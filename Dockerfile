@@ -13,6 +13,4 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# EXPOSE 5173 8000
-
 CMD ["/bin/bash"]
