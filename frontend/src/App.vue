@@ -1,7 +1,12 @@
 <script setup lang="ts">
-import HelloWorld from './components/HelloWorld.vue'
+import { zhCn, it } from 'element-plus/es/locales.mjs';
+
 </script>
 
 <template>
-  <HelloWorld />
+  <ElConfigProvider :locale="it">
+    <h1>You did it!</h1>
+  </ElConfigProvider>
 </template>
+
+<style scoped></style>
