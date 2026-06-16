@@ -1,12 +1,10 @@
 <script setup lang="ts">
-import { zhCn, it } from 'element-plus/es/locales.mjs';
-
+import '@/styles/global.css'
+import { zhCn } from 'element-plus/es/locales.mjs'
 </script>
 
 <template>
-  <ElConfigProvider :locale="it">
-    <h1>You did it!</h1>
+  <ElConfigProvider :locale="zhCn">
+    <RouterView />
   </ElConfigProvider>
 </template>
-
-<style scoped></style>
