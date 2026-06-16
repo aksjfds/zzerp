@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
+import { useRouter } from 'vue-router'
 
 type ModuleItem = {
   title: string
   description: string
   badge: string
   accent: string
+  path?: string
 }
 
 type TodoItem = {
@@ -59,6 +61,7 @@ const moduleItems: ModuleItem[] = [
     description: '工单、物料需求和产能排程',
     badge: '3 个延误风险',
     accent: '#dc2626',
+    path: '/production-plan',
   },
   {
     title: '报表中心',
@@ -83,6 +86,13 @@ const metrics = [
 ]
 
 const activeScope = ref('全部')
+const router = useRouter()
+
+function openModule(item: ModuleItem) {
+  if (item.path) {
+    router.push(item.path)
+  }
+}
 </script>
 
 <template>
@@ -161,7 +171,7 @@ const activeScope = ref('全部')
                 </div>
                 <p>{{ item.description }}</p>
                 <div class="module-actions">
-                  <ElButton type="primary" plain>进入模块</ElButton>
+                  <ElButton type="primary" plain @click="openModule(item)">进入模块</ElButton>
                   <ElButton text>查看报表</ElButton>
                 </div>
               </ElCard>
