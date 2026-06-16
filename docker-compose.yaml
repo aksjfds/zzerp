@@ -4,6 +4,8 @@ services:
     container_name: app
     stdin_open: true
     tty: true
+    volumes:
+      - .:/zzerp
     command: /bin/bash
     ports:
       - 5173:5173
