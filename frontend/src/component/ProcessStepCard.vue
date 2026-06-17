@@ -1,19 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-
-export type OutboundRecord = {
-  id: string
-  quantity: number
-  createdAt: string
-  operator: string
-}
-
-export type ProcessStep = {
-  name: string
-  inbound: number
-  outbound: number
-  outboundRecords: OutboundRecord[]
-}
+import type { ProcessStep } from '@/types/workorder'
 
 const emit = defineEmits<{
   outbound: [quantity: number]

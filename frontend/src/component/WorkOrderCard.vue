@@ -1,14 +1,6 @@
 <script setup lang="ts">
-import ProcessStepCard, { type ProcessStep } from '@/component/ProcessStepCard.vue'
-
-export type WorkOrderItem = {
-  id: string
-  part: string
-  quantity: number
-  status: string
-  createdAt: string
-  steps: ProcessStep[]
-}
+import ProcessStepCard from '@/component/ProcessStepCard.vue'
+import type { ProcessStep, WorkOrderItem } from '@/types/workorder'
 
 defineProps<{
   order: WorkOrderItem

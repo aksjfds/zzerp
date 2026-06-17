@@ -1,14 +1,28 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import WorkOrderCard, { type WorkOrderItem } from '@/component/WorkOrderCard.vue'
-
-type ProcedureName = '激光' | 'CNC' | '打磨' | 'QC'
+import { createWorkOrder as createWorkOrderApi, queryWorkOrders } from '@/api/workorder'
+import WorkOrderCard from '@/component/WorkOrderCard.vue'
+import {
+  PROCEDURE_OPTIONS,
+  type ProcedureName,
+  type WorkOrderItem,
+  type WorkOrderQuery,
+  type WorkOrderStatus,
+} from '@/types/workorder'
 
 const router = useRouter()
 const dialogVisible = ref(false)
-const availableProcedures: ProcedureName[] = ['激光', 'CNC', '打磨', 'QC']
+const loading = ref(false)
+const availableProcedures = [...PROCEDURE_OPTIONS]
 const selectedProcedure = ref<ProcedureName | ''>('激光')
+
+const queryForm = reactive<WorkOrderQuery>({
+  orderId: '',
+  part: '',
+  status: '',
+  procedure: '',
+})
 
 const form = reactive({
   part: 'MOG3V45-过桥',
@@ -20,63 +34,8 @@ const proceduresToAdd = computed(() =>
   availableProcedures.filter((procedure) => !form.procedures.includes(procedure)),
 )
 
-const workOrders = ref<WorkOrderItem[]>([
-  {
-    id: 'MO-20260616-001',
-    part: 'MOG3V45-过桥',
-    quantity: 120,
-    status: '加工中',
-    createdAt: '2026-06-16',
-    steps: [
-      {
-        name: '激光',
-        inbound: 120,
-        outbound: 120,
-        outboundRecords: [
-          { id: 'R-001-1', quantity: 70, createdAt: '2026-06-16 09:12', operator: '张工' },
-          { id: 'R-001-2', quantity: 50, createdAt: '2026-06-16 10:24', operator: '张工' },
-        ],
-      },
-      {
-        name: 'CNC',
-        inbound: 120,
-        outbound: 86,
-        outboundRecords: [
-          { id: 'R-001-3', quantity: 46, createdAt: '2026-06-16 13:18', operator: '李工' },
-          { id: 'R-001-4', quantity: 40, createdAt: '2026-06-16 15:06', operator: '李工' },
-        ],
-      },
-      {
-        name: '打磨',
-        inbound: 86,
-        outbound: 42,
-        outboundRecords: [
-          { id: 'R-001-5', quantity: 42, createdAt: '2026-06-16 16:20', operator: '王工' },
-        ],
-      },
-      {
-        name: 'QC',
-        inbound: 42,
-        outbound: 18,
-        outboundRecords: [
-          { id: 'R-001-6', quantity: 18, createdAt: '2026-06-16 17:05', operator: '赵工' },
-        ],
-      },
-    ],
-  },
-  {
-    id: 'MO-20260616-002',
-    part: 'BRK8A12-固定座',
-    quantity: 80,
-    status: '待开工',
-    createdAt: '2026-06-16',
-    steps: [
-      { name: '激光', inbound: 80, outbound: 0, outboundRecords: [] },
-      { name: 'CNC', inbound: 0, outbound: 0, outboundRecords: [] },
-      { name: 'QC', inbound: 0, outbound: 0, outboundRecords: [] },
-    ],
-  },
-])
+const statusOptions: WorkOrderStatus[] = ['待开工', '加工中', '已完成']
+const workOrders = ref<WorkOrderItem[]>([])
 
 const totalQuantity = computed(() =>
   workOrders.value.reduce((total, order) => total + order.quantity, 0),
@@ -88,6 +47,24 @@ const activeQuantity = computed(() =>
     return total + (lastStep ? order.quantity - lastStep.outbound : order.quantity)
   }, 0),
 )
+
+async function loadWorkOrders() {
+  loading.value = true
+
+  try {
+    workOrders.value = await queryWorkOrders(queryForm)
+  } finally {
+    loading.value = false
+  }
+}
+
+function resetQuery() {
+  queryForm.orderId = ''
+  queryForm.part = ''
+  queryForm.status = ''
+  queryForm.procedure = ''
+  loadWorkOrders()
+}
 
 function openCreateDialog() {
   form.part = 'MOG3V45-过桥'
@@ -129,29 +106,19 @@ function moveProcedure(index: number, direction: -1 | 1) {
   form.procedures[targetIndex] = current
 }
 
-function createWorkOrder() {
+async function createWorkOrder() {
   if (!form.part.trim() || form.quantity <= 0 || form.procedures.length === 0) {
     return
   }
 
-  const id = `MO-${new Date().getTime()}`
-  const steps = form.procedures.map((name, index) => ({
-    name,
-    inbound: index === 0 ? form.quantity : 0,
-    outbound: 0,
-    outboundRecords: [],
-  }))
-
-  workOrders.value.unshift({
-    id,
+  await createWorkOrderApi({
     part: form.part.trim(),
     quantity: form.quantity,
-    status: '待开工',
-    createdAt: '今日',
-    steps,
+    procedures: [...form.procedures],
   })
 
   dialogVisible.value = false
+  await loadWorkOrders()
 }
 
 function formatRecordTime(date: Date) {
@@ -190,6 +157,10 @@ function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: nu
     order.status = '加工中'
   }
 }
+
+onMounted(() => {
+  loadWorkOrders()
+})
 </script>
 
 <template>
@@ -206,6 +177,36 @@ function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: nu
         <ElButton type="primary" @click="openCreateDialog">添加工单</ElButton>
       </div>
     </header>
+
+    <section class="query-panel">
+      <ElForm :model="queryForm" class="query-form" label-position="top">
+        <ElFormItem label="工单编号">
+          <ElInput v-model="queryForm.orderId" clearable placeholder="例如：MO-20260616" />
+        </ElFormItem>
+        <ElFormItem label="部件">
+          <ElInput v-model="queryForm.part" clearable placeholder="例如：MOG3V45-过桥" />
+        </ElFormItem>
+        <ElFormItem label="状态">
+          <ElSelect v-model="queryForm.status" clearable placeholder="全部状态">
+            <ElOption v-for="status in statusOptions" :key="status" :label="status" :value="status" />
+          </ElSelect>
+        </ElFormItem>
+        <ElFormItem label="包含工序">
+          <ElSelect v-model="queryForm.procedure" clearable placeholder="全部工序">
+            <ElOption
+              v-for="procedure in availableProcedures"
+              :key="procedure"
+              :label="procedure"
+              :value="procedure"
+            />
+          </ElSelect>
+        </ElFormItem>
+        <div class="query-actions">
+          <ElButton @click="resetQuery">重置</ElButton>
+          <ElButton type="primary" :loading="loading" @click="loadWorkOrders">查询工单</ElButton>
+        </div>
+      </ElForm>
+    </section>
 
     <section class="summary-grid">
       <div class="summary-card">
@@ -226,17 +227,18 @@ function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: nu
       <div class="summary-card">
         <span>标准工序</span>
         <strong>{{ availableProcedures.length }}</strong>
-        <small>激光 / CNC / 打磨 / QC</small>
+        <small>激光 / CNC / 打磨 / QC / 装配</small>
       </div>
     </section>
 
-    <section class="order-list">
+    <section v-loading="loading" class="order-list">
       <WorkOrderCard
         v-for="order in workOrders"
         :key="order.id"
         :order="order"
         @outbound="recordOutbound"
       />
+      <ElEmpty v-if="!loading && workOrders.length === 0" description="暂无匹配工单" />
     </section>
 
     <ElDialog v-model="dialogVisible" title="添加工单" width="560px">
@@ -356,6 +358,32 @@ function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: nu
   color: #ffffff;
 }
 
+.query-panel {
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid var(--erp-border);
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: var(--erp-shadow-sm);
+}
+
+.query-form {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.query-form :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.query-actions {
+  display: flex;
+  gap: 8px;
+  padding-bottom: 1px;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -448,6 +476,14 @@ function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: nu
 }
 
 @media (max-width: 1180px) {
+  .query-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .query-actions {
+    grid-column: 1 / -1;
+  }
+
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -477,6 +513,10 @@ function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: nu
   }
 
   .summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .query-form {
     grid-template-columns: 1fr;
   }
 
