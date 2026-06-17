@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import type { ProcessStep } from '@/types/workorder'
+import { PROCEDURE_LABELS, type ProcessStep } from '@/types/workorder'
 
 const emit = defineEmits<{
   outbound: [quantity: number]
@@ -33,6 +33,8 @@ function submitOutbound() {
 
   emit('outbound', outboundQuantity.value)
 }
+
+const procedureLabel = computed(() => PROCEDURE_LABELS[props.step.name])
 </script>
 
 <template>
@@ -47,7 +49,7 @@ function submitOutbound() {
       <ElCard shadow="never" class="process-card">
         <div class="process-card-head">
           <span class="step-index">{{ index + 1 }}</span>
-          <strong>{{ step.name }}</strong>
+          <strong>{{ procedureLabel }}</strong>
         </div>
 
         <div class="quantity-pair">
@@ -69,7 +71,7 @@ function submitOutbound() {
       </ElCard>
     </template>
 
-    <div class="history-panel">
+    <!-- <div class="history-panel">
       <div class="history-head">
         <strong>{{ step.name }} 出库记录</strong>
         <span>{{ step.outboundRecords.length }} 次操作</span>
@@ -105,7 +107,7 @@ function submitOutbound() {
       </ElTimeline>
 
       <ElEmpty v-else description="暂无出库记录" :image-size="72" />
-    </div>
+    </div> -->
   </ElPopover>
 </template>
 

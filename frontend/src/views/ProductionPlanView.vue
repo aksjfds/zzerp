@@ -4,8 +4,9 @@ import { useRouter } from 'vue-router'
 import { createWorkOrder as createWorkOrderApi, queryWorkOrders } from '@/api/workorder'
 import WorkOrderCard from '@/component/WorkOrderCard.vue'
 import {
+  PROCEDURE_LABELS,
   PROCEDURE_OPTIONS,
-  type ProcedureName,
+  type Procedure,
   type WorkOrderItem,
   type WorkOrderQuery,
   type WorkOrderStatus,
@@ -15,19 +16,19 @@ const router = useRouter()
 const dialogVisible = ref(false)
 const loading = ref(false)
 const availableProcedures = [...PROCEDURE_OPTIONS]
-const selectedProcedure = ref<ProcedureName | ''>('激光')
+const selectedProcedure = ref<Procedure | ''>('laser')
 
 const queryForm = reactive<WorkOrderQuery>({
   orderId: '',
-  part: '',
+  item: '',
   status: '',
   procedure: '',
 })
 
 const form = reactive({
-  part: 'MOG3V45-过桥',
+  item: 'MOG3V45-过桥',
   quantity: 100,
-  procedures: [] as ProcedureName[],
+  procedures: [] as Procedure[],
 })
 
 const proceduresToAdd = computed(() =>
@@ -60,17 +61,17 @@ async function loadWorkOrders() {
 
 function resetQuery() {
   queryForm.orderId = ''
-  queryForm.part = ''
+  queryForm.item = ''
   queryForm.status = ''
   queryForm.procedure = ''
   loadWorkOrders()
 }
 
 function openCreateDialog() {
-  form.part = 'MOG3V45-过桥'
+  form.item = 'MOG3V45-过桥'
   form.quantity = 100
   form.procedures = []
-  selectedProcedure.value = proceduresToAdd.value[0] ?? '激光'
+  selectedProcedure.value = proceduresToAdd.value[0] ?? 'laser'
   dialogVisible.value = true
 }
 
@@ -107,12 +108,12 @@ function moveProcedure(index: number, direction: -1 | 1) {
 }
 
 async function createWorkOrder() {
-  if (!form.part.trim() || form.quantity <= 0 || form.procedures.length === 0) {
+  if (!form.item.trim() || form.quantity <= 0 || form.procedures.length === 0) {
     return
   }
 
   await createWorkOrderApi({
-    part: form.part.trim(),
+    item: form.item.trim(),
     quantity: form.quantity,
     procedures: [...form.procedures],
   })
@@ -129,6 +130,10 @@ function formatRecordTime(date: Date) {
   )}:${pad(date.getMinutes())}`
 }
 
+function getProcedureLabel(procedure: Procedure) {
+  return PROCEDURE_LABELS[procedure]
+}
+
 function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: number) {
   const order = workOrders.value.find((item) => item.id === orderId)
   const step = order?.steps[stepIndex]
@@ -139,12 +144,12 @@ function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: nu
 
   const quantity = outboundQuantity
   step.outbound += quantity
-  step.outboundRecords.unshift({
-    id: `R-${Date.now()}-${stepIndex}`,
-    quantity,
-    createdAt: formatRecordTime(new Date()),
-    operator: '当前操作员',
-  })
+  // step.outboundRecords.unshift({
+  //   id: `R-${Date.now()}-${stepIndex}`,
+  //   quantity,
+  //   createdAt: formatRecordTime(new Date()),
+  //   operator: '当前操作员',
+  // })
 
   const nextStep = order.steps[stepIndex + 1]
   if (nextStep) {
@@ -184,7 +189,7 @@ onMounted(() => {
           <ElInput v-model="queryForm.orderId" clearable placeholder="例如：MO-20260616" />
         </ElFormItem>
         <ElFormItem label="部件">
-          <ElInput v-model="queryForm.part" clearable placeholder="例如：MOG3V45-过桥" />
+          <ElInput v-model="queryForm.item" clearable placeholder="例如：MOG3V45-过桥" />
         </ElFormItem>
         <ElFormItem label="状态">
           <ElSelect v-model="queryForm.status" clearable placeholder="全部状态">
@@ -196,7 +201,7 @@ onMounted(() => {
             <ElOption
               v-for="procedure in availableProcedures"
               :key="procedure"
-              :label="procedure"
+              :label="getProcedureLabel(procedure)"
               :value="procedure"
             />
           </ElSelect>
@@ -227,7 +232,7 @@ onMounted(() => {
       <div class="summary-card">
         <span>标准工序</span>
         <strong>{{ availableProcedures.length }}</strong>
-        <small>激光 / CNC / 打磨 / QC / 装配</small>
+        <small>激光 / 冲压 / CNC / 打磨 / QC</small>
       </div>
     </section>
 
@@ -244,7 +249,7 @@ onMounted(() => {
     <ElDialog v-model="dialogVisible" title="添加工单" width="560px">
       <ElForm label-position="top">
         <ElFormItem label="部件">
-          <ElInput v-model="form.part" placeholder="例如：MOG3V45-过桥" />
+          <ElInput v-model="form.item" placeholder="例如：MOG3V45-过桥" />
         </ElFormItem>
 
         <ElFormItem label="数量">
@@ -258,7 +263,7 @@ onMounted(() => {
                 <ElOption
                   v-for="procedure in proceduresToAdd"
                   :key="procedure"
-                  :label="procedure"
+                  :label="getProcedureLabel(procedure)"
                   :value="procedure"
                 />
               </ElSelect>
@@ -269,7 +274,7 @@ onMounted(() => {
               <div v-for="(procedure, index) in form.procedures" :key="procedure" class="procedure-row">
                 <div class="procedure-sequence">
                   <span>{{ index + 1 }}</span>
-                  <strong>{{ procedure }}</strong>
+                  <strong>{{ getProcedureLabel(procedure) }}</strong>
                 </div>
                 <div class="procedure-actions">
                   <ElButton text :disabled="index === 0" @click="moveProcedure(index, -1)">上移</ElButton>

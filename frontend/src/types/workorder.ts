@@ -1,6 +1,14 @@
-export const PROCEDURE_OPTIONS = ['激光', 'CNC', '打磨', 'QC', '装配'] as const
+export const PROCEDURE_OPTIONS = ['laser', 'stamp', 'cnc', 'polish', 'qc'] as const
 
-export type ProcedureName = (typeof PROCEDURE_OPTIONS)[number]
+export type Procedure = (typeof PROCEDURE_OPTIONS)[number]
+
+export const PROCEDURE_LABELS: Record<Procedure, string> = {
+  laser: '激光',
+  stamp: '冲压',
+  cnc: 'CNC',
+  polish: '打磨',
+  qc: 'QC',
+}
 
 export type WorkOrderStatus = '待开工' | '加工中' | '已完成'
 
@@ -12,30 +20,30 @@ export type OutboundRecord = {
 }
 
 export type ProcessStep = {
-  name: ProcedureName
+  name: Procedure
   inbound: number
   outbound: number
-  outboundRecords: OutboundRecord[]
+  // outboundRecords: OutboundRecord[]
 }
 
 export type WorkOrderItem = {
   id: string
-  part: string
+  item: string
   quantity: number
   status: WorkOrderStatus
-  createdAt: string
+  createdAt?: string
   steps: ProcessStep[]
 }
 
 export type WorkOrderQuery = {
   orderId?: string
-  part?: string
+  item?: string
   status?: WorkOrderStatus | ''
-  procedure?: ProcedureName | ''
+  procedure?: Procedure | ''
 }
 
 export type CreateWorkOrderPayload = {
-  part: string
+  item: string
   quantity: number
-  procedures: ProcedureName[]
+  procedures: Procedure[]
 }

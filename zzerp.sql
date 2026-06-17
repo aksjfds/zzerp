@@ -8,10 +8,10 @@
 -- 库存流水表
 -- ============================================================
 
-CREATE TABLE inventory_transaction (
+CREATE TABLE records (
     id BIGSERIAL PRIMARY KEY,
 
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     order_id INT NOT NULL,
 
@@ -25,7 +25,7 @@ CREATE TABLE inventory_transaction (
 
     inbound INT NOT NULL DEFAULT 0 CHECK (inbound >= 0),
 
-    outbound INT NOT NULL DEFAULT 0 CHECK (outbound >= 0),
+    outbound INT NOT NULL DEFAULT 0 CHECK (outbound >= 0)
 );
 
 
@@ -33,10 +33,10 @@ CREATE TABLE inventory_transaction (
 -- 操作日志表
 -- ============================================================
 
-CREATE TABLE inventory_log (
+CREATE TABLE records_log (
     id BIGSERIAL PRIMARY KEY,
 
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
     order_id INT NOT NULL,
 
@@ -50,7 +50,7 @@ CREATE TABLE inventory_log (
 
     operator VARCHAR(100),
 
-    note VARCHAR(255),
+    note VARCHAR(255)
 );
 
 
@@ -58,11 +58,11 @@ CREATE TABLE inventory_log (
 -- 索引
 -- ============================================================
 
-CREATE INDEX idx_inventory_order_item
-ON inventory_transaction(order_id, item);
+CREATE INDEX idx_records_order_item
+ON records(order_id, item);
 
-CREATE INDEX idx_inventory_repository
-ON inventory_transaction(repository);
+CREATE INDEX idx_records_repository
+ON records(repository);
 
-CREATE INDEX idx_inventory_repo_order_item
-ON inventory_transaction(repository, order_id, item);
+CREATE INDEX idx_records_repo_order_item
+ON records(repository, order_id, item);

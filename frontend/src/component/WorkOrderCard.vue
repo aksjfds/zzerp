@@ -24,7 +24,7 @@ function getProgress(step: ProcessStep) {
     <div class="order-head">
       <div>
         <div class="order-meta">{{ order.id }} · {{ order.createdAt }}</div>
-        <h2>{{ order.part }}</h2>
+        <h2>{{ order.item }}</h2>
         <p>计划数量：{{ order.quantity }}</p>
       </div>
       <ElTag :type="order.status === '加工中' ? 'primary' : order.status === '已完成' ? 'success' : 'info'" effect="light">

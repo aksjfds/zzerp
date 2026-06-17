@@ -1,63 +1,11 @@
-import type { CreateWorkOrderPayload, WorkOrderItem, WorkOrderQuery } from '@/types/workorder'
+import type {
+    CreateWorkOrderPayload,
+    Procedure,
+    WorkOrderItem,
+    WorkOrderQuery,
+    WorkOrderStatus,
+} from '@/types/workorder'
 import { service } from './request'
-
-const mockWorkOrders: WorkOrderItem[] = [
-    {
-        id: 'MO-20260616-001',
-        part: 'MOG3V45-过桥',
-        quantity: 120,
-        status: '加工中',
-        createdAt: '2026-06-16',
-        steps: [
-            {
-                name: '激光',
-                inbound: 120,
-                outbound: 120,
-                outboundRecords: [
-                    { id: 'R-001-1', quantity: 70, createdAt: '2026-06-16 09:12', operator: '张工' },
-                    { id: 'R-001-2', quantity: 50, createdAt: '2026-06-16 10:24', operator: '张工' },
-                ],
-            },
-            {
-                name: 'CNC',
-                inbound: 120,
-                outbound: 86,
-                outboundRecords: [
-                    { id: 'R-001-3', quantity: 46, createdAt: '2026-06-16 13:18', operator: '李工' },
-                    { id: 'R-001-4', quantity: 40, createdAt: '2026-06-16 15:06', operator: '李工' },
-                ],
-            },
-            {
-                name: '打磨',
-                inbound: 86,
-                outbound: 42,
-                outboundRecords: [
-                    { id: 'R-001-5', quantity: 42, createdAt: '2026-06-16 16:20', operator: '王工' },
-                ],
-            },
-            {
-                name: 'QC',
-                inbound: 42,
-                outbound: 18,
-                outboundRecords: [
-                    { id: 'R-001-6', quantity: 18, createdAt: '2026-06-16 17:05', operator: '赵工' },
-                ],
-            },
-        ],
-    },
-    {
-        id: 'MO-20260616-002',
-        part: 'BRK8A12-固定座',
-        quantity: 80,
-        status: '待开工',
-        createdAt: '2026-06-16',
-        steps: [
-            { name: '激光', inbound: 80, outbound: 0, outboundRecords: [] },
-            { name: 'CNC', inbound: 0, outbound: 0, outboundRecords: [] },
-            { name: 'QC', inbound: 0, outbound: 0, outboundRecords: [] },
-        ],
-    },
-]
 
 function cloneWorkOrders(workOrders: WorkOrderItem[]) {
     return structuredClone(workOrders)
@@ -67,40 +15,73 @@ function cloneWorkOrder(workOrder: WorkOrderItem) {
     return structuredClone(workOrder)
 }
 
-function getTodayText() {
-    const date = new Date()
-    const pad = (value: number) => String(value).padStart(2, '0')
+type ApiWorkOrder = {
+    id: number | string
+    item: string
+    quantity: number
+    createdAt?: string
+    steps: Array<{
+        name: Procedure
+        inbound: number
+        outbound: number
+    }>
+}
 
-    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+function getWorkOrderStatus(order: Pick<WorkOrderItem, 'quantity' | 'steps'>): WorkOrderStatus {
+    const lastStep = order.steps[order.steps.length - 1]
+
+    if (lastStep && lastStep.outbound >= order.quantity) {
+        return '已完成'
+    }
+
+    if (order.steps.some((step) => step.outbound > 0)) {
+        return '加工中'
+    }
+
+    return '待开工'
+}
+
+function normalizeWorkOrder(order: ApiWorkOrder): WorkOrderItem {
+    const workOrder = {
+        id: `MO-${order.id}`,
+        item: order.item,
+        quantity: order.quantity,
+        createdAt: order.createdAt,
+        steps: order.steps,
+    }
+
+    return {
+        ...workOrder,
+        status: getWorkOrderStatus(workOrder),
+    }
 }
 
 export async function queryWorkOrders(query: WorkOrderQuery = {}) {
 
-    // const res = await service.get("/query_workorders")
-    const res = await service.get("")
-    console.log(await res.data);
-    
+    const res = await service.get<{ data: ApiWorkOrder[] }>("/query_workorders")
+    const workOrders = res.data.data.map(normalizeWorkOrder)
+
 
     const orderId = query.orderId?.trim().toLowerCase()
-    const part = query.part?.trim().toLowerCase()
+    const item = query.item?.trim().toLowerCase()
 
-    const filtered = mockWorkOrders.filter((order) => {
+    const filtered = workOrders.filter((order) => {
         const matchOrderId = !orderId || order.id.toLowerCase().includes(orderId)
-        const matchPart = !part || order.part.toLowerCase().includes(part)
+        const matchitem = !item || order.item.toLowerCase().includes(item)
         const matchStatus = !query.status || order.status === query.status
         const matchProcedure =
             !query.procedure || order.steps.some((step) => step.name === query.procedure)
 
-        return matchOrderId && matchPart && matchStatus && matchProcedure
+        return matchOrderId && matchitem && matchStatus && matchProcedure
     })
 
     return cloneWorkOrders(filtered)
 }
 
 export async function createWorkOrder(payload: CreateWorkOrderPayload) {
-    const part = payload.part.trim()
+    const item = payload.item.trim()
 
-    if (!part) {
+    if (!item) {
         throw new Error('部件不能为空')
     }
 
@@ -112,21 +93,11 @@ export async function createWorkOrder(payload: CreateWorkOrderPayload) {
         throw new Error('至少需要配置一道工序')
     }
 
-    const workOrder: WorkOrderItem = {
-        id: `MO-${Date.now()}`,
-        part,
+    const res = await service.post<{ data: ApiWorkOrder }>("/create_workorder", {
+        item,
         quantity: payload.quantity,
-        status: '待开工',
-        createdAt: getTodayText(),
-        steps: payload.procedures.map((name, index) => ({
-            name,
-            inbound: index === 0 ? payload.quantity : 0,
-            outbound: 0,
-            outboundRecords: [],
-        })),
-    }
+        procedures: payload.procedures,
+    })
 
-    mockWorkOrders.unshift(workOrder)
-
-    return cloneWorkOrder(workOrder)
+    return cloneWorkOrder(normalizeWorkOrder(res.data.data))
 }
