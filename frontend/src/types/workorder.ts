@@ -12,18 +12,20 @@ export const PROCEDURE_LABELS: Record<Procedure, string> = {
 
 export type WorkOrderStatus = '待开工' | '加工中' | '已完成'
 
-export type OutboundRecord = {
-  id: string
+export type OperationRecord = {
+  id: number
   quantity: number
   createdAt: string
-  operator: string
+  fromRepository?: Procedure | 'in' | null
+  toRepository?: Procedure | 'out' | null
+  worker?: string | null
+  operator?: string | null
+  note?: string | null
 }
 
 export type ProcessStep = {
   name: Procedure
-  inbound: number
-  outbound: number
-  // outboundRecords: OutboundRecord[]
+  quantity: number
 }
 
 export type WorkOrderItem = {
@@ -46,4 +48,14 @@ export type CreateWorkOrderPayload = {
   item: string
   quantity: number
   procedures: Procedure[]
+}
+
+export type MoveRepositoryQuantityPayload = {
+  orderId: string
+  item: string
+  repository: Procedure
+  quantity: number
+  operator?: string
+  worker?: string
+  note?: string
 }

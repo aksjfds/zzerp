@@ -1,22 +1,14 @@
 <script setup lang="ts">
-import ProcessStepCard from '@/component/ProcessStepCard.vue'
-import type { ProcessStep, WorkOrderItem } from '@/types/workorder'
+import ProcessStepCard from '@/components/workorders/ProcessStepCard.vue'
+import type { WorkOrderItem } from '@/types/workorder'
 
 defineProps<{
   order: WorkOrderItem
 }>()
 
 const emit = defineEmits<{
-  outbound: [orderId: string, stepIndex: number, quantity: number]
+  changed: []
 }>()
-
-function getProgress(step: ProcessStep) {
-  if (step.inbound <= 0) {
-    return 0
-  }
-
-  return Math.min(100, Math.round((step.outbound / step.inbound) * 100))
-}
 </script>
 
 <template>
@@ -35,16 +27,16 @@ function getProgress(step: ProcessStep) {
     <div class="process-flow">
       <div v-for="(step, index) in order.steps" :key="`${order.id}-${step.name}`" class="process-node">
         <ProcessStepCard
+          :order-id="order.id"
+          :item="order.item"
           :step="step"
           :index="index"
-          :progress="getProgress(step)"
-          :can-outbound="step.inbound > step.outbound"
-          @outbound="(quantity) => emit('outbound', order.id, index, quantity)"
+          :can-outbound="step.quantity > 0"
+          :can-rework="index > 0 && step.quantity > 0"
+          :outbound-target="order.steps[index + 1]?.name ?? 'out'"
+          :rework-target="order.steps[index - 1]?.name"
+          @changed="emit('changed')"
         />
-
-        <div v-if="index < order.steps.length - 1" class="flow-connector">
-          <ElProgress :percentage="getProgress(step)" :stroke-width="6" :show-text="false" />
-        </div>
       </div>
     </div>
   </article>
@@ -96,9 +88,4 @@ function getProgress(step: ProcessStep) {
   min-width: 248px;
 }
 
-.flow-connector {
-  width: 88px;
-  padding: 0 14px;
-  flex-shrink: 0;
-}
 </style>

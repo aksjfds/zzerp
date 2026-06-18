@@ -8,12 +8,16 @@ class Procedure(str, Enum):
     POLISH = "polish"
     QC = "qc"
 
-class ProcessStep(BaseModel):
-    name: Procedure
-    inbound: int
-    outbound: int
-
 class CreateWorkOrderPayload(BaseModel):
     item: str = Field(min_length=1, max_length=100)
     quantity: int = Field(gt=0)
     procedures: list[Procedure] = Field(min_length=1)
+
+class MoveRepositoryQuantityPayload(BaseModel):
+    order_id: int = Field(gt=0)
+    item: str = Field(min_length=1, max_length=100)
+    repository: Procedure
+    quantity: int = Field(gt=0)
+    operator: str | None = Field(default=None, max_length=100)
+    worker: str | None = Field(default=None, max_length=100)
+    note: str | None = Field(default=None, max_length=255)

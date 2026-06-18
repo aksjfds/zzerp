@@ -1,19 +1,13 @@
 import type {
     CreateWorkOrderPayload,
+    MoveRepositoryQuantityPayload,
+    OperationRecord,
     Procedure,
     WorkOrderItem,
     WorkOrderQuery,
     WorkOrderStatus,
 } from '@/types/workorder'
 import { service } from './request'
-
-function cloneWorkOrders(workOrders: WorkOrderItem[]) {
-    return structuredClone(workOrders)
-}
-
-function cloneWorkOrder(workOrder: WorkOrderItem) {
-    return structuredClone(workOrder)
-}
 
 type ApiWorkOrder = {
     id: number | string
@@ -22,19 +16,16 @@ type ApiWorkOrder = {
     createdAt?: string
     steps: Array<{
         name: Procedure
-        inbound: number
-        outbound: number
+        quantity: number
     }>
 }
 
 function getWorkOrderStatus(order: Pick<WorkOrderItem, 'quantity' | 'steps'>): WorkOrderStatus {
-    const lastStep = order.steps[order.steps.length - 1]
-
-    if (lastStep && lastStep.outbound >= order.quantity) {
+    if (order.quantity > 0 && order.steps.every((step) => step.quantity === 0)) {
         return '已完成'
     }
 
-    if (order.steps.some((step) => step.outbound > 0)) {
+    if (order.steps.some((step, index) => index > 0 && step.quantity > 0)) {
         return '加工中'
     }
 
@@ -56,11 +47,20 @@ function normalizeWorkOrder(order: ApiWorkOrder): WorkOrderItem {
     }
 }
 
-export async function queryWorkOrders(query: WorkOrderQuery = {}) {
+function parseWorkOrderId(orderId: string) {
+    const value = orderId.replace(/^MO-/, '')
+    const parsed = Number(value)
 
+    if (!Number.isInteger(parsed) || parsed <= 0) {
+        throw new Error('工单编号无效')
+    }
+
+    return parsed
+}
+
+export async function queryWorkOrders(query: WorkOrderQuery = {}) {
     const res = await service.get<{ data: ApiWorkOrder[] }>("/query_workorders")
     const workOrders = res.data.data.map(normalizeWorkOrder)
-
 
     const orderId = query.orderId?.trim().toLowerCase()
     const item = query.item?.trim().toLowerCase()
@@ -75,7 +75,7 @@ export async function queryWorkOrders(query: WorkOrderQuery = {}) {
         return matchOrderId && matchitem && matchStatus && matchProcedure
     })
 
-    return cloneWorkOrders(filtered)
+    return filtered
 }
 
 export async function createWorkOrder(payload: CreateWorkOrderPayload) {
@@ -99,5 +99,41 @@ export async function createWorkOrder(payload: CreateWorkOrderPayload) {
         procedures: payload.procedures,
     })
 
-    return cloneWorkOrder(normalizeWorkOrder(res.data.data))
+    return normalizeWorkOrder(res.data.data)
+}
+
+export async function queryOperationRecords(orderId: string, item: string, repository: Procedure) {
+    const res = await service.get<{ data: OperationRecord[] }>("/query_record_logs", {
+        params: {
+            order_id: parseWorkOrderId(orderId),
+            item,
+            repository,
+        },
+    })
+
+    return res.data.data
+}
+
+function buildMovePayload(payload: MoveRepositoryQuantityPayload) {
+    return {
+        order_id: parseWorkOrderId(payload.orderId),
+        item: payload.item,
+        repository: payload.repository,
+        quantity: payload.quantity,
+        operator: payload.operator,
+        worker: payload.worker,
+        note: payload.note,
+    }
+}
+
+export async function recordOutbound(payload: MoveRepositoryQuantityPayload) {
+    await service.post("/record_outbound", {
+        ...buildMovePayload(payload),
+    })
+}
+
+export async function recordRework(payload: MoveRepositoryQuantityPayload) {
+    await service.post("/record_rework", {
+        ...buildMovePayload(payload),
+    })
 }

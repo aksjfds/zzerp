@@ -1,82 +1,88 @@
-from sqlalchemy import String, Integer, BigInteger, TIMESTAMP, func, text
-from sqlalchemy.orm import Mapped, mapped_column
 from datetime import datetime
-from typing import List, Optional
-from typing_extensions import Self
+
+from sqlalchemy import BigInteger, Integer, String, TIMESTAMP, func, or_, text
+from sqlalchemy.orm import Mapped, mapped_column
+
 from backend.src.database import Base, SessionLocal
 
 
-class Record(Base):
-    __tablename__ = "records"
+class Repository(Base):
+    __tablename__ = "repository"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
+    repository_name: Mapped[str] = mapped_column(String(50), nullable=False)
     order_id: Mapped[int] = mapped_column(Integer, nullable=False)
     item: Mapped[str] = mapped_column(String(100), nullable=False)
-    repository: Mapped[str] = mapped_column(String(50), nullable=False)
-    worker: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    inbound: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    outbound: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
-    def __init__(self, order_id: int, item: str, repository: str, worker: str | None = None,
-                 inbound: int = 0, outbound: int = 0):
+    def __init__(
+        self,
+        order_id: int,
+        item: str,
+        repository_name: str,
+        quantity: int = 0,
+    ):
         self.order_id = order_id
         self.item = item
-        self.repository = repository
-        self.worker = worker
-        self.inbound = inbound
-        self.outbound = outbound
+        self.repository_name = repository_name
+        self.quantity = quantity
 
-    def __str__(self):
-        return f"Record(id={self.id}, order_id={self.order_id}, item={self.item}, repository={self.repository})"
-
-    # ====================== 批量创建（适配前端） ======================
     @classmethod
-    def create_from_work_order(cls, 
-                               item: str, 
-                               procedures: List[str], 
-                               quantity: int,
-                               order_id: int | None = None,
-                               worker: str | None = None) -> List[Self]:
+    def create_from_work_order(
+        cls,
+        item: str,
+        procedures: list[str],
+        quantity: int,
+        order_id: int | None = None,
+        operator: str | None = None,
+    ) -> list["Repository"]:
         if not procedures:
             raise ValueError("至少需要一道工序")
-
-        created_records = []
 
         with SessionLocal() as session:
             if order_id is None:
                 max_order_id = session.query(func.max(cls.order_id)).scalar() or 0
-                order_id = max_order_id + 1
+                resolved_order_id = max_order_id + 1
+            else:
+                resolved_order_id = order_id
 
-            for index, repository in enumerate(procedures):
-                inbound = quantity if index == 0 else 0
-                
-                record = cls(
-                    order_id=order_id, # type: ignore
+            repositories: list[Repository] = []
+
+            repository_names = [*procedures, "out"]
+
+            for index, repository_name in enumerate(repository_names):
+                repository = cls(
+                    order_id=resolved_order_id,
                     item=item,
-                    repository=repository,
-                    worker=worker,
-                    inbound=inbound,
-                    outbound=0
+                    repository_name=repository_name,
+                    quantity=quantity if index == 0 else 0,
                 )
-                session.add(record)
-                created_records.append(record)
+                session.add(repository)
+                repositories.append(repository)
+
+            session.add(
+                Record(
+                    order_id=resolved_order_id,
+                    item=item,
+                    from_repository="in",
+                    to_repository=procedures[0],
+                    quantity=quantity,
+                    operator=operator,
+                    note="创建工单",
+                )
+            )
 
             session.commit()
-            
-            # 刷新所有记录，获取 id 和 created_at
-            for record in created_records:
-                session.refresh(record)
 
-        return created_records
+            for repository in repositories:
+                session.refresh(repository)
+
+            return repositories
 
     @classmethod
     def get_work_orders(cls) -> list[dict]:
-        """按 order_id + item 聚合 records，返回前端工单视图需要的数据。"""
         with SessionLocal() as session:
-            records = (
+            repositories = (
                 session.query(cls)
                 .order_by(cls.order_id.desc(), cls.id.asc())
                 .all()
@@ -84,79 +90,242 @@ class Record(Base):
 
             work_orders: dict[tuple[int, str], dict] = {}
 
-            for record in records:
-                key = (record.order_id, record.item)
+            for repository in repositories:
+                key = (repository.order_id, repository.item)
                 work_order = work_orders.setdefault(
                     key,
                     {
-                        "id": record.order_id,
-                        "item": record.item,
+                        "id": repository.order_id,
+                        "item": repository.item,
                         "quantity": 0,
-                        "createdAt": record.created_at.date().isoformat(),
                         "steps": [],
                     },
                 )
 
-                work_order["quantity"] = max(work_order["quantity"], record.inbound)
-                work_order["steps"].append(
-                    {
-                        "name": record.repository,
-                        "inbound": record.inbound,
-                        "outbound": record.outbound,
-                    }
-                )
+                work_order["quantity"] += repository.quantity
+                if repository.repository_name != "out":
+                    work_order["steps"].append(
+                        {
+                            "name": repository.repository_name,
+                            "quantity": repository.quantity,
+                        }
+                    )
 
             return list(work_orders.values())
-    
-    # ====================== 查询 ======================
-    @classmethod
-    def get_by_id(cls, record_id: int) -> Optional[Self]:
-        """根据ID查询"""
-        with SessionLocal() as session:
-            return session.query(cls).filter(cls.id == record_id).first()
 
     @classmethod
-    def get_by_order_id(cls, order_id: int) -> List[Self]:
-        """根据 order_id 查询"""
+    def move_quantity(
+        cls,
+        order_id: int,
+        item: str,
+        from_repository: str,
+        to_repository: str,
+        quantity: int,
+        operator: str | None = None,
+        worker: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        if quantity <= 0:
+            raise ValueError("数量必须大于 0")
+
         with SessionLocal() as session:
-            return session.query(cls).filter(cls.order_id == order_id).all()
+            repositories = (
+                session.query(cls)
+                .filter(cls.order_id == order_id, cls.item == item)
+                .order_by(cls.id.asc())
+                .all()
+            )
+            repository_by_name = {
+                repository.repository_name: repository
+                for repository in repositories
+            }
+
+            source = repository_by_name.get(from_repository)
+            target = repository_by_name.get(to_repository)
+
+            if source is None:
+                raise ValueError("来源仓库不存在")
+
+            if source.quantity < quantity:
+                raise ValueError("数量不能超过当前仓库库存")
+
+            source.quantity -= quantity
+
+            if target is not None:
+                target.quantity += quantity
+
+            session.add(
+                Record(
+                    order_id=order_id,
+                    item=item,
+                    from_repository=from_repository,
+                    to_repository=to_repository,
+                    worker=worker,
+                    quantity=quantity,
+                    operator=operator,
+                    note=note,
+                )
+            )
+            session.commit()
 
     @classmethod
-    def get_all(cls) -> List[Self]:
-        """查询所有"""
-        with SessionLocal() as session:
-            return session.query(cls).all()
+    def move_to_next_repository(
+        cls,
+        order_id: int,
+        item: str,
+        repository_name: str,
+        quantity: int,
+        operator: str | None = None,
+        worker: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        target_repository = cls._get_adjacent_repository(
+            order_id=order_id,
+            item=item,
+            repository_name=repository_name,
+            direction=1,
+        )
+        cls.move_quantity(
+            order_id=order_id,
+            item=item,
+            from_repository=repository_name,
+            to_repository=target_repository or "out",
+            quantity=quantity,
+            operator=operator,
+            worker=worker,
+            note=note or "工序出库",
+        )
 
     @classmethod
-    def get_by_repository(cls, repository: str) -> List[Self]:
-        """按仓库查询"""
-        with SessionLocal() as session:
-            return session.query(cls).filter(cls.repository == repository).all()
+    def rework_to_previous_repository(
+        cls,
+        order_id: int,
+        item: str,
+        repository_name: str,
+        quantity: int,
+        operator: str | None = None,
+        worker: str | None = None,
+        note: str | None = None,
+    ) -> None:
+        target_repository = cls._get_adjacent_repository(
+            order_id=order_id,
+            item=item,
+            repository_name=repository_name,
+            direction=-1,
+        )
 
-    # ====================== 修改 ======================
+        if target_repository is None:
+            raise ValueError("第一道工序不能返工")
+
+        cls.move_quantity(
+            order_id=order_id,
+            item=item,
+            from_repository=repository_name,
+            to_repository=target_repository,
+            quantity=quantity,
+            operator=operator,
+            worker=worker,
+            note=note or "返工",
+        )
+
     @classmethod
-    def update(cls, record_id: int, **kwargs) -> Optional[Self]:
-        """更新记录"""
+    def _get_adjacent_repository(
+        cls,
+        order_id: int,
+        item: str,
+        repository_name: str,
+        direction: int,
+    ) -> str | None:
         with SessionLocal() as session:
-            record = cls.get_by_id(record_id)   # 注意：这里会再开一个session，下面优化
-            if not record:
+            repositories = (
+                session.query(cls)
+                .filter(cls.order_id == order_id, cls.item == item)
+                .order_by(cls.id.asc())
+                .all()
+            )
+            current_index = next(
+                (
+                    index
+                    for index, repository in enumerate(repositories)
+                    if repository.repository_name == repository_name
+                ),
+                None,
+            )
+
+            if current_index is None:
+                raise ValueError("仓库不存在")
+
+            target_index = current_index + direction
+
+            if target_index < 0 or target_index >= len(repositories):
                 return None
 
-            for key, value in kwargs.items():
-                if hasattr(record, key):
-                    setattr(record, key, value)
+            return repositories[target_index].repository_name
 
-            session.commit()
-            session.refresh(record)
-            return record
 
-    def update_self(self, **kwargs) -> Self:
-        """实例方法更新"""
+class Record(Base):
+    __tablename__ = "records"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    item: Mapped[str] = mapped_column(String(100), nullable=False)
+    from_repository: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    to_repository: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    worker: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    operator: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    def __init__(
+        self,
+        order_id: int,
+        item: str,
+        quantity: int,
+        from_repository: str | None = None,
+        to_repository: str | None = None,
+        worker: str | None = None,
+        operator: str | None = None,
+        note: str | None = None,
+    ):
+        self.order_id = order_id
+        self.item = item
+        self.from_repository = from_repository
+        self.to_repository = to_repository
+        self.worker = worker
+        self.quantity = quantity
+        self.operator = operator
+        self.note = note
+
+    @classmethod
+    def get_by_work_order_step(cls, order_id: int, item: str, repository: str) -> list[dict]:
         with SessionLocal() as session:
-            for key, value in kwargs.items():
-                if hasattr(self, key):
-                    setattr(self, key, value)
-            session.add(self)          # 确保对象被关联
-            session.commit()
-            session.refresh(self)
-            return self
+            records = (
+                session.query(cls)
+                .filter(
+                    cls.order_id == order_id,
+                    cls.item == item,
+                    or_(
+                        cls.from_repository == repository,
+                        cls.to_repository == repository,
+                    ),
+                )
+                .order_by(cls.created_at.desc(), cls.id.desc())
+                .all()
+            )
+
+            return [
+                {
+                    "id": record.id,
+                    "createdAt": record.created_at.strftime("%Y-%m-%d %H:%M"),
+                    "fromRepository": record.from_repository,
+                    "toRepository": record.to_repository,
+                    "worker": record.worker,
+                    "quantity": record.quantity,
+                    "operator": record.operator,
+                    "note": record.note,
+                }
+                for record in records
+            ]

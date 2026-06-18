@@ -1,170 +1,46 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { createWorkOrder as createWorkOrderApi, queryWorkOrders } from '@/api/workorder'
-import WorkOrderCard from '@/component/WorkOrderCard.vue'
+import CreateWorkOrderDialog from '@/components/workorders/CreateWorkOrderDialog.vue'
+import WorkOrderCard from '@/components/workorders/WorkOrderCard.vue'
+import { useWorkOrdersStore } from '@/stores/workorders'
 import {
   PROCEDURE_LABELS,
   PROCEDURE_OPTIONS,
+  type CreateWorkOrderPayload,
   type Procedure,
-  type WorkOrderItem,
-  type WorkOrderQuery,
   type WorkOrderStatus,
 } from '@/types/workorder'
 
 const router = useRouter()
+const workOrdersStore = useWorkOrdersStore()
+const { activeQuantity, loading, totalQuantity, workOrders } = storeToRefs(workOrdersStore)
+
 const dialogVisible = ref(false)
-const loading = ref(false)
 const availableProcedures = [...PROCEDURE_OPTIONS]
-const selectedProcedure = ref<Procedure | ''>('laser')
-
-const queryForm = reactive<WorkOrderQuery>({
-  orderId: '',
-  item: '',
-  status: '',
-  procedure: '',
-})
-
-const form = reactive({
-  item: 'MOG3V45-过桥',
-  quantity: 100,
-  procedures: [] as Procedure[],
-})
-
-const proceduresToAdd = computed(() =>
-  availableProcedures.filter((procedure) => !form.procedures.includes(procedure)),
-)
-
+const queryForm = workOrdersStore.queryForm
 const statusOptions: WorkOrderStatus[] = ['待开工', '加工中', '已完成']
-const workOrders = ref<WorkOrderItem[]>([])
-
-const totalQuantity = computed(() =>
-  workOrders.value.reduce((total, order) => total + order.quantity, 0),
-)
-
-const activeQuantity = computed(() =>
-  workOrders.value.reduce((total, order) => {
-    const lastStep = order.steps[order.steps.length - 1]
-    return total + (lastStep ? order.quantity - lastStep.outbound : order.quantity)
-  }, 0),
-)
-
-async function loadWorkOrders() {
-  loading.value = true
-
-  try {
-    workOrders.value = await queryWorkOrders(queryForm)
-  } finally {
-    loading.value = false
-  }
-}
 
 function resetQuery() {
-  queryForm.orderId = ''
-  queryForm.item = ''
-  queryForm.status = ''
-  queryForm.procedure = ''
-  loadWorkOrders()
+  workOrdersStore.resetQuery()
 }
 
 function openCreateDialog() {
-  form.item = 'MOG3V45-过桥'
-  form.quantity = 100
-  form.procedures = []
-  selectedProcedure.value = proceduresToAdd.value[0] ?? 'laser'
   dialogVisible.value = true
 }
 
-function addProcedure() {
-  if (!selectedProcedure.value || form.procedures.includes(selectedProcedure.value)) {
-    return
-  }
-
-  form.procedures.push(selectedProcedure.value)
-  selectedProcedure.value = proceduresToAdd.value[0] ?? ''
-}
-
-function removeProcedure(index: number) {
-  form.procedures.splice(index, 1)
-  selectedProcedure.value = proceduresToAdd.value[0] ?? ''
-}
-
-function moveProcedure(index: number, direction: -1 | 1) {
-  const targetIndex = index + direction
-
-  if (targetIndex < 0 || targetIndex >= form.procedures.length) {
-    return
-  }
-
-  const current = form.procedures[index]
-  const target = form.procedures[targetIndex]
-
-  if (!current || !target) {
-    return
-  }
-
-  form.procedures[index] = target
-  form.procedures[targetIndex] = current
-}
-
-async function createWorkOrder() {
-  if (!form.item.trim() || form.quantity <= 0 || form.procedures.length === 0) {
-    return
-  }
-
-  await createWorkOrderApi({
-    item: form.item.trim(),
-    quantity: form.quantity,
-    procedures: [...form.procedures],
-  })
-
+async function createWorkOrder(payload: CreateWorkOrderPayload) {
+  await workOrdersStore.createWorkOrder(payload)
   dialogVisible.value = false
-  await loadWorkOrders()
-}
-
-function formatRecordTime(date: Date) {
-  const pad = (value: number) => String(value).padStart(2, '0')
-
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`
 }
 
 function getProcedureLabel(procedure: Procedure) {
   return PROCEDURE_LABELS[procedure]
 }
 
-function recordOutbound(orderId: string, stepIndex: number, outboundQuantity: number) {
-  const order = workOrders.value.find((item) => item.id === orderId)
-  const step = order?.steps[stepIndex]
-
-  if (!order || !step || outboundQuantity <= 0 || step.inbound < step.outbound + outboundQuantity) {
-    return
-  }
-
-  const quantity = outboundQuantity
-  step.outbound += quantity
-  // step.outboundRecords.unshift({
-  //   id: `R-${Date.now()}-${stepIndex}`,
-  //   quantity,
-  //   createdAt: formatRecordTime(new Date()),
-  //   operator: '当前操作员',
-  // })
-
-  const nextStep = order.steps[stepIndex + 1]
-  if (nextStep) {
-    nextStep.inbound += quantity
-  } else {
-    order.status = '已完成'
-  }
-
-  if (order.status === '待开工') {
-    order.status = '加工中'
-  }
-}
-
 onMounted(() => {
-  loadWorkOrders()
+  workOrdersStore.loadWorkOrders()
 })
 </script>
 
@@ -198,17 +74,13 @@ onMounted(() => {
         </ElFormItem>
         <ElFormItem label="包含工序">
           <ElSelect v-model="queryForm.procedure" clearable placeholder="全部工序">
-            <ElOption
-              v-for="procedure in availableProcedures"
-              :key="procedure"
-              :label="getProcedureLabel(procedure)"
-              :value="procedure"
-            />
+            <ElOption v-for="procedure in availableProcedures" :key="procedure" :label="getProcedureLabel(procedure)"
+              :value="procedure" />
           </ElSelect>
         </ElFormItem>
         <div class="query-actions">
           <ElButton @click="resetQuery">重置</ElButton>
-          <ElButton type="primary" :loading="loading" @click="loadWorkOrders">查询工单</ElButton>
+          <ElButton type="primary" :loading="loading" @click="workOrdersStore.loadWorkOrders">查询工单</ElButton>
         </div>
       </ElForm>
     </section>
@@ -241,62 +113,12 @@ onMounted(() => {
         v-for="order in workOrders"
         :key="order.id"
         :order="order"
-        @outbound="recordOutbound"
+        @changed="workOrdersStore.loadWorkOrders"
       />
       <ElEmpty v-if="!loading && workOrders.length === 0" description="暂无匹配工单" />
     </section>
 
-    <ElDialog v-model="dialogVisible" title="添加工单" width="560px">
-      <ElForm label-position="top">
-        <ElFormItem label="部件">
-          <ElInput v-model="form.item" placeholder="例如：MOG3V45-过桥" />
-        </ElFormItem>
-
-        <ElFormItem label="数量">
-          <ElInputNumber v-model="form.quantity" :min="1" :step="1" controls-position="right" />
-        </ElFormItem>
-
-        <ElFormItem label="工序流程">
-          <div class="procedure-builder">
-            <div class="procedure-picker">
-              <ElSelect v-model="selectedProcedure" :disabled="proceduresToAdd.length === 0" placeholder="选择工序">
-                <ElOption
-                  v-for="procedure in proceduresToAdd"
-                  :key="procedure"
-                  :label="getProcedureLabel(procedure)"
-                  :value="procedure"
-                />
-              </ElSelect>
-              <ElButton :disabled="proceduresToAdd.length === 0" @click="addProcedure">加入流程</ElButton>
-            </div>
-
-            <div class="ordered-procedures">
-              <div v-for="(procedure, index) in form.procedures" :key="procedure" class="procedure-row">
-                <div class="procedure-sequence">
-                  <span>{{ index + 1 }}</span>
-                  <strong>{{ getProcedureLabel(procedure) }}</strong>
-                </div>
-                <div class="procedure-actions">
-                  <ElButton text :disabled="index === 0" @click="moveProcedure(index, -1)">上移</ElButton>
-                  <ElButton text :disabled="index === form.procedures.length - 1" @click="moveProcedure(index, 1)">
-                    下移
-                  </ElButton>
-                  <ElButton text type="danger" @click="removeProcedure(index)">移除</ElButton>
-                </div>
-              </div>
-              <ElEmpty v-if="form.procedures.length === 0" description="请按加工顺序加入工序" :image-size="72" />
-            </div>
-          </div>
-        </ElFormItem>
-      </ElForm>
-
-      <template #footer>
-        <ElButton @click="dialogVisible = false">取消</ElButton>
-        <ElButton type="primary" :disabled="form.procedures.length === 0" @click="createWorkOrder">
-          确认添加
-        </ElButton>
-      </template>
-    </ElDialog>
+    <CreateWorkOrderDialog v-model="dialogVisible" @submit="createWorkOrder" />
   </main>
 </template>
 
@@ -423,63 +245,6 @@ onMounted(() => {
   gap: 18px;
 }
 
-.procedure-builder {
-  display: grid;
-  gap: 12px;
-  width: 100%;
-}
-
-.procedure-picker {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-}
-
-.ordered-procedures {
-  display: grid;
-  gap: 8px;
-}
-
-.procedure-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 10px 12px;
-  border: 1px solid var(--erp-border);
-  border-radius: 8px;
-  background: var(--erp-surface-muted);
-}
-
-.procedure-sequence {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-
-.procedure-sequence span {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 8px;
-  background: #dbeafe;
-  color: #1d4ed8;
-  font-weight: 700;
-}
-
-.procedure-sequence strong {
-  color: var(--erp-text);
-}
-
-.procedure-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 2px;
-}
-
 @media (max-width: 1180px) {
   .query-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -525,14 +290,5 @@ onMounted(() => {
     grid-template-columns: 1fr;
   }
 
-  .procedure-picker,
-  .procedure-row {
-    grid-template-columns: 1fr;
-  }
-
-  .procedure-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
 }
 </style>
