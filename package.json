@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "f": "pnpm --dir frontend dev",
-    "b": "PYTHONPATH=backend/src uvicorn backend.src.main:app --host 0.0.0.0 --port 8000 --reload"
+    "b": "PYTHONPATH=backend/src uvicorn backend.src.main:app --host 0.0.0.0 --port 8000 --reload",
+    "b:prod": "APP_ENV=production uvicorn backend.src.main:app --host 0.0.0.0 --port ${PORT:-8000}"
   }
 }
