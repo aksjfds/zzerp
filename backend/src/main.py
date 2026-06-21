@@ -1,8 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.src.config import get_settings
-from backend.src.routers import auth, products, records, tasks
+from config import get_settings
+from routers import auth, products, records, tasks
 
 settings = get_settings()
 

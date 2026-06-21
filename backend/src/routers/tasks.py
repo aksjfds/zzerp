@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.src.models.production import Procedure, Task, Worker
-from backend.src.types.production import CreateProcedurePayload, CreateTaskPayload
+from models.production import Procedure, Task, Worker
+from schemas.production import CreateProcedurePayload, CreateTaskPayload
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 

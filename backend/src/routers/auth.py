@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.src.models.user import User
-from backend.src.types.user import LoginPayload
+from models.user import User
+from schemas.user import LoginPayload
 
 router = APIRouter(tags=["auth"])
 

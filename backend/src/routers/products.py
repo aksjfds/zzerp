@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from backend.src.models.production import Product
-from backend.src.types.production import CreateProductPayload
+from models.production import Product
+from schemas.production import CreateProductPayload
 
 router = APIRouter(prefix="/products", tags=["products"])
 

@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from backend.src.models.production import Record
+from models.production import Record
 
 router = APIRouter(prefix="/records", tags=["records"])
 

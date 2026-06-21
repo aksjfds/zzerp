@@ -4,7 +4,7 @@ from sqlalchemy import BigInteger, Boolean, Integer, Text, TIMESTAMP, or_, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.src.database import Base, SessionLocal
+from database import Base, SessionLocal
 
 
 class Product(Base):

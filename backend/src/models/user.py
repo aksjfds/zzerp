@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, String, Text, TIMESTAMP, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from backend.src.database import Base, SessionLocal
+from database import Base, SessionLocal
 
 
 class User(Base):
