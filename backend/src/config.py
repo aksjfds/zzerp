@@ -14,9 +14,7 @@ if env_file:
     load_dotenv(env_file)
 else:
     env_path = BACKEND_DIR / f".env.{app_env}"
-    load_dotenv(env_path if env_path.exists() else BACKEND_DIR / ".env")
-
-load_dotenv(BACKEND_DIR / ".env")
+    load_dotenv(env_path)
 
 
 def _split_csv(value: str | None) -> list[str]:
