@@ -82,3 +82,8 @@ export type CreateTaskPayload = {
   quantity: number
   note?: string
 }
+
+export type CreateProcedurePayload = {
+  department: Department
+  procedureName: string
+}

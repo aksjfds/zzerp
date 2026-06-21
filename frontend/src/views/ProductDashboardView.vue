@@ -4,12 +4,10 @@ import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useProductsStore } from '@/stores/products'
-import { useTasksStore } from '@/stores/tasks'
 import {
   DEPARTMENT_LABELS,
   DEPARTMENTS,
   type CreateProductPayload,
-  type CreateTaskPayload,
   type Department,
   type ProductItem,
 } from '@/types/production'
@@ -17,12 +15,12 @@ import {
 const router = useRouter()
 const authStore = useAuthStore()
 const productsStore = useProductsStore()
-const tasksStore = useTasksStore()
 const { loading: productsLoading, products, records } = storeToRefs(productsStore)
-const { loading: tasksLoading, procedures, tasks, workers } = storeToRefs(tasksStore)
 
 const productDialogVisible = ref(false)
+const recordsDialogVisible = ref(false)
 const activeProduct = ref<ProductItem | null>(null)
+const activeDepartment = ref<Department | null>(null)
 const selectedProcessDepartment = ref<Department>('laser')
 
 const productForm = reactive<CreateProductPayload>({
@@ -32,43 +30,32 @@ const productForm = reactive<CreateProductPayload>({
   quantity: 1,
 })
 
-const taskForm = reactive<CreateTaskPayload>({
-  zzCode: '',
-  product: '',
-  worker: '',
-  department: 'laser',
-  procedure: '',
-  quantity: 1,
-  note: '',
-})
-
-const isAdmin = computed(() => authStore.department === 'sys')
-const currentDepartment = computed<Department | null>(() =>
-  authStore.department && authStore.department !== 'sys' ? authStore.department : null,
-)
-const currentDepartmentName = computed(() =>
-  currentDepartment.value ? getDepartmentLabel(currentDepartment.value) : '',
-)
 const processOptions = computed(() =>
   DEPARTMENTS.filter((department) => department !== 'in' && department !== 'out'),
 )
 const selectableProcessOptions = computed(() =>
   processOptions.value.filter((department) => !productForm.process.includes(department)),
 )
-const departmentProducts = computed(() => {
-  if (!currentDepartment.value) {
-    return []
+const activeTimelineTitle = computed(() => {
+  if (!activeProduct.value) {
+    return ''
   }
 
-  return products.value.filter((product) =>
-    product.repositories.some(
-      (repository) => repository.department === currentDepartment.value && repository.quantity > 0,
-    ),
-  )
+  const departmentName = activeDepartment.value ? getDepartmentLabel(activeDepartment.value) : ''
+  return `${activeProduct.value.productName} / ${departmentName}流转时间线`
 })
-
 function getDepartmentLabel(department: Department) {
   return DEPARTMENT_LABELS[department]
+}
+
+function getDisplayDepartments(product: ProductItem) {
+  return [...product.process, 'out'] as Department[]
+}
+
+function getDepartmentQuantity(product: ProductItem, department: Department) {
+  return product.repositories
+    .filter((repository) => repository.department === department)
+    .reduce((total, repository) => total + repository.quantity, 0)
 }
 
 function resetProductForm() {
@@ -121,42 +108,11 @@ async function submitProduct() {
   productDialogVisible.value = false
 }
 
-async function openRecords(product: ProductItem) {
+async function openRecords(product: ProductItem, department?: Department) {
   activeProduct.value = product
-  await productsStore.loadRecords(product.zzCode, product.productName)
-}
-
-function resetTaskForm() {
-  if (!currentDepartment.value) {
-    return
-  }
-
-  taskForm.zzCode = ''
-  taskForm.product = ''
-  taskForm.worker = ''
-  taskForm.department = currentDepartment.value
-  taskForm.procedure = ''
-  taskForm.quantity = 1
-  taskForm.note = ''
-}
-
-function selectTaskProduct(value: string) {
-  const product = products.value.find((item) => item.zzCode === value)
-  taskForm.product = product?.productName ?? ''
-}
-
-async function submitTask() {
-  await tasksStore.createTask(taskForm)
-  resetTaskForm()
-}
-
-async function completeTask(taskId: number) {
-  if (!currentDepartment.value) {
-    return
-  }
-
-  await tasksStore.completeTask(taskId, currentDepartment.value)
-  await productsStore.loadProducts()
+  activeDepartment.value = department ?? null
+  await productsStore.loadRecords(product.zzCode, product.productName, department)
+  recordsDialogVisible.value = true
 }
 
 function logout() {
@@ -166,11 +122,6 @@ function logout() {
 
 async function loadDashboard() {
   await productsStore.loadProducts()
-
-  if (currentDepartment.value) {
-    resetTaskForm()
-    await tasksStore.loadDepartmentData(currentDepartment.value)
-  }
 }
 
 onMounted(loadDashboard)
@@ -180,134 +131,66 @@ onMounted(loadDashboard)
   <main class="dashboard-page">
     <header class="dashboard-header">
       <div>
-        <div class="page-kicker">{{ isAdmin ? 'Admin Dashboard' : 'Task Dashboard' }}</div>
-        <h1>{{ isAdmin ? '产品流转看板' : `${currentDepartmentName}任务分配` }}</h1>
-        <p v-if="isAdmin">管理员只能新增产品，并查看产品的流转时间线。</p>
-        <p v-else>主管在本页面分配任务；任务完成后产品自动流转到下一部门。</p>
+        <div class="page-kicker">Admin Dashboard</div>
+        <h1>产品流转看板</h1>
+        <p>管理员只能新增产品，并查看产品的流转时间线。</p>
       </div>
       <div class="header-actions">
-        <ElButton v-if="isAdmin" v-permission="'product:add'" type="primary" @click="openProductDialog">
+        <ElButton v-permission="'product:add'" type="primary" @click="openProductDialog">
           新增产品
         </ElButton>
         <ElButton @click="logout">退出</ElButton>
       </div>
     </header>
 
-    <template v-if="isAdmin">
-      <section class="summary-grid">
-        <div class="summary-card">
-          <span>产品数量</span>
-          <strong>{{ products.length }}</strong>
+    <section class="summary-grid">
+      <div class="summary-card">
+        <span>产品数量</span>
+        <strong>{{ products.length }}</strong>
+      </div>
+    </section>
+
+    <section v-loading="productsLoading" class="product-grid">
+      <article v-for="product in products" :key="product.id" class="product-card">
+        <div class="product-head">
+          <div>
+            <div class="product-code">{{ product.zzCode }}</div>
+            <h2>{{ product.productName }}</h2>
+          </div>
         </div>
-      </section>
 
-      <section v-loading="productsLoading" class="product-grid">
-        <article v-for="product in products" :key="product.id" class="product-card">
-          <div class="product-head">
-            <div>
-              <div class="product-code">{{ product.zzCode }}</div>
-              <h2>{{ product.productName }}</h2>
-            </div>
-            <ElButton text @click="openRecords(product)">流转时间线</ElButton>
-          </div>
+        <div class="department-stock-grid">
+          <button
+            v-for="department in getDisplayDepartments(product)"
+            :key="department"
+            type="button"
+            class="department-stock"
+            @click="openRecords(product, department)"
+          >
+            <span>{{ getDepartmentLabel(department) }}</span>
+            <strong>{{ getDepartmentQuantity(product, department) }}</strong>
+          </button>
+        </div>
+      </article>
+      <ElEmpty v-if="!productsLoading && products.length === 0" description="暂无产品" />
+    </section>
 
-          <div class="process-line">
-            <ElTag v-for="department in product.process" :key="department" effect="plain">
-              {{ getDepartmentLabel(department) }}
-            </ElTag>
-          </div>
-        </article>
-        <ElEmpty v-if="!productsLoading && products.length === 0" description="暂无产品" />
-      </section>
-
-      <aside v-if="activeProduct" class="records-panel">
+    <ElDialog v-model="recordsDialogVisible" :title="activeTimelineTitle" width="560px">
+      <div class="records-dialog-body">
         <div class="records-head">
-          <strong>{{ activeProduct.productName }} 流转时间线</strong>
-          <span>{{ records.length }} 条</span>
+          <span>流转记录</span>
+          <strong>{{ records.length }} 条</strong>
         </div>
-        <ElTimeline>
+        <ElTimeline :reverse="true" v-if="records.length > 0">
           <ElTimelineItem v-for="record in records" :key="record.id" :timestamp="record.createdAt">
             {{ getDepartmentLabel(record.fromRepository) }} -> {{ getDepartmentLabel(record.toRepository) }}
             {{ record.quantity }}
             <span v-if="record.note">，{{ record.note }}</span>
           </ElTimelineItem>
         </ElTimeline>
-      </aside>
-    </template>
-
-    <template v-else>
-      <section class="task-layout">
-        <div class="assign-panel">
-          <h2>分配任务</h2>
-          <ElForm :model="taskForm" label-position="top">
-            <ElFormItem label="产品">
-              <ElSelect v-model="taskForm.zzCode" filterable placeholder="选择产品" @change="selectTaskProduct">
-                <ElOption
-                  v-for="product in departmentProducts"
-                  :key="product.id"
-                  :label="`${product.zzCode} / ${product.productName}`"
-                  :value="product.zzCode"
-                />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem label="工人">
-              <ElSelect v-model="taskForm.worker" filterable allow-create placeholder="选择或输入工人">
-                <ElOption v-for="worker in workers" :key="worker.id" :label="worker.name" :value="worker.name" />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem label="细分工艺">
-              <ElSelect v-model="taskForm.procedure" filterable allow-create placeholder="选择或输入工艺">
-                <ElOption
-                  v-for="procedure in procedures"
-                  :key="procedure.id"
-                  :label="procedure.procedureName"
-                  :value="procedure.procedureName"
-                />
-              </ElSelect>
-            </ElFormItem>
-            <ElFormItem label="数量">
-              <ElInputNumber v-model="taskForm.quantity" :min="1" />
-            </ElFormItem>
-            <ElFormItem label="备注">
-              <ElInput v-model="taskForm.note" type="textarea" />
-            </ElFormItem>
-            <ElButton
-              v-permission="'task:assign'"
-              type="primary"
-              :disabled="!taskForm.zzCode || !taskForm.worker || !taskForm.procedure"
-              @click="submitTask"
-            >
-              确认分配
-            </ElButton>
-          </ElForm>
-        </div>
-
-        <div v-loading="tasksLoading" class="task-list">
-          <h2>本部门任务</h2>
-          <div v-for="task in tasks" :key="task.id" class="task-row">
-            <div>
-              <strong>{{ task.product }}</strong>
-              <span>{{ task.worker }} / {{ task.procedure }} / {{ task.quantity }}</span>
-            </div>
-            <div class="task-actions">
-              <ElTag :type="task.status ? 'success' : 'warning'" effect="light">
-                {{ task.status ? '完成' : '进行中' }}
-              </ElTag>
-              <ElButton
-                v-permission="'task:complete'"
-                type="primary"
-                size="small"
-                :disabled="task.status"
-                @click="completeTask(task.id)"
-              >
-                完成
-              </ElButton>
-            </div>
-          </div>
-          <ElEmpty v-if="!tasksLoading && tasks.length === 0" description="暂无任务" />
-        </div>
-      </section>
-    </template>
+        <ElEmpty v-else description="暂无流转记录" :image-size="72" />
+      </div>
+    </ElDialog>
 
     <ElDialog v-model="productDialogVisible" title="新增产品" width="620px">
       <ElForm :model="productForm" label-position="top">
@@ -372,10 +255,7 @@ onMounted(loadDashboard)
 
 .dashboard-header,
 .summary-card,
-.product-card,
-.records-panel,
-.assign-panel,
-.task-list {
+.product-card {
   border: 1px solid var(--erp-border);
   border-radius: 8px;
   background: #ffffff;
@@ -441,63 +321,59 @@ onMounted(loadDashboard)
   gap: 16px;
 }
 
-.product-card,
-.records-panel,
-.assign-panel,
-.task-list {
+.product-card {
   padding: 18px;
 }
 
 .product-head,
-.records-head,
-.task-row {
+.records-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.process-line {
-  display: flex;
-  flex-wrap: wrap;
+.records-dialog-body {
+  max-height: 520px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.department-stock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
   gap: 8px;
   margin-top: 14px;
 }
 
-.records-panel {
-  margin-top: 18px;
-}
-
-.task-layout {
+.department-stock {
   display: grid;
-  grid-template-columns: 380px minmax(0, 1fr);
-  gap: 18px;
-}
-
-.assign-panel h2,
-.task-list h2 {
-  margin: 0 0 16px;
-}
-
-.task-row {
-  padding: 14px;
+  gap: 4px;
+  min-height: 68px;
+  padding: 10px;
   border: 1px solid var(--erp-border);
   border-radius: 8px;
   background: var(--erp-surface-muted);
+  color: var(--erp-text);
+  cursor: pointer;
+  text-align: left;
 }
 
-.task-row + .task-row {
-  margin-top: 10px;
+.department-stock:hover {
+  border-color: var(--erp-primary);
+  background: #eff6ff;
 }
 
-.task-row span {
-  display: block;
-  margin-top: 4px;
+.department-stock span {
   color: var(--erp-text-muted);
   font-size: 13px;
 }
 
-.task-actions,
+.department-stock strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
 .process-actions {
   display: flex;
   align-items: center;
@@ -545,15 +421,13 @@ onMounted(loadDashboard)
 
 @media (max-width: 900px) {
   .dashboard-header,
-  .header-actions,
-  .task-row {
+  .header-actions {
     align-items: flex-start;
     flex-direction: column;
   }
 
   .summary-grid,
-  .product-grid,
-  .task-layout {
+  .product-grid {
     grid-template-columns: 1fr;
   }
 

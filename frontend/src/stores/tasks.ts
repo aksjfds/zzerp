@@ -2,12 +2,20 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   completeTask as completeTaskApi,
+  createDepartmentProcedure,
   createTask as createTaskApi,
   queryDepartmentProcedures,
   queryDepartmentTasks,
   queryDepartmentWorkers,
 } from '@/api/production'
-import type { CreateTaskPayload, Department, ProcedureItem, TaskItem, WorkerItem } from '@/types/production'
+import type {
+  CreateProcedurePayload,
+  CreateTaskPayload,
+  Department,
+  ProcedureItem,
+  TaskItem,
+  WorkerItem,
+} from '@/types/production'
 
 export const useTasksStore = defineStore('tasks', () => {
   const loading = ref(false)
@@ -42,8 +50,14 @@ export const useTasksStore = defineStore('tasks', () => {
     await loadDepartmentData(department)
   }
 
+  async function createProcedure(payload: CreateProcedurePayload) {
+    await createDepartmentProcedure(payload)
+    await loadDepartmentData(payload.department)
+  }
+
   return {
     completeTask,
+    createProcedure,
     createTask,
     loadDepartmentData,
     loading,

@@ -1,5 +1,6 @@
 import type {
   CreateProductPayload,
+  CreateProcedurePayload,
   CreateTaskPayload,
   Department,
   ProcedureItem,
@@ -26,11 +27,12 @@ export async function createProduct(payload: CreateProductPayload) {
   return res.data.data
 }
 
-export async function queryProductRecords(zzCode: string, product: string) {
+export async function queryProductRecords(zzCode: string, product: string, department?: Department) {
   const res = await service.get<{ data: ProductRecord[] }>('/records', {
     params: {
       zz_code: zzCode,
       product,
+      department,
     },
   })
 
@@ -68,5 +70,14 @@ export async function queryDepartmentWorkers(department: Department) {
 
 export async function queryDepartmentProcedures(department: Department) {
   const res = await service.get<{ data: ProcedureItem[] }>(`/tasks/${department}/procedures`)
+  return res.data.data
+}
+
+export async function createDepartmentProcedure(payload: CreateProcedurePayload) {
+  const res = await service.post<{ data: ProcedureItem }>(`/tasks/${payload.department}/procedures`, {
+    department: payload.department,
+    procedure_name: payload.procedureName.trim(),
+  })
+
   return res.data.data
 }

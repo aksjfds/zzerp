@@ -13,6 +13,14 @@ const loginForm = reactive({
   password: '',
 })
 
+function getDefaultDashboardPath(department?: string) {
+  if (!department || department === 'sys') {
+    return '/dashboard'
+  }
+
+  return `/dashboard/${department}`
+}
+
 async function submitLogin() {
   if (!loginForm.username.trim() || !loginForm.password) {
     ElMessage.warning('请输入用户名和密码')
@@ -20,8 +28,8 @@ async function submitLogin() {
   }
 
   try {
-    await authStore.login(loginForm)
-    const defaultPath = '/dashboard'
+    const user = await authStore.login(loginForm)
+    const defaultPath = getDefaultDashboardPath(user.department)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : defaultPath
     router.replace(redirect)
   } catch {

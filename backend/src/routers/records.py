@@ -6,10 +6,11 @@ router = APIRouter(prefix="/records", tags=["records"])
 
 
 @router.get("")
-def list_records(zz_code: str, product: str):
+def list_records(zz_code: str, product: str, department: str | None = None):
     return {
         "data": Record.list_by_product(
             zz_code=zz_code.strip(),
             product=product.strip(),
+            department=department.strip() if department else None,
         )
     }

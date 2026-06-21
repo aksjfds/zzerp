@@ -16,3 +16,8 @@ class CreateTaskPayload(BaseModel):
     procedure: str = Field(min_length=1)
     quantity: int = Field(gt=0)
     note: str | None = None
+
+
+class CreateProcedurePayload(BaseModel):
+    department: str = Field(min_length=1)
+    procedure_name: str = Field(min_length=1)

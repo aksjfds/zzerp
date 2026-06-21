@@ -1,9 +1,17 @@
 from fastapi import APIRouter, HTTPException
 
 from backend.src.models.production import Procedure, Task, Worker
-from backend.src.types.production import CreateTaskPayload
+from backend.src.types.production import CreateProcedurePayload, CreateTaskPayload
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
+
+
+def normalize_optional_text(value: str | None) -> str | None:
+    if value is None:
+        return None
+
+    normalized = value.strip()
+    return normalized or None
 
 
 @router.post("")
@@ -16,7 +24,7 @@ def create_task(payload: CreateTaskPayload):
             department=payload.department.strip(),
             procedure=payload.procedure.strip(),
             quantity=payload.quantity,
-            note=payload.note.strip() if payload.note else None,
+            note=normalize_optional_text(payload.note),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -42,6 +50,28 @@ def list_department_workers(department: str):
 @router.get("/{department}/procedures")
 def list_department_procedures(department: str):
     return {"data": Procedure.list_by_department(department.strip())}
+
+
+@router.post("/{department}/procedures")
+def create_department_procedure(department: str, payload: CreateProcedurePayload):
+    procedure_name = payload.procedure_name.strip()
+    resolved_department = department.strip()
+
+    if not procedure_name:
+        raise HTTPException(status_code=400, detail="工艺名称不能为空")
+
+    if payload.department.strip() != resolved_department:
+        raise HTTPException(status_code=400, detail="部门不一致")
+
+    try:
+        procedure = Procedure.create(
+            department=resolved_department,
+            procedure_name=procedure_name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    return {"data": procedure}
 
 
 @router.get("/{department}")

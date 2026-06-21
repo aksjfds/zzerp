@@ -5,7 +5,7 @@ import {
   queryProductRecords,
   queryProducts,
 } from '@/api/production'
-import type { CreateProductPayload, ProductItem, ProductRecord } from '@/types/production'
+import type { CreateProductPayload, Department, ProductItem, ProductRecord } from '@/types/production'
 
 export const useProductsStore = defineStore('products', () => {
   const loading = ref(false)
@@ -31,8 +31,8 @@ export const useProductsStore = defineStore('products', () => {
     await loadProducts()
   }
 
-  async function loadRecords(zzCode: string, product: string) {
-    records.value = await queryProductRecords(zzCode, product)
+  async function loadRecords(zzCode: string, product: string, department?: Department) {
+    records.value = await queryProductRecords(zzCode, product, department)
   }
 
   return {

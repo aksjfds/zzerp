@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, Integer, Text, TIMESTAMP, text
+from sqlalchemy import BigInteger, Boolean, Integer, Text, TIMESTAMP, or_, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -220,6 +220,23 @@ class Procedure(Base):
             )
             return [cls.serialize(procedure) for procedure in procedures]
 
+    @classmethod
+    def create(cls, department: str, procedure_name: str) -> dict:
+        with SessionLocal() as session:
+            procedure = (
+                session.query(cls)
+                .filter(cls.department == department, cls.procedure_name == procedure_name)
+                .one_or_none()
+            )
+
+            if procedure is None:
+                procedure = cls(department=department, procedure_name=procedure_name)
+                session.add(procedure)
+                session.commit()
+                session.refresh(procedure)
+
+            return cls.serialize(procedure)
+
 
 class Record(Base):
     __tablename__ = "records"
@@ -249,14 +266,19 @@ class Record(Base):
         }
 
     @classmethod
-    def list_by_product(cls, zz_code: str, product: str) -> list[dict]:
+    def list_by_product(cls, zz_code: str, product: str, department: str | None = None) -> list[dict]:
         with SessionLocal() as session:
-            records = (
+            query = (
                 session.query(cls)
                 .filter(cls.zz_code == zz_code, cls.product == product)
-                .order_by(cls.created_at.desc(), cls.id.desc())
-                .all()
             )
+
+            if department:
+                query = query.filter(
+                    or_(cls.from_repository == department, cls.to_repository == department)
+                )
+
+            records = query.order_by(cls.created_at.desc(), cls.id.desc()).all()
             return [cls.serialize(record) for record in records]
 
 
@@ -366,7 +388,7 @@ class Task(Base):
                 from_department=task.department,
                 to_department=next_department,
                 quantity=task.quantity,
-                note=f"{task.worker} 完成 {task.procedure}",
+                note=None,
             )
             task.ok = task.quantity
             task.status = True

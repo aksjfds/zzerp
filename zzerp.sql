@@ -86,12 +86,12 @@ CREATE TABLE users (
 
 
 INSERT INTO users (username, password, department, role, permissions) VALUES
-('admin', 'admin123', 'sys', 'supervisor', 'product:view,product:add,record:view,sys:user:add'),
-('laser_lead', 'laser123', 'laser', 'supervisor', 'task:view,task:assign,task:complete'),
-('stamp_lead', 'stamp123', 'stamp', 'supervisor', 'task:view,task:assign,task:complete'),
-('cnc_lead', 'cnc123', 'cnc', 'supervisor', 'task:view,task:assign,task:complete'),
-('polish_lead', 'polish123', 'polish', 'supervisor', 'task:view,task:assign,task:complete'),
-('qc_lead', 'qc123', 'qc', 'supervisor', 'task:view,task:assign,task:complete');
+('admin', '1', 'sys', 'supervisor', 'product:view,product:add,record:view,sys:user:add'),
+('laser', '1', 'laser', 'supervisor', 'task:view,task:assign,task:complete'),
+('stamp', '1', 'stamp', 'supervisor', 'task:view,task:assign,task:complete'),
+('cnc', '1', 'cnc', 'supervisor', 'task:view,task:assign,task:complete'),
+('polish', '1', 'polish', 'supervisor', 'task:view,task:assign,task:complete'),
+('qc', '1', 'qc', 'supervisor', 'task:view,task:assign,task:complete');
 
 
 -- ============================================================
