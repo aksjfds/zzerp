@@ -18,12 +18,6 @@ else:
     load_dotenv(env_path)
 
 
-def _split_csv(value: str | None) -> list[str]:
-    if not value:
-        return []
-    return [item.strip() for item in value.split(",") if item.strip()]
-
-
 def _build_database_url() -> str:
     database_url = os.getenv("DATABASE_URL")
     if database_url:
@@ -65,13 +59,9 @@ def _build_database_url() -> str:
 
 class Settings:
     database_url: str
-    cors_origins: list[str]
 
     def __init__(self) -> None:
         self.database_url = _build_database_url()
-        self.cors_origins = _split_csv(os.getenv("CORS_ORIGINS")) or [
-            "http://localhost:5173",
-        ]
 
 
 @lru_cache
