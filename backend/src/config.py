@@ -7,14 +7,16 @@ from dotenv import load_dotenv
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
-load_dotenv(BACKEND_DIR / ".env")
-
-app_env = os.getenv("APP_ENV") or os.getenv("ENVIRONMENT")
 env_file = os.getenv("ENV_FILE")
+app_env = os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "development"
+
 if env_file:
     load_dotenv(env_file)
-elif app_env == "production":
-    load_dotenv(BACKEND_DIR / ".env.production")
+else:
+    env_path = BACKEND_DIR / f".env.{app_env}"
+    load_dotenv(env_path if env_path.exists() else BACKEND_DIR / ".env")
+
+load_dotenv(BACKEND_DIR / ".env")
 
 
 def _split_csv(value: str | None) -> list[str]:

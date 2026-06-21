@@ -2,8 +2,14 @@
   "name": "zzerp",
   "private": true,
   "scripts": {
-    "f": "pnpm --dir frontend dev",
-    "b": "PYTHONPATH=backend/src uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
-    "b:prod": "APP_ENV=production PYTHONPATH=backend/src uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+    "f": "pnpm run f:dev",
+    "f:dev": "pnpm --dir frontend dev",
+    "f:dev:prod-env": "pnpm --dir frontend dev:prod",
+    "f:build:dev": "pnpm --dir frontend build:dev",
+    "f:build:prod": "pnpm --dir frontend build:prod",
+    "f:preview:prod": "pnpm --dir frontend preview:prod",
+    "b": "pnpm run b:dev",
+    "b:dev": "APP_ENV=development uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
+    "b:prod": "APP_ENV=production uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
   }
 }

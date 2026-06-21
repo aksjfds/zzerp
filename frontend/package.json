@@ -4,10 +4,16 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "run-p type-check \"build-only {@}\" --",
+    "dev": "vite --host 0.0.0.0 --mode development",
+    "dev:prod": "vite --host 0.0.0.0 --mode production",
+    "build": "run-p type-check build-only",
+    "build:dev": "run-p type-check build-only:dev",
+    "build:prod": "run-p type-check build-only:prod",
     "preview": "vite preview",
+    "preview:prod": "vite preview --mode production",
     "build-only": "vite build",
+    "build-only:dev": "vite build --mode development",
+    "build-only:prod": "vite build --mode production",
     "type-check": "vue-tsc --build"
   },
   "dependencies": {
