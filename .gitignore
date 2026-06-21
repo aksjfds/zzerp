@@ -1,4 +1,3 @@
 __pycache__/
 *.py[cod]
-backend/.env.production
 frontend/.env.production

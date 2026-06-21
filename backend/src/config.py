@@ -1,6 +1,7 @@
 from functools import lru_cache
 import os
 from pathlib import Path
+from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 
@@ -8,7 +9,7 @@ from dotenv import load_dotenv
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 
 env_file = os.getenv("ENV_FILE")
-app_env = os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "development"
+app_env = os.getenv("APP_ENV") or os.getenv("ENVIRONMENT") or "production"
 
 if env_file:
     load_dotenv(env_file)
@@ -33,6 +34,8 @@ def _build_database_url() -> str:
     host = os.getenv("POSTGRES_HOST")
     port = os.getenv("POSTGRES_PORT", "5432")
     database = os.getenv("POSTGRES_DB")
+    sslmode = os.getenv("POSTGRES_SSLMODE")
+    channel_binding = os.getenv("POSTGRES_CHANNEL_BINDING")
 
     missing = [
         name
@@ -47,7 +50,17 @@ def _build_database_url() -> str:
     if missing:
         raise RuntimeError(f"Missing database configuration: {', '.join(missing)}")
 
-    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}"
+    query_params = {
+        key: value
+        for key, value in {
+            "sslmode": sslmode,
+            "channel_binding": channel_binding,
+        }.items()
+        if value
+    }
+    query = f"?{urlencode(query_params)}" if query_params else ""
+
+    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}{query}"
 
 
 class Settings:
