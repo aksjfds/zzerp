@@ -22,3 +22,8 @@ app.include_router(tasks.router)
 @app.get("/")
 def root():
     return {"message": "zzerp backend running"}
+
+
+@app.head("/health")
+def health_head():
+    return
