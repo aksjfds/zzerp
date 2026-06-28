@@ -13,6 +13,7 @@ export const DEPARTMENT_LABELS: Record<Department, string> = {
 
 export type RepositoryStock = {
   id: number
+  orderId: string
   department: Department
   zzCode: string
   productName: string
@@ -21,8 +22,10 @@ export type RepositoryStock = {
 
 export type ProductItem = {
   id: number
+  orderId: string
   zzCode: string
   productName: string
+  deliveryDate: string
   process: Department[]
   quantity: number
   repositories: RepositoryStock[]
@@ -30,14 +33,17 @@ export type ProductItem = {
 }
 
 export type CreateProductPayload = {
+  orderId: string
   zzCode: string
   productName: string
+  deliveryDate: string
   process: Department[]
   quantity: number
 }
 
 export type ProductRecord = {
   id: number
+  orderId: string
   zzCode: string
   product: string
   fromRepository: Department
@@ -49,6 +55,7 @@ export type ProductRecord = {
 
 export type TaskItem = {
   id: number
+  orderId: string
   zzCode: string
   product: string
   worker: string
@@ -74,6 +81,7 @@ export type ProcedureItem = {
 }
 
 export type CreateTaskPayload = {
+  orderId: string
   zzCode: string
   product: string
   worker: string

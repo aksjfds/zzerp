@@ -23,8 +23,10 @@ const tasksStore = useTasksStore()
 const { products } = storeToRefs(productsStore)
 const { loading, procedures, tasks, workers } = storeToRefs(tasksStore)
 const assignDialogVisible = ref(false)
+const selectedProductId = ref<number | null>(null)
 
 const taskForm = reactive<CreateTaskPayload>({
+  orderId: '',
   zzCode: '',
   product: '',
   worker: '',
@@ -42,21 +44,16 @@ const departmentProducts = computed(() =>
     ),
   ),
 )
+const selectedProduct = computed(() =>
+  products.value.find((item) => item.id === selectedProductId.value) ?? null,
+)
 const selectedTaskProductStock = computed(() => {
-  if (!taskForm.zzCode) {
-    return null
-  }
-
-  const product = products.value.find((item) => item.zzCode === taskForm.zzCode)
-  return product?.repositories.find((repository) => repository.department === props.department) ?? null
+  return selectedProduct.value?.repositories.find(
+    (repository) => repository.department === props.department,
+  ) ?? null
 })
 const selectedAssignableQuantity = computed(() => {
-  if (!taskForm.zzCode) {
-    return 0
-  }
-
-  const product = products.value.find((item) => item.zzCode === taskForm.zzCode)
-  return product ? getAssignableQuantity(product) : 0
+  return selectedProduct.value ? getAssignableQuantity(selectedProduct.value) : 0
 })
 
 function getDepartmentQuantity(product: ProductItem) {
@@ -70,6 +67,7 @@ function getAssignedQuantity(product: ProductItem) {
     .filter(
       (task) =>
         !task.status
+        && task.orderId === product.orderId
         && task.zzCode === product.zzCode
         && task.product === product.productName
         && task.department === props.department,
@@ -82,6 +80,8 @@ function getAssignableQuantity(product: ProductItem) {
 }
 
 function resetTaskForm() {
+  selectedProductId.value = null
+  taskForm.orderId = ''
   taskForm.zzCode = ''
   taskForm.product = ''
   taskForm.worker = ''
@@ -91,8 +91,10 @@ function resetTaskForm() {
   taskForm.note = ''
 }
 
-function selectTaskProduct(value: string) {
-  const product = products.value.find((item) => item.zzCode === value)
+function selectTaskProduct(value: number) {
+  const product = products.value.find((item) => item.id === value)
+  taskForm.orderId = product?.orderId ?? ''
+  taskForm.zzCode = product?.zzCode ?? ''
   taskForm.product = product?.productName ?? ''
   const assignableQuantity = product ? getAssignableQuantity(product) : 0
   taskForm.quantity = assignableQuantity > 0 ? 1 : 0
@@ -100,6 +102,8 @@ function selectTaskProduct(value: string) {
 
 function openAssignDialog(product: ProductItem) {
   resetTaskForm()
+  selectedProductId.value = product.id
+  taskForm.orderId = product.orderId
   taskForm.zzCode = product.zzCode
   taskForm.product = product.productName
   taskForm.quantity = getAssignableQuantity(product) > 0 ? 1 : 0
@@ -131,8 +135,8 @@ async function completeTask(taskId: number) {
   await productsStore.loadProducts()
 }
 
-function logout() {
-  authStore.logout()
+async function logout() {
+  await authStore.logout()
   router.replace('/login')
 }
 
@@ -169,12 +173,17 @@ onMounted(loadDashboard)
             class="repository-product"
             @click="openAssignDialog(product)"
           >
-            <span>{{ product.zzCode }}</span>
+            <span>订单 {{ product.orderId }} · {{ product.zzCode }}</span>
             <strong>{{ product.productName }}</strong>
+            <em>交货日期：{{ product.deliveryDate }}</em>
             <em>总计：{{ getDepartmentQuantity(product) }}</em>
             <em>已分配：{{ getAssignedQuantity(product) }}</em>
           </button>
-          <ElEmpty v-if="departmentProducts.length === 0" description="暂无本部门产品" :image-size="72" />
+          <ElEmpty
+            v-if="departmentProducts.length === 0"
+            description="暂无本部门产品"
+            :image-size="72"
+          />
         </div>
       </div>
 
@@ -183,6 +192,7 @@ onMounted(loadDashboard)
         <div v-for="task in tasks" :key="task.id" class="task-row">
           <div>
             <strong>{{ task.product }}</strong>
+            <span>订单 {{ task.orderId }} · {{ task.zzCode }}</span>
             <span>{{ task.worker }} / {{ task.procedure }} / {{ task.quantity }}</span>
           </div>
           <div class="task-actions">
@@ -207,12 +217,17 @@ onMounted(loadDashboard)
     <ElDialog v-model="assignDialogVisible" title="分配任务" width="520px" @closed="resetTaskForm">
       <ElForm :model="taskForm" label-position="top">
         <ElFormItem label="产品">
-          <ElSelect v-model="taskForm.zzCode" filterable placeholder="选择产品" @change="selectTaskProduct">
+          <ElSelect
+            v-model="selectedProductId"
+            filterable
+            placeholder="选择产品"
+            @change="selectTaskProduct"
+          >
             <ElOption
               v-for="product in departmentProducts"
               :key="product.id"
-              :label="`${product.zzCode} / ${product.productName}`"
-              :value="product.zzCode"
+              :label="`${product.orderId} / ${product.zzCode} / ${product.productName}`"
+              :value="product.id"
             />
           </ElSelect>
           <div v-if="selectedTaskProductStock" class="current-stock">
@@ -227,7 +242,12 @@ onMounted(loadDashboard)
         <ElFormItem label="工艺">
           <div class="procedure-field">
             <div class="procedure-select-row">
-              <ElSelect v-model="taskForm.procedure" filterable allow-create placeholder="选择或输入工艺">
+              <ElSelect
+                v-model="taskForm.procedure"
+                filterable
+                allow-create
+                placeholder="选择或输入工艺"
+              >
                 <ElOption
                   v-for="procedure in procedures"
                   :key="procedure.id"
@@ -251,7 +271,12 @@ onMounted(loadDashboard)
         <ElButton
           v-permission="'task:assign'"
           type="primary"
-          :disabled="!taskForm.zzCode || !taskForm.worker || !taskForm.procedure || selectedAssignableQuantity <= 0"
+          :disabled="
+            !selectedProductId
+            || !taskForm.worker
+            || !taskForm.procedure
+            || selectedAssignableQuantity <= 0
+          "
           @click="submitTask"
         >
           确认分配

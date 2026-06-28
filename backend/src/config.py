@@ -59,9 +59,33 @@ def _build_database_url() -> str:
 
 class Settings:
     database_url: str
+    allowed_origins: list[str]
+    session_cookie_name: str
+    session_expire_hours: int
+    cookie_secure: bool
+    cookie_samesite: str
 
     def __init__(self) -> None:
         self.database_url = _build_database_url()
+        self.allowed_origins = [
+            origin.strip()
+            for origin in os.getenv(
+                "ALLOWED_ORIGINS",
+                "http://localhost:5173,https://zzerp.netlify.app",
+            ).split(",")
+            if origin.strip()
+        ]
+        self.session_cookie_name = os.getenv("SESSION_COOKIE_NAME", "zzerp_session")
+        self.session_expire_hours = int(os.getenv("SESSION_EXPIRE_HOURS", "12"))
+        self.cookie_secure = os.getenv("COOKIE_SECURE", "true").lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+        self.cookie_samesite = os.getenv("COOKIE_SAMESITE", "none").lower()
+
+        if self.cookie_samesite not in {"lax", "strict", "none"}:
+            raise RuntimeError("COOKIE_SAMESITE must be lax, strict, or none")
 
 
 @lru_cache

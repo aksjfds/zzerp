@@ -18,8 +18,10 @@ export async function queryProducts() {
 
 export async function createProduct(payload: CreateProductPayload) {
   const res = await service.post<{ data: ProductItem }>('/products', {
+    order_id: payload.orderId.trim(),
     zz_code: payload.zzCode.trim(),
     product_name: payload.productName.trim(),
+    delivery_date: payload.deliveryDate,
     process: payload.process,
     quantity: payload.quantity,
   })
@@ -27,9 +29,15 @@ export async function createProduct(payload: CreateProductPayload) {
   return res.data.data
 }
 
-export async function queryProductRecords(zzCode: string, product: string, department?: Department) {
+export async function queryProductRecords(
+  orderId: string,
+  zzCode: string,
+  product: string,
+  department?: Department,
+) {
   const res = await service.get<{ data: ProductRecord[] }>('/records', {
     params: {
+      order_id: orderId,
       zz_code: zzCode,
       product,
       department,
@@ -46,6 +54,7 @@ export async function queryDepartmentTasks(department: Department) {
 
 export async function createTask(payload: CreateTaskPayload) {
   const res = await service.post<{ data: TaskItem }>('/tasks', {
+    order_id: payload.orderId.trim(),
     zz_code: payload.zzCode.trim(),
     product: payload.product.trim(),
     worker: payload.worker.trim(),

@@ -31,8 +31,13 @@ export const useProductsStore = defineStore('products', () => {
     await loadProducts()
   }
 
-  async function loadRecords(zzCode: string, product: string, department?: Department) {
-    records.value = await queryProductRecords(zzCode, product, department)
+  async function loadRecords(
+    orderId: string,
+    zzCode: string,
+    product: string,
+    department?: Department,
+  ) {
+    records.value = await queryProductRecords(orderId, zzCode, product, department)
   }
 
   return {

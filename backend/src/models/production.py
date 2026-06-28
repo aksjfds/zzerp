@@ -1,6 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Boolean, Integer, Text, TIMESTAMP, or_, text
+from sqlalchemy import BigInteger, Boolean, Date, Integer, Text, TIMESTAMP, func, or_, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -11,8 +11,10 @@ class Product(Base):
     __tablename__ = "product"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
     zz_code: Mapped[str] = mapped_column(Text, nullable=False)
     product_name: Mapped[str] = mapped_column(Text, nullable=False)
+    delivery_date: Mapped[date] = mapped_column(Date, nullable=False)
     process: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP, nullable=False, server_default=text("NOW()")
@@ -22,27 +24,47 @@ class Product(Base):
     def serialize(product: "Product") -> dict:
         return {
             "id": product.id,
+            "orderId": product.order_id,
             "zzCode": product.zz_code,
             "productName": product.product_name,
+            "deliveryDate": product.delivery_date.isoformat(),
             "process": product.process,
             "createdAt": product.created_at.strftime("%Y-%m-%d %H:%M"),
         }
 
     @classmethod
-    def create(cls, zz_code: str, product_name: str, process: list[str], quantity: int) -> dict:
+    def create(
+        cls,
+        order_id: str,
+        zz_code: str,
+        product_name: str,
+        delivery_date: date,
+        process: list[str],
+        quantity: int,
+    ) -> dict:
         if not process:
             raise ValueError("产品流程不能为空")
 
         with SessionLocal() as session:
             exists = (
                 session.query(cls)
-                .filter(cls.zz_code == zz_code, cls.product_name == product_name)
+                .filter(
+                    cls.order_id == order_id,
+                    cls.zz_code == zz_code,
+                    cls.product_name == product_name,
+                )
                 .one_or_none()
             )
             if exists is not None:
                 raise ValueError("产品已存在")
 
-            product = cls(zz_code=zz_code, product_name=product_name, process=process)
+            product = cls(
+                order_id=order_id,
+                zz_code=zz_code,
+                product_name=product_name,
+                delivery_date=delivery_date,
+                process=process,
+            )
             session.add(product)
             session.flush()
 
@@ -50,6 +72,7 @@ class Product(Base):
             session.add(
                 Repository(
                     department=first_department,
+                    order_id=order_id,
                     zz_code=zz_code,
                     product_name=product_name,
                     quantity=quantity,
@@ -57,6 +80,7 @@ class Product(Base):
             )
             session.add(
                 Record(
+                    order_id=order_id,
                     zz_code=zz_code,
                     product=product_name,
                     from_repository="in",
@@ -71,20 +95,39 @@ class Product(Base):
             return cls.serialize(product)
 
     @classmethod
-    def list_all(cls) -> list[dict]:
+    def list_all(cls, department: str | None = None) -> list[dict]:
         with SessionLocal() as session:
-            products = session.query(cls).order_by(cls.created_at.desc(), cls.id.desc()).all()
-            repositories = session.query(Repository).all()
+            product_query = session.query(cls)
+            repository_query = session.query(Repository)
 
-            repository_map: dict[tuple[str, str], list[dict]] = {}
+            if department:
+                product_query = product_query.join(
+                    Repository,
+                    (Repository.order_id == cls.order_id)
+                    & (Repository.zz_code == cls.zz_code)
+                    & (Repository.product_name == cls.product_name),
+                ).filter(Repository.department == department, Repository.quantity > 0)
+                repository_query = repository_query.filter(Repository.department == department)
+
+            products = product_query.order_by(
+                cls.delivery_date.asc(),
+                cls.created_at.desc(),
+                cls.id.desc(),
+            ).all()
+            repositories = repository_query.all()
+
+            repository_map: dict[tuple[str, str, str], list[dict]] = {}
             for repository in repositories:
-                key = (repository.zz_code, repository.product_name)
+                key = (repository.order_id, repository.zz_code, repository.product_name)
                 repository_map.setdefault(key, []).append(Repository.serialize(repository))
 
             result = []
             for product in products:
                 item = cls.serialize(product)
-                item["repositories"] = repository_map.get((product.zz_code, product.product_name), [])
+                item["repositories"] = repository_map.get(
+                    (product.order_id, product.zz_code, product.product_name),
+                    [],
+                )
                 item["quantity"] = sum(repository["quantity"] for repository in item["repositories"])
                 result.append(item)
 
@@ -95,6 +138,7 @@ class Repository(Base):
     __tablename__ = "repository"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
     department: Mapped[str] = mapped_column(Text, nullable=False)
     zz_code: Mapped[str] = mapped_column(Text, nullable=False)
     product_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -104,6 +148,7 @@ class Repository(Base):
     def serialize(repository: "Repository") -> dict:
         return {
             "id": repository.id,
+            "orderId": repository.order_id,
             "department": repository.department,
             "zzCode": repository.zz_code,
             "productName": repository.product_name,
@@ -113,6 +158,7 @@ class Repository(Base):
     @classmethod
     def move(
         cls,
+        order_id: str,
         zz_code: str,
         product_name: str,
         from_department: str,
@@ -123,6 +169,7 @@ class Repository(Base):
         with SessionLocal() as session:
             cls._move_in_session(
                 session=session,
+                order_id=order_id,
                 zz_code=zz_code,
                 product_name=product_name,
                 from_department=from_department,
@@ -136,6 +183,7 @@ class Repository(Base):
     def _move_in_session(
         cls,
         session,
+        order_id: str,
         zz_code: str,
         product_name: str,
         from_department: str,
@@ -149,6 +197,7 @@ class Repository(Base):
         source = (
             session.query(cls)
             .filter(
+                cls.order_id == order_id,
                 cls.zz_code == zz_code,
                 cls.product_name == product_name,
                 cls.department == from_department,
@@ -164,6 +213,7 @@ class Repository(Base):
         target = (
             session.query(cls)
             .filter(
+                cls.order_id == order_id,
                 cls.zz_code == zz_code,
                 cls.product_name == product_name,
                 cls.department == to_department,
@@ -175,6 +225,7 @@ class Repository(Base):
         if target is None:
             target = cls(
                 department=to_department,
+                order_id=order_id,
                 zz_code=zz_code,
                 product_name=product_name,
                 quantity=0,
@@ -184,6 +235,7 @@ class Repository(Base):
         target.quantity += quantity
         session.add(
             Record(
+                order_id=order_id,
                 zz_code=zz_code,
                 product=product_name,
                 from_repository=from_department,
@@ -242,6 +294,7 @@ class Record(Base):
     __tablename__ = "records"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
     zz_code: Mapped[str] = mapped_column(Text, nullable=False)
     product: Mapped[str] = mapped_column(Text, nullable=False)
     from_repository: Mapped[str] = mapped_column(Text, nullable=False)
@@ -256,6 +309,7 @@ class Record(Base):
     def serialize(record: "Record") -> dict:
         return {
             "id": record.id,
+            "orderId": record.order_id,
             "zzCode": record.zz_code,
             "product": record.product,
             "fromRepository": record.from_repository,
@@ -266,11 +320,21 @@ class Record(Base):
         }
 
     @classmethod
-    def list_by_product(cls, zz_code: str, product: str, department: str | None = None) -> list[dict]:
+    def list_by_product(
+        cls,
+        order_id: str,
+        zz_code: str,
+        product: str,
+        department: str | None = None,
+    ) -> list[dict]:
         with SessionLocal() as session:
             query = (
                 session.query(cls)
-                .filter(cls.zz_code == zz_code, cls.product == product)
+                .filter(
+                    cls.order_id == order_id,
+                    cls.zz_code == zz_code,
+                    cls.product == product,
+                )
             )
 
             if department:
@@ -286,6 +350,7 @@ class Task(Base):
     __tablename__ = "tasks"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    order_id: Mapped[str] = mapped_column(Text, nullable=False)
     zz_code: Mapped[str] = mapped_column(Text, nullable=False)
     product: Mapped[str] = mapped_column(Text, nullable=False)
     worker: Mapped[str] = mapped_column(Text, nullable=False)
@@ -303,6 +368,7 @@ class Task(Base):
     def serialize(task: "Task") -> dict:
         return {
             "id": task.id,
+            "orderId": task.order_id,
             "zzCode": task.zz_code,
             "product": task.product,
             "worker": task.worker,
@@ -329,6 +395,7 @@ class Task(Base):
     @classmethod
     def create(
         cls,
+        order_id: str,
         zz_code: str,
         product: str,
         worker: str,
@@ -338,7 +405,50 @@ class Task(Base):
         note: str | None = None,
     ) -> dict:
         with SessionLocal() as session:
+            product_item = (
+                session.query(Product)
+                .filter(
+                    Product.order_id == order_id,
+                    Product.zz_code == zz_code,
+                    Product.product_name == product,
+                )
+                .one_or_none()
+            )
+            if product_item is None:
+                raise ValueError("产品不存在")
+            if department not in product_item.process:
+                raise ValueError("产品流程不包含当前部门")
+
+            repository = (
+                session.query(Repository)
+                .filter(
+                    Repository.order_id == order_id,
+                    Repository.zz_code == zz_code,
+                    Repository.product_name == product,
+                    Repository.department == department,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if repository is None or repository.quantity <= 0:
+                raise ValueError("当前部门没有该产品库存")
+
+            assigned_quantity = (
+                session.query(func.coalesce(func.sum(cls.quantity), 0))
+                .filter(
+                    cls.order_id == order_id,
+                    cls.zz_code == zz_code,
+                    cls.product == product,
+                    cls.department == department,
+                    cls.status.is_(False),
+                )
+                .scalar()
+            )
+            if quantity > repository.quantity - assigned_quantity:
+                raise ValueError("任务数量超过当前可分配库存")
+
             task = cls(
+                order_id=order_id,
                 zz_code=zz_code,
                 product=product,
                 worker=worker,
@@ -353,18 +463,25 @@ class Task(Base):
             return cls.serialize(task)
 
     @classmethod
-    def complete(cls, task_id: int) -> dict:
+    def complete(cls, task_id: int, allowed_department: str) -> dict:
         with SessionLocal() as session:
             task = session.query(cls).filter(cls.id == task_id).one_or_none()
             if task is None:
                 raise ValueError("任务不存在")
+
+            if allowed_department not in {"sys", task.department}:
+                raise PermissionError("无权操作该部门任务")
 
             if task.status:
                 return cls.serialize(task)
 
             product = (
                 session.query(Product)
-                .filter(Product.zz_code == task.zz_code, Product.product_name == task.product)
+                .filter(
+                    Product.order_id == task.order_id,
+                    Product.zz_code == task.zz_code,
+                    Product.product_name == task.product,
+                )
                 .one_or_none()
             )
             if product is None:
@@ -383,6 +500,7 @@ class Task(Base):
 
             Repository._move_in_session(
                 session=session,
+                order_id=task.order_id,
                 zz_code=task.zz_code,
                 product_name=task.product,
                 from_department=task.department,

@@ -10,8 +10,12 @@ function getDefaultDashboardPath(department?: string) {
 }
 
 export function setupRouterGuard(router: Router) {
-  router.beforeEach((to) => {
+  router.beforeEach(async (to) => {
     const authStore = useAuthStore()
+
+    if (!authStore.initialized) {
+      await authStore.refreshUser()
+    }
 
     if (to.meta.requiresAuth && !authStore.isLoggedIn) {
       return {

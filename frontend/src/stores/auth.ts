@@ -1,28 +1,12 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
-import { login as loginApi, queryCurrentUser } from '@/api/auth'
+import { login as loginApi, logout as logoutApi, queryCurrentUser } from '@/api/auth'
 import type { LoginPayload, UserProfile } from '@/types/auth'
 
-const USER_STORAGE_KEY = 'zzerp_user'
-
-function readStoredUser() {
-  const storedUser = localStorage.getItem(USER_STORAGE_KEY)
-
-  if (!storedUser) {
-    return null
-  }
-
-  try {
-    return JSON.parse(storedUser) as UserProfile
-  } catch {
-    localStorage.removeItem(USER_STORAGE_KEY)
-    return null
-  }
-}
-
 export const useAuthStore = defineStore('auth', () => {
-  const user = ref<UserProfile | null>(readStoredUser())
+  const user = ref<UserProfile | null>(null)
   const loading = ref(false)
+  const initialized = ref(false)
 
   const isLoggedIn = computed(() => Boolean(user.value))
   const permissions = computed(() => user.value?.permissions ?? [])
@@ -30,7 +14,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   function setUser(profile: UserProfile) {
     user.value = profile
-    localStorage.setItem(USER_STORAGE_KEY, JSON.stringify(profile))
   }
 
   async function login(payload: LoginPayload) {
@@ -39,6 +22,7 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       const profile = await loginApi(payload)
       setUser(profile)
+      initialized.value = true
       return profile
     } finally {
       loading.value = false
@@ -46,18 +30,30 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   async function refreshUser() {
-    if (!user.value) {
+    try {
+      const profile = await queryCurrentUser()
+      setUser(profile)
+      return profile
+    } catch {
+      user.value = null
       return null
+    } finally {
+      initialized.value = true
     }
-
-    const profile = await queryCurrentUser(user.value.username)
-    setUser(profile)
-    return profile
   }
 
-  function logout() {
+  async function logout() {
+    try {
+      await logoutApi()
+    } finally {
+      user.value = null
+      initialized.value = true
+    }
+  }
+
+  function clearSession() {
     user.value = null
-    localStorage.removeItem(USER_STORAGE_KEY)
+    initialized.value = true
   }
 
   function hasPermission(permission?: string | string[]) {
@@ -71,7 +67,9 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     department,
+    clearSession,
     hasPermission,
+    initialized,
     isLoggedIn,
     loading,
     login,

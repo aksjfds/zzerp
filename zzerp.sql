@@ -13,26 +13,29 @@ CREATE TABLE worker (
 -- 产品当前所在部门库存
 CREATE TABLE repository (
     id BIGSERIAL PRIMARY KEY,
+    order_id TEXT NOT NULL,
     -- in / laser / stamp / cnc / polish / qc / out
     department TEXT NOT NULL,
     -- 产品的本厂编码
     zz_code TEXT NOT NULL,
     product_name TEXT NOT NULL,
     quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-    UNIQUE (department, zz_code, product_name)
+    UNIQUE (department, order_id, zz_code, product_name)
 );
 
 
 -- 产品
 CREATE TABLE product (
     id BIGSERIAL PRIMARY KEY,
+    order_id TEXT NOT NULL,
     zz_code TEXT NOT NULL,
     -- L46狗扣-主体或L46狗扣-拉环
     product_name TEXT NOT NULL,
+    delivery_date DATE NOT NULL,
     -- in / laser / stamp / cnc / polish / qc / out
     process TEXT[] NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (zz_code, product_name)
+    UNIQUE (order_id, zz_code, product_name)
 );
 
 
@@ -48,6 +51,7 @@ CREATE TABLE procedure (
 -- 产品流转记录
 CREATE TABLE records (
     id BIGSERIAL PRIMARY KEY,
+    order_id TEXT NOT NULL,
     zz_code TEXT NOT NULL,
     product TEXT NOT NULL,
     from_repository TEXT NOT NULL,
@@ -61,6 +65,7 @@ CREATE TABLE records (
 -- 部门主管分配给工人的任务
 CREATE TABLE tasks (
     id BIGSERIAL PRIMARY KEY,
+    order_id TEXT NOT NULL,
     zz_code TEXT NOT NULL,
     product TEXT NOT NULL,
     worker TEXT NOT NULL,
@@ -85,6 +90,17 @@ CREATE TABLE users (
 );
 
 
+-- 服务端登录会话。客户端持有原始令牌，数据库只保存令牌哈希。
+CREATE TABLE user_sessions (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    csrf_token TEXT NOT NULL,
+    expires_at TIMESTAMP NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
 INSERT INTO users (username, password, department, role, permissions) VALUES
 ('admin', '1', 'sys', 'supervisor', 'product:view,product:add,record:view,sys:user:add'),
 ('laser', '1', 'laser', 'supervisor', 'task:view,task:assign,task:complete'),
@@ -105,10 +121,16 @@ CREATE INDEX idx_repository_department
 ON repository(department);
 
 CREATE INDEX idx_repository_product
-ON repository(zz_code, product_name);
+ON repository(order_id, zz_code, product_name);
 
 CREATE INDEX idx_repository_department_product
-ON repository(department, zz_code, product_name);
+ON repository(department, order_id, zz_code, product_name);
+
+CREATE INDEX idx_product_order_id
+ON product(order_id);
+
+CREATE INDEX idx_product_delivery_date
+ON product(delivery_date);
 
 CREATE INDEX idx_product_zz_code
 ON product(zz_code);
@@ -120,13 +142,13 @@ CREATE INDEX idx_procedure_department
 ON procedure(department);
 
 CREATE INDEX idx_records_product
-ON records(zz_code, product);
+ON records(order_id, zz_code, product);
 
 CREATE INDEX idx_records_from_repository
-ON records(from_repository, zz_code, product);
+ON records(from_repository, order_id, zz_code, product);
 
 CREATE INDEX idx_records_to_repository
-ON records(to_repository, zz_code, product);
+ON records(to_repository, order_id, zz_code, product);
 
 CREATE INDEX idx_records_created_at
 ON records(created_at DESC);
@@ -138,7 +160,13 @@ CREATE INDEX idx_tasks_worker
 ON tasks(worker);
 
 CREATE INDEX idx_tasks_product
-ON tasks(zz_code, product);
+ON tasks(order_id, zz_code, product);
 
 CREATE INDEX idx_users_department_role
 ON users(department, role);
+
+CREATE INDEX idx_user_sessions_user_id
+ON user_sessions(user_id);
+
+CREATE INDEX idx_user_sessions_expires_at
+ON user_sessions(expires_at);

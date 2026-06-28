@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, String, Text, TIMESTAMP, text
+from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, TIMESTAMP, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base, SessionLocal
@@ -9,7 +9,11 @@ from database import Base, SessionLocal
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
     username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     password: Mapped[str] = mapped_column(String(100), nullable=False)
     department: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -20,7 +24,7 @@ class User(Base):
     )
 
     @staticmethod
-    def _serialize(user: "User") -> dict:
+    def serialize(user: "User") -> dict:
         return {
             "id": user.id,
             "username": user.username,
@@ -46,7 +50,7 @@ class User(Base):
             if user is None:
                 raise ValueError("用户名或密码错误")
 
-            return cls._serialize(user)
+            return cls.serialize(user)
 
     @classmethod
     def get_by_username(cls, username: str) -> dict | None:
@@ -56,4 +60,27 @@ class User(Base):
             if user is None:
                 return None
 
-            return cls._serialize(user)
+            return cls.serialize(user)
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id: Mapped[int] = mapped_column(
+        BigInteger().with_variant(Integer, "sqlite"),
+        primary_key=True,
+        autoincrement=True,
+    )
+    user_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    csrf_token: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(TIMESTAMP, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )

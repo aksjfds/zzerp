@@ -24,8 +24,10 @@ const activeDepartment = ref<Department | null>(null)
 const selectedProcessDepartment = ref<Department>('laser')
 
 const productForm = reactive<CreateProductPayload>({
+  orderId: '',
   zzCode: '',
   productName: '',
+  deliveryDate: '',
   process: ['laser', 'stamp', 'cnc', 'polish', 'qc'],
   quantity: 1,
 })
@@ -36,13 +38,26 @@ const processOptions = computed(() =>
 const selectableProcessOptions = computed(() =>
   processOptions.value.filter((department) => !productForm.process.includes(department)),
 )
+const canSubmitProduct = computed(() =>
+  Boolean(
+    productForm.orderId.trim()
+    && productForm.zzCode.trim()
+    && productForm.productName.trim()
+    && productForm.deliveryDate
+    && productForm.process.length > 0,
+  ),
+)
 const activeTimelineTitle = computed(() => {
   if (!activeProduct.value) {
     return ''
   }
 
   const departmentName = activeDepartment.value ? getDepartmentLabel(activeDepartment.value) : ''
-  return `${activeProduct.value.productName} / ${departmentName}流转时间线`
+  return [
+    activeProduct.value.orderId,
+    activeProduct.value.productName,
+    `${departmentName}流转时间线`,
+  ].join(' / ')
 })
 function getDepartmentLabel(department: Department) {
   return DEPARTMENT_LABELS[department]
@@ -59,8 +74,10 @@ function getDepartmentQuantity(product: ProductItem, department: Department) {
 }
 
 function resetProductForm() {
+  productForm.orderId = ''
   productForm.zzCode = ''
   productForm.productName = ''
+  productForm.deliveryDate = ''
   productForm.process = ['laser', 'stamp', 'cnc', 'polish', 'qc']
   productForm.quantity = 1
   selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'laser'
@@ -104,6 +121,10 @@ function moveProcessDepartment(index: number, direction: -1 | 1) {
 }
 
 async function submitProduct() {
+  if (!canSubmitProduct.value) {
+    return
+  }
+
   await productsStore.createProduct(productForm)
   productDialogVisible.value = false
 }
@@ -111,12 +132,17 @@ async function submitProduct() {
 async function openRecords(product: ProductItem, department?: Department) {
   activeProduct.value = product
   activeDepartment.value = department ?? null
-  await productsStore.loadRecords(product.zzCode, product.productName, department)
+  await productsStore.loadRecords(
+    product.orderId,
+    product.zzCode,
+    product.productName,
+    department,
+  )
   recordsDialogVisible.value = true
 }
 
-function logout() {
-  authStore.logout()
+async function logout() {
+  await authStore.logout()
   router.replace('/login')
 }
 
@@ -154,8 +180,9 @@ onMounted(loadDashboard)
       <article v-for="product in products" :key="product.id" class="product-card">
         <div class="product-head">
           <div>
-            <div class="product-code">{{ product.zzCode }}</div>
+            <div class="product-code">订单 {{ product.orderId }} · {{ product.zzCode }}</div>
             <h2>{{ product.productName }}</h2>
+            <div class="delivery-date">交货日期：{{ product.deliveryDate }}</div>
           </div>
         </div>
 
@@ -194,11 +221,23 @@ onMounted(loadDashboard)
 
     <ElDialog v-model="productDialogVisible" title="新增产品" width="620px">
       <ElForm :model="productForm" label-position="top">
-        <ElFormItem label="本厂编码">
+        <ElFormItem label="订单号" required>
+          <ElInput v-model="productForm.orderId" placeholder="请输入订单号" />
+        </ElFormItem>
+        <ElFormItem label="本厂编码" required>
           <ElInput v-model="productForm.zzCode" />
         </ElFormItem>
-        <ElFormItem label="产品名称">
+        <ElFormItem label="产品名称" required>
           <ElInput v-model="productForm.productName" />
+        </ElFormItem>
+        <ElFormItem label="交货日期" required>
+          <ElDatePicker
+            class="delivery-date-picker"
+            v-model="productForm.deliveryDate"
+            type="date"
+            value-format="YYYY-MM-DD"
+            placeholder="请选择交货日期"
+          />
         </ElFormItem>
         <ElFormItem label="初始数量">
           <ElInputNumber v-model="productForm.quantity" :min="1" />
@@ -223,7 +262,13 @@ onMounted(loadDashboard)
                 <span>{{ index + 1 }}</span>
                 <strong>{{ getDepartmentLabel(department) }}</strong>
                 <div class="process-actions">
-                  <ElButton text :disabled="index === 0" @click="moveProcessDepartment(index, -1)">上移</ElButton>
+                  <ElButton
+                    text
+                    :disabled="index === 0"
+                    @click="moveProcessDepartment(index, -1)"
+                  >
+                    上移
+                  </ElButton>
                   <ElButton
                     text
                     :disabled="index === productForm.process.length - 1"
@@ -240,7 +285,7 @@ onMounted(loadDashboard)
       </ElForm>
       <template #footer>
         <ElButton @click="productDialogVisible = false">取消</ElButton>
-        <ElButton type="primary" :disabled="productForm.process.length === 0" @click="submitProduct">确认</ElButton>
+        <ElButton type="primary" :disabled="!canSubmitProduct" @click="submitProduct">确认</ElButton>
       </template>
     </ElDialog>
   </main>
@@ -276,6 +321,15 @@ onMounted(loadDashboard)
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.delivery-date {
+  color: var(--erp-text-muted);
+  font-size: 13px;
+}
+
+.delivery-date-picker {
+  width: 100%;
 }
 
 .dashboard-header h1,
