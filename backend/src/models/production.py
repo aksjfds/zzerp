@@ -749,6 +749,126 @@ class WorkOrder(Base):
             return [cls._serialize_in_session(session, item) for item in items]
 
     @classmethod
+    def worker_overview(
+        cls,
+        start_date: date,
+        end_date: date,
+        worker_id: int | None = None,
+        product_id: int | None = None,
+        process_name: str | None = None,
+    ) -> list[dict]:
+        start_at = datetime.combine(start_date, datetime.min.time())
+        end_at = datetime.combine(end_date, datetime.max.time())
+        with SessionLocal() as session:
+            worker_query = session.query(Worker).filter(
+                Worker.department == "polish",
+            )
+            if worker_id is not None:
+                worker_query = worker_query.filter(Worker.id == worker_id)
+            workers = worker_query.order_by(Worker.name.asc()).all()
+
+            order_query = session.query(cls).filter(
+                cls.department == "polish",
+                cls.status == "closed",
+                cls.closed_at >= start_at,
+                cls.closed_at <= end_at,
+            )
+            if worker_id is not None:
+                order_query = order_query.filter(cls.worker_id == worker_id)
+            if product_id is not None:
+                order_query = order_query.filter(cls.product_id == product_id)
+            if process_name:
+                order_query = order_query.filter(cls.process_name == process_name)
+            orders = order_query.order_by(cls.closed_at.desc(), cls.id.desc()).all()
+
+            product_ids = {item.product_id for item in orders}
+            products = (
+                session.query(Product).filter(Product.id.in_(product_ids)).all()
+                if product_ids
+                else []
+            )
+            product_map = {item.id: item for item in products}
+
+            order_ids = {item.id for item in orders}
+            batches = (
+                session.query(WorkOrderBatch)
+                .filter(WorkOrderBatch.work_order_id.in_(order_ids))
+                .order_by(WorkOrderBatch.batch_no.asc())
+                .all()
+                if order_ids
+                else []
+            )
+            batch_map: dict[int, list[WorkOrderBatch]] = {}
+            for batch in batches:
+                batch_map.setdefault(batch.work_order_id, []).append(batch)
+
+            order_map: dict[int, list[WorkOrder]] = {}
+            for item in orders:
+                order_map.setdefault(item.worker_id, []).append(item)
+
+            result = []
+            for worker in workers:
+                order_items = []
+                issued_total = 0
+                ok_total = 0
+                scrap_total = 0
+                lost_total = 0
+                for item in order_map.get(worker.id, []):
+                    product = product_map[item.product_id]
+                    totals = cls._totals(batch_map.get(item.id, []))
+                    issued_total += item.issued_quantity
+                    ok_total += totals["okQuantity"]
+                    scrap_total += totals["scrapQuantity"]
+                    lost_total += totals["lostQuantity"]
+                    denominator = item.issued_quantity or 1
+                    order_items.append(
+                        {
+                            "id": item.id,
+                            "workOrderNo": item.work_order_no,
+                            "productId": item.product_id,
+                            "orderId": product.order_id,
+                            "zzCode": product.zz_code,
+                            "productName": product.product_name,
+                            "processName": item.process_name,
+                            "issuedQuantity": item.issued_quantity,
+                            "okQuantity": totals["okQuantity"],
+                            "scrapQuantity": totals["scrapQuantity"],
+                            "lostQuantity": totals["lostQuantity"],
+                            "completionRate": round(
+                                totals["okQuantity"] * 100 / denominator,
+                                2,
+                            ),
+                            "scrapRate": round(
+                                totals["scrapQuantity"] * 100 / denominator,
+                                2,
+                            ),
+                            "lostRate": round(
+                                totals["lostQuantity"] * 100 / denominator,
+                                2,
+                            ),
+                            "closedAt": item.closed_at.strftime("%Y-%m-%d %H:%M"),
+                        }
+                    )
+
+                denominator = issued_total or 1
+                result.append(
+                    {
+                        "workerId": worker.id,
+                        "workerName": worker.name,
+                        "workOrderCount": len(order_items),
+                        "issuedQuantity": issued_total,
+                        "okQuantity": ok_total,
+                        "scrapQuantity": scrap_total,
+                        "lostQuantity": lost_total,
+                        "completionRate": round(ok_total * 100 / denominator, 2),
+                        "scrapRate": round(scrap_total * 100 / denominator, 2),
+                        "lostRate": round(lost_total * 100 / denominator, 2),
+                        "orders": order_items,
+                    }
+                )
+            return result
+
+    @classmethod
     def _route_in_session(cls, session, product_id: int) -> PolishProcess:
         route = session.query(PolishProcess).filter(
             PolishProcess.product_id == product_id,

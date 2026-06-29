@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException
 
 from models.production import PolishProcess, PolishProcessPreset, Procedure, WorkOrder, Worker
@@ -153,6 +155,33 @@ def create_polish_preset(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"data": data}
+
+
+@router.get("/polish/workers/overview")
+def get_polish_worker_overview(
+    start_date: date,
+    end_date: date,
+    worker_id: int | None = None,
+    product_id: int | None = None,
+    process_name: str | None = None,
+    user: dict = Depends(require_any_permission("task:view")),
+):
+    ensure_department_access(user, "polish")
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="结束日期不能早于开始日期")
+
+    resolved_process_name = (
+        process_name.strip() if process_name and process_name.strip() else None
+    )
+    return {
+        "data": WorkOrder.worker_overview(
+            start_date=start_date,
+            end_date=end_date,
+            worker_id=worker_id,
+            product_id=product_id,
+            process_name=resolved_process_name,
+        )
+    }
 
 
 @router.put("/polish/presets/{preset_id}")

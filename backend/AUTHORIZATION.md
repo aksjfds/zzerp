@@ -15,6 +15,7 @@
 | `GET /records` | `record:view` | 登录后查看产品流转记录 |
 | `POST /products` | `product:add` | 管理员创建订单产品和全局部门流程 |
 | `GET /work-orders/{department}` | `task:view` | 当前部门 |
+| `GET /work-orders/polish/workers/overview` | `task:view` | 磨房或管理员，仅统计已结工单 |
 | 配置工艺、维护工人、开工单 | `task:assign` | 当前部门 |
 | 维护磨房工艺预设 | `task:assign` | 磨房主管或管理员 |
 | 送检、直接报工 | `task:complete` | 当前部门工单 |

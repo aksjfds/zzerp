@@ -4,16 +4,17 @@ import type {
   CreateProcedurePayload,
   CreateWorkOrderPayload,
   Department,
-  PolishProcessStep,
   DirectReportPayload,
   InspectionPayload,
   PendingQcBatch,
   PolishCleaningBatch,
   PolishProcessPreset,
+  PolishProcessStep,
+  PolishWorkerOverview,
   ProcedureItem,
   ProcessStepPayload,
-  ProductItem,
   ProductDepartmentProgress,
+  ProductItem,
   ProductRecord,
   WorkerItem,
   WorkOrderBatch,
@@ -122,6 +123,28 @@ export async function createDepartmentProcedure(payload: CreateProcedurePayload)
 
 export async function queryDepartmentWorkOrders(department: Department) {
   const res = await service.get<{ data: WorkOrderItem[] }>(`/work-orders/${department}`)
+  return res.data.data
+}
+
+export async function queryPolishWorkerOverview(params: {
+  startDate: string
+  endDate: string
+  workerId?: number
+  productId?: number
+  processName?: string
+}) {
+  const res = await service.get<{ data: PolishWorkerOverview[] }>(
+    '/work-orders/polish/workers/overview',
+    {
+      params: {
+        start_date: params.startDate,
+        end_date: params.endDate,
+        worker_id: params.workerId,
+        product_id: params.productId,
+        process_name: params.processName,
+      },
+    },
+  )
   return res.data.data
 }
 

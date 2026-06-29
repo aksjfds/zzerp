@@ -3,6 +3,7 @@ import { setupRouterGuard } from '@/permission/guard'
 import LoginView from '@/views/LoginView.vue'
 import ProductDashboardView from '@/views/ProductDashboardView.vue'
 import PolishDashboardView from '@/views/departments/PolishDashboardView.vue'
+import PolishWorkerOverviewView from '@/views/departments/PolishWorkerOverviewView.vue'
 import QcDashboardView from '@/views/departments/QcDashboardView.vue'
 
 const router = createRouter({
@@ -39,6 +40,16 @@ const router = createRouter({
       component: QcDashboardView,
       meta: {
         department: 'qc',
+        requiresAuth: true,
+        permissions: ['task:view'],
+      },
+    },
+    {
+      path: '/dashboard/polish/workers',
+      name: 'dashboard-polish-workers',
+      component: PolishWorkerOverviewView,
+      meta: {
+        department: 'polish',
         requiresAuth: true,
         permissions: ['task:view'],
       },

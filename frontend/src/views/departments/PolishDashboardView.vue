@@ -327,6 +327,7 @@ onMounted(loadDashboard)
       <nav class="header-actions" aria-label="磨房导航">
         <ElButton @click="router.push('/dashboard')">产品总览</ElButton>
         <ElButton class="nav-current" type="primary" aria-current="page">磨房工单</ElButton>
+        <ElButton @click="router.push('/dashboard/polish/workers')">工人总览</ElButton>
         <ElButton v-permission="'task:assign'" @click="workerDialogVisible = true">
           添加工人
         </ElButton>

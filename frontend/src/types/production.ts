@@ -176,6 +176,38 @@ export type WorkOrderItem = {
   cleaningBatches: PolishCleaningBatch[]
 }
 
+export type PolishWorkerOrderOverview = {
+  id: number
+  workOrderNo: string
+  productId: number
+  orderId: string
+  zzCode: string
+  productName: string
+  processName: string
+  issuedQuantity: number
+  okQuantity: number
+  scrapQuantity: number
+  lostQuantity: number
+  completionRate: number
+  scrapRate: number
+  lostRate: number
+  closedAt: string
+}
+
+export type PolishWorkerOverview = {
+  workerId: number
+  workerName: string
+  workOrderCount: number
+  issuedQuantity: number
+  okQuantity: number
+  scrapQuantity: number
+  lostQuantity: number
+  completionRate: number
+  scrapRate: number
+  lostRate: number
+  orders: PolishWorkerOrderOverview[]
+}
+
 export type PendingQcBatch = WorkOrderBatch & {
   workOrderNo: string
   orderId: string
