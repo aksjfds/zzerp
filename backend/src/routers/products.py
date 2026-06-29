@@ -19,11 +19,26 @@ def list_products():
     return {"data": Product.list_all()}
 
 
+@router.get("/{product_id}/departments/{department}/progress")
+def get_department_progress(product_id: int, department: str):
+    try:
+        data = Product.department_progress(
+            product_id=product_id,
+            department=department.strip(),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"data": data}
+
+
 @router.post("")
 def create_product(
     payload: CreateProductPayload,
-    _user: dict = Depends(require_any_permission("product:add", csrf=True)),
+    user: dict = Depends(require_any_permission("product:add", csrf=True)),
 ):
+    if user["department"] != "sys":
+        raise HTTPException(status_code=403, detail="只有 admin 可以新增产品")
+
     try:
         process = [department.strip() for department in payload.process if department.strip()]
         product = Product.create(

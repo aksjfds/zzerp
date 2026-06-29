@@ -11,6 +11,7 @@ import type {
   ProcedureItem,
   ProcessStepPayload,
   ProductItem,
+  ProductDepartmentProgress,
   ProductRecord,
   WorkerItem,
   WorkOrderBatch,
@@ -20,6 +21,16 @@ import { service } from './request'
 
 export async function queryProducts() {
   const res = await service.get<{ data: ProductItem[] }>('/products')
+  return res.data.data
+}
+
+export async function queryProductDepartmentProgress(
+  productId: number,
+  department: Department,
+) {
+  const res = await service.get<{ data: ProductDepartmentProgress }>(
+    `/products/${productId}/departments/${department}/progress`,
+  )
   return res.data.data
 }
 

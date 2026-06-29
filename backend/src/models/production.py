@@ -53,6 +53,8 @@ class Product(Base):
     ) -> dict:
         if not process:
             raise ValueError("产品部门流程不能为空")
+        if "qc" in process:
+            raise ValueError("QC 不能作为产品正式部门流程")
         if len(set(process)) != len(process):
             raise ValueError("产品部门流程不能包含重复部门")
 
@@ -162,6 +164,111 @@ class Product(Base):
                 result.append(item)
 
             return result
+
+    @classmethod
+    def department_progress(cls, product_id: int, department: str) -> dict:
+        with SessionLocal() as session:
+            product = session.get(cls, product_id)
+            if product is None:
+                raise ValueError("产品不存在")
+
+            belongs_to_route = (
+                session.query(ProductDepartmentStep)
+                .filter(
+                    ProductDepartmentStep.product_id == product_id,
+                    ProductDepartmentStep.department == department,
+                )
+                .first()
+            )
+            if belongs_to_route is None and department != "out":
+                raise ValueError("产品流程不包含该部门")
+
+            entered_quantity = sum(
+                record.quantity
+                for record in session.query(Record)
+                .filter(
+                    Record.product_id == product_id,
+                    Record.to_repository == department,
+                )
+                .all()
+            )
+            repository = (
+                session.query(Repository)
+                .filter(
+                    Repository.product_id == product_id,
+                    Repository.department == department,
+                )
+                .one_or_none()
+            )
+            current_quantity = repository.quantity if repository else 0
+            processes = (
+                session.query(DepartmentProcess)
+                .filter(
+                    DepartmentProcess.product_id == product_id,
+                    DepartmentProcess.department == department,
+                )
+                .order_by(DepartmentProcess.sequence_no.asc())
+                .all()
+            )
+
+            process_items = []
+            for process in processes:
+                work_orders = (
+                    session.query(WorkOrder)
+                    .filter(WorkOrder.process_id == process.id)
+                    .all()
+                )
+                issued_quantity = sum(item.issued_quantity for item in work_orders)
+                processing_quantity = 0
+                pending_qc_quantity = 0
+                ok_quantity = 0
+                rework_quantity = 0
+                scrap_quantity = 0
+                lost_quantity = 0
+
+                for item in work_orders:
+                    batches = WorkOrder._batches(session, item.id)
+                    totals = WorkOrder._totals(batches)
+                    processing_quantity += WorkOrder._processing_quantity(item, batches)
+                    pending_qc_quantity += totals["pendingQcQuantity"]
+                    ok_quantity += totals["okQuantity"]
+                    rework_quantity += totals["reworkQuantity"]
+                    scrap_quantity += totals["scrapQuantity"]
+                    lost_quantity += totals["lostQuantity"]
+
+                progress = (
+                    min(100, round(ok_quantity * 100 / entered_quantity, 1))
+                    if entered_quantity > 0
+                    else 0
+                )
+                process_items.append(
+                    {
+                        "id": process.id,
+                        "sequenceNo": process.sequence_no,
+                        "processName": process.process_name,
+                        "requiresQc": process.requires_qc,
+                        "waitingQuantity": process.available_quantity,
+                        "issuedQuantity": issued_quantity,
+                        "processingQuantity": processing_quantity,
+                        "pendingQcQuantity": pending_qc_quantity,
+                        "okQuantity": ok_quantity,
+                        "reworkQuantity": rework_quantity,
+                        "scrapQuantity": scrap_quantity,
+                        "lostQuantity": lost_quantity,
+                        "progress": progress,
+                    }
+                )
+
+            return {
+                "productId": product.id,
+                "orderId": product.order_id,
+                "zzCode": product.zz_code,
+                "productName": product.product_name,
+                "department": department,
+                "enteredQuantity": entered_quantity,
+                "currentQuantity": current_quantity,
+                "processes": process_items,
+            }
 
 
 class ProductDepartmentStep(Base):

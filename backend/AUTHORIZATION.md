@@ -11,7 +11,8 @@
 | 接口 | 权限 | 数据范围 |
 | --- | --- | --- |
 | `GET /products` | 公开 | 无需登录，只读查看全部产品库存 |
-| `GET /records` | 公开 | 无需登录，只读查看产品流转记录 |
+| `GET /products/{id}/departments/{department}/progress` | 公开 | 仅返回部门工艺数量汇总，不返回工人和工单信息 |
+| `GET /records` | `record:view` | 登录后查看产品流转记录 |
 | `POST /products` | `product:add` | 管理员创建订单产品和全局部门流程 |
 | `GET /work-orders/{department}` | `task:view` | 当前部门 |
 | 配置工艺、维护工人、开工单 | `task:assign` | 当前部门 |
@@ -19,6 +20,11 @@
 | `GET /qc/submissions/pending` | `task:view` | 仅 QC 或管理员 |
 | 分配送检批次给 QC 工人 | `task:assign` | 仅 QC 或管理员 |
 | 提交 QC 结果 | `task:complete` | 仅 QC 或管理员 |
+
+## 产品流程规则
+
+- QC 不能作为产品正式部门流程，也不持有正式产品库存。
+- QC 只处理其他部门工艺明确要求质检时产生的送检批次。
 
 ## QC 不可变规则
 

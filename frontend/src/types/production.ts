@@ -51,6 +51,33 @@ export type ProductRecord = {
   createdAt: string
 }
 
+export type DepartmentProcessProgress = {
+  id: number
+  sequenceNo: number
+  processName: string
+  requiresQc: boolean
+  waitingQuantity: number
+  issuedQuantity: number
+  processingQuantity: number
+  pendingQcQuantity: number
+  okQuantity: number
+  reworkQuantity: number
+  scrapQuantity: number
+  lostQuantity: number
+  progress: number
+}
+
+export type ProductDepartmentProgress = {
+  productId: number
+  orderId: string
+  zzCode: string
+  productName: string
+  department: Department
+  enteredQuantity: number
+  currentQuantity: number
+  processes: DepartmentProcessProgress[]
+}
+
 export type WorkerItem = {
   id: number
   name: string

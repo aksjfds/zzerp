@@ -2,15 +2,21 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   createProduct as createProductApi,
-  queryProductRecords,
+  queryProductDepartmentProgress,
   queryProducts,
 } from '@/api/production'
-import type { CreateProductPayload, Department, ProductItem, ProductRecord } from '@/types/production'
+import type {
+  CreateProductPayload,
+  Department,
+  ProductDepartmentProgress,
+  ProductItem,
+} from '@/types/production'
 
 export const useProductsStore = defineStore('products', () => {
   const loading = ref(false)
   const products = ref<ProductItem[]>([])
-  const records = ref<ProductRecord[]>([])
+  const departmentProgress = ref<ProductDepartmentProgress | null>(null)
+  const progressLoading = ref(false)
 
   const totalQuantity = computed(() =>
     products.value.reduce((total, product) => total + product.quantity, 0),
@@ -31,22 +37,24 @@ export const useProductsStore = defineStore('products', () => {
     await loadProducts()
   }
 
-  async function loadRecords(
-    orderId: string,
-    zzCode: string,
-    product: string,
-    department?: Department,
-  ) {
-    records.value = await queryProductRecords(orderId, zzCode, product, department)
+  async function loadDepartmentProgress(productId: number, department: Department) {
+    progressLoading.value = true
+    departmentProgress.value = null
+    try {
+      departmentProgress.value = await queryProductDepartmentProgress(productId, department)
+    } finally {
+      progressLoading.value = false
+    }
   }
 
   return {
     createProduct,
+    departmentProgress,
+    loadDepartmentProgress,
     loadProducts,
-    loadRecords,
     loading,
     products,
-    records,
+    progressLoading,
     totalQuantity,
   }
 })

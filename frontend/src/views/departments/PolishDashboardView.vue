@@ -207,7 +207,7 @@ async function submitDirectReport() {
   }
 }
 
-async function logout() {
+async function switchUser() {
   await authStore.logout()
   router.replace('/login')
 }
@@ -229,17 +229,18 @@ onMounted(loadDashboard)
 <template>
   <main class="dashboard-page">
     <header class="dashboard-header">
-      <div>
-        <div class="page-kicker">Polish Work Orders</div>
+      <div class="navbar-title">
+        <div class="page-kicker">磨房部门</div>
         <h1>磨房工单</h1>
-        <p>配置产品工艺、给工人开单，并按批次送检或直接报工。</p>
       </div>
-      <div class="header-actions">
+      <nav class="header-actions" aria-label="磨房导航">
+        <ElButton @click="router.push('/dashboard')">产品总览</ElButton>
+        <ElButton class="nav-current" type="primary" aria-current="page">磨房工单</ElButton>
         <ElButton v-permission="'task:assign'" @click="workerDialogVisible = true">
           添加工人
         </ElButton>
-        <ElButton @click="logout">退出</ElButton>
-      </div>
+        <ElButton @click="switchUser">切换用户</ElButton>
+      </nav>
     </header>
 
     <div v-loading="loading" class="workspace-layout">
@@ -505,20 +506,25 @@ onMounted(loadDashboard)
 
 .dashboard-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
   gap: 20px;
   margin-bottom: 18px;
-  padding: 24px;
+  padding: 16px 20px;
 }
 
 .dashboard-header h1,
 .section-head h2 { margin: 6px 0; }
+.navbar-title h1 { margin-bottom: 0; font-size: 22px; }
 .dashboard-header p,
 .section-head p { margin: 0; color: var(--erp-text-muted); }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
 .header-actions,
 .order-actions,
 .process-actions { display: flex; align-items: center; gap: 8px; }
+.header-actions { flex-wrap: wrap; justify-content: flex-end; }
+.header-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.nav-current { pointer-events: none; }
 .section-card { margin-bottom: 18px; padding: 18px; }
 .section-head { margin-bottom: 16px; }
 .workspace-layout {
@@ -578,6 +584,8 @@ onMounted(loadDashboard)
   .dashboard-header,
   .product-title,
   .order-head { flex-direction: column; }
+  .dashboard-header { align-items: flex-start; }
+  .header-actions { justify-content: flex-start; width: 100%; }
   .workspace-layout { grid-template-columns: 1fr; }
   .metrics { grid-template-columns: 1fr 1fr; }
   .config-row { grid-template-columns: 1fr; }
