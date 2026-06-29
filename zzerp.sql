@@ -1,81 +1,21 @@
 -- ============================================================
--- ZZ ERP 产品流转系统
+-- ZZ ERP 产品流转与工单系统
 -- ============================================================
 
 CREATE TABLE worker (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     department TEXT NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
     UNIQUE (name, department)
 );
 
 
--- 产品当前所在部门库存
-CREATE TABLE repository (
-    id BIGSERIAL PRIMARY KEY,
-    order_id TEXT NOT NULL,
-    -- in / laser / stamp / cnc / polish / qc / out
-    department TEXT NOT NULL,
-    -- 产品的本厂编码
-    zz_code TEXT NOT NULL,
-    product_name TEXT NOT NULL,
-    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-    UNIQUE (department, order_id, zz_code, product_name)
-);
-
-
--- 产品
-CREATE TABLE product (
-    id BIGSERIAL PRIMARY KEY,
-    order_id TEXT NOT NULL,
-    zz_code TEXT NOT NULL,
-    -- L46狗扣-主体或L46狗扣-拉环
-    product_name TEXT NOT NULL,
-    delivery_date DATE NOT NULL,
-    -- in / laser / stamp / cnc / polish / qc / out
-    process TEXT[] NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (order_id, zz_code, product_name)
-);
-
-
--- 每个部门的细分工艺
 CREATE TABLE procedure (
     id BIGSERIAL PRIMARY KEY,
     procedure_name TEXT NOT NULL,
     department TEXT NOT NULL,
     UNIQUE (department, procedure_name)
-);
-
-
--- 产品流转记录
-CREATE TABLE records (
-    id BIGSERIAL PRIMARY KEY,
-    order_id TEXT NOT NULL,
-    zz_code TEXT NOT NULL,
-    product TEXT NOT NULL,
-    from_repository TEXT NOT NULL,
-    to_repository TEXT NOT NULL,
-    quantity INT NOT NULL CHECK (quantity > 0),
-    note TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-
--- 部门主管分配给工人的任务
-CREATE TABLE tasks (
-    id BIGSERIAL PRIMARY KEY,
-    order_id TEXT NOT NULL,
-    zz_code TEXT NOT NULL,
-    product TEXT NOT NULL,
-    worker TEXT NOT NULL,
-    department TEXT NOT NULL,
-    procedure TEXT NOT NULL,
-    quantity INT NOT NULL CHECK (quantity > 0),
-    ok INT NOT NULL DEFAULT 0 CHECK (ok >= 0 AND ok <= quantity),
-    status BOOLEAN NOT NULL DEFAULT FALSE,
-    note TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
 
@@ -90,7 +30,161 @@ CREATE TABLE users (
 );
 
 
--- 服务端登录会话。客户端持有原始令牌，数据库只保存令牌哈希。
+-- 每一行代表一个订单产品。
+CREATE TABLE product (
+    id BIGSERIAL PRIMARY KEY,
+    order_id TEXT NOT NULL,
+    zz_code TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    delivery_date DATE NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (order_id, zz_code, product_name)
+);
+
+
+-- 产品正式经过的部门顺序，例如 laser -> polish -> qc。
+CREATE TABLE product_department_step (
+    id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    sequence_no INT NOT NULL CHECK (sequence_no > 0),
+    department TEXT NOT NULL,
+    UNIQUE (product_id, sequence_no)
+);
+
+
+-- 产品正式归属各部门的数量。内部送检不会改变此表的部门。
+CREATE TABLE repository (
+    id BIGSERIAL PRIMARY KEY,
+    department TEXT NOT NULL,
+    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    UNIQUE (department, product_id)
+);
+
+
+-- 一个订单产品在某部门内需要执行的有序工艺。
+CREATE TABLE department_process (
+    id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    department TEXT NOT NULL,
+    sequence_no INT NOT NULL CHECK (sequence_no > 0),
+    process_name TEXT NOT NULL,
+    requires_qc BOOLEAN NOT NULL DEFAULT FALSE,
+    available_quantity INT NOT NULL DEFAULT 0 CHECK (available_quantity >= 0),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    UNIQUE (product_id, department, sequence_no),
+    UNIQUE (product_id, department, process_name)
+);
+
+
+-- 每张工单只对应一个工艺、一个工人和一次领取数量。
+CREATE TABLE work_order (
+    id BIGSERIAL PRIMARY KEY,
+    work_order_no TEXT UNIQUE,
+    product_id BIGINT NOT NULL REFERENCES product(id),
+    process_id BIGINT NOT NULL REFERENCES department_process(id),
+    worker_id BIGINT NOT NULL REFERENCES worker(id),
+    issued_quantity INT NOT NULL CHECK (issued_quantity > 0),
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
+    created_by BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    closed_at TIMESTAMP,
+    note TEXT
+);
+
+
+-- 需要 QC 时先建立 pending_qc 批次，由 QC 补全结果。
+-- 不需要 QC 时由部门主管直接建立 completed 批次。
+CREATE TABLE work_order_batch (
+    id BIGSERIAL PRIMARY KEY,
+    work_order_id BIGINT NOT NULL REFERENCES work_order(id),
+    batch_no INT NOT NULL CHECK (batch_no > 0),
+    submitted_quantity INT NOT NULL CHECK (submitted_quantity > 0),
+    ok_quantity INT,
+    rework_quantity INT,
+    scrap_quantity INT,
+    lost_quantity INT,
+    qc_worker_id BIGINT REFERENCES worker(id),
+    defect_reason TEXT,
+    status TEXT NOT NULL CHECK (status IN ('pending_qc', 'completed')),
+    submitted_by BIGINT NOT NULL REFERENCES users(id),
+    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    inspected_by BIGINT REFERENCES users(id),
+    inspected_at TIMESTAMP,
+    UNIQUE (work_order_id, batch_no),
+    CHECK (ok_quantity IS NULL OR ok_quantity >= 0),
+    CHECK (rework_quantity IS NULL OR rework_quantity >= 0),
+    CHECK (scrap_quantity IS NULL OR scrap_quantity >= 0),
+    CHECK (lost_quantity IS NULL OR lost_quantity >= 0)
+);
+
+
+-- pending_qc 阶段只允许分配或重新分配 QC 工人；完成后的批次永久不可修改或删除。
+CREATE OR REPLACE FUNCTION protect_work_order_batch_result()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION '工单批次不允许删除';
+    END IF;
+    IF OLD.status = 'completed' THEN
+        RAISE EXCEPTION '已完成的工单批次不允许修改';
+    END IF;
+    IF NEW.status = 'pending_qc' THEN
+        IF ROW(
+            NEW.work_order_id,
+            NEW.batch_no,
+            NEW.submitted_quantity,
+            NEW.ok_quantity,
+            NEW.rework_quantity,
+            NEW.scrap_quantity,
+            NEW.lost_quantity,
+            NEW.defect_reason,
+            NEW.submitted_by,
+            NEW.submitted_at,
+            NEW.inspected_by,
+            NEW.inspected_at
+        ) IS DISTINCT FROM ROW(
+            OLD.work_order_id,
+            OLD.batch_no,
+            OLD.submitted_quantity,
+            OLD.ok_quantity,
+            OLD.rework_quantity,
+            OLD.scrap_quantity,
+            OLD.lost_quantity,
+            OLD.defect_reason,
+            OLD.submitted_by,
+            OLD.submitted_at,
+            OLD.inspected_by,
+            OLD.inspected_at
+        ) THEN
+            RAISE EXCEPTION '待质检批次只允许变更 QC 工人';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF NEW.status <> 'completed' THEN
+        RAISE EXCEPTION '待质检批次只能更新为已完成';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_protect_work_order_batch_result
+BEFORE UPDATE OR DELETE ON work_order_batch
+FOR EACH ROW EXECUTE FUNCTION protect_work_order_batch_result();
+
+
+-- 只记录正式部门流转；部门内部送检由工单批次追踪。
+CREATE TABLE records (
+    id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    from_repository TEXT NOT NULL,
+    to_repository TEXT NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    note TEXT,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+
 CREATE TABLE user_sessions (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -103,64 +197,33 @@ CREATE TABLE user_sessions (
 
 INSERT INTO users (username, password, department, role, permissions) VALUES
 ('admin', '1', 'sys', 'supervisor', 'product:view,product:add,record:view,sys:user:add'),
-('laser', '1', 'laser', 'supervisor', 'task:view,task:assign,task:complete'),
-('stamp', '1', 'stamp', 'supervisor', 'task:view,task:assign,task:complete'),
-('cnc', '1', 'cnc', 'supervisor', 'task:view,task:assign,task:complete'),
 ('polish', '1', 'polish', 'supervisor', 'task:view,task:assign,task:complete'),
 ('qc', '1', 'qc', 'supervisor', 'task:view,task:assign,task:complete');
 
 
--- ============================================================
--- 索引
--- ============================================================
-
-CREATE INDEX idx_worker_department
-ON worker(department);
+CREATE INDEX idx_department_step_product
+ON product_department_step(product_id, sequence_no);
 
 CREATE INDEX idx_repository_department
 ON repository(department);
 
-CREATE INDEX idx_repository_product
-ON repository(order_id, zz_code, product_name);
+CREATE INDEX idx_department_process_product
+ON department_process(product_id, department, sequence_no);
 
-CREATE INDEX idx_repository_department_product
-ON repository(department, order_id, zz_code, product_name);
+CREATE INDEX idx_work_order_department_process
+ON work_order(process_id, status);
 
-CREATE INDEX idx_product_order_id
-ON product(order_id);
+CREATE INDEX idx_work_order_worker
+ON work_order(worker_id, status);
 
-CREATE INDEX idx_product_delivery_date
-ON product(delivery_date);
-
-CREATE INDEX idx_product_zz_code
-ON product(zz_code);
-
-CREATE INDEX idx_product_name
-ON product(product_name);
-
-CREATE INDEX idx_procedure_department
-ON procedure(department);
+CREATE INDEX idx_work_order_batch_status
+ON work_order_batch(status, submitted_at);
 
 CREATE INDEX idx_records_product
-ON records(order_id, zz_code, product);
+ON records(product_id, created_at DESC);
 
-CREATE INDEX idx_records_from_repository
-ON records(from_repository, order_id, zz_code, product);
-
-CREATE INDEX idx_records_to_repository
-ON records(to_repository, order_id, zz_code, product);
-
-CREATE INDEX idx_records_created_at
-ON records(created_at DESC);
-
-CREATE INDEX idx_tasks_department_status
-ON tasks(department, status);
-
-CREATE INDEX idx_tasks_worker
-ON tasks(worker);
-
-CREATE INDEX idx_tasks_product
-ON tasks(order_id, zz_code, product);
+CREATE INDEX idx_worker_department
+ON worker(department, active);
 
 CREATE INDEX idx_users_department_role
 ON users(department, role);

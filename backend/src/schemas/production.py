@@ -12,15 +12,49 @@ class CreateProductPayload(BaseModel):
     quantity: int = Field(gt=0)
 
 
-class CreateTaskPayload(BaseModel):
-    order_id: str = Field(min_length=1)
-    zz_code: str = Field(min_length=1)
-    product: str = Field(min_length=1)
-    worker: str = Field(min_length=1)
-    department: str = Field(min_length=1)
-    procedure: str = Field(min_length=1)
+class ProcessStepPayload(BaseModel):
+    process_name: str = Field(min_length=1)
+    requires_qc: bool = False
+
+
+class ConfigureProcessesPayload(BaseModel):
+    product_id: int = Field(gt=0)
+    steps: list[ProcessStepPayload] = Field(min_length=1)
+
+
+class CreateWorkOrderPayload(BaseModel):
+    product_id: int = Field(gt=0)
+    process_id: int = Field(gt=0)
+    worker_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
     note: str | None = None
+
+
+class CreateSubmissionPayload(BaseModel):
+    quantity: int = Field(gt=0)
+
+
+class DirectReportPayload(BaseModel):
+    ok_quantity: int = Field(ge=0)
+    scrap_quantity: int = Field(ge=0)
+    lost_quantity: int = Field(ge=0)
+    reason: str | None = None
+
+
+class AssignQcWorkerPayload(BaseModel):
+    qc_worker_id: int = Field(gt=0)
+
+
+class InspectionPayload(BaseModel):
+    ok_quantity: int = Field(ge=0)
+    rework_quantity: int = Field(ge=0)
+    scrap_quantity: int = Field(ge=0)
+    lost_quantity: int = Field(ge=0)
+    defect_reason: str | None = None
+
+
+class CreateWorkerPayload(BaseModel):
+    name: str = Field(min_length=1)
 
 
 class CreateProcedurePayload(BaseModel):

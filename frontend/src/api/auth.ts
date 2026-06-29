@@ -11,7 +11,7 @@ export async function login(payload: LoginPayload) {
 }
 
 export async function queryCurrentUser() {
-  const res = await service.get<{ data: UserProfile; csrfToken: string }>('/current_user')
+  const res = await service.get<{ data: UserProfile | null; csrfToken?: string }>('/current_user')
 
   return res.data.data
 }

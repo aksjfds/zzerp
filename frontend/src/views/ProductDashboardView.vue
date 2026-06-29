@@ -28,7 +28,7 @@ const productForm = reactive<CreateProductPayload>({
   zzCode: '',
   productName: '',
   deliveryDate: '',
-  process: ['laser', 'stamp', 'cnc', 'polish', 'qc'],
+  process: ['polish', 'qc'],
   quantity: 1,
 })
 
@@ -78,7 +78,7 @@ function resetProductForm() {
   productForm.zzCode = ''
   productForm.productName = ''
   productForm.deliveryDate = ''
-  productForm.process = ['laser', 'stamp', 'cnc', 'polish', 'qc']
+  productForm.process = ['polish', 'qc']
   productForm.quantity = 1
   selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'laser'
 }
@@ -168,13 +168,6 @@ onMounted(loadDashboard)
         <ElButton @click="logout">退出</ElButton>
       </div>
     </header>
-
-    <section class="summary-grid">
-      <div class="summary-card">
-        <span>产品数量</span>
-        <strong>{{ products.length }}</strong>
-      </div>
-    </section>
 
     <section v-loading="productsLoading" class="product-grid">
       <article v-for="product in products" :key="product.id" class="product-card">

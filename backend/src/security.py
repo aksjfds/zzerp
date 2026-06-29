@@ -108,6 +108,15 @@ def get_current_user(request: Request) -> dict:
         return User.serialize(user)
 
 
+def get_optional_current_user(request: Request) -> dict | None:
+    try:
+        return get_current_user(request)
+    except HTTPException as exc:
+        if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+            return None
+        raise
+
+
 def require_csrf(request: Request, user: dict = Depends(get_current_user)) -> dict:
     session_token = request.cookies.get(settings.session_cookie_name)
     csrf_header = request.headers.get("X-CSRF-Token")

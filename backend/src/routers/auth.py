@@ -6,7 +6,7 @@ from schemas.user import LoginPayload
 from security import (
     create_user_session,
     get_csrf_token,
-    get_current_user,
+    get_optional_current_user,
     require_csrf,
     revoke_user_session,
 )
@@ -40,7 +40,9 @@ def login(payload: LoginPayload, response: Response):
 
 
 @router.get("/current_user")
-def current_user(request: Request, user: dict = Depends(get_current_user)):
+def current_user(request: Request, user: dict | None = Depends(get_optional_current_user)):
+    if user is None:
+        return {"data": None}
     csrf_token = get_csrf_token(request.cookies.get(settings.session_cookie_name))
     return {"data": user, "csrfToken": csrf_token}
 

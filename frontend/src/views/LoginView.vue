@@ -51,7 +51,7 @@ async function submitLogin() {
 
       <ElForm class="login-form" :model="loginForm" label-position="top" @keyup.enter="submitLogin">
         <ElFormItem label="用户名">
-          <ElInput v-model="loginForm.username" clearable placeholder="admin / qc_lead / polish_lead" />
+          <ElInput v-model="loginForm.username" clearable placeholder="admin / polish / qc" />
         </ElFormItem>
         <ElFormItem label="密码">
           <ElInput v-model="loginForm.password" type="password" show-password placeholder="请输入密码" />

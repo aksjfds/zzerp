@@ -15,11 +15,8 @@ def normalize_text(value: str, field_name: str) -> str:
 
 
 @router.get("")
-def list_products(
-    user: dict = Depends(require_any_permission("product:view", "task:view")),
-):
-    department = None if user["department"] == "sys" else user["department"]
-    return {"data": Product.list_all(department=department)}
+def list_products():
+    return {"data": Product.list_all()}
 
 
 @router.post("")

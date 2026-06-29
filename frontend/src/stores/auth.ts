@@ -32,7 +32,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function refreshUser() {
     try {
       const profile = await queryCurrentUser()
-      setUser(profile)
+      user.value = profile
       return profile
     } catch {
       user.value = null

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from config import get_settings
-from routers import auth, products, records, tasks
+from routers import auth, products, qc, records, work_orders
 
 app = FastAPI(title="zzerp")
 settings = get_settings()
@@ -30,7 +30,8 @@ async def validate_request_origin(request: Request, call_next):
 app.include_router(auth.router)
 app.include_router(products.router)
 app.include_router(records.router)
-app.include_router(tasks.router)
+app.include_router(work_orders.router)
+app.include_router(qc.router)
 
 
 @app.get("/")
