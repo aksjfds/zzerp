@@ -22,11 +22,11 @@ export const useProductsStore = defineStore('products', () => {
     products.value.reduce((total, product) => total + product.quantity, 0),
   )
 
-  async function loadProducts() {
+  async function loadProducts(department?: Department) {
     loading.value = true
 
     try {
-      products.value = await queryProducts()
+      products.value = await queryProducts(department)
     } finally {
       loading.value = false
     }

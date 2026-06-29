@@ -55,10 +55,13 @@ export type DepartmentProcessProgress = {
   id: number
   sequenceNo: number
   processName: string
+  requiresCleaning: boolean
   requiresQc: boolean
   waitingQuantity: number
   issuedQuantity: number
   processingQuantity: number
+  cleaningQuantity: number
+  cleanedReadyQuantity: number
   pendingQcQuantity: number
   okQuantity: number
   reworkQuantity: number
@@ -91,18 +94,27 @@ export type ProcedureItem = {
   department: Department
 }
 
-export type DepartmentProcessItem = {
-  id: number
+export type PolishProcessStep = {
   productId: number
   department: Department
   sequenceNo: number
   processName: string
+  requiresCleaning: boolean
   requiresQc: boolean
   availableQuantity: number
 }
 
+export type PolishProcessPreset = {
+  id: number
+  presetName: string
+  processFlow: string[]
+  steps: ProcessStepPayload[]
+  active: boolean
+}
+
 export type ProcessStepPayload = {
   processName: string
+  requiresCleaning: boolean
   requiresQc: boolean
 }
 
@@ -123,6 +135,16 @@ export type WorkOrderBatch = {
   inspectedAt?: string | null
 }
 
+export type PolishCleaningBatch = {
+  id: number
+  workOrderId: number
+  batchNo: number
+  quantity: number
+  status: 'cleaning' | 'completed'
+  sentAt: string
+  completedAt?: string | null
+}
+
 export type WorkOrderItem = {
   id: number
   workOrderNo: string
@@ -130,14 +152,16 @@ export type WorkOrderItem = {
   orderId: string
   zzCode: string
   productName: string
-  processId: number
   processName: string
   department: Department
   requiresQc: boolean
+  requiresCleaning: boolean
   workerId: number
   workerName: string
   issuedQuantity: number
   processingQuantity: number
+  cleaningQuantity: number
+  cleanedReadyQuantity: number
   submittedQuantity: number
   pendingQcQuantity: number
   okQuantity: number
@@ -149,6 +173,7 @@ export type WorkOrderItem = {
   createdAt: string
   closedAt?: string | null
   batches: WorkOrderBatch[]
+  cleaningBatches: PolishCleaningBatch[]
 }
 
 export type PendingQcBatch = WorkOrderBatch & {
@@ -163,7 +188,8 @@ export type PendingQcBatch = WorkOrderBatch & {
 
 export type CreateWorkOrderPayload = {
   productId: number
-  processId: number
+  department: Department
+  processName: string
   workerId: number
   quantity: number
   note?: string

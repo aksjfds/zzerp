@@ -15,8 +15,9 @@ def normalize_text(value: str, field_name: str) -> str:
 
 
 @router.get("")
-def list_products():
-    return {"data": Product.list_all()}
+def list_products(department: str | None = None):
+    resolved_department = department.strip() if department and department.strip() else None
+    return {"data": Product.list_all(department=resolved_department)}
 
 
 @router.get("/{product_id}/departments/{department}/progress")

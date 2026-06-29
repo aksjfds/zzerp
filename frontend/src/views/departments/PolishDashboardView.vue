@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useProductsStore } from '@/stores/products'
 import { useWorkOrdersStore } from '@/stores/workOrders'
 import type {
-  DepartmentProcessItem,
+  PolishProcessStep,
   DirectReportPayload,
   ProcessStepPayload,
   ProductItem,
@@ -20,19 +20,27 @@ const authStore = useAuthStore()
 const productsStore = useProductsStore()
 const workOrdersStore = useWorkOrdersStore()
 const { products } = storeToRefs(productsStore)
-const { loading, processes, workers, workOrders } = storeToRefs(workOrdersStore)
+const { loading, presets, processes, workers, workOrders } = storeToRefs(workOrdersStore)
 
 const configDialogVisible = ref(false)
 const workOrderDialogVisible = ref(false)
 const workerDialogVisible = ref(false)
 const submissionDialogVisible = ref(false)
 const directDialogVisible = ref(false)
+const cleaningDialogVisible = ref(false)
+const presetDialogVisible = ref(false)
 const activeProduct = ref<ProductItem | null>(null)
-const activeProcess = ref<DepartmentProcessItem | null>(null)
+const activeProcess = ref<PolishProcessStep | null>(null)
 const activeWorkOrder = ref<WorkOrderItem | null>(null)
 const selectedProductId = ref<number | null>(null)
 const workerName = ref('')
 const submissionQuantity = ref(1)
+const cleaningQuantity = ref(1)
+const selectedPresetId = ref<number | undefined>()
+const editingPresetId = ref<number | undefined>()
+const presetName = ref('')
+const presetActive = ref(true)
+const presetSteps = ref<ProcessStepPayload[]>([])
 
 const processSteps = ref<ProcessStepPayload[]>([])
 const workOrderForm = reactive({ workerId: 0, quantity: 1, note: '' })
@@ -74,20 +82,32 @@ function openConfig(product: ProductItem) {
   selectProduct(product)
   activeProduct.value = product
   const existing = productProcesses(product.id)
+  selectedPresetId.value = undefined
   processSteps.value = existing.length
     ? existing.map((item) => ({
         processName: item.processName,
+        requiresCleaning: item.requiresCleaning,
         requiresQc: item.requiresQc,
       }))
     : [
-        { processName: '粗光', requiresQc: true },
-        { processName: '全光', requiresQc: false },
+        { processName: '粗光', requiresCleaning: false, requiresQc: true },
+        { processName: '全光', requiresCleaning: false, requiresQc: false },
       ]
   configDialogVisible.value = true
 }
 
+function applyPreset() {
+  const preset = presets.value.find((item) => item.id === selectedPresetId.value)
+  if (!preset) return
+  processSteps.value = preset.steps.map((step) => ({ ...step }))
+}
+
 function addProcessStep() {
-  processSteps.value.push({ processName: '', requiresQc: false })
+  processSteps.value.push({
+    processName: '',
+    requiresCleaning: false,
+    requiresQc: false,
+  })
 }
 
 function removeProcessStep(index: number) {
@@ -104,6 +124,7 @@ async function submitProcesses() {
       department,
       activeProduct.value.id,
       processSteps.value,
+      selectedPresetId.value,
     )
     configDialogVisible.value = false
     ElMessage.success('工艺配置已保存')
@@ -112,7 +133,7 @@ async function submitProcesses() {
   }
 }
 
-function openWorkOrder(product: ProductItem, process: DepartmentProcessItem) {
+function openWorkOrder(product: ProductItem, process: PolishProcessStep) {
   selectProduct(product)
   activeProduct.value = product
   activeProcess.value = process
@@ -130,7 +151,8 @@ async function submitWorkOrder() {
   try {
     await workOrdersStore.addWorkOrder(department, {
       productId: activeProduct.value.id,
-      processId: activeProcess.value.id,
+      department,
+      processName: activeProcess.value.processName,
       workerId: workOrderForm.workerId,
       quantity: workOrderForm.quantity,
       note: workOrderForm.note,
@@ -158,8 +180,76 @@ async function submitWorker() {
 
 function openSubmission(item: WorkOrderItem) {
   activeWorkOrder.value = item
-  submissionQuantity.value = item.processingQuantity > 0 ? 1 : 0
+  const available = item.requiresCleaning ? item.cleanedReadyQuantity : item.processingQuantity
+  submissionQuantity.value = available > 0 ? 1 : 0
   submissionDialogVisible.value = true
+}
+
+function openCleaning(item: WorkOrderItem) {
+  activeWorkOrder.value = item
+  cleaningQuantity.value = item.processingQuantity > 0 ? 1 : 0
+  cleaningDialogVisible.value = true
+}
+
+async function submitCleaning() {
+  if (!activeWorkOrder.value) return
+  try {
+    await workOrdersStore.submitToCleaning(
+      department,
+      activeWorkOrder.value.id,
+      cleaningQuantity.value,
+    )
+    cleaningDialogVisible.value = false
+    ElMessage.success('已送去清洗')
+  } catch {
+    ElMessage.error('送洗失败，请检查加工中数量')
+  }
+}
+
+async function completeCleaning(cleaningBatchId: number) {
+  try {
+    await workOrdersStore.completeCleaning(department, cleaningBatchId)
+    ElMessage.success('清洗完成')
+  } catch {
+    ElMessage.error('确认清洗完成失败')
+  }
+}
+
+function newPreset() {
+  editingPresetId.value = undefined
+  presetName.value = ''
+  presetActive.value = true
+  presetSteps.value = [{ processName: '', requiresCleaning: false, requiresQc: false }]
+  presetDialogVisible.value = true
+}
+
+function editPreset(presetId: number) {
+  const preset = presets.value.find((item) => item.id === presetId)
+  if (!preset) return
+  editingPresetId.value = preset.id
+  presetName.value = preset.presetName
+  presetActive.value = preset.active
+  presetSteps.value = preset.steps.map((step) => ({ ...step }))
+  presetDialogVisible.value = true
+}
+
+async function submitPreset() {
+  if (!presetName.value.trim() || presetSteps.value.some((step) => !step.processName.trim())) {
+    ElMessage.warning('请完整填写预设名称和工艺')
+    return
+  }
+  try {
+    await workOrdersStore.savePreset(
+      presetName.value,
+      presetSteps.value,
+      presetActive.value,
+      editingPresetId.value,
+    )
+    presetDialogVisible.value = false
+    ElMessage.success('工艺预设已保存')
+  } catch {
+    ElMessage.error('工艺预设保存失败')
+  }
 }
 
 async function submitToQc() {
@@ -200,7 +290,7 @@ async function submitDirectReport() {
       directForm,
     )
     directDialogVisible.value = false
-    await productsStore.loadProducts()
+    await productsStore.loadProducts(department)
     ElMessage.success('报工已提交')
   } catch {
     ElMessage.error('报工失败，请检查加工中数量')
@@ -214,8 +304,9 @@ async function switchUser() {
 
 async function loadDashboard() {
   await Promise.all([
-    productsStore.loadProducts(),
+    productsStore.loadProducts(department),
     workOrdersStore.loadDepartment(department),
+    workOrdersStore.loadPresets(),
   ])
 
   if (!products.value.some((product) => product.id === selectedProductId.value)) {
@@ -239,6 +330,7 @@ onMounted(loadDashboard)
         <ElButton v-permission="'task:assign'" @click="workerDialogVisible = true">
           添加工人
         </ElButton>
+        <ElButton v-permission="'task:assign'" @click="newPreset">工艺预设</ElButton>
         <ElButton @click="switchUser">切换用户</ElButton>
       </nav>
     </header>
@@ -277,12 +369,15 @@ onMounted(loadDashboard)
             <div v-if="productProcesses(product.id).length" class="process-list">
               <div
                 v-for="process in productProcesses(product.id)"
-                :key="process.id"
+                :key="process.processName"
                 class="process-row"
               >
                 <div>
                   <strong>{{ process.sequenceNo }}. {{ process.processName }}</strong>
-                  <span>{{ process.requiresQc ? '需要 QC' : '无需 QC' }}</span>
+                  <span>
+                    {{ process.requiresCleaning ? '需要清洗' : '无需清洗' }} ·
+                    {{ process.requiresQc ? '需要 QC' : '无需 QC' }}
+                  </span>
                 </div>
                 <div class="process-actions">
                   <em>可开单 {{ process.availableQuantity }}</em>
@@ -325,10 +420,14 @@ onMounted(loadDashboard)
               <ElTag :type="item.status === 'closed' ? 'success' : 'warning'">
                 {{
                   item.status === 'closed'
-                    ? '已结单'
-                    : item.pendingQcQuantity > 0
-                      ? `${item.processName}质检中`
-                      : `${item.processName}加工中`
+                  ? '已结单'
+                  : item.pendingQcQuantity > 0
+                    ? `${item.processName}质检中`
+                    : item.cleaningQuantity > 0
+                      ? `${item.processName}清洗中`
+                      : item.cleanedReadyQuantity > 0
+                        ? `${item.processName}清洗完成`
+                        : `${item.processName}加工中`
                 }}
               </ElTag>
             </div>
@@ -336,6 +435,8 @@ onMounted(loadDashboard)
             <div class="metrics">
               <div><span>领料数</span><strong>{{ item.issuedQuantity }}</strong></div>
               <div><span>加工中</span><strong>{{ item.processingQuantity }}</strong></div>
+              <div><span>清洗中</span><strong>{{ item.cleaningQuantity }}</strong></div>
+              <div><span>清洗完成</span><strong>{{ item.cleanedReadyQuantity }}</strong></div>
               <div><span>质检中</span><strong>{{ item.pendingQcQuantity }}</strong></div>
               <div><span>累计 OK</span><strong>{{ item.okQuantity }}</strong></div>
               <div><span>累计返修</span><strong>{{ item.reworkQuantity }}</strong></div>
@@ -347,11 +448,22 @@ onMounted(loadDashboard)
 
             <div v-if="item.status === 'open'" class="order-actions">
               <ElButton
+                v-if="item.requiresCleaning"
+                v-permission="'task:complete'"
+                type="primary"
+                plain
+                size="small"
+                :disabled="item.processingQuantity <= 0"
+                @click="openCleaning(item)"
+              >
+                送去清洗
+              </ElButton>
+              <ElButton
                 v-if="item.requiresQc"
                 v-permission="'task:complete'"
                 type="primary"
                 size="small"
-                :disabled="item.processingQuantity <= 0"
+                :disabled="(item.requiresCleaning ? item.cleanedReadyQuantity : item.processingQuantity) <= 0"
                 @click="openSubmission(item)"
               >
                 送 QC
@@ -361,11 +473,31 @@ onMounted(loadDashboard)
                 v-permission="'task:complete'"
                 type="primary"
                 size="small"
-                :disabled="item.processingQuantity <= 0"
+                :disabled="(item.requiresCleaning ? item.cleanedReadyQuantity : item.processingQuantity) <= 0"
                 @click="openDirectReport(item)"
               >
                 直接报工
               </ElButton>
+            </div>
+
+            <div v-if="item.cleaningBatches.length" class="batch-list">
+              <div
+                v-for="batch in item.cleaningBatches"
+                :key="`cleaning-${batch.id}`"
+                class="batch-row"
+              >
+                <span>第 {{ batch.batchNo }} 批清洗 · {{ batch.quantity }} · {{ batch.sentAt }}</span>
+                <ElButton
+                  v-if="batch.status === 'cleaning'"
+                  v-permission="'task:complete'"
+                  size="small"
+                  type="success"
+                  @click="completeCleaning(batch.id)"
+                >
+                  清洗完成
+                </ElButton>
+                <span v-else>已完成 · {{ batch.completedAt }}</span>
+              </div>
             </div>
 
             <div v-if="item.batches.length" class="batch-list">
@@ -391,15 +523,36 @@ onMounted(loadDashboard)
       </section>
     </div>
 
-    <ElDialog v-model="configDialogVisible" title="配置磨房工艺" width="620px">
+    <ElDialog v-model="configDialogVisible" title="配置磨房工艺" width="820px">
       <div class="form-stack">
+        <div class="preset-picker">
+          <ElSelect v-model="selectedPresetId" clearable placeholder="选择工艺预设">
+            <ElOption
+              v-for="preset in presets.filter((item) => item.active)"
+              :key="preset.id"
+              :label="preset.presetName"
+              :value="preset.id"
+            />
+          </ElSelect>
+          <ElButton :disabled="!selectedPresetId" @click="applyPreset">应用预设</ElButton>
+        </div>
         <div v-for="(step, index) in processSteps" :key="index" class="config-row">
           <span>{{ index + 1 }}</span>
           <ElInput v-model="step.processName" placeholder="工艺名称" />
-          <ElSelect v-model="step.requiresQc">
-            <ElOption label="需要 QC" :value="true" />
-            <ElOption label="无需 QC" :value="false" />
-          </ElSelect>
+          <div class="config-choice">
+            <label>是否清洗</label>
+            <ElRadioGroup v-model="step.requiresCleaning">
+              <ElRadio :value="true">是</ElRadio>
+              <ElRadio :value="false">否</ElRadio>
+            </ElRadioGroup>
+          </div>
+          <div class="config-choice">
+            <label>是否 QC</label>
+            <ElRadioGroup v-model="step.requiresQc">
+              <ElRadio :value="true">是</ElRadio>
+              <ElRadio :value="false">否</ElRadio>
+            </ElRadioGroup>
+          </div>
           <ElButton type="danger" text @click="removeProcessStep(index)">删除</ElButton>
         </div>
         <ElButton @click="addProcessStep">添加工艺</ElButton>
@@ -451,15 +604,34 @@ onMounted(loadDashboard)
     </ElDialog>
 
     <ElDialog v-model="submissionDialogVisible" title="送 QC" width="440px">
-      <p>当前加工中：{{ activeWorkOrder?.processingQuantity }}</p>
+      <p>
+        当前可送检：{{ activeWorkOrder?.requiresCleaning
+          ? activeWorkOrder?.cleanedReadyQuantity
+          : activeWorkOrder?.processingQuantity }}
+      </p>
       <ElInputNumber
         v-model="submissionQuantity"
         :min="1"
-        :max="activeWorkOrder?.processingQuantity || 1"
+        :max="(activeWorkOrder?.requiresCleaning
+          ? activeWorkOrder?.cleanedReadyQuantity
+          : activeWorkOrder?.processingQuantity) || 1"
       />
       <template #footer>
         <ElButton @click="submissionDialogVisible = false">取消</ElButton>
         <ElButton type="primary" @click="submitToQc">确认送检</ElButton>
+      </template>
+    </ElDialog>
+
+    <ElDialog v-model="cleaningDialogVisible" title="送去清洗" width="440px">
+      <p>当前加工中：{{ activeWorkOrder?.processingQuantity }}</p>
+      <ElInputNumber
+        v-model="cleaningQuantity"
+        :min="1"
+        :max="activeWorkOrder?.processingQuantity || 1"
+      />
+      <template #footer>
+        <ElButton @click="cleaningDialogVisible = false">取消</ElButton>
+        <ElButton type="primary" @click="submitCleaning">确认送洗</ElButton>
       </template>
     </ElDialog>
 
@@ -478,10 +650,68 @@ onMounted(loadDashboard)
           <ElInput v-model="directForm.reason" type="textarea" />
         </ElFormItem>
       </ElForm>
-      <p>本次合计：{{ directTotal }} / 当前加工中：{{ activeWorkOrder?.processingQuantity }}</p>
+      <p>
+        本次合计：{{ directTotal }} / 当前可报工：{{ activeWorkOrder?.requiresCleaning
+          ? activeWorkOrder?.cleanedReadyQuantity
+          : activeWorkOrder?.processingQuantity }}
+      </p>
       <template #footer>
         <ElButton @click="directDialogVisible = false">取消</ElButton>
         <ElButton type="primary" @click="submitDirectReport">提交报工</ElButton>
+      </template>
+    </ElDialog>
+
+    <ElDialog v-model="presetDialogVisible" title="磨房工艺预设" width="820px">
+      <div class="preset-list">
+        <div v-for="preset in presets" :key="preset.id" class="preset-row">
+          <span>{{ preset.presetName }} · {{ preset.processFlow.join(' → ') }}</span>
+          <div>
+            <ElTag :type="preset.active ? 'success' : 'info'">
+              {{ preset.active ? '启用' : '停用' }}
+            </ElTag>
+            <ElButton text @click="editPreset(preset.id)">编辑</ElButton>
+          </div>
+        </div>
+      </div>
+      <ElDivider />
+      <ElForm label-position="top">
+        <ElFormItem label="预设名称" required>
+          <ElInput v-model="presetName" />
+        </ElFormItem>
+        <ElFormItem label="状态">
+          <ElSwitch v-model="presetActive" active-text="启用" inactive-text="停用" />
+        </ElFormItem>
+      </ElForm>
+      <div class="form-stack">
+        <div v-for="(step, index) in presetSteps" :key="index" class="config-row">
+          <span>{{ index + 1 }}</span>
+          <ElInput v-model="step.processName" placeholder="工艺名称" />
+          <div class="config-choice">
+            <label>是否清洗</label>
+            <ElRadioGroup v-model="step.requiresCleaning">
+              <ElRadio :value="true">是</ElRadio>
+              <ElRadio :value="false">否</ElRadio>
+            </ElRadioGroup>
+          </div>
+          <div class="config-choice">
+            <label>是否 QC</label>
+            <ElRadioGroup v-model="step.requiresQc">
+              <ElRadio :value="true">是</ElRadio>
+              <ElRadio :value="false">否</ElRadio>
+            </ElRadioGroup>
+          </div>
+          <ElButton type="danger" text @click="presetSteps.splice(index, 1)">删除</ElButton>
+        </div>
+        <ElButton
+          @click="presetSteps.push({ processName: '', requiresCleaning: false, requiresQc: false })"
+        >
+          添加工艺
+        </ElButton>
+      </div>
+      <template #footer>
+        <ElButton @click="newPreset">新建预设</ElButton>
+        <ElButton @click="presetDialogVisible = false">关闭</ElButton>
+        <ElButton type="primary" @click="submitPreset">保存预设</ElButton>
       </template>
     </ElDialog>
   </main>
@@ -572,13 +802,32 @@ onMounted(loadDashboard)
   background: var(--erp-surface-muted);
 }
 .process-row > div:first-child { display: grid; gap: 4px; }
-.metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin: 14px 0; }
 .metrics div { padding: 9px; border-radius: 8px; background: var(--erp-surface-muted); }
 .metrics span { display: block; color: var(--erp-text-muted); font-size: 12px; }
 .metrics strong { display: block; margin-top: 3px; }
 .batch-list { margin-top: 12px; }
 .batch-row { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
-.config-row { display: grid; grid-template-columns: 30px minmax(0, 1fr) 140px auto; gap: 8px; align-items: center; }
+.config-row {
+  display: grid;
+  grid-template-columns: 30px minmax(160px, 1fr) 150px 150px auto;
+  gap: 12px;
+  align-items: center;
+}
+.config-choice { display: grid; gap: 6px; }
+.config-choice label { color: var(--erp-text-muted); font-size: 12px; }
+.preset-picker { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
+.preset-list { display: grid; gap: 8px; }
+.preset-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 10px 12px;
+  border: 1px solid var(--erp-border);
+  border-radius: 8px;
+}
+.preset-row > div { display: flex; gap: 8px; align-items: center; }
 
 @media (max-width: 900px) {
   .dashboard-header,

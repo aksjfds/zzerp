@@ -16,7 +16,9 @@
 | `POST /products` | `product:add` | 管理员创建订单产品和全局部门流程 |
 | `GET /work-orders/{department}` | `task:view` | 当前部门 |
 | 配置工艺、维护工人、开工单 | `task:assign` | 当前部门 |
+| 维护磨房工艺预设 | `task:assign` | 磨房主管或管理员 |
 | 送检、直接报工 | `task:complete` | 当前部门工单 |
+| 送洗、确认清洗完成 | `task:complete` | 磨房工单 |
 | `GET /qc/submissions/pending` | `task:view` | 仅 QC 或管理员 |
 | 分配送检批次给 QC 工人 | `task:assign` | 仅 QC 或管理员 |
 | 提交 QC 结果 | `task:complete` | 仅 QC 或管理员 |

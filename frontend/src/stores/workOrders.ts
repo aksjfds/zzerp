@@ -2,24 +2,29 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   assignQcSubmission,
-  configureDepartmentProcesses,
+  completeCleaningSubmission,
+  configurePolishProcesses,
   createDepartmentWorker,
+  createCleaningSubmission,
   createDirectReport,
   createWorkOrder,
   createWorkOrderSubmission,
   inspectQcSubmission,
-  queryDepartmentProcesses,
+  queryPolishProcesses,
   queryDepartmentWorkers,
   queryDepartmentWorkOrders,
   queryPendingQcSubmissions,
+  queryPolishProcessPresets,
+  savePolishProcessPreset,
 } from '@/api/production'
 import type {
   CreateWorkOrderPayload,
   Department,
-  DepartmentProcessItem,
+  PolishProcessStep,
   DirectReportPayload,
   InspectionPayload,
   PendingQcBatch,
+  PolishProcessPreset,
   ProcessStepPayload,
   WorkerItem,
   WorkOrderItem,
@@ -27,16 +32,17 @@ import type {
 
 export const useWorkOrdersStore = defineStore('workOrders', () => {
   const loading = ref(false)
-  const processes = ref<DepartmentProcessItem[]>([])
+  const processes = ref<PolishProcessStep[]>([])
   const workers = ref<WorkerItem[]>([])
   const workOrders = ref<WorkOrderItem[]>([])
   const pendingQc = ref<PendingQcBatch[]>([])
+  const presets = ref<PolishProcessPreset[]>([])
 
   async function loadDepartment(department: Department) {
     loading.value = true
     try {
       const [processList, workerList, orderList] = await Promise.all([
-        queryDepartmentProcesses(department),
+        queryPolishProcesses(department),
         queryDepartmentWorkers(department),
         queryDepartmentWorkOrders(department),
       ])
@@ -52,8 +58,9 @@ export const useWorkOrdersStore = defineStore('workOrders', () => {
     department: Department,
     productId: number,
     steps: ProcessStepPayload[],
+    presetId?: number,
   ) {
-    await configureDepartmentProcesses(department, productId, steps)
+    await configurePolishProcesses(department, productId, steps, presetId)
     await loadDepartment(department)
   }
 
@@ -101,6 +108,30 @@ export const useWorkOrdersStore = defineStore('workOrders', () => {
     await loadPendingQc()
   }
 
+  async function loadPresets() {
+    presets.value = await queryPolishProcessPresets()
+  }
+
+  async function savePreset(
+    presetName: string,
+    steps: ProcessStepPayload[],
+    active: boolean,
+    presetId?: number,
+  ) {
+    await savePolishProcessPreset(presetName, steps, active, presetId)
+    await loadPresets()
+  }
+
+  async function submitToCleaning(department: Department, workOrderId: number, quantity: number) {
+    await createCleaningSubmission(workOrderId, quantity)
+    await loadDepartment(department)
+  }
+
+  async function completeCleaning(department: Department, cleaningBatchId: number) {
+    await completeCleaningSubmission(cleaningBatchId)
+    await loadDepartment(department)
+  }
+
   return {
     addWorker,
     addWorkOrder,
@@ -111,8 +142,13 @@ export const useWorkOrdersStore = defineStore('workOrders', () => {
     loadPendingQc,
     loading,
     pendingQc,
+    presets,
     processes,
     reportDirect,
+    loadPresets,
+    savePreset,
+    submitToCleaning,
+    completeCleaning,
     submitToQc,
     workers,
     workOrders,

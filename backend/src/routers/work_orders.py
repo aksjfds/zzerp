@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException
 
-from models.production import DepartmentProcess, Procedure, WorkOrder, Worker
+from models.production import PolishProcess, PolishProcessPreset, Procedure, WorkOrder, Worker
 from schemas.production import (
     ConfigureProcessesPayload,
     CreateProcedurePayload,
@@ -8,6 +8,7 @@ from schemas.production import (
     CreateWorkerPayload,
     CreateWorkOrderPayload,
     DirectReportPayload,
+    SavePolishProcessPresetPayload,
 )
 from security import ensure_department_access, require_any_permission
 
@@ -83,7 +84,7 @@ def list_processes(
 ):
     resolved_department = department.strip()
     ensure_department_access(user, resolved_department)
-    return {"data": DepartmentProcess.list_by_department(resolved_department)}
+    return {"data": PolishProcess.list_by_department(resolved_department)}
 
 
 @router.post("/{department}/processes")
@@ -95,10 +96,11 @@ def configure_processes(
     resolved_department = department.strip()
     ensure_department_access(user, resolved_department)
     try:
-        data = DepartmentProcess.configure(
+        data = PolishProcess.configure(
             product_id=payload.product_id,
             department=resolved_department,
             steps=[step.model_dump() for step in payload.steps],
+            preset_id=payload.preset_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -113,12 +115,95 @@ def create_work_order(
     try:
         data = WorkOrder.create(
             product_id=payload.product_id,
-            process_id=payload.process_id,
+            department=payload.department.strip(),
+            process_name=_normalize_required(payload.process_name, "工艺名称"),
             worker_id=payload.worker_id,
             issued_quantity=payload.quantity,
             created_by=user["id"],
             allowed_department=user["department"],
             note=payload.note.strip() if payload.note and payload.note.strip() else None,
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"data": data}
+
+
+@router.get("/polish/presets")
+def list_polish_presets(
+    user: dict = Depends(require_any_permission("task:view")),
+):
+    ensure_department_access(user, "polish")
+    return {"data": PolishProcessPreset.list_all()}
+
+
+@router.post("/polish/presets")
+def create_polish_preset(
+    payload: SavePolishProcessPresetPayload,
+    user: dict = Depends(require_any_permission("task:assign", csrf=True)),
+):
+    ensure_department_access(user, "polish")
+    try:
+        data = PolishProcessPreset.save(
+            preset_name=payload.preset_name,
+            steps=[step.model_dump() for step in payload.steps],
+            active=payload.active,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"data": data}
+
+
+@router.put("/polish/presets/{preset_id}")
+def update_polish_preset(
+    preset_id: int,
+    payload: SavePolishProcessPresetPayload,
+    user: dict = Depends(require_any_permission("task:assign", csrf=True)),
+):
+    ensure_department_access(user, "polish")
+    try:
+        data = PolishProcessPreset.save(
+            preset_id=preset_id,
+            preset_name=payload.preset_name,
+            steps=[step.model_dump() for step in payload.steps],
+            active=payload.active,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"data": data}
+
+
+@router.post("/{work_order_id}/cleaning-submissions")
+def create_cleaning_submission(
+    work_order_id: int,
+    payload: CreateSubmissionPayload,
+    user: dict = Depends(require_any_permission("task:complete", csrf=True)),
+):
+    try:
+        data = WorkOrder.create_cleaning_submission(
+            work_order_id=work_order_id,
+            quantity=payload.quantity,
+            sent_by=user["id"],
+            allowed_department=user["department"],
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"data": data}
+
+
+@router.post("/cleaning-submissions/{cleaning_batch_id}/complete")
+def complete_cleaning_submission(
+    cleaning_batch_id: int,
+    user: dict = Depends(require_any_permission("task:complete", csrf=True)),
+):
+    try:
+        data = WorkOrder.complete_cleaning_submission(
+            cleaning_batch_id=cleaning_batch_id,
+            completed_by=user["id"],
+            allowed_department=user["department"],
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc

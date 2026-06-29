@@ -10,6 +10,7 @@ from sqlalchemy import (
     TIMESTAMP,
     text,
 )
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base, SessionLocal
@@ -201,26 +202,27 @@ class Product(Base):
                 .one_or_none()
             )
             current_quantity = repository.quantity if repository else 0
-            processes = (
-                session.query(DepartmentProcess)
-                .filter(
-                    DepartmentProcess.product_id == product_id,
-                    DepartmentProcess.department == department,
-                )
-                .order_by(DepartmentProcess.sequence_no.asc())
-                .all()
-            )
+            route = session.query(PolishProcess).filter(
+                PolishProcess.product_id == product_id,
+            ).one_or_none() if department == "polish" else None
+            processes = PolishProcess.parse_flow(route.process_flow) if route else []
 
             process_items = []
-            for process in processes:
+            for index, process in enumerate(processes, start=1):
                 work_orders = (
                     session.query(WorkOrder)
-                    .filter(WorkOrder.process_id == process.id)
+                    .filter(
+                        WorkOrder.product_id == product_id,
+                        WorkOrder.department == department,
+                        WorkOrder.process_name == process["processName"],
+                    )
                     .all()
                 )
                 issued_quantity = sum(item.issued_quantity for item in work_orders)
                 processing_quantity = 0
                 pending_qc_quantity = 0
+                cleaning_quantity = 0
+                cleaned_ready_quantity = 0
                 ok_quantity = 0
                 rework_quantity = 0
                 scrap_quantity = 0
@@ -229,7 +231,22 @@ class Product(Base):
                 for item in work_orders:
                     batches = WorkOrder._batches(session, item.id)
                     totals = WorkOrder._totals(batches)
-                    processing_quantity += WorkOrder._processing_quantity(item, batches)
+                    processing_quantity += WorkOrder._processing_quantity(item, batches, session)
+                    cleaning_batches = WorkOrder._cleaning_batches(session, item.id)
+                    cleaning_quantity += sum(
+                        cleaning.quantity
+                        for cleaning in cleaning_batches
+                        if cleaning.status == "cleaning"
+                    )
+                    if process["requiresCleaning"]:
+                        cleaned_ready_quantity += max(
+                            0,
+                            sum(
+                                cleaning.quantity
+                                for cleaning in cleaning_batches
+                                if cleaning.status == "completed"
+                            ) - totals["submittedQuantity"],
+                        )
                     pending_qc_quantity += totals["pendingQcQuantity"]
                     ok_quantity += totals["okQuantity"]
                     rework_quantity += totals["reworkQuantity"]
@@ -243,13 +260,20 @@ class Product(Base):
                 )
                 process_items.append(
                     {
-                        "id": process.id,
-                        "sequenceNo": process.sequence_no,
-                        "processName": process.process_name,
-                        "requiresQc": process.requires_qc,
-                        "waitingQuantity": process.available_quantity,
+                        "id": index,
+                        "sequenceNo": index,
+                        "processName": process["processName"],
+                        "requiresCleaning": process["requiresCleaning"],
+                        "requiresQc": process["requiresQc"],
+                        "waitingQuantity": WorkOrder._available_for_process_in_session(
+                            session,
+                            route,
+                            process["processName"],
+                        ),
                         "issuedQuantity": issued_quantity,
                         "processingQuantity": processing_quantity,
+                        "cleaningQuantity": cleaning_quantity,
+                        "cleanedReadyQuantity": cleaned_ready_quantity,
                         "pendingQcQuantity": pending_qc_quantity,
                         "okQuantity": ok_quantity,
                         "reworkQuantity": rework_quantity,
@@ -402,20 +426,90 @@ class Worker(Base):
             return cls.serialize(worker)
 
 
-class DepartmentProcess(Base):
-    __tablename__ = "department_process"
+class PolishProcessPreset(Base):
+    __tablename__ = "polish_process_preset"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    preset_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    process_flow: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+
+    @staticmethod
+    def serialize(item: "PolishProcessPreset") -> dict:
+        return {
+            "id": item.id,
+            "presetName": item.preset_name,
+            "processFlow": item.process_flow,
+            "steps": PolishProcess.parse_flow(item.process_flow),
+            "active": item.active,
+        }
+
+    @classmethod
+    def list_all(cls) -> list[dict]:
+        with SessionLocal() as session:
+            items = session.query(cls).order_by(cls.preset_name.asc()).all()
+            return [cls.serialize(item) for item in items]
+
+    @classmethod
+    def save(
+        cls,
+        preset_name: str,
+        steps: list[dict],
+        preset_id: int | None = None,
+        active: bool = True,
+    ) -> dict:
+        name = preset_name.strip()
+        if not name:
+            raise ValueError("预设名称不能为空")
+        process_flow = PolishProcess.encode_steps(steps)
+        with SessionLocal() as session:
+            duplicate = session.query(cls).filter(cls.preset_name == name)
+            if preset_id is not None:
+                duplicate = duplicate.filter(cls.id != preset_id)
+            if duplicate.first() is not None:
+                raise ValueError("预设名称已存在")
+            item = session.get(cls, preset_id) if preset_id else None
+            if preset_id and item is None:
+                raise ValueError("预设不存在")
+            if item is None:
+                item = cls(preset_name=name, process_flow=process_flow, active=active)
+                session.add(item)
+            else:
+                item.preset_name = name
+                item.process_flow = process_flow
+                item.active = active
+                item.updated_at = datetime.now()
+            session.commit()
+            session.refresh(item)
+            return cls.serialize(item)
+
+
+class PolishProcess(Base):
+    __tablename__ = "polish_process"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     product_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("product.id", ondelete="CASCADE"),
         nullable=False,
+        unique=True,
     )
-    department: Mapped[str] = mapped_column(Text, nullable=False)
-    sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
-    process_name: Mapped[str] = mapped_column(Text, nullable=False)
-    requires_qc: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
-    available_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    preset_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("polish_process_preset.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    process_flow: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,
         nullable=False,
@@ -423,27 +517,71 @@ class DepartmentProcess(Base):
     )
 
     @staticmethod
-    def serialize(item: "DepartmentProcess") -> dict:
+    def parse_token(token: str) -> dict:
+        parts = [part.strip() for part in token.split("-")]
+        if not parts or not parts[0]:
+            raise ValueError("工艺名称不能为空")
+        name = parts[0]
+        if name in {"清洗", "QC"}:
+            raise ValueError("清洗和 QC 不能作为独立工艺")
+        modifiers = parts[1:]
+        if modifiers not in ([], ["清洗"], ["QC"], ["清洗", "QC"]):
+            raise ValueError("工艺附加流程只允许按 清洗、QC 顺序配置")
         return {
-            "id": item.id,
-            "productId": item.product_id,
-            "department": item.department,
-            "sequenceNo": item.sequence_no,
-            "processName": item.process_name,
-            "requiresQc": item.requires_qc,
-            "availableQuantity": item.available_quantity,
+            "processName": name,
+            "requiresCleaning": "清洗" in modifiers,
+            "requiresQc": "QC" in modifiers,
         }
 
     @classmethod
+    def parse_flow(cls, process_flow: list[str]) -> list[dict]:
+        steps = [cls.parse_token(token) for token in process_flow]
+        names = [step["processName"] for step in steps]
+        if not steps:
+            raise ValueError("至少需要一道磨房工艺")
+        if len(set(names)) != len(names):
+            raise ValueError("同一路线不能包含重复工艺")
+        return steps
+
+    @classmethod
+    def encode_steps(cls, steps: list[dict]) -> list[str]:
+        process_flow = []
+        for step in steps:
+            name = str(step["process_name"]).strip()
+            if not name or "-" in name:
+                raise ValueError("工艺名称不能为空且不能包含 -")
+            token = name
+            if bool(step.get("requires_cleaning")):
+                token += "-清洗"
+            if bool(step.get("requires_qc")):
+                token += "-QC"
+            process_flow.append(token)
+        cls.parse_flow(process_flow)
+        return process_flow
+
+    @classmethod
     def list_by_department(cls, department: str) -> list[dict]:
+        if department != "polish":
+            return []
         with SessionLocal() as session:
-            items = (
-                session.query(cls)
-                .filter(cls.department == department)
-                .order_by(cls.product_id.asc(), cls.sequence_no.asc())
-                .all()
-            )
-            return [cls.serialize(item) for item in items]
+            routes = session.query(cls).order_by(cls.product_id.asc()).all()
+            result = []
+            for route in routes:
+                for index, step in enumerate(cls.parse_flow(route.process_flow), start=1):
+                    result.append(
+                        {
+                            "productId": route.product_id,
+                            "department": "polish",
+                            "sequenceNo": index,
+                            **step,
+                            "availableQuantity": WorkOrder._available_for_process_in_session(
+                                session,
+                                route,
+                                step["processName"],
+                            ),
+                        }
+                    )
+            return result
 
     @classmethod
     def configure(
@@ -451,76 +589,39 @@ class DepartmentProcess(Base):
         product_id: int,
         department: str,
         steps: list[dict],
+        preset_id: int | None = None,
     ) -> list[dict]:
-        if not steps:
-            raise ValueError("至少需要配置一道部门工艺")
-
+        if department != "polish":
+            raise ValueError("当前只支持配置磨房工艺")
+        process_flow = cls.encode_steps(steps)
         with SessionLocal() as session:
             product = session.get(Product, product_id)
             if product is None:
                 raise ValueError("产品不存在")
-
-            belongs_to_route = (
-                session.query(ProductDepartmentStep)
-                .filter(
-                    ProductDepartmentStep.product_id == product_id,
-                    ProductDepartmentStep.department == department,
-                )
-                .first()
-            )
+            belongs_to_route = session.query(ProductDepartmentStep).filter(
+                ProductDepartmentStep.product_id == product_id,
+                ProductDepartmentStep.department == "polish",
+            ).first()
             if belongs_to_route is None:
-                raise ValueError("产品的部门流程不包含当前部门")
-
-            existing_processes = session.query(cls).filter(
-                cls.product_id == product_id,
-                cls.department == department,
-            )
-            existing_ids = [item.id for item in existing_processes.all()]
-            if existing_ids:
-                has_work_orders = (
-                    session.query(WorkOrder)
-                    .filter(WorkOrder.process_id.in_(existing_ids))
-                    .first()
-                )
-                if has_work_orders is not None:
-                    raise ValueError("已有工单，不能修改部门工艺")
-                existing_processes.delete(synchronize_session=False)
-
-            repository = (
-                session.query(Repository)
-                .filter(
-                    Repository.product_id == product_id,
-                    Repository.department == department,
-                )
-                .one_or_none()
-            )
-            available = repository.quantity if repository is not None else 0
-
-            created = []
-            names: set[str] = set()
-            for index, step in enumerate(steps, start=1):
-                process_name = str(step["process_name"]).strip()
-                if not process_name:
-                    raise ValueError("工艺名称不能为空")
-                if process_name in names:
-                    raise ValueError("同一部门不能配置重复工艺")
-                names.add(process_name)
-
-                item = cls(
-                    product_id=product_id,
-                    department=department,
-                    sequence_no=index,
-                    process_name=process_name,
-                    requires_qc=bool(step["requires_qc"]),
-                    available_quantity=available if index == 1 else 0,
-                )
-                session.add(item)
-                created.append(item)
-
+                raise ValueError("产品流程不包含磨房")
+            if session.query(WorkOrder).filter(
+                WorkOrder.product_id == product_id,
+                WorkOrder.department == "polish",
+            ).first() is not None:
+                raise ValueError("已有工单，不能修改磨房工艺")
+            if preset_id is not None:
+                preset = session.get(PolishProcessPreset, preset_id)
+                if preset is None or not preset.active:
+                    raise ValueError("预设不存在或已停用")
+            route = session.query(cls).filter(cls.product_id == product_id).one_or_none()
+            if route is None:
+                route = cls(product_id=product_id, preset_id=preset_id, process_flow=process_flow)
+                session.add(route)
+            else:
+                route.preset_id = preset_id
+                route.process_flow = process_flow
             session.commit()
-            for item in created:
-                session.refresh(item)
-            return [cls.serialize(item) for item in created]
+        return cls.list_by_department("polish")
 
 
 class WorkOrder(Base):
@@ -529,11 +630,8 @@ class WorkOrder(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     work_order_no: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("product.id"), nullable=False)
-    process_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("department_process.id"),
-        nullable=False,
-    )
+    department: Mapped[str] = mapped_column(Text, nullable=False)
+    process_name: Mapped[str] = mapped_column(Text, nullable=False)
     worker_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("worker.id"), nullable=False)
     issued_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
@@ -571,7 +669,7 @@ class WorkOrder(Base):
     @classmethod
     def _serialize_in_session(cls, session, item: "WorkOrder") -> dict:
         product = session.get(Product, item.product_id)
-        process = session.get(DepartmentProcess, item.process_id)
+        process = cls._process_step_in_session(session, item)
         worker = session.get(Worker, item.worker_id)
         batches = (
             session.query(WorkOrderBatch)
@@ -581,9 +679,19 @@ class WorkOrder(Base):
         )
         totals = cls._totals(batches)
         processing = (
-            item.issued_quantity
-            + totals["reworkQuantity"]
-            - totals["submittedQuantity"]
+            cls._processing_quantity(item, batches, session)
+        )
+        cleaning_batches = cls._cleaning_batches(session, item.id)
+        cleaning_quantity = sum(
+            batch.quantity for batch in cleaning_batches if batch.status == "cleaning"
+        )
+        cleaned_quantity = sum(
+            batch.quantity for batch in cleaning_batches if batch.status == "completed"
+        )
+        cleaned_ready_quantity = (
+            cleaned_quantity - totals["submittedQuantity"]
+            if process["requiresCleaning"]
+            else 0
         )
         return {
             "id": item.id,
@@ -592,14 +700,16 @@ class WorkOrder(Base):
             "orderId": product.order_id,
             "zzCode": product.zz_code,
             "productName": product.product_name,
-            "processId": item.process_id,
-            "processName": process.process_name,
-            "department": process.department,
-            "requiresQc": process.requires_qc,
+            "processName": item.process_name,
+            "department": item.department,
+            "requiresCleaning": process["requiresCleaning"],
+            "requiresQc": process["requiresQc"],
             "workerId": item.worker_id,
             "workerName": worker.name,
             "issuedQuantity": item.issued_quantity,
             "processingQuantity": processing,
+            "cleaningQuantity": cleaning_quantity,
+            "cleanedReadyQuantity": max(0, cleaned_ready_quantity),
             "status": item.status,
             "note": item.note,
             "createdAt": item.created_at.strftime("%Y-%m-%d %H:%M"),
@@ -610,6 +720,9 @@ class WorkOrder(Base):
             ),
             "batches": [
                 cls._serialize_batch_in_session(session, batch) for batch in batches
+            ],
+            "cleaningBatches": [
+                PolishCleaningBatch.serialize(batch) for batch in cleaning_batches
             ],
             **totals,
         }
@@ -629,18 +742,96 @@ class WorkOrder(Base):
         with SessionLocal() as session:
             items = (
                 session.query(cls)
-                .join(DepartmentProcess, DepartmentProcess.id == cls.process_id)
-                .filter(DepartmentProcess.department == department)
+                .filter(cls.department == department)
                 .order_by(cls.created_at.desc(), cls.id.desc())
                 .all()
             )
             return [cls._serialize_in_session(session, item) for item in items]
 
     @classmethod
+    def _route_in_session(cls, session, product_id: int) -> PolishProcess:
+        route = session.query(PolishProcess).filter(
+            PolishProcess.product_id == product_id,
+        ).one_or_none()
+        if route is None:
+            raise ValueError("产品尚未配置磨房工艺")
+        return route
+
+    @classmethod
+    def _process_step_in_session(cls, session, item: "WorkOrder") -> dict:
+        route = cls._route_in_session(session, item.product_id)
+        step = next(
+            (
+                current
+                for current in PolishProcess.parse_flow(route.process_flow)
+                if current["processName"] == item.process_name
+            ),
+            None,
+        )
+        if step is None:
+            raise ValueError("工单对应的磨房工艺不存在")
+        return step
+
+    @classmethod
+    def _process_ok_in_session(cls, session, product_id: int, process_name: str) -> int:
+        items = session.query(cls).filter(
+            cls.product_id == product_id,
+            cls.department == "polish",
+            cls.process_name == process_name,
+        ).all()
+        return sum(
+            cls._totals(cls._batches(session, item.id))["okQuantity"]
+            for item in items
+        )
+
+    @classmethod
+    def _available_for_process_in_session(
+        cls,
+        session,
+        route: PolishProcess,
+        process_name: str,
+    ) -> int:
+        steps = PolishProcess.parse_flow(route.process_flow)
+        names = [step["processName"] for step in steps]
+        if process_name not in names:
+            raise ValueError("产品工艺不存在")
+        index = names.index(process_name)
+        if index == 0:
+            input_quantity = sum(
+                record.quantity
+                for record in session.query(Record).filter(
+                    Record.product_id == route.product_id,
+                    Record.to_repository == "polish",
+                ).all()
+            )
+        else:
+            input_quantity = cls._process_ok_in_session(
+                session,
+                route.product_id,
+                names[index - 1],
+            )
+        issued = sum(
+            item.issued_quantity
+            for item in session.query(cls).filter(
+                cls.product_id == route.product_id,
+                cls.department == "polish",
+                cls.process_name == process_name,
+            ).all()
+        )
+        return max(0, input_quantity - issued)
+
+    @staticmethod
+    def _cleaning_batches(session, work_order_id: int) -> list["PolishCleaningBatch"]:
+        return session.query(PolishCleaningBatch).filter(
+            PolishCleaningBatch.work_order_id == work_order_id,
+        ).order_by(PolishCleaningBatch.batch_no.asc()).all()
+
+    @classmethod
     def create(
         cls,
         product_id: int,
-        process_id: int,
+        department: str,
+        process_name: str,
         worker_id: int,
         issued_quantity: int,
         created_by: int,
@@ -651,28 +842,41 @@ class WorkOrder(Base):
             raise ValueError("领取数量必须大于 0")
 
         with SessionLocal() as session:
-            process = (
-                session.query(DepartmentProcess)
-                .filter(DepartmentProcess.id == process_id)
+            if department != "polish":
+                raise ValueError("当前只支持磨房工单")
+            route = (
+                session.query(PolishProcess)
+                .filter(PolishProcess.product_id == product_id)
                 .with_for_update()
                 .one_or_none()
             )
-            if process is None or process.product_id != product_id:
+            if route is None:
                 raise ValueError("产品工艺不存在")
-            cls._ensure_department(process.department, allowed_department)
-            if process.available_quantity < issued_quantity:
+            cls._ensure_department(department, allowed_department)
+            process = next(
+                (
+                    step
+                    for step in PolishProcess.parse_flow(route.process_flow)
+                    if step["processName"] == process_name
+                ),
+                None,
+            )
+            if process is None:
+                raise ValueError("产品工艺不存在")
+            available = cls._available_for_process_in_session(session, route, process_name)
+            if available < issued_quantity:
                 raise ValueError("领取数量超过当前工艺可开单数量")
 
             worker = session.get(Worker, worker_id)
             if worker is None or not worker.active:
                 raise ValueError("工人不存在或已停用")
-            if worker.department != process.department:
+            if worker.department != department:
                 raise ValueError("工人与工艺部门不一致")
 
-            process.available_quantity -= issued_quantity
             item = cls(
                 product_id=product_id,
-                process_id=process_id,
+                department=department,
+                process_name=process_name,
                 worker_id=worker_id,
                 issued_quantity=issued_quantity,
                 created_by=created_by,
@@ -705,17 +909,17 @@ class WorkOrder(Base):
             )
             if item is None:
                 raise ValueError("工单不存在")
-            process = session.get(DepartmentProcess, item.process_id)
-            cls._ensure_department(process.department, allowed_department)
+            process = cls._process_step_in_session(session, item)
+            cls._ensure_department(item.department, allowed_department)
             if item.status != "open":
                 raise ValueError("工单已经结单")
-            if not process.requires_qc:
+            if not process["requiresQc"]:
                 raise ValueError("当前工艺不需要 QC")
 
             batches = cls._batches(session, item.id)
-            processing = cls._processing_quantity(item, batches)
-            if quantity > processing:
-                raise ValueError("送检数量超过当前加工中数量")
+            available = cls._downstream_ready_quantity(session, item, process, batches)
+            if quantity > available:
+                raise ValueError("送检数量超过当前可送检数量")
 
             batch = WorkOrderBatch(
                 work_order_id=item.id,
@@ -753,16 +957,17 @@ class WorkOrder(Base):
             )
             if item is None:
                 raise ValueError("工单不存在")
-            process = session.get(DepartmentProcess, item.process_id)
-            cls._ensure_department(process.department, allowed_department)
+            process = cls._process_step_in_session(session, item)
+            cls._ensure_department(item.department, allowed_department)
             if item.status != "open":
                 raise ValueError("工单已经结单")
-            if process.requires_qc:
+            if process["requiresQc"]:
                 raise ValueError("当前工艺必须由 QC 录入结果")
 
             batches = cls._batches(session, item.id)
-            if submitted_quantity > cls._processing_quantity(item, batches):
-                raise ValueError("报工数量超过当前加工中数量")
+            available = cls._downstream_ready_quantity(session, item, process, batches)
+            if submitted_quantity > available:
+                raise ValueError("报工数量超过当前可报工数量")
 
             batch = WorkOrderBatch(
                 work_order_id=item.id,
@@ -836,7 +1041,7 @@ class WorkOrder(Base):
                 .with_for_update()
                 .one()
             )
-            process = session.get(DepartmentProcess, item.process_id)
+            process = cls._process_step_in_session(session, item)
 
             batch.ok_quantity = ok_quantity
             batch.rework_quantity = rework_quantity
@@ -901,7 +1106,6 @@ class WorkOrder(Base):
             result = []
             for batch in batches:
                 item = session.get(cls, batch.work_order_id)
-                process = session.get(DepartmentProcess, item.process_id)
                 product = session.get(Product, item.product_id)
                 worker = session.get(Worker, item.worker_id)
                 data = cls._serialize_batch_in_session(session, batch)
@@ -911,8 +1115,8 @@ class WorkOrder(Base):
                         "orderId": product.order_id,
                         "zzCode": product.zz_code,
                         "productName": product.product_name,
-                        "ownerDepartment": process.department,
-                        "processName": process.process_name,
+                        "ownerDepartment": item.department,
+                        "processName": item.process_name,
                         "workerName": worker.name,
                     }
                 )
@@ -938,8 +1142,16 @@ class WorkOrder(Base):
         cls,
         item: "WorkOrder",
         batches: list["WorkOrderBatch"],
+        session=None,
     ) -> int:
         totals = cls._totals(batches)
+        if session is not None:
+            process = cls._process_step_in_session(session, item)
+            if process["requiresCleaning"]:
+                sent_cleaning = sum(
+                    batch.quantity for batch in cls._cleaning_batches(session, item.id)
+                )
+                return item.issued_quantity + totals["reworkQuantity"] - sent_cleaning
         return (
             item.issued_quantity
             + totals["reworkQuantity"]
@@ -947,10 +1159,91 @@ class WorkOrder(Base):
         )
 
     @classmethod
+    def _downstream_ready_quantity(
+        cls,
+        session,
+        item: "WorkOrder",
+        process: dict,
+        batches: list["WorkOrderBatch"],
+    ) -> int:
+        if not process["requiresCleaning"]:
+            return cls._processing_quantity(item, batches, session)
+        cleaned = sum(
+            batch.quantity
+            for batch in cls._cleaning_batches(session, item.id)
+            if batch.status == "completed"
+        )
+        return max(0, cleaned - cls._totals(batches)["submittedQuantity"])
+
+    @classmethod
+    def create_cleaning_submission(
+        cls,
+        work_order_id: int,
+        quantity: int,
+        sent_by: int,
+        allowed_department: str,
+    ) -> dict:
+        if quantity <= 0:
+            raise ValueError("送洗数量必须大于 0")
+        with SessionLocal() as session:
+            item = session.query(cls).filter(cls.id == work_order_id).with_for_update().one_or_none()
+            if item is None:
+                raise ValueError("工单不存在")
+            cls._ensure_department(item.department, allowed_department)
+            process = cls._process_step_in_session(session, item)
+            if not process["requiresCleaning"]:
+                raise ValueError("当前工艺不需要清洗")
+            if item.status != "open":
+                raise ValueError("工单已经结单")
+            processing = cls._processing_quantity(item, cls._batches(session, item.id), session)
+            if quantity > processing:
+                raise ValueError("送洗数量超过当前加工中数量")
+            cleaning_batches = cls._cleaning_batches(session, item.id)
+            batch = PolishCleaningBatch(
+                work_order_id=item.id,
+                batch_no=len(cleaning_batches) + 1,
+                quantity=quantity,
+                status="cleaning",
+                sent_by=sent_by,
+            )
+            session.add(batch)
+            session.commit()
+            session.refresh(batch)
+            return PolishCleaningBatch.serialize(batch)
+
+    @classmethod
+    def complete_cleaning_submission(
+        cls,
+        cleaning_batch_id: int,
+        completed_by: int,
+        allowed_department: str,
+    ) -> dict:
+        with SessionLocal() as session:
+            batch = session.query(PolishCleaningBatch).filter(
+                PolishCleaningBatch.id == cleaning_batch_id,
+            ).with_for_update().one_or_none()
+            if batch is None:
+                raise ValueError("清洗批次不存在")
+            item = session.get(cls, batch.work_order_id)
+            cls._ensure_department(item.department, allowed_department)
+            if batch.status != "cleaning":
+                raise ValueError("该清洗批次已经完成")
+            batch.status = "completed"
+            batch.completed_by = completed_by
+            batch.completed_at = datetime.now()
+            session.commit()
+            session.refresh(batch)
+            return PolishCleaningBatch.serialize(batch)
+
+    @classmethod
     def _close_if_complete(cls, session, item: "WorkOrder") -> None:
         batches = cls._batches(session, item.id)
         totals = cls._totals(batches)
-        processing = cls._processing_quantity(item, batches)
+        processing = cls._processing_quantity(item, batches, session)
+        process = cls._process_step_in_session(session, item)
+        cleaning_batches = cls._cleaning_batches(session, item.id)
+        cleaning = sum(batch.quantity for batch in cleaning_batches if batch.status == "cleaning")
+        ready = cls._downstream_ready_quantity(session, item, process, batches)
         resolved = (
             totals["okQuantity"]
             + totals["scrapQuantity"]
@@ -958,6 +1251,8 @@ class WorkOrder(Base):
         )
         if (
             processing == 0
+            and cleaning == 0
+            and ready == 0
             and totals["pendingQcQuantity"] == 0
             and resolved == item.issued_quantity
         ):
@@ -969,7 +1264,7 @@ class WorkOrder(Base):
         cls,
         session,
         item: "WorkOrder",
-        process: DepartmentProcess,
+        process: dict,
         batch: "WorkOrderBatch",
     ) -> None:
         ok = batch.ok_quantity or 0
@@ -980,7 +1275,7 @@ class WorkOrder(Base):
             session.query(Repository)
             .filter(
                 Repository.product_id == item.product_id,
-                Repository.department == process.department,
+                Repository.department == item.department,
             )
             .with_for_update()
             .one_or_none()
@@ -992,19 +1287,12 @@ class WorkOrder(Base):
             raise ValueError("报废和遗失数量超过当前部门库存")
         repository.quantity -= scrap + lost
 
-        next_process = (
-            session.query(DepartmentProcess)
-            .filter(
-                DepartmentProcess.product_id == item.product_id,
-                DepartmentProcess.department == process.department,
-                DepartmentProcess.sequence_no > process.sequence_no,
-            )
-            .order_by(DepartmentProcess.sequence_no.asc())
-            .with_for_update()
-            .first()
-        )
-        if next_process is not None:
-            next_process.available_quantity += ok
+        route = cls._route_in_session(session, item.product_id)
+        process_names = [
+            step["processName"] for step in PolishProcess.parse_flow(route.process_flow)
+        ]
+        current_index = process_names.index(item.process_name)
+        if current_index + 1 < len(process_names):
             return
 
         if repository.quantity < ok:
@@ -1013,7 +1301,7 @@ class WorkOrder(Base):
         target_department = cls._next_global_department(
             session,
             item.product_id,
-            process.department,
+            item.department,
         )
         target = (
             session.query(Repository)
@@ -1033,27 +1321,14 @@ class WorkOrder(Base):
             session.add(target)
         target.quantity += ok
 
-        first_target_process = (
-            session.query(DepartmentProcess)
-            .filter(
-                DepartmentProcess.product_id == item.product_id,
-                DepartmentProcess.department == target_department,
-            )
-            .order_by(DepartmentProcess.sequence_no.asc())
-            .with_for_update()
-            .first()
-        )
-        if first_target_process is not None:
-            first_target_process.available_quantity += ok
-
         if ok > 0:
             session.add(
                 Record(
                     product_id=item.product_id,
-                    from_repository=process.department,
+                    from_repository=item.department,
                     to_repository=target_department,
                     quantity=ok,
-                    note=f"工单 {item.work_order_no} 完成 {process.process_name}",
+                    note=f"工单 {item.work_order_no} 完成 {item.process_name}",
                 )
             )
 
@@ -1075,6 +1350,48 @@ class WorkOrder(Base):
                     return steps[index + 1].department
                 return "out"
         raise ValueError("产品部门流程不包含当前部门")
+
+
+class PolishCleaningBatch(Base):
+    __tablename__ = "polish_cleaning_batch"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("work_order.id"),
+        nullable=False,
+    )
+    batch_no: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    sent_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    completed_by: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id"),
+        nullable=True,
+    )
+    completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+    @staticmethod
+    def serialize(batch: "PolishCleaningBatch") -> dict:
+        return {
+            "id": batch.id,
+            "workOrderId": batch.work_order_id,
+            "batchNo": batch.batch_no,
+            "quantity": batch.quantity,
+            "status": batch.status,
+            "sentAt": batch.sent_at.strftime("%Y-%m-%d %H:%M"),
+            "completedAt": (
+                batch.completed_at.strftime("%Y-%m-%d %H:%M")
+                if batch.completed_at
+                else None
+            ),
+        }
 
 
 class WorkOrderBatch(Base):

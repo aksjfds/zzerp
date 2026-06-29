@@ -14,17 +14,26 @@ class CreateProductPayload(BaseModel):
 
 class ProcessStepPayload(BaseModel):
     process_name: str = Field(min_length=1)
+    requires_cleaning: bool = False
     requires_qc: bool = False
 
 
 class ConfigureProcessesPayload(BaseModel):
     product_id: int = Field(gt=0)
+    preset_id: int | None = Field(default=None, gt=0)
     steps: list[ProcessStepPayload] = Field(min_length=1)
+
+
+class SavePolishProcessPresetPayload(BaseModel):
+    preset_name: str = Field(min_length=1)
+    steps: list[ProcessStepPayload] = Field(min_length=1)
+    active: bool = True
 
 
 class CreateWorkOrderPayload(BaseModel):
     product_id: int = Field(gt=0)
-    process_id: int = Field(gt=0)
+    department: str = Field(min_length=1)
+    process_name: str = Field(min_length=1)
     worker_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
     note: str | None = None

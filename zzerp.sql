@@ -42,7 +42,7 @@ CREATE TABLE product (
 );
 
 
--- 产品正式经过的部门顺序，例如 laser -> polish -> qc。
+-- 产品正式经过的部门顺序，例如 laser -> polish；QC 不是正式归属部门。
 CREATE TABLE product_department_step (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
@@ -62,18 +62,27 @@ CREATE TABLE repository (
 );
 
 
--- 一个订单产品在某部门内需要执行的有序工艺。
-CREATE TABLE department_process (
+-- 磨房主管维护的可复用工艺路线预设。
+CREATE TABLE polish_process_preset (
+    id BIGSERIAL PRIMARY KEY,
+    preset_name TEXT NOT NULL UNIQUE,
+    process_flow TEXT[] NOT NULL,
+    active BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    CHECK (cardinality(process_flow) > 0)
+);
+
+
+-- 每个产品只保存一条磨房工艺数组，数组位置代表工艺顺序。
+CREATE TABLE polish_process (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    department TEXT NOT NULL,
-    sequence_no INT NOT NULL CHECK (sequence_no > 0),
-    process_name TEXT NOT NULL,
-    requires_qc BOOLEAN NOT NULL DEFAULT FALSE,
-    available_quantity INT NOT NULL DEFAULT 0 CHECK (available_quantity >= 0),
+    preset_id BIGINT REFERENCES polish_process_preset(id) ON DELETE SET NULL,
+    process_flow TEXT[] NOT NULL,
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (product_id, department, sequence_no),
-    UNIQUE (product_id, department, process_name)
+    UNIQUE (product_id),
+    CHECK (cardinality(process_flow) > 0)
 );
 
 
@@ -82,7 +91,8 @@ CREATE TABLE work_order (
     id BIGSERIAL PRIMARY KEY,
     work_order_no TEXT UNIQUE,
     product_id BIGINT NOT NULL REFERENCES product(id),
-    process_id BIGINT NOT NULL REFERENCES department_process(id),
+    department TEXT NOT NULL,
+    process_name TEXT NOT NULL,
     worker_id BIGINT NOT NULL REFERENCES worker(id),
     issued_quantity INT NOT NULL CHECK (issued_quantity > 0),
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
@@ -91,6 +101,47 @@ CREATE TABLE work_order (
     closed_at TIMESTAMP,
     note TEXT
 );
+
+
+-- 清洗是磨房工单的分批附加流程，不单独开工单。
+CREATE TABLE polish_cleaning_batch (
+    id BIGSERIAL PRIMARY KEY,
+    work_order_id BIGINT NOT NULL REFERENCES work_order(id),
+    batch_no INT NOT NULL CHECK (batch_no > 0),
+    quantity INT NOT NULL CHECK (quantity > 0),
+    status TEXT NOT NULL CHECK (status IN ('cleaning', 'completed')),
+    sent_by BIGINT NOT NULL REFERENCES users(id),
+    sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    completed_by BIGINT REFERENCES users(id),
+    completed_at TIMESTAMP,
+    UNIQUE (work_order_id, batch_no)
+);
+
+
+CREATE OR REPLACE FUNCTION protect_polish_cleaning_batch()
+RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION '清洗批次不允许删除';
+    END IF;
+    IF OLD.status = 'completed' THEN
+        RAISE EXCEPTION '已完成的清洗批次不允许修改';
+    END IF;
+    IF NEW.status <> 'completed'
+       OR NEW.work_order_id IS DISTINCT FROM OLD.work_order_id
+       OR NEW.batch_no IS DISTINCT FROM OLD.batch_no
+       OR NEW.quantity IS DISTINCT FROM OLD.quantity
+       OR NEW.sent_by IS DISTINCT FROM OLD.sent_by
+       OR NEW.sent_at IS DISTINCT FROM OLD.sent_at THEN
+        RAISE EXCEPTION '清洗批次只允许确认完成';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_protect_polish_cleaning_batch
+BEFORE UPDATE OR DELETE ON polish_cleaning_batch
+FOR EACH ROW EXECUTE FUNCTION protect_polish_cleaning_batch();
 
 
 -- 需要 QC 时先建立 pending_qc 批次，由 QC 补全结果。
@@ -207,17 +258,20 @@ ON product_department_step(product_id, sequence_no);
 CREATE INDEX idx_repository_department
 ON repository(department);
 
-CREATE INDEX idx_department_process_product
-ON department_process(product_id, department, sequence_no);
+CREATE INDEX idx_polish_process_preset_active
+ON polish_process_preset(active, preset_name);
 
-CREATE INDEX idx_work_order_department_process
-ON work_order(process_id, status);
+CREATE INDEX idx_work_order_process
+ON work_order(department, product_id, process_name, status);
 
 CREATE INDEX idx_work_order_worker
 ON work_order(worker_id, status);
 
 CREATE INDEX idx_work_order_batch_status
 ON work_order_batch(status, submitted_at);
+
+CREATE INDEX idx_polish_cleaning_batch_status
+ON polish_cleaning_batch(status, sent_at);
 
 CREATE INDEX idx_records_product
 ON records(product_id, created_at DESC);

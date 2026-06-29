@@ -4,10 +4,12 @@ import type {
   CreateProcedurePayload,
   CreateWorkOrderPayload,
   Department,
-  DepartmentProcessItem,
+  PolishProcessStep,
   DirectReportPayload,
   InspectionPayload,
   PendingQcBatch,
+  PolishCleaningBatch,
+  PolishProcessPreset,
   ProcedureItem,
   ProcessStepPayload,
   ProductItem,
@@ -19,8 +21,10 @@ import type {
 } from '@/types/production'
 import { service } from './request'
 
-export async function queryProducts() {
-  const res = await service.get<{ data: ProductItem[] }>('/products')
+export async function queryProducts(department?: Department) {
+  const res = await service.get<{ data: ProductItem[] }>('/products', {
+    params: { department },
+  })
   return res.data.data
 }
 
@@ -58,24 +62,27 @@ export async function queryProductRecords(
   return res.data.data
 }
 
-export async function queryDepartmentProcesses(department: Department) {
-  const res = await service.get<{ data: DepartmentProcessItem[] }>(
+export async function queryPolishProcesses(department: Department) {
+  const res = await service.get<{ data: PolishProcessStep[] }>(
     `/work-orders/${department}/processes`,
   )
   return res.data.data
 }
 
-export async function configureDepartmentProcesses(
+export async function configurePolishProcesses(
   department: Department,
   productId: number,
   steps: ProcessStepPayload[],
+  presetId?: number,
 ) {
-  const res = await service.post<{ data: DepartmentProcessItem[] }>(
+  const res = await service.post<{ data: PolishProcessStep[] }>(
     `/work-orders/${department}/processes`,
     {
       product_id: productId,
+      preset_id: presetId,
       steps: steps.map((step) => ({
         process_name: step.processName.trim(),
+        requires_cleaning: step.requiresCleaning,
         requires_qc: step.requiresQc,
       })),
     },
@@ -121,11 +128,58 @@ export async function queryDepartmentWorkOrders(department: Department) {
 export async function createWorkOrder(payload: CreateWorkOrderPayload) {
   const res = await service.post<{ data: WorkOrderItem }>('/work-orders', {
     product_id: payload.productId,
-    process_id: payload.processId,
+    department: payload.department,
+    process_name: payload.processName,
     worker_id: payload.workerId,
     quantity: payload.quantity,
     note: payload.note?.trim() || undefined,
   })
+  return res.data.data
+}
+
+export async function queryPolishProcessPresets() {
+  const res = await service.get<{ data: PolishProcessPreset[] }>(
+    '/work-orders/polish/presets',
+  )
+  return res.data.data
+}
+
+export async function savePolishProcessPreset(
+  presetName: string,
+  steps: ProcessStepPayload[],
+  active: boolean,
+  presetId?: number,
+) {
+  const payload = {
+    preset_name: presetName.trim(),
+    active,
+    steps: steps.map((step) => ({
+      process_name: step.processName.trim(),
+      requires_cleaning: step.requiresCleaning,
+      requires_qc: step.requiresQc,
+    })),
+  }
+  const res = presetId
+    ? await service.put<{ data: PolishProcessPreset }>(
+        `/work-orders/polish/presets/${presetId}`,
+        payload,
+      )
+    : await service.post<{ data: PolishProcessPreset }>('/work-orders/polish/presets', payload)
+  return res.data.data
+}
+
+export async function createCleaningSubmission(workOrderId: number, quantity: number) {
+  const res = await service.post<{ data: PolishCleaningBatch }>(
+    `/work-orders/${workOrderId}/cleaning-submissions`,
+    { quantity },
+  )
+  return res.data.data
+}
+
+export async function completeCleaningSubmission(cleaningBatchId: number) {
+  const res = await service.post<{ data: PolishCleaningBatch }>(
+    `/work-orders/cleaning-submissions/${cleaningBatchId}/complete`,
+  )
   return res.data.data
 }
 

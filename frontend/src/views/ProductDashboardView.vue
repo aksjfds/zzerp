@@ -364,6 +364,8 @@ onMounted(loadDashboard)
                 <div><span>待开单</span><strong>{{ process.waitingQuantity }}</strong></div>
                 <div><span>累计投入</span><strong>{{ process.issuedQuantity }}</strong></div>
                 <div><span>加工中</span><strong>{{ process.processingQuantity }}</strong></div>
+                <div><span>清洗中</span><strong>{{ process.cleaningQuantity }}</strong></div>
+                <div><span>清洗完成</span><strong>{{ process.cleanedReadyQuantity }}</strong></div>
                 <div><span>质检中</span><strong>{{ process.pendingQcQuantity }}</strong></div>
                 <div><span>累计 OK</span><strong>{{ process.okQuantity }}</strong></div>
                 <div><span>累计返修</span><strong>{{ process.reworkQuantity }}</strong></div>
@@ -576,7 +578,7 @@ onMounted(loadDashboard)
 .progress-process-head strong { font-size: 17px; }
 .progress-metrics {
   display: grid;
-  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));
   gap: 8px;
   margin-top: 14px;
 }
