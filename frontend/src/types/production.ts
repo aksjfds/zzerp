@@ -1,12 +1,30 @@
-export const DEPARTMENTS = ['in', 'laser', 'stamp', 'cnc', 'polish', 'qc', 'out'] as const
+export const DEPARTMENTS = [
+  'in',
+  'stamp',
+  'cnc',
+  'polish',
+  'assembly',
+  'finished',
+  'qc',
+  'out',
+] as const
 export type Department = (typeof DEPARTMENTS)[number]
+
+export const FORMAL_DEPARTMENTS = [
+  'stamp',
+  'cnc',
+  'polish',
+  'assembly',
+  'finished',
+] as const satisfies readonly Department[]
 
 export const DEPARTMENT_LABELS: Record<Department, string> = {
   in: '入库',
-  laser: '激光',
   stamp: '冲压',
-  cnc: 'CNC',
+  cnc: '机加',
   polish: '磨房',
+  assembly: '装配',
+  finished: '成品',
   qc: 'QC',
   out: '完工',
 }
@@ -159,6 +177,8 @@ export type WorkOrderItem = {
   workerId: number
   workerName: string
   issuedQuantity: number
+  workOrderType: 'normal' | 'rework'
+  reworkRequestId?: number | null
   processingQuantity: number
   cleaningQuantity: number
   cleanedReadyQuantity: number
@@ -224,7 +244,41 @@ export type CreateWorkOrderPayload = {
   processName: string
   workerId: number
   quantity: number
+  reworkRequestId?: number
   note?: string
+}
+
+export type ReworkRequestItem = {
+  id: number
+  sourceWorkOrderId: number
+  sourceWorkOrderNo: string
+  sourceBatchId?: number | null
+  productId: number
+  orderId: string
+  zzCode: string
+  productName: string
+  sourceDepartment: Department
+  targetDepartment: Department
+  targetProcessName: string
+  quantity: number
+  allocatedQuantity: number
+  remainingQuantity: number
+  returnedQuantity: number
+  scrapQuantity: number
+  lostQuantity: number
+  reason: string
+  status: 'pending' | 'processing' | 'closed'
+  createdAt: string
+  closedAt?: string | null
+}
+
+export type CreateReworkRequestPayload = {
+  sourceWorkOrderId: number
+  sourceBatchId?: number
+  targetDepartment: Department
+  targetProcessName: string
+  quantity: number
+  reason: string
 }
 
 export type DirectReportPayload = {

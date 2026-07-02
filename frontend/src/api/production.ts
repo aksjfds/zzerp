@@ -2,6 +2,7 @@ import type {
   AssignQcWorkerPayload,
   CreateProductPayload,
   CreateProcedurePayload,
+  CreateReworkRequestPayload,
   CreateWorkOrderPayload,
   Department,
   DirectReportPayload,
@@ -16,6 +17,7 @@ import type {
   ProductDepartmentProgress,
   ProductItem,
   ProductRecord,
+  ReworkRequestItem,
   WorkerItem,
   WorkOrderBatch,
   WorkOrderItem,
@@ -155,8 +157,31 @@ export async function createWorkOrder(payload: CreateWorkOrderPayload) {
     process_name: payload.processName,
     worker_id: payload.workerId,
     quantity: payload.quantity,
+    rework_request_id: payload.reworkRequestId,
     note: payload.note?.trim() || undefined,
   })
+  return res.data.data
+}
+
+export async function queryDepartmentReworkRequests(department: Department) {
+  const res = await service.get<{ data: ReworkRequestItem[] }>(
+    `/work-orders/${department}/rework-requests`,
+  )
+  return res.data.data
+}
+
+export async function createReworkRequest(payload: CreateReworkRequestPayload) {
+  const res = await service.post<{ data: ReworkRequestItem }>(
+    '/work-orders/rework-requests',
+    {
+      source_work_order_id: payload.sourceWorkOrderId,
+      source_batch_id: payload.sourceBatchId,
+      target_department: payload.targetDepartment,
+      target_process_name: payload.targetProcessName.trim(),
+      quantity: payload.quantity,
+      reason: payload.reason.trim(),
+    },
+  )
   return res.data.data
 }
 

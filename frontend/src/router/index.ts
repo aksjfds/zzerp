@@ -2,9 +2,13 @@ import { createRouter, createWebHistory } from 'vue-router'
 import { setupRouterGuard } from '@/permission/guard'
 import LoginView from '@/views/LoginView.vue'
 import ProductDashboardView from '@/views/ProductDashboardView.vue'
+import AssemblyDashboardView from '@/views/departments/AssemblyDashboardView.vue'
+import CncDashboardView from '@/views/departments/CncDashboardView.vue'
+import FinishedDashboardView from '@/views/departments/FinishedDashboardView.vue'
 import PolishDashboardView from '@/views/departments/PolishDashboardView.vue'
 import PolishWorkerOverviewView from '@/views/departments/PolishWorkerOverviewView.vue'
 import QcDashboardView from '@/views/departments/QcDashboardView.vue'
+import StampDashboardView from '@/views/departments/StampDashboardView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -25,11 +29,51 @@ const router = createRouter({
       component: ProductDashboardView,
     },
     {
+      path: '/dashboard/stamp',
+      name: 'dashboard-stamp',
+      component: StampDashboardView,
+      meta: {
+        department: 'stamp',
+        requiresAuth: true,
+        permissions: ['task:view'],
+      },
+    },
+    {
+      path: '/dashboard/cnc',
+      name: 'dashboard-cnc',
+      component: CncDashboardView,
+      meta: {
+        department: 'cnc',
+        requiresAuth: true,
+        permissions: ['task:view'],
+      },
+    },
+    {
       path: '/dashboard/polish',
       name: 'dashboard-polish',
       component: PolishDashboardView,
       meta: {
         department: 'polish',
+        requiresAuth: true,
+        permissions: ['task:view'],
+      },
+    },
+    {
+      path: '/dashboard/assembly',
+      name: 'dashboard-assembly',
+      component: AssemblyDashboardView,
+      meta: {
+        department: 'assembly',
+        requiresAuth: true,
+        permissions: ['task:view'],
+      },
+    },
+    {
+      path: '/dashboard/finished',
+      name: 'dashboard-finished',
+      component: FinishedDashboardView,
+      meta: {
+        department: 'finished',
         requiresAuth: true,
         permissions: ['task:view'],
       },

@@ -2,10 +2,18 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from models.production import PolishProcess, PolishProcessPreset, Procedure, WorkOrder, Worker
+from models.production import (
+    PolishProcess,
+    PolishProcessPreset,
+    Procedure,
+    ReworkRequest,
+    WorkOrder,
+    Worker,
+)
 from schemas.production import (
     ConfigureProcessesPayload,
     CreateProcedurePayload,
+    CreateReworkRequestPayload,
     CreateSubmissionPayload,
     CreateWorkerPayload,
     CreateWorkOrderPayload,
@@ -124,12 +132,52 @@ def create_work_order(
             created_by=user["id"],
             allowed_department=user["department"],
             note=payload.note.strip() if payload.note and payload.note.strip() else None,
+            rework_request_id=payload.rework_request_id,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"data": data}
+
+
+@router.post("/rework-requests")
+def create_rework_request(
+    payload: CreateReworkRequestPayload,
+    user: dict = Depends(require_any_permission("task:complete", csrf=True)),
+):
+    try:
+        data = ReworkRequest.create(
+            source_work_order_id=payload.source_work_order_id,
+            source_batch_id=payload.source_batch_id,
+            target_department=_normalize_required(
+                payload.target_department,
+                "返修部门",
+            ),
+            target_process_name=_normalize_required(
+                payload.target_process_name,
+                "返修工艺",
+            ),
+            quantity=payload.quantity,
+            reason=_normalize_required(payload.reason, "返修原因"),
+            created_by=user["id"],
+            allowed_department=user["department"],
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"data": data}
+
+
+@router.get("/{department}/rework-requests")
+def list_rework_requests(
+    department: str,
+    user: dict = Depends(require_any_permission("task:view")),
+):
+    resolved_department = department.strip()
+    ensure_department_access(user, resolved_department)
+    return {"data": ReworkRequest.list_by_department(resolved_department)}
 
 
 @router.get("/polish/presets")

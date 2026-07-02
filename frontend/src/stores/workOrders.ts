@@ -10,22 +10,24 @@ import {
   createWorkOrder,
   createWorkOrderSubmission,
   inspectQcSubmission,
-  queryPolishProcesses,
+  queryDepartmentReworkRequests,
   queryDepartmentWorkers,
   queryDepartmentWorkOrders,
   queryPendingQcSubmissions,
+  queryPolishProcesses,
   queryPolishProcessPresets,
   savePolishProcessPreset,
 } from '@/api/production'
 import type {
   CreateWorkOrderPayload,
   Department,
-  PolishProcessStep,
   DirectReportPayload,
   InspectionPayload,
   PendingQcBatch,
   PolishProcessPreset,
+  PolishProcessStep,
   ProcessStepPayload,
+  ReworkRequestItem,
   WorkerItem,
   WorkOrderItem,
 } from '@/types/production'
@@ -37,18 +39,21 @@ export const useWorkOrdersStore = defineStore('workOrders', () => {
   const workOrders = ref<WorkOrderItem[]>([])
   const pendingQc = ref<PendingQcBatch[]>([])
   const presets = ref<PolishProcessPreset[]>([])
+  const reworkRequests = ref<ReworkRequestItem[]>([])
 
   async function loadDepartment(department: Department) {
     loading.value = true
     try {
-      const [processList, workerList, orderList] = await Promise.all([
+      const [processList, workerList, orderList, reworkList] = await Promise.all([
         queryPolishProcesses(department),
         queryDepartmentWorkers(department),
         queryDepartmentWorkOrders(department),
+        queryDepartmentReworkRequests(department),
       ])
       processes.value = processList
       workers.value = workerList
       workOrders.value = orderList
+      reworkRequests.value = reworkList
     } finally {
       loading.value = false
     }
@@ -143,6 +148,7 @@ export const useWorkOrdersStore = defineStore('workOrders', () => {
     loading,
     pendingQc,
     presets,
+    reworkRequests,
     processes,
     reportDirect,
     loadPresets,

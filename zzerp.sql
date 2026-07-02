@@ -42,7 +42,8 @@ CREATE TABLE product (
 );
 
 
--- 产品正式经过的部门顺序，例如 laser -> polish；QC 不是正式归属部门。
+-- 产品正式经过的部门顺序，例如 stamp -> cnc -> polish -> finished。
+-- QC 不是正式归属部门。
 CREATE TABLE product_department_step (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
@@ -95,11 +96,18 @@ CREATE TABLE work_order (
     process_name TEXT NOT NULL,
     worker_id BIGINT NOT NULL REFERENCES worker(id),
     issued_quantity INT NOT NULL CHECK (issued_quantity > 0),
+    work_order_type TEXT NOT NULL DEFAULT 'normal'
+        CHECK (work_order_type IN ('normal', 'rework')),
+    rework_request_id BIGINT,
     status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
     created_by BIGINT NOT NULL REFERENCES users(id),
     created_at TIMESTAMP NOT NULL DEFAULT NOW(),
     closed_at TIMESTAMP,
-    note TEXT
+    note TEXT,
+    CHECK (
+        (work_order_type = 'normal' AND rework_request_id IS NULL)
+        OR (work_order_type = 'rework' AND rework_request_id IS NOT NULL)
+    )
 );
 
 
@@ -170,7 +178,8 @@ CREATE TABLE work_order_batch (
 );
 
 
--- pending_qc 阶段只允许分配或重新分配 QC 工人；完成后的批次永久不可修改或删除。
+-- pending_qc 阶段只允许分配或重新分配 QC 工人。
+-- 完成后的批次永久不可修改或删除。
 CREATE OR REPLACE FUNCTION protect_work_order_batch_result()
 RETURNS TRIGGER AS $$
 BEGIN
@@ -224,6 +233,30 @@ BEFORE UPDATE OR DELETE ON work_order_batch
 FOR EACH ROW EXECUTE FUNCTION protect_work_order_batch_result();
 
 
+-- 跨部门返修不改变产品正式归属；目标部门可按工人拆分多张返修工单。
+CREATE TABLE rework_request (
+    id BIGSERIAL PRIMARY KEY,
+    source_work_order_id BIGINT NOT NULL REFERENCES work_order(id),
+    source_batch_id BIGINT REFERENCES work_order_batch(id),
+    product_id BIGINT NOT NULL REFERENCES product(id),
+    source_department TEXT NOT NULL,
+    target_department TEXT NOT NULL,
+    target_process_name TEXT NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    reason TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'processing', 'closed')),
+    created_by BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    closed_at TIMESTAMP,
+    CHECK (source_department <> target_department)
+);
+
+ALTER TABLE work_order
+ADD CONSTRAINT fk_work_order_rework_request
+FOREIGN KEY (rework_request_id) REFERENCES rework_request(id);
+
+
 -- 只记录正式部门流转；部门内部送检由工单批次追踪。
 CREATE TABLE records (
     id BIGSERIAL PRIMARY KEY,
@@ -247,8 +280,18 @@ CREATE TABLE user_sessions (
 
 
 INSERT INTO users (username, password, department, role, permissions) VALUES
-('admin', '1', 'sys', 'supervisor', 'product:view,product:add,record:view,sys:user:add'),
+(
+    'admin',
+    '1',
+    'sys',
+    'supervisor',
+    'product:view,product:add,record:view,task:view,task:assign,task:complete,sys:user:add'
+),
 ('polish', '1', 'polish', 'supervisor', 'task:view,task:assign,task:complete'),
+('stamp', '1', 'stamp', 'supervisor', 'task:view,task:assign,task:complete'),
+('cnc', '1', 'cnc', 'supervisor', 'task:view,task:assign,task:complete'),
+('assembly', '1', 'assembly', 'supervisor', 'task:view,task:assign,task:complete'),
+('finished', '1', 'finished', 'supervisor', 'task:view,task:assign,task:complete'),
 ('qc', '1', 'qc', 'supervisor', 'task:view,task:assign,task:complete');
 
 
@@ -269,6 +312,15 @@ ON work_order(worker_id, status);
 
 CREATE INDEX idx_work_order_batch_status
 ON work_order_batch(status, submitted_at);
+
+CREATE INDEX idx_rework_request_source
+ON rework_request(source_department, status, created_at);
+
+CREATE INDEX idx_rework_request_target
+ON rework_request(target_department, status, created_at);
+
+CREATE INDEX idx_work_order_rework_request
+ON work_order(rework_request_id);
 
 CREATE INDEX idx_polish_cleaning_batch_status
 ON polish_cleaning_batch(status, sent_at);

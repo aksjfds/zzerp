@@ -6,11 +6,13 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useProductsStore } from '@/stores/products'
 import { useWorkOrdersStore } from '@/stores/workOrders'
+import { DEPARTMENT_LABELS } from '@/types/production'
 import type {
-  PolishProcessStep,
   DirectReportPayload,
+  PolishProcessStep,
   ProcessStepPayload,
   ProductItem,
+  ReworkRequestItem,
   WorkOrderItem,
 } from '@/types/production'
 
@@ -20,7 +22,14 @@ const authStore = useAuthStore()
 const productsStore = useProductsStore()
 const workOrdersStore = useWorkOrdersStore()
 const { products } = storeToRefs(productsStore)
-const { loading, presets, processes, workers, workOrders } = storeToRefs(workOrdersStore)
+const {
+  loading,
+  presets,
+  processes,
+  reworkRequests,
+  workers,
+  workOrders,
+} = storeToRefs(workOrdersStore)
 
 const configDialogVisible = ref(false)
 const workOrderDialogVisible = ref(false)
@@ -32,6 +41,7 @@ const presetDialogVisible = ref(false)
 const activeProduct = ref<ProductItem | null>(null)
 const activeProcess = ref<PolishProcessStep | null>(null)
 const activeWorkOrder = ref<WorkOrderItem | null>(null)
+const activeRework = ref<ReworkRequestItem | null>(null)
 const selectedProductId = ref<number | null>(null)
 const workerName = ref('')
 const submissionQuantity = ref(1)
@@ -63,6 +73,12 @@ const visibleWorkOrders = computed(() => {
   if (selectedProductId.value === null) return []
   return workOrders.value.filter((item) => item.productId === selectedProductId.value)
 })
+
+const incomingReworks = computed(() =>
+  reworkRequests.value.filter(
+    (item) => item.targetDepartment === department && item.status !== 'closed',
+  ),
+)
 
 function selectProduct(product: ProductItem) {
   selectedProductId.value = product.id
@@ -137,24 +153,47 @@ function openWorkOrder(product: ProductItem, process: PolishProcessStep) {
   selectProduct(product)
   activeProduct.value = product
   activeProcess.value = process
+  activeRework.value = null
   workOrderForm.workerId = workers.value[0]?.id ?? 0
   workOrderForm.quantity = process.availableQuantity > 0 ? 1 : 0
   workOrderForm.note = ''
   workOrderDialogVisible.value = true
 }
 
+function openReworkWorkOrder(request: ReworkRequestItem) {
+  const process = processes.value.find(
+    (item) =>
+      item.productId === request.productId
+      && item.processName === request.targetProcessName,
+  )
+  if (!process) {
+    ElMessage.error('返修工艺未在该产品的磨房工艺中配置')
+    return
+  }
+  selectedProductId.value = request.productId
+  activeProduct.value = null
+  activeProcess.value = process
+  activeRework.value = request
+  workOrderForm.workerId = workers.value[0]?.id ?? 0
+  workOrderForm.quantity = request.remainingQuantity > 0 ? 1 : 0
+  workOrderForm.note = `跨部门返修：${request.reason}`
+  workOrderDialogVisible.value = true
+}
+
 async function submitWorkOrder() {
-  if (!activeProduct.value || !activeProcess.value || !workOrderForm.workerId) {
+  const productId = activeRework.value?.productId ?? activeProduct.value?.id
+  if (!productId || !activeProcess.value || !workOrderForm.workerId) {
     ElMessage.warning('请选择工人')
     return
   }
   try {
     await workOrdersStore.addWorkOrder(department, {
-      productId: activeProduct.value.id,
+      productId,
       department,
       processName: activeProcess.value.processName,
       workerId: workOrderForm.workerId,
       quantity: workOrderForm.quantity,
+      reworkRequestId: activeRework.value?.id,
       note: workOrderForm.note,
     })
     workOrderDialogVisible.value = false
@@ -336,6 +375,48 @@ onMounted(loadDashboard)
       </nav>
     </header>
 
+    <section v-if="incomingReworks.length" class="section-card rework-panel">
+      <div class="section-head">
+        <div>
+          <h2>跨部门返修</h2>
+          <p>产品正式归属不变，磨房只执行指定返修工艺。</p>
+        </div>
+      </div>
+      <div class="rework-list">
+        <article v-for="item in incomingReworks" :key="item.id" class="rework-card">
+          <div class="rework-head">
+            <div>
+              <span>
+                {{ item.sourceWorkOrderNo }} · 来自{{ DEPARTMENT_LABELS[item.sourceDepartment] }}
+              </span>
+              <strong>{{ item.orderId }} · {{ item.zzCode }} · {{ item.productName }}</strong>
+              <em>返修工艺：{{ item.targetProcessName }} · 原因：{{ item.reason }}</em>
+            </div>
+            <ElTag :type="item.status === 'pending' ? 'warning' : 'primary'">
+              {{ item.status === 'pending' ? '待分配' : '返修中' }}
+            </ElTag>
+          </div>
+          <div class="metrics">
+            <div><span>返修数量</span><strong>{{ item.quantity }}</strong></div>
+            <div><span>已分配</span><strong>{{ item.allocatedQuantity }}</strong></div>
+            <div><span>待分配</span><strong>{{ item.remainingQuantity }}</strong></div>
+            <div><span>已返回</span><strong>{{ item.returnedQuantity }}</strong></div>
+            <div><span>报废</span><strong>{{ item.scrapQuantity }}</strong></div>
+            <div><span>遗失</span><strong>{{ item.lostQuantity }}</strong></div>
+          </div>
+          <ElButton
+            v-permission="'task:assign'"
+            type="primary"
+            size="small"
+            :disabled="item.remainingQuantity <= 0 || workers.length === 0"
+            @click="openReworkWorkOrder(item)"
+          >
+            分配返修工单
+          </ElButton>
+        </article>
+      </div>
+    </section>
+
     <div v-loading="loading" class="workspace-layout">
       <section class="section-card product-panel">
         <div class="section-head">
@@ -361,7 +442,8 @@ onMounted(loadDashboard)
                 <span>订单 {{ product.orderId }} · {{ product.zzCode }}</span>
                 <strong>{{ product.productName }}</strong>
                 <em>
-                  磨房库存：{{ getDepartmentQuantity(product) }} · 交期：{{ product.deliveryDate }}
+                  磨房库存：{{ getDepartmentQuantity(product) }} ·
+                  交期：{{ product.deliveryDate }}
                 </em>
               </div>
               <ElButton size="small" @click.stop="openConfig(product)">配置工艺</ElButton>
@@ -406,6 +488,7 @@ onMounted(loadDashboard)
             <h2>
               工单记录
               <template v-if="selectedProduct">· {{ selectedProduct.productName }}</template>
+              <template v-else-if="activeRework">· {{ activeRework.productName }}</template>
             </h2>
             <p>加工中数量自动包含 QC 返回的返修数量。</p>
           </div>
@@ -417,6 +500,9 @@ onMounted(loadDashboard)
               <div>
                 <span>{{ item.workOrderNo }} · {{ item.processName }}</span>
                 <strong>{{ item.productName }} / {{ item.workerName }}</strong>
+                <ElTag v-if="item.workOrderType === 'rework'" size="small" type="danger">
+                  返修工单
+                </ElTag>
               </div>
               <ElTag :type="item.status === 'closed' ? 'success' : 'warning'">
                 {{
@@ -464,7 +550,11 @@ onMounted(loadDashboard)
                 v-permission="'task:complete'"
                 type="primary"
                 size="small"
-                :disabled="(item.requiresCleaning ? item.cleanedReadyQuantity : item.processingQuantity) <= 0"
+                :disabled="
+                  (item.requiresCleaning
+                    ? item.cleanedReadyQuantity
+                    : item.processingQuantity) <= 0
+                "
                 @click="openSubmission(item)"
               >
                 送 QC
@@ -474,7 +564,11 @@ onMounted(loadDashboard)
                 v-permission="'task:complete'"
                 type="primary"
                 size="small"
-                :disabled="(item.requiresCleaning ? item.cleanedReadyQuantity : item.processingQuantity) <= 0"
+                :disabled="
+                  (item.requiresCleaning
+                    ? item.cleanedReadyQuantity
+                    : item.processingQuantity) <= 0
+                "
                 @click="openDirectReport(item)"
               >
                 直接报工
@@ -487,7 +581,9 @@ onMounted(loadDashboard)
                 :key="`cleaning-${batch.id}`"
                 class="batch-row"
               >
-                <span>第 {{ batch.batchNo }} 批清洗 · {{ batch.quantity }} · {{ batch.sentAt }}</span>
+                <span>
+                  第 {{ batch.batchNo }} 批清洗 · {{ batch.quantity }} · {{ batch.sentAt }}
+                </span>
                 <ElButton
                   v-if="batch.status === 'cleaning'"
                   v-permission="'task:complete'"
@@ -503,7 +599,9 @@ onMounted(loadDashboard)
 
             <div v-if="item.batches.length" class="batch-list">
               <div v-for="batch in item.batches" :key="batch.id" class="batch-row">
-                <span>第 {{ batch.batchNo }} 批 · 送检/报工 {{ batch.submittedQuantity }}</span>
+                <span>
+                  第 {{ batch.batchNo }} 批 · 送检/报工 {{ batch.submittedQuantity }}
+                </span>
                 <span v-if="batch.status === 'pending_qc'">等待 QC</span>
                 <span v-else>
                   OK {{ batch.okQuantity }} / 返修 {{ batch.reworkQuantity }} /
@@ -515,7 +613,7 @@ onMounted(loadDashboard)
               </div>
             </div>
           </article>
-          <ElEmpty v-if="!selectedProduct" description="请先选择左侧产品" />
+          <ElEmpty v-if="selectedProductId === null" description="请先选择左侧产品" />
           <ElEmpty
             v-else-if="visibleWorkOrders.length === 0"
             description="该产品暂无工单"
@@ -566,8 +664,18 @@ onMounted(loadDashboard)
       </template>
     </ElDialog>
 
-    <ElDialog v-model="workOrderDialogVisible" title="开工单" width="500px">
+    <ElDialog
+      v-model="workOrderDialogVisible"
+      :title="activeRework ? '分配返修工单' : '开工单'"
+      width="500px"
+    >
       <ElForm label-position="top">
+        <ElFormItem v-if="activeRework" label="返修产品">
+          <strong>
+            {{ activeRework.orderId }} · {{ activeRework.zzCode }} ·
+            {{ activeRework.productName }}
+          </strong>
+        </ElFormItem>
         <ElFormItem label="工艺"><strong>{{ activeProcess?.processName }}</strong></ElFormItem>
         <ElFormItem label="工人">
           <ElSelect v-model="workOrderForm.workerId">
@@ -583,7 +691,7 @@ onMounted(loadDashboard)
           <ElInputNumber
             v-model="workOrderForm.quantity"
             :min="1"
-            :max="activeProcess?.availableQuantity || 1"
+            :max="activeRework?.remainingQuantity || activeProcess?.availableQuantity || 1"
           />
         </ElFormItem>
         <ElFormItem label="备注">
@@ -600,7 +708,13 @@ onMounted(loadDashboard)
       <ElInput v-model="workerName" placeholder="工人姓名" @keyup.enter="submitWorker" />
       <template #footer>
         <ElButton @click="workerDialogVisible = false">取消</ElButton>
-        <ElButton type="primary" :disabled="!workerName.trim()" @click="submitWorker">添加</ElButton>
+        <ElButton
+          type="primary"
+          :disabled="!workerName.trim()"
+          @click="submitWorker"
+        >
+          添加
+        </ElButton>
       </template>
     </ElDialog>
 
@@ -769,10 +883,17 @@ onMounted(loadDashboard)
 .order-list,
 .process-list,
 .batch-list,
+.rework-list,
 .form-stack { display: grid; gap: 12px; }
 .product-grid { grid-template-columns: 1fr; }
 .product-card,
-.order-card { padding: 16px; }
+.order-card,
+.rework-card { padding: 16px; }
+.rework-card { border: 1px solid var(--erp-border); border-radius: 8px; background: #fff7ed; }
+.rework-head { display: flex; justify-content: space-between; gap: 12px; }
+.rework-head > div { display: grid; gap: 5px; }
+.rework-head span,
+.rework-head em { color: var(--erp-text-muted); font-size: 13px; font-style: normal; }
 .product-card {
   cursor: pointer;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
@@ -803,7 +924,12 @@ onMounted(loadDashboard)
   background: var(--erp-surface-muted);
 }
 .process-row > div:first-child { display: grid; gap: 4px; }
-.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin: 14px 0; }
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
 .metrics div { padding: 9px; border-radius: 8px; background: var(--erp-surface-muted); }
 .metrics span { display: block; color: var(--erp-text-muted); font-size: 12px; }
 .metrics strong { display: block; margin-top: 3px; }
@@ -833,7 +959,8 @@ onMounted(loadDashboard)
 @media (max-width: 900px) {
   .dashboard-header,
   .product-title,
-  .order-head { flex-direction: column; }
+  .order-head,
+  .rework-head { flex-direction: column; }
   .dashboard-header { align-items: flex-start; }
   .header-actions { justify-content: flex-start; width: 100%; }
   .workspace-layout { grid-template-columns: 1fr; }

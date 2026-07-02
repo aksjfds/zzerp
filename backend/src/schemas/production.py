@@ -36,7 +36,17 @@ class CreateWorkOrderPayload(BaseModel):
     process_name: str = Field(min_length=1)
     worker_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
+    rework_request_id: int | None = Field(default=None, gt=0)
     note: str | None = None
+
+
+class CreateReworkRequestPayload(BaseModel):
+    source_work_order_id: int = Field(gt=0)
+    source_batch_id: int | None = Field(default=None, gt=0)
+    target_department: str = Field(min_length=1)
+    target_process_name: str = Field(min_length=1)
+    quantity: int = Field(gt=0)
+    reason: str = Field(min_length=1)
 
 
 class CreateSubmissionPayload(BaseModel):

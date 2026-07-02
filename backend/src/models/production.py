@@ -52,10 +52,16 @@ class Product(Base):
         process: list[str],
         quantity: int,
     ) -> dict:
+        formal_departments = {"stamp", "cnc", "polish", "assembly", "finished"}
         if not process:
             raise ValueError("产品部门流程不能为空")
         if "qc" in process:
             raise ValueError("QC 不能作为产品正式部门流程")
+        invalid_departments = set(process) - formal_departments
+        if invalid_departments:
+            raise ValueError("产品流程包含无效生产部门")
+        if process[-1] != "finished":
+            raise ValueError("成品部门必须是产品流程的最后一个部门")
         if len(set(process)) != len(process):
             raise ValueError("产品部门流程不能包含重复部门")
 
@@ -215,6 +221,7 @@ class Product(Base):
                         WorkOrder.product_id == product_id,
                         WorkOrder.department == department,
                         WorkOrder.process_name == process["processName"],
+                        WorkOrder.work_order_type == "normal",
                     )
                     .all()
                 )
@@ -634,6 +641,12 @@ class WorkOrder(Base):
     process_name: Mapped[str] = mapped_column(Text, nullable=False)
     worker_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("worker.id"), nullable=False)
     issued_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    work_order_type: Mapped[str] = mapped_column(Text, nullable=False, default="normal")
+    rework_request_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("rework_request.id"),
+        nullable=True,
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
     created_by: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -707,6 +720,8 @@ class WorkOrder(Base):
             "workerId": item.worker_id,
             "workerName": worker.name,
             "issuedQuantity": item.issued_quantity,
+            "workOrderType": item.work_order_type,
+            "reworkRequestId": item.rework_request_id,
             "processingQuantity": processing,
             "cleaningQuantity": cleaning_quantity,
             "cleanedReadyQuantity": max(0, cleaned_ready_quantity),
@@ -898,6 +913,7 @@ class WorkOrder(Base):
             cls.product_id == product_id,
             cls.department == "polish",
             cls.process_name == process_name,
+            cls.work_order_type == "normal",
         ).all()
         return sum(
             cls._totals(cls._batches(session, item.id))["okQuantity"]
@@ -936,6 +952,7 @@ class WorkOrder(Base):
                 cls.product_id == route.product_id,
                 cls.department == "polish",
                 cls.process_name == process_name,
+                cls.work_order_type == "normal",
             ).all()
         )
         return max(0, input_quantity - issued)
@@ -957,6 +974,7 @@ class WorkOrder(Base):
         created_by: int,
         allowed_department: str,
         note: str | None,
+        rework_request_id: int | None = None,
     ) -> dict:
         if issued_quantity <= 0:
             raise ValueError("领取数量必须大于 0")
@@ -983,9 +1001,41 @@ class WorkOrder(Base):
             )
             if process is None:
                 raise ValueError("产品工艺不存在")
-            available = cls._available_for_process_in_session(session, route, process_name)
-            if available < issued_quantity:
-                raise ValueError("领取数量超过当前工艺可开单数量")
+
+            rework_request = None
+            if rework_request_id is None:
+                available = cls._available_for_process_in_session(
+                    session,
+                    route,
+                    process_name,
+                )
+                if available < issued_quantity:
+                    raise ValueError("领取数量超过当前工艺可开单数量")
+            else:
+                rework_request = (
+                    session.query(ReworkRequest)
+                    .filter(ReworkRequest.id == rework_request_id)
+                    .with_for_update()
+                    .one_or_none()
+                )
+                if rework_request is None:
+                    raise ValueError("返修单不存在")
+                if rework_request.status == "closed":
+                    raise ValueError("返修单已经关闭")
+                if (
+                    rework_request.product_id != product_id
+                    or rework_request.target_department != department
+                    or rework_request.target_process_name != process_name
+                ):
+                    raise ValueError("工单与返修单的产品、部门或工艺不一致")
+                allocated = sum(
+                    current.issued_quantity
+                    for current in session.query(cls).filter(
+                        cls.rework_request_id == rework_request.id,
+                    ).all()
+                )
+                if allocated + issued_quantity > rework_request.quantity:
+                    raise ValueError("领取数量超过返修单待分配数量")
 
             worker = session.get(Worker, worker_id)
             if worker is None or not worker.active:
@@ -999,12 +1049,16 @@ class WorkOrder(Base):
                 process_name=process_name,
                 worker_id=worker_id,
                 issued_quantity=issued_quantity,
+                work_order_type="rework" if rework_request else "normal",
+                rework_request_id=rework_request.id if rework_request else None,
                 created_by=created_by,
                 note=note,
             )
             session.add(item)
             session.flush()
             item.work_order_no = f"MO-{datetime.now():%Y%m%d}-{item.id:06d}"
+            if rework_request is not None:
+                rework_request.status = "processing"
             session.commit()
             session.refresh(item)
             return cls._serialize_in_session(session, item)
@@ -1265,18 +1319,57 @@ class WorkOrder(Base):
         session=None,
     ) -> int:
         totals = cls._totals(batches)
+        external = (
+            cls._external_rework_totals(session, item.id)
+            if session is not None
+            else {"sentQuantity": 0, "returnedQuantity": 0}
+        )
+        external_adjustment = (
+            external["returnedQuantity"] - external["sentQuantity"]
+        )
         if session is not None:
             process = cls._process_step_in_session(session, item)
             if process["requiresCleaning"]:
                 sent_cleaning = sum(
                     batch.quantity for batch in cls._cleaning_batches(session, item.id)
                 )
-                return item.issued_quantity + totals["reworkQuantity"] - sent_cleaning
+                return (
+                    item.issued_quantity
+                    + totals["reworkQuantity"]
+                    - sent_cleaning
+                    + external_adjustment
+                )
         return (
             item.issued_quantity
             + totals["reworkQuantity"]
             - totals["submittedQuantity"]
+            + external_adjustment
         )
+
+    @classmethod
+    def _external_rework_totals(cls, session, work_order_id: int) -> dict:
+        requests = session.query(ReworkRequest).filter(
+            ReworkRequest.source_work_order_id == work_order_id,
+        ).all()
+        sent = sum(request.quantity for request in requests)
+        returned = 0
+        scrap = 0
+        lost = 0
+        for request in requests:
+            target_orders = session.query(cls).filter(
+                cls.rework_request_id == request.id,
+            ).all()
+            for target_order in target_orders:
+                totals = cls._totals(cls._batches(session, target_order.id))
+                returned += totals["okQuantity"]
+                scrap += totals["scrapQuantity"]
+                lost += totals["lostQuantity"]
+        return {
+            "sentQuantity": sent,
+            "returnedQuantity": returned,
+            "scrapQuantity": scrap,
+            "lostQuantity": lost,
+        }
 
     @classmethod
     def _downstream_ready_quantity(
@@ -1306,7 +1399,12 @@ class WorkOrder(Base):
         if quantity <= 0:
             raise ValueError("送洗数量必须大于 0")
         with SessionLocal() as session:
-            item = session.query(cls).filter(cls.id == work_order_id).with_for_update().one_or_none()
+            item = (
+                session.query(cls)
+                .filter(cls.id == work_order_id)
+                .with_for_update()
+                .one_or_none()
+            )
             if item is None:
                 raise ValueError("工单不存在")
             cls._ensure_department(item.department, allowed_department)
@@ -1369,6 +1467,8 @@ class WorkOrder(Base):
             + totals["scrapQuantity"]
             + totals["lostQuantity"]
         )
+        external = cls._external_rework_totals(session, item.id)
+        resolved += external["scrapQuantity"] + external["lostQuantity"]
         if (
             processing == 0
             and cleaning == 0
@@ -1378,6 +1478,13 @@ class WorkOrder(Base):
         ):
             item.status = "closed"
             item.closed_at = datetime.now()
+            if item.rework_request_id is not None:
+                request = session.get(ReworkRequest, item.rework_request_id)
+                if request is not None:
+                    ReworkRequest.refresh_status(session, request)
+                    source = session.get(cls, request.source_work_order_id)
+                    if source is not None and source.status == "open":
+                        cls._close_if_complete(session, source)
 
     @classmethod
     def _apply_result(
@@ -1390,6 +1497,24 @@ class WorkOrder(Base):
         ok = batch.ok_quantity or 0
         scrap = batch.scrap_quantity or 0
         lost = batch.lost_quantity or 0
+
+        if item.work_order_type == "rework":
+            request = session.get(ReworkRequest, item.rework_request_id)
+            if request is None:
+                raise ValueError("返修工单缺少返修单")
+            repository = (
+                session.query(Repository)
+                .filter(
+                    Repository.product_id == item.product_id,
+                    Repository.department == request.source_department,
+                )
+                .with_for_update()
+                .one_or_none()
+            )
+            if repository is None or repository.quantity < scrap + lost:
+                raise ValueError("报废和遗失数量超过产品正式归属部门库存")
+            repository.quantity -= scrap + lost
+            return
 
         repository = (
             session.query(Repository)
@@ -1570,6 +1695,217 @@ class WorkOrderBatch(Base):
                 else None
             ),
         }
+
+
+class ReworkRequest(Base):
+    __tablename__ = "rework_request"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    source_work_order_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("work_order.id"),
+        nullable=False,
+    )
+    source_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("work_order_batch.id"),
+        nullable=True,
+    )
+    product_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("product.id"),
+        nullable=False,
+    )
+    source_department: Mapped[str] = mapped_column(Text, nullable=False)
+    target_department: Mapped[str] = mapped_column(Text, nullable=False)
+    target_process_name: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    created_by: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("users.id"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("NOW()"),
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP, nullable=True)
+
+    @classmethod
+    def _target_orders(cls, session, request_id: int) -> list[WorkOrder]:
+        return session.query(WorkOrder).filter(
+            WorkOrder.rework_request_id == request_id,
+        ).order_by(WorkOrder.created_at.asc(), WorkOrder.id.asc()).all()
+
+    @classmethod
+    def _totals(cls, session, request_id: int) -> dict:
+        orders = cls._target_orders(session, request_id)
+        allocated = sum(item.issued_quantity for item in orders)
+        returned = 0
+        scrap = 0
+        lost = 0
+        for item in orders:
+            totals = WorkOrder._totals(WorkOrder._batches(session, item.id))
+            returned += totals["okQuantity"]
+            scrap += totals["scrapQuantity"]
+            lost += totals["lostQuantity"]
+        return {
+            "orders": orders,
+            "allocatedQuantity": allocated,
+            "returnedQuantity": returned,
+            "scrapQuantity": scrap,
+            "lostQuantity": lost,
+        }
+
+    @classmethod
+    def serialize(cls, session, request: "ReworkRequest") -> dict:
+        product = session.get(Product, request.product_id)
+        source_order = session.get(WorkOrder, request.source_work_order_id)
+        totals = cls._totals(session, request.id)
+        return {
+            "id": request.id,
+            "sourceWorkOrderId": request.source_work_order_id,
+            "sourceWorkOrderNo": source_order.work_order_no,
+            "sourceBatchId": request.source_batch_id,
+            "productId": request.product_id,
+            "orderId": product.order_id,
+            "zzCode": product.zz_code,
+            "productName": product.product_name,
+            "sourceDepartment": request.source_department,
+            "targetDepartment": request.target_department,
+            "targetProcessName": request.target_process_name,
+            "quantity": request.quantity,
+            "allocatedQuantity": totals["allocatedQuantity"],
+            "remainingQuantity": max(
+                0,
+                request.quantity - totals["allocatedQuantity"],
+            ),
+            "returnedQuantity": totals["returnedQuantity"],
+            "scrapQuantity": totals["scrapQuantity"],
+            "lostQuantity": totals["lostQuantity"],
+            "reason": request.reason,
+            "status": request.status,
+            "createdAt": request.created_at.strftime("%Y-%m-%d %H:%M"),
+            "closedAt": (
+                request.closed_at.strftime("%Y-%m-%d %H:%M")
+                if request.closed_at
+                else None
+            ),
+        }
+
+    @classmethod
+    def refresh_status(cls, session, request: "ReworkRequest") -> None:
+        totals = cls._totals(session, request.id)
+        orders = totals["orders"]
+        all_resolved = (
+            totals["returnedQuantity"]
+            + totals["scrapQuantity"]
+            + totals["lostQuantity"]
+        )
+        if (
+            totals["allocatedQuantity"] == request.quantity
+            and all_resolved == request.quantity
+            and all(item.status == "closed" for item in orders)
+        ):
+            request.status = "closed"
+            request.closed_at = datetime.now()
+        elif totals["allocatedQuantity"] > 0:
+            request.status = "processing"
+
+    @classmethod
+    def list_by_department(cls, department: str) -> list[dict]:
+        with SessionLocal() as session:
+            requests = session.query(cls).filter(
+                (cls.source_department == department)
+                | (cls.target_department == department)
+            ).order_by(cls.created_at.desc(), cls.id.desc()).all()
+            return [cls.serialize(session, request) for request in requests]
+
+    @classmethod
+    def create(
+        cls,
+        source_work_order_id: int,
+        source_batch_id: int | None,
+        target_department: str,
+        target_process_name: str,
+        quantity: int,
+        reason: str,
+        created_by: int,
+        allowed_department: str,
+    ) -> dict:
+        with SessionLocal() as session:
+            source = session.query(WorkOrder).filter(
+                WorkOrder.id == source_work_order_id,
+            ).with_for_update().one_or_none()
+            if source is None:
+                raise ValueError("来源工单不存在")
+            WorkOrder._ensure_department(source.department, allowed_department)
+            if source.status != "open":
+                raise ValueError("已结单工单不能发起跨部门返修")
+            if source.department == target_department:
+                raise ValueError("跨部门返修的目标部门不能与来源部门相同")
+            if target_department != "polish":
+                raise ValueError("当前只支持创建返修到磨房的返修单")
+
+            target_route = session.query(PolishProcess).filter(
+                PolishProcess.product_id == source.product_id,
+            ).one_or_none()
+            if target_route is None or target_process_name not in {
+                step["processName"]
+                for step in PolishProcess.parse_flow(target_route.process_flow)
+            }:
+                raise ValueError("目标磨房工艺未配置")
+
+            available = WorkOrder._processing_quantity(
+                source,
+                WorkOrder._batches(session, source.id),
+                session,
+            )
+            if source_batch_id is not None:
+                source_batch = session.get(WorkOrderBatch, source_batch_id)
+                if (
+                    source_batch is None
+                    or source_batch.work_order_id != source.id
+                    or source_batch.status != "completed"
+                ):
+                    raise ValueError("来源批次不存在或尚未完成")
+                requested = sum(
+                    item.quantity
+                    for item in session.query(cls).filter(
+                        cls.source_batch_id == source_batch_id,
+                    ).all()
+                )
+                batch_available = (source_batch.rework_quantity or 0) - requested
+                available = min(available, batch_available)
+            if quantity > available:
+                raise ValueError("返修数量超过来源工单当前可返修数量")
+
+            repository = session.query(Repository).filter(
+                Repository.product_id == source.product_id,
+                Repository.department == source.department,
+            ).one_or_none()
+            if repository is None or repository.quantity < quantity:
+                raise ValueError("来源部门正式库存不足")
+
+            request = cls(
+                source_work_order_id=source.id,
+                source_batch_id=source_batch_id,
+                product_id=source.product_id,
+                source_department=source.department,
+                target_department=target_department,
+                target_process_name=target_process_name,
+                quantity=quantity,
+                reason=reason,
+                status="pending",
+                created_by=created_by,
+            )
+            session.add(request)
+            session.commit()
+            session.refresh(request)
+            return cls.serialize(session, request)
 
 
 class Record(Base):

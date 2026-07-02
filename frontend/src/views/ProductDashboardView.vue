@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useProductsStore } from '@/stores/products'
 import {
   DEPARTMENT_LABELS,
-  DEPARTMENTS,
+  FORMAL_DEPARTMENTS,
   type CreateProductPayload,
   type Department,
   type ProductItem,
@@ -27,7 +27,7 @@ const productDialogVisible = ref(false)
 const progressDialogVisible = ref(false)
 const activeProduct = ref<ProductItem | null>(null)
 const activeDepartment = ref<Department | null>(null)
-const selectedProcessDepartment = ref<Department>('laser')
+const selectedProcessDepartment = ref<Department>('cnc')
 const searchKeyword = ref('')
 const departmentFilter = ref<Department | ''>('')
 const deliveryDateRange = ref<string[]>([])
@@ -39,18 +39,12 @@ const productForm = reactive<CreateProductPayload>({
   zzCode: '',
   productName: '',
   deliveryDate: '',
-  process: ['polish'],
+  process: ['stamp', 'finished'],
   quantity: 1,
 })
 
-const processOptions = computed(() =>
-  DEPARTMENTS.filter(
-    (department) => department !== 'in' && department !== 'out' && department !== 'qc',
-  ),
-)
-const productDepartmentOptions = computed(() =>
-  DEPARTMENTS.filter((department) => department !== 'in' && department !== 'qc'),
-)
+const processOptions = computed(() => [...FORMAL_DEPARTMENTS])
+const productDepartmentOptions = computed(() => [...FORMAL_DEPARTMENTS])
 const selectableProcessOptions = computed(() =>
   processOptions.value.filter((department) => !productForm.process.includes(department)),
 )
@@ -60,7 +54,8 @@ const canSubmitProduct = computed(() =>
     && productForm.zzCode.trim()
     && productForm.productName.trim()
     && productForm.deliveryDate
-    && productForm.process.length > 0,
+    && productForm.process.length > 0
+    && productForm.process[productForm.process.length - 1] === 'finished',
   ),
 )
 const isAdmin = computed(
@@ -109,7 +104,10 @@ const filteredProducts = computed(() => {
     const matchesOverdue = overdueFilter.value === 'all'
       || (overdueFilter.value === 'yes' ? overdue : !overdue)
     const hasProductionStock = product.repositories.some(
-      (repository) => repository.department !== 'out' && repository.quantity > 0,
+      (repository) =>
+        repository.department !== 'finished'
+        && repository.department !== 'out'
+        && repository.quantity > 0,
     )
     const matchesStock = stockFilter.value === 'all'
       || (stockFilter.value === 'yes' ? hasProductionStock : !hasProductionStock)
@@ -126,7 +124,7 @@ function getDepartmentLabel(department: Department) {
 }
 
 function getDisplayDepartments(product: ProductItem) {
-  return [...product.process.filter((department) => department !== 'qc'), 'out'] as Department[]
+  return product.process.filter((department) => department !== 'qc')
 }
 
 function getDepartmentQuantity(product: ProductItem, department: Department) {
@@ -140,9 +138,9 @@ function resetProductForm() {
   productForm.zzCode = ''
   productForm.productName = ''
   productForm.deliveryDate = ''
-  productForm.process = ['polish']
+  productForm.process = ['stamp', 'finished']
   productForm.quantity = 1
-  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'laser'
+  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'cnc'
 }
 
 function openProductDialog() {
@@ -155,13 +153,17 @@ function addProcessDepartment() {
     return
   }
 
-  productForm.process.push(selectedProcessDepartment.value)
-  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'laser'
+  const finishedIndex = productForm.process.indexOf('finished')
+  productForm.process.splice(finishedIndex, 0, selectedProcessDepartment.value)
+  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'cnc'
 }
 
 function removeProcessDepartment(index: number) {
+  if (productForm.process[index] === 'finished') {
+    return
+  }
   productForm.process.splice(index, 1)
-  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'laser'
+  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'cnc'
 }
 
 function moveProcessDepartment(index: number, direction: -1 | 1) {
@@ -174,7 +176,7 @@ function moveProcessDepartment(index: number, direction: -1 | 1) {
   const current = productForm.process[index]
   const target = productForm.process[targetIndex]
 
-  if (!current || !target) {
+  if (!current || !target || current === 'finished' || target === 'finished') {
     return
   }
 
@@ -365,7 +367,10 @@ onMounted(loadDashboard)
                 <div><span>累计投入</span><strong>{{ process.issuedQuantity }}</strong></div>
                 <div><span>加工中</span><strong>{{ process.processingQuantity }}</strong></div>
                 <div><span>清洗中</span><strong>{{ process.cleaningQuantity }}</strong></div>
-                <div><span>清洗完成</span><strong>{{ process.cleanedReadyQuantity }}</strong></div>
+                <div>
+                  <span>清洗完成</span>
+                  <strong>{{ process.cleanedReadyQuantity }}</strong>
+                </div>
                 <div><span>质检中</span><strong>{{ process.pendingQcQuantity }}</strong></div>
                 <div><span>累计 OK</span><strong>{{ process.okQuantity }}</strong></div>
                 <div><span>累计返修</span><strong>{{ process.reworkQuantity }}</strong></div>
@@ -405,7 +410,10 @@ onMounted(loadDashboard)
         <ElFormItem label="有序工艺流程">
           <div class="process-builder">
             <div class="process-picker">
-              <ElSelect v-model="selectedProcessDepartment" :disabled="selectableProcessOptions.length === 0">
+              <ElSelect
+                v-model="selectedProcessDepartment"
+                :disabled="selectableProcessOptions.length === 0"
+              >
                 <ElOption
                   v-for="department in selectableProcessOptions"
                   :key="department"
@@ -413,30 +421,47 @@ onMounted(loadDashboard)
                   :value="department"
                 />
               </ElSelect>
-              <ElButton :disabled="selectableProcessOptions.length === 0" @click="addProcessDepartment">
+              <ElButton
+                :disabled="selectableProcessOptions.length === 0"
+                @click="addProcessDepartment"
+              >
                 加入流程
               </ElButton>
             </div>
             <div class="process-list">
-              <div v-for="(department, index) in productForm.process" :key="department" class="process-row">
+              <div
+                v-for="(department, index) in productForm.process"
+                :key="department"
+                class="process-row"
+              >
                 <span>{{ index + 1 }}</span>
                 <strong>{{ getDepartmentLabel(department) }}</strong>
                 <div class="process-actions">
                   <ElButton
                     text
-                    :disabled="index === 0"
+                    :disabled="index === 0 || department === 'finished'"
                     @click="moveProcessDepartment(index, -1)"
                   >
                     上移
                   </ElButton>
                   <ElButton
                     text
-                    :disabled="index === productForm.process.length - 1"
+                    :disabled="
+                      index === productForm.process.length - 1
+                      || productForm.process[index + 1] === 'finished'
+                    "
                     @click="moveProcessDepartment(index, 1)"
                   >
                     下移
                   </ElButton>
-                  <ElButton text type="danger" @click="removeProcessDepartment(index)">移除</ElButton>
+                  <ElButton
+                    text
+                    type="danger"
+                    :disabled="department === 'finished'"
+                    @click="removeProcessDepartment(index)"
+                  >
+                    移除
+                  </ElButton>
                 </div>
               </div>
             </div>
@@ -445,7 +470,13 @@ onMounted(loadDashboard)
       </ElForm>
       <template #footer>
         <ElButton @click="productDialogVisible = false">取消</ElButton>
-        <ElButton type="primary" :disabled="!canSubmitProduct" @click="submitProduct">确认</ElButton>
+        <ElButton
+          type="primary"
+          :disabled="!canSubmitProduct"
+          @click="submitProduct"
+        >
+          确认
+        </ElButton>
       </template>
     </ElDialog>
   </main>
@@ -518,7 +549,13 @@ onMounted(loadDashboard)
 
 .filter-grid {
   display: grid;
-  grid-template-columns: minmax(260px, 1.5fr) minmax(140px, 0.7fr) minmax(300px, 1.2fr) minmax(150px, 0.7fr) minmax(180px, 0.8fr) auto;
+  grid-template-columns:
+    minmax(260px, 1.5fr)
+    minmax(140px, 0.7fr)
+    minmax(300px, 1.2fr)
+    minmax(150px, 0.7fr)
+    minmax(180px, 0.8fr)
+    auto;
   gap: 10px;
   align-items: center;
 }
@@ -572,8 +609,17 @@ onMounted(loadDashboard)
 .progress-process-head span { color: var(--erp-text-muted); font-size: 12px; }
 .progress-summary strong { display: block; margin-top: 4px; font-size: 22px; }
 .progress-process-list { display: grid; gap: 14px; }
-.progress-process-card { padding: 16px; border: 1px solid var(--erp-border); border-radius: 8px; }
-.progress-process-head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.progress-process-card {
+  padding: 16px;
+  border: 1px solid var(--erp-border);
+  border-radius: 8px;
+}
+.progress-process-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
 .progress-process-head > div { display: grid; gap: 4px; }
 .progress-process-head strong { font-size: 17px; }
 .progress-metrics {
