@@ -1,35 +1,39 @@
 from datetime import datetime
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, TIMESTAMP, text
+from sqlalchemy import BigInteger, Boolean, ForeignKey, Text, TIMESTAMP, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base, SessionLocal
+from models.organization import Department
 
 
 class User(Base):
     __tablename__ = "users"
 
-    id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"),
-        primary_key=True,
-        autoincrement=True,
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    password: Mapped[str] = mapped_column(Text, nullable=False)
+    department_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("department.id"),
+        nullable=False,
     )
-    username: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
-    password: Mapped[str] = mapped_column(String(100), nullable=False)
-    department: Mapped[str] = mapped_column(String(50), nullable=False)
-    role: Mapped[str] = mapped_column(String(50), nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False)
     permissions: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+        TIMESTAMP,
+        nullable=False,
+        server_default=text("NOW()"),
     )
 
     @staticmethod
-    def serialize(user: "User") -> dict:
+    def serialize(user: "User", department_code: str) -> dict:
         return {
             "id": user.id,
             "username": user.username,
             "name": user.username,
-            "department": user.department,
+            "department": department_code,
             "role": user.role,
             "permissions": [
                 permission.strip()
@@ -39,38 +43,64 @@ class User(Base):
         }
 
     @classmethod
-    def login(cls, username: str, password: str) -> dict:
+    def login_selected(cls, username: str) -> dict:
         with SessionLocal() as session:
-            user = (
-                session.query(cls)
-                .filter(cls.username == username, cls.password == password)
-                .one_or_none()
-            )
+            result = session.query(cls, Department).join(
+                Department,
+                Department.id == cls.department_id,
+            ).filter(
+                cls.username == username,
+                cls.active.is_(True),
+                Department.active.is_(True),
+            ).one_or_none()
+            if result is None:
+                raise ValueError("所选账号不存在或已停用")
+            user, department = result
+            return cls.serialize(user, department.department_code)
 
-            if user is None:
-                raise ValueError("用户名或密码错误")
-
-            return cls.serialize(user)
+    @classmethod
+    def list_login_accounts(cls) -> list[dict]:
+        with SessionLocal() as session:
+            rows = session.query(cls, Department).join(
+                Department,
+                Department.id == cls.department_id,
+            ).filter(
+                cls.active.is_(True),
+                Department.active.is_(True),
+            ).order_by(
+                Department.id.asc(),
+                cls.username.asc(),
+            ).all()
+            return [
+                {
+                    "username": user.username,
+                    "department": department.department_code,
+                    "department_name": department.department_name,
+                    "role": user.role,
+                }
+                for user, department in rows
+            ]
 
     @classmethod
     def get_by_username(cls, username: str) -> dict | None:
         with SessionLocal() as session:
-            user = session.query(cls).filter(cls.username == username).one_or_none()
-
-            if user is None:
+            result = session.query(cls, Department).join(
+                Department,
+                Department.id == cls.department_id,
+            ).filter(
+                cls.username == username,
+                cls.active.is_(True),
+            ).one_or_none()
+            if result is None:
                 return None
-
-            return cls.serialize(user)
+            user, department = result
+            return cls.serialize(user, department.department_code)
 
 
 class UserSession(Base):
     __tablename__ = "user_sessions"
 
-    id: Mapped[int] = mapped_column(
-        BigInteger().with_variant(Integer, "sqlite"),
-        primary_key=True,
-        autoincrement=True,
-    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -82,5 +112,5 @@ class UserSession(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP,
         nullable=False,
-        server_default=text("CURRENT_TIMESTAMP"),
+        server_default=text("NOW()"),
     )

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
@@ -8,7 +8,6 @@ import { useProductsStore } from '@/stores/products'
 import {
   DEPARTMENT_LABELS,
   FORMAL_DEPARTMENTS,
-  type CreateProductPayload,
   type Department,
   type ProductItem,
 } from '@/types/production'
@@ -23,43 +22,19 @@ const {
   progressLoading,
 } = storeToRefs(productsStore)
 
-const productDialogVisible = ref(false)
 const progressDialogVisible = ref(false)
 const activeProduct = ref<ProductItem | null>(null)
 const activeDepartment = ref<Department | null>(null)
-const selectedProcessDepartment = ref<Department>('cnc')
 const searchKeyword = ref('')
 const departmentFilter = ref<Department | ''>('')
 const deliveryDateRange = ref<string[]>([])
 const overdueFilter = ref<'all' | 'yes' | 'no'>('all')
 const stockFilter = ref<'all' | 'yes' | 'no'>('all')
 
-const productForm = reactive<CreateProductPayload>({
-  orderId: '',
-  zzCode: '',
-  productName: '',
-  deliveryDate: '',
-  process: ['stamp', 'finished'],
-  quantity: 1,
-})
-
-const processOptions = computed(() => [...FORMAL_DEPARTMENTS])
 const productDepartmentOptions = computed(() => [...FORMAL_DEPARTMENTS])
-const selectableProcessOptions = computed(() =>
-  processOptions.value.filter((department) => !productForm.process.includes(department)),
-)
-const canSubmitProduct = computed(() =>
-  Boolean(
-    productForm.orderId.trim()
-    && productForm.zzCode.trim()
-    && productForm.productName.trim()
-    && productForm.deliveryDate
-    && productForm.process.length > 0
-    && productForm.process[productForm.process.length - 1] === 'finished',
-  ),
-)
-const isAdmin = computed(
-  () => authStore.user?.department === 'sys' && authStore.hasPermission('product:add'),
+const canManageProducts = computed(
+  () => authStore.user?.department === 'sys'
+    && authStore.hasPermission('product:manage'),
 )
 const departmentDashboardPath = computed(() => {
   const department = authStore.department
@@ -69,7 +44,13 @@ const currentDepartmentName = computed(() => {
   const department = authStore.department
   if (!department) return '公开页面'
   if (department === 'sys') return '系统管理'
-  return `${DEPARTMENT_LABELS[department]}部门`
+  const officeLabels: Record<string, string> = {
+    engineering: '工程部',
+    business: '业务部',
+    planning: '生产计划部',
+  }
+  return officeLabels[department]
+    ?? `${DEPARTMENT_LABELS[department as Department]}部门`
 })
 const activeProgressTitle = computed(() => {
   if (!activeProduct.value) {
@@ -133,66 +114,6 @@ function getDepartmentQuantity(product: ProductItem, department: Department) {
     .reduce((total, repository) => total + repository.quantity, 0)
 }
 
-function resetProductForm() {
-  productForm.orderId = ''
-  productForm.zzCode = ''
-  productForm.productName = ''
-  productForm.deliveryDate = ''
-  productForm.process = ['stamp', 'finished']
-  productForm.quantity = 1
-  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'cnc'
-}
-
-function openProductDialog() {
-  resetProductForm()
-  productDialogVisible.value = true
-}
-
-function addProcessDepartment() {
-  if (productForm.process.includes(selectedProcessDepartment.value)) {
-    return
-  }
-
-  const finishedIndex = productForm.process.indexOf('finished')
-  productForm.process.splice(finishedIndex, 0, selectedProcessDepartment.value)
-  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'cnc'
-}
-
-function removeProcessDepartment(index: number) {
-  if (productForm.process[index] === 'finished') {
-    return
-  }
-  productForm.process.splice(index, 1)
-  selectedProcessDepartment.value = selectableProcessOptions.value[0] ?? 'cnc'
-}
-
-function moveProcessDepartment(index: number, direction: -1 | 1) {
-  const targetIndex = index + direction
-
-  if (targetIndex < 0 || targetIndex >= productForm.process.length) {
-    return
-  }
-
-  const current = productForm.process[index]
-  const target = productForm.process[targetIndex]
-
-  if (!current || !target || current === 'finished' || target === 'finished') {
-    return
-  }
-
-  productForm.process[index] = target
-  productForm.process[targetIndex] = current
-}
-
-async function submitProduct() {
-  if (!canSubmitProduct.value) {
-    return
-  }
-
-  await productsStore.createProduct(productForm)
-  productDialogVisible.value = false
-}
-
 async function openDepartmentProgress(product: ProductItem, department: Department) {
   activeProduct.value = product
   activeDepartment.value = department
@@ -240,7 +161,7 @@ onMounted(loadDashboard)
     <header class="dashboard-header">
       <div class="navbar-title">
         <div class="page-kicker">{{ currentDepartmentName }}</div>
-        <h1>产品流转看板</h1>
+        <h1>生产物料流转看板</h1>
       </div>
       <nav class="header-actions" aria-label="产品总览导航">
         <ElButton class="nav-current" type="primary" aria-current="page">产品总览</ElButton>
@@ -250,8 +171,25 @@ onMounted(loadDashboard)
         >
           返回{{ currentDepartmentName }}
         </ElButton>
-        <ElButton v-if="isAdmin" type="primary" plain @click="openProductDialog">
-          新增产品
+        <ElButton
+          v-if="canManageProducts"
+          type="primary"
+          plain
+          @click="router.push('/dashboard/engineering')"
+        >
+          产品资料
+        </ElButton>
+        <ElButton
+          v-if="authStore.hasPermission('order:manage')"
+          @click="router.push('/dashboard/business')"
+        >
+          客户订单
+        </ElButton>
+        <ElButton
+          v-if="authStore.hasPermission('plan:manage')"
+          @click="router.push('/dashboard/planning')"
+        >
+          生产计划
         </ElButton>
         <ElButton v-if="authStore.isLoggedIn" @click="switchUser">切换用户</ElButton>
         <ElButton v-else @click="goToLogin">登录</ElButton>
@@ -263,7 +201,7 @@ onMounted(loadDashboard)
         <ElInput
           v-model="searchKeyword"
           clearable
-          placeholder="搜索订单号、本厂编码或产品名称"
+          placeholder="搜索计划号、物料编号或物料名称"
         />
         <ElSelect v-model="departmentFilter" clearable placeholder="所在部门">
           <ElOption
@@ -293,7 +231,7 @@ onMounted(loadDashboard)
         </ElSelect>
         <ElButton @click="resetFilters">重置筛选</ElButton>
       </div>
-      <div class="filter-result">共 {{ filteredProducts.length }} 个产品</div>
+      <div class="filter-result">共 {{ filteredProducts.length }} 个生产物料</div>
     </section>
 
     <section v-loading="productsLoading" class="product-list">
@@ -328,7 +266,7 @@ onMounted(loadDashboard)
       </article>
       <ElEmpty
         v-if="!productsLoading && filteredProducts.length === 0"
-        description="没有符合条件的产品"
+        description="没有符合条件的生产物料"
       />
     </section>
 
@@ -384,101 +322,6 @@ onMounted(loadDashboard)
       </div>
     </ElDialog>
 
-    <ElDialog v-model="productDialogVisible" title="新增产品" width="620px">
-      <ElForm :model="productForm" label-position="top">
-        <ElFormItem label="订单号" required>
-          <ElInput v-model="productForm.orderId" placeholder="请输入订单号" />
-        </ElFormItem>
-        <ElFormItem label="本厂编码" required>
-          <ElInput v-model="productForm.zzCode" />
-        </ElFormItem>
-        <ElFormItem label="产品名称" required>
-          <ElInput v-model="productForm.productName" />
-        </ElFormItem>
-        <ElFormItem label="交货日期" required>
-          <ElDatePicker
-            class="delivery-date-picker"
-            v-model="productForm.deliveryDate"
-            type="date"
-            value-format="YYYY-MM-DD"
-            placeholder="请选择交货日期"
-          />
-        </ElFormItem>
-        <ElFormItem label="初始数量">
-          <ElInputNumber v-model="productForm.quantity" :min="1" />
-        </ElFormItem>
-        <ElFormItem label="有序工艺流程">
-          <div class="process-builder">
-            <div class="process-picker">
-              <ElSelect
-                v-model="selectedProcessDepartment"
-                :disabled="selectableProcessOptions.length === 0"
-              >
-                <ElOption
-                  v-for="department in selectableProcessOptions"
-                  :key="department"
-                  :label="getDepartmentLabel(department)"
-                  :value="department"
-                />
-              </ElSelect>
-              <ElButton
-                :disabled="selectableProcessOptions.length === 0"
-                @click="addProcessDepartment"
-              >
-                加入流程
-              </ElButton>
-            </div>
-            <div class="process-list">
-              <div
-                v-for="(department, index) in productForm.process"
-                :key="department"
-                class="process-row"
-              >
-                <span>{{ index + 1 }}</span>
-                <strong>{{ getDepartmentLabel(department) }}</strong>
-                <div class="process-actions">
-                  <ElButton
-                    text
-                    :disabled="index === 0 || department === 'finished'"
-                    @click="moveProcessDepartment(index, -1)"
-                  >
-                    上移
-                  </ElButton>
-                  <ElButton
-                    text
-                    :disabled="
-                      index === productForm.process.length - 1
-                      || productForm.process[index + 1] === 'finished'
-                    "
-                    @click="moveProcessDepartment(index, 1)"
-                  >
-                    下移
-                  </ElButton>
-                  <ElButton
-                    text
-                    type="danger"
-                    :disabled="department === 'finished'"
-                    @click="removeProcessDepartment(index)"
-                  >
-                    移除
-                  </ElButton>
-                </div>
-              </div>
-            </div>
-          </div>
-        </ElFormItem>
-      </ElForm>
-      <template #footer>
-        <ElButton @click="productDialogVisible = false">取消</ElButton>
-        <ElButton
-          type="primary"
-          :disabled="!canSubmitProduct"
-          @click="submitProduct"
-        >
-          确认
-        </ElButton>
-      </template>
-    </ElDialog>
   </main>
 </template>
 
@@ -513,10 +356,6 @@ onMounted(loadDashboard)
   font-size: 12px;
   font-weight: 700;
   text-transform: uppercase;
-}
-
-.delivery-date-picker {
-  width: 100%;
 }
 
 .dashboard-header h1 { margin: 6px 0; }
@@ -665,51 +504,6 @@ onMounted(loadDashboard)
   line-height: 1;
 }
 
-.process-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.process-builder {
-  display: grid;
-  gap: 12px;
-  width: 100%;
-}
-
-.process-picker {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-}
-
-.process-list {
-  display: grid;
-  gap: 8px;
-}
-
-.process-row {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: center;
-  padding: 10px 12px;
-  border: 1px solid var(--erp-border);
-  border-radius: 8px;
-  background: var(--erp-surface-muted);
-}
-
-.process-row span {
-  display: grid;
-  width: 28px;
-  height: 28px;
-  place-items: center;
-  border-radius: 8px;
-  background: #dbeafe;
-  color: #1d4ed8;
-  font-weight: 700;
-}
-
 @media (max-width: 1300px) {
   .filter-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
@@ -738,10 +532,5 @@ onMounted(loadDashboard)
   .progress-summary { grid-template-columns: 1fr 1fr; }
 
   .progress-metrics { grid-template-columns: 1fr 1fr; }
-
-  .process-row,
-  .process-picker {
-    grid-template-columns: 1fr;
-  }
 }
 </style>

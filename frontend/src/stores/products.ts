@@ -1,12 +1,10 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
-  createProduct as createProductApi,
   queryProductDepartmentProgress,
   queryProducts,
 } from '@/api/production'
 import type {
-  CreateProductPayload,
   Department,
   ProductDepartmentProgress,
   ProductItem,
@@ -32,11 +30,6 @@ export const useProductsStore = defineStore('products', () => {
     }
   }
 
-  async function createProduct(payload: CreateProductPayload) {
-    await createProductApi(payload)
-    await loadProducts()
-  }
-
   async function loadDepartmentProgress(productId: number, department: Department) {
     progressLoading.value = true
     departmentProgress.value = null
@@ -48,7 +41,6 @@ export const useProductsStore = defineStore('products', () => {
   }
 
   return {
-    createProduct,
     departmentProgress,
     loadDepartmentProgress,
     loadProducts,

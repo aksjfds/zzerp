@@ -1,12 +1,16 @@
-import type { LoginPayload, UserProfile } from '@/types/auth'
+import type { LoginAccount, LoginPayload, UserProfile } from '@/types/auth'
 import { service } from './request'
 
 export async function login(payload: LoginPayload) {
   const res = await service.post<{ data: UserProfile; csrfToken: string }>('/login', {
     username: payload.username.trim(),
-    password: payload.password,
   })
 
+  return res.data.data
+}
+
+export async function queryLoginAccounts() {
+  const res = await service.get<{ data: LoginAccount[] }>('/login/accounts')
   return res.data.data
 }
 

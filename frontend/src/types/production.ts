@@ -48,15 +48,6 @@ export type ProductItem = {
   createdAt: string
 }
 
-export type CreateProductPayload = {
-  orderId: string
-  zzCode: string
-  productName: string
-  deliveryDate: string
-  process: Department[]
-  quantity: number
-}
-
 export type ProductRecord = {
   id: number
   orderId: string

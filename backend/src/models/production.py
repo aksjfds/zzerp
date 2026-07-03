@@ -17,9 +17,15 @@ from database import Base, SessionLocal
 
 
 class Product(Base):
-    __tablename__ = "product"
+    __tablename__ = "production_item"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    production_plan_material_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("production_plan_material.id"),
+        unique=True,
+        nullable=False,
+    )
     order_id: Mapped[str] = mapped_column(Text, nullable=False)
     zz_code: Mapped[str] = mapped_column(Text, nullable=False)
     product_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -41,85 +47,6 @@ class Product(Base):
             "process": process,
             "createdAt": product.created_at.strftime("%Y-%m-%d %H:%M"),
         }
-
-    @classmethod
-    def create(
-        cls,
-        order_id: str,
-        zz_code: str,
-        product_name: str,
-        delivery_date: date,
-        process: list[str],
-        quantity: int,
-    ) -> dict:
-        formal_departments = {"stamp", "cnc", "polish", "assembly", "finished"}
-        if not process:
-            raise ValueError("产品部门流程不能为空")
-        if "qc" in process:
-            raise ValueError("QC 不能作为产品正式部门流程")
-        invalid_departments = set(process) - formal_departments
-        if invalid_departments:
-            raise ValueError("产品流程包含无效生产部门")
-        if process[-1] != "finished":
-            raise ValueError("成品部门必须是产品流程的最后一个部门")
-        if len(set(process)) != len(process):
-            raise ValueError("产品部门流程不能包含重复部门")
-
-        with SessionLocal() as session:
-            exists = (
-                session.query(cls)
-                .filter(
-                    cls.order_id == order_id,
-                    cls.zz_code == zz_code,
-                    cls.product_name == product_name,
-                )
-                .one_or_none()
-            )
-            if exists is not None:
-                raise ValueError("当前订单中已存在该产品")
-
-            product = cls(
-                order_id=order_id,
-                zz_code=zz_code,
-                product_name=product_name,
-                delivery_date=delivery_date,
-            )
-            session.add(product)
-            session.flush()
-
-            for index, department in enumerate(process, start=1):
-                session.add(
-                    ProductDepartmentStep(
-                        product_id=product.id,
-                        sequence_no=index,
-                        department=department,
-                    )
-                )
-
-            first_department = process[0]
-            repository = Repository(
-                department=first_department,
-                product_id=product.id,
-                quantity=quantity,
-            )
-            session.add(repository)
-            session.add(
-                Record(
-                    product_id=product.id,
-                    from_repository="in",
-                    to_repository=first_department,
-                    quantity=quantity,
-                    note="创建产品",
-                )
-            )
-            session.commit()
-            session.refresh(product)
-            session.refresh(repository)
-
-            item = cls.serialize(product, process)
-            item["repositories"] = [Repository.serialize(repository)]
-            item["quantity"] = quantity
-            return item
 
     @classmethod
     def list_all(cls, department: str | None = None) -> list[dict]:
@@ -308,7 +235,7 @@ class ProductDepartmentStep(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     product_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product.id", ondelete="CASCADE"),
+        ForeignKey("production_item.id", ondelete="CASCADE"),
         nullable=False,
     )
     sequence_no: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -322,7 +249,7 @@ class Repository(Base):
     department: Mapped[str] = mapped_column(Text, nullable=False)
     product_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product.id", ondelete="CASCADE"),
+        ForeignKey("production_item.id", ondelete="CASCADE"),
         nullable=False,
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -507,7 +434,7 @@ class PolishProcess(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     product_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product.id", ondelete="CASCADE"),
+        ForeignKey("production_item.id", ondelete="CASCADE"),
         nullable=False,
         unique=True,
     )
@@ -636,7 +563,11 @@ class WorkOrder(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     work_order_no: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
-    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("product.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("production_item.id"),
+        nullable=False,
+    )
     department: Mapped[str] = mapped_column(Text, nullable=False)
     process_name: Mapped[str] = mapped_column(Text, nullable=False)
     worker_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("worker.id"), nullable=False)
@@ -1713,7 +1644,7 @@ class ReworkRequest(Base):
     )
     product_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product.id"),
+        ForeignKey("production_item.id"),
         nullable=False,
     )
     source_department: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1914,7 +1845,7 @@ class Record(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     product_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey("product.id", ondelete="CASCADE"),
+        ForeignKey("production_item.id", ondelete="CASCADE"),
         nullable=False,
     )
     from_repository: Mapped[str] = mapped_column(Text, nullable=False)

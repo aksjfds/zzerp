@@ -18,10 +18,7 @@ settings = get_settings()
 @router.post("/login")
 def login(payload: LoginPayload, response: Response):
     try:
-        user = User.login(
-            username=payload.username.strip(),
-            password=payload.password,
-        )
+        user = User.login_selected(username=payload.username.strip())
     except ValueError as exc:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
@@ -37,6 +34,11 @@ def login(payload: LoginPayload, response: Response):
         path="/",
     )
     return {"data": user, "csrfToken": csrf_token}
+
+
+@router.get("/login/accounts")
+def login_accounts():
+    return {"data": User.list_login_accounts()}
 
 
 @router.get("/current_user")

@@ -9,6 +9,7 @@ import PolishDashboardView from '@/views/departments/PolishDashboardView.vue'
 import PolishWorkerOverviewView from '@/views/departments/PolishWorkerOverviewView.vue'
 import QcDashboardView from '@/views/departments/QcDashboardView.vue'
 import StampDashboardView from '@/views/departments/StampDashboardView.vue'
+import { v2Routes } from './v2'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -28,6 +29,7 @@ const router = createRouter({
       name: 'dashboard',
       component: ProductDashboardView,
     },
+    ...v2Routes,
     {
       path: '/dashboard/stamp',
       name: 'dashboard-stamp',

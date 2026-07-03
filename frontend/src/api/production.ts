@@ -1,6 +1,5 @@
 import type {
   AssignQcWorkerPayload,
-  CreateProductPayload,
   CreateProcedurePayload,
   CreateReworkRequestPayload,
   CreateWorkOrderPayload,
@@ -38,18 +37,6 @@ export async function queryProductDepartmentProgress(
   const res = await service.get<{ data: ProductDepartmentProgress }>(
     `/products/${productId}/departments/${department}/progress`,
   )
-  return res.data.data
-}
-
-export async function createProduct(payload: CreateProductPayload) {
-  const res = await service.post<{ data: ProductItem }>('/products', {
-    order_id: payload.orderId.trim(),
-    zz_code: payload.zzCode.trim(),
-    product_name: payload.productName.trim(),
-    delivery_date: payload.deliveryDate,
-    process: payload.process,
-    quantity: payload.quantity,
-  })
   return res.data.data
 }
 

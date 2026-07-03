@@ -1,6 +1,11 @@
 import type { Department } from '@/types/production'
 
-export type UserDepartment = Department | 'sys'
+export type UserDepartment =
+  | Department
+  | 'sys'
+  | 'engineering'
+  | 'business'
+  | 'planning'
 
 export type UserProfile = {
   id: number
@@ -13,5 +18,11 @@ export type UserProfile = {
 
 export type LoginPayload = {
   username: string
-  password: string
+}
+
+export type LoginAccount = {
+  username: string
+  department: UserDepartment
+  departmentName: string
+  role: string
 }

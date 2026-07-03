@@ -8,6 +8,7 @@ from fastapi import Depends, HTTPException, Request, status
 from config import get_settings
 from database import SessionLocal
 from models.user import User, UserSession
+from models.organization import Department
 
 
 settings = get_settings()
@@ -84,8 +85,9 @@ def get_current_user(request: Request) -> dict:
     now = datetime.now()
     with SessionLocal() as session:
         result = (
-            session.query(UserSession, User)
+            session.query(UserSession, User, Department)
             .join(User, User.id == UserSession.user_id)
+            .join(Department, Department.id == User.department_id)
             .filter(UserSession.token_hash == _hash_token(session_token))
             .one_or_none()
         )
@@ -96,7 +98,7 @@ def get_current_user(request: Request) -> dict:
                 detail="登录会话无效",
             )
 
-        user_session, user = result
+        user_session, user, department = result
         if user_session.expires_at <= now:
             session.delete(user_session)
             session.commit()
@@ -105,7 +107,12 @@ def get_current_user(request: Request) -> dict:
                 detail="登录会话已过期",
             )
 
-        return User.serialize(user)
+        if not user.active or not department.active:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="账号或部门已停用",
+            )
+        return User.serialize(user, department.department_code)
 
 
 def get_optional_current_user(request: Request) -> dict | None:

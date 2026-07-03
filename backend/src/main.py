@@ -4,6 +4,7 @@ from fastapi.responses import JSONResponse
 
 from config import get_settings
 from routers import auth, products, qc, records, work_orders
+from routers.v2 import router as v2_router
 
 app = FastAPI(title="zzerp")
 settings = get_settings()
@@ -12,7 +13,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-CSRF-Token"],
 )
 
@@ -32,6 +33,7 @@ app.include_router(products.router)
 app.include_router(records.router)
 app.include_router(work_orders.router)
 app.include_router(qc.router)
+app.include_router(v2_router)
 
 
 @app.get("/")
