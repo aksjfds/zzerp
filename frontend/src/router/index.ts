@@ -1,102 +1,34 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { setupRouterGuard } from '@/permission/guard'
 import LoginView from '@/views/LoginView.vue'
-import ProductDashboardView from '@/views/ProductDashboardView.vue'
-import AssemblyDashboardView from '@/views/departments/AssemblyDashboardView.vue'
-import CncDashboardView from '@/views/departments/CncDashboardView.vue'
-import FinishedDashboardView from '@/views/departments/FinishedDashboardView.vue'
-import PolishDashboardView from '@/views/departments/PolishDashboardView.vue'
-import PolishWorkerOverviewView from '@/views/departments/PolishWorkerOverviewView.vue'
-import QcDashboardView from '@/views/departments/QcDashboardView.vue'
-import StampDashboardView from '@/views/departments/StampDashboardView.vue'
+import EngineeringProductsView from '@/features/process-designer/views/EngineeringProductsView.vue'
+import EngineeringProductEditorView from '@/features/process-designer/views/EngineeringProductEditorView.vue'
+import ForbiddenView from '@/views/ForbiddenView.vue'
+import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
+    { path: '/', redirect: '/products' },
+    { path: '/login', name: 'login', component: LoginView },
+    { path: '/forbidden', name: 'forbidden', component: ForbiddenView, meta: { requiresAuth: true } },
     {
-      path: '/',
-      name: 'home',
-      redirect: '/dashboard',
+      path: '/products',
+      name: 'engineering-products',
+      component: EngineeringProductsView,
+      meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.view] },
     },
     {
-      path: '/login',
-      name: 'login',
-      component: LoginView,
+      path: '/products/new',
+      name: 'engineering-product-create',
+      component: EngineeringProductEditorView,
+      meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.add] },
     },
     {
-      path: '/dashboard',
-      name: 'dashboard',
-      component: ProductDashboardView,
-    },
-    {
-      path: '/dashboard/stamp',
-      name: 'dashboard-stamp',
-      component: StampDashboardView,
-      meta: {
-        department: 'stamp',
-        requiresAuth: true,
-        permissions: ['task:view'],
-      },
-    },
-    {
-      path: '/dashboard/cnc',
-      name: 'dashboard-cnc',
-      component: CncDashboardView,
-      meta: {
-        department: 'cnc',
-        requiresAuth: true,
-        permissions: ['task:view'],
-      },
-    },
-    {
-      path: '/dashboard/polish',
-      name: 'dashboard-polish',
-      component: PolishDashboardView,
-      meta: {
-        department: 'polish',
-        requiresAuth: true,
-        permissions: ['task:view'],
-      },
-    },
-    {
-      path: '/dashboard/assembly',
-      name: 'dashboard-assembly',
-      component: AssemblyDashboardView,
-      meta: {
-        department: 'assembly',
-        requiresAuth: true,
-        permissions: ['task:view'],
-      },
-    },
-    {
-      path: '/dashboard/finished',
-      name: 'dashboard-finished',
-      component: FinishedDashboardView,
-      meta: {
-        department: 'finished',
-        requiresAuth: true,
-        permissions: ['task:view'],
-      },
-    },
-    {
-      path: '/dashboard/qc',
-      name: 'dashboard-qc',
-      component: QcDashboardView,
-      meta: {
-        department: 'qc',
-        requiresAuth: true,
-        permissions: ['task:view'],
-      },
-    },
-    {
-      path: '/dashboard/polish/workers',
-      name: 'dashboard-polish-workers',
-      component: PolishWorkerOverviewView,
-      meta: {
-        department: 'polish',
-        requiresAuth: true,
-        permissions: ['task:view'],
-      },
+      path: '/products/:productId(\\d+)',
+      name: 'engineering-product-edit',
+      component: EngineeringProductEditorView,
+      meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.edit] },
     },
   ],
 })

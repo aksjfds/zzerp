@@ -4,6 +4,7 @@ from pathlib import Path
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
+from sqlalchemy.engine import URL
 
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -54,7 +55,15 @@ def _build_database_url() -> str:
     }
     query = f"?{urlencode(query_params)}" if query_params else ""
 
-    return f"postgresql+psycopg2://{user}:{password}@{host}:{port}/{database}{query}"
+    base_url = URL.create(
+        "postgresql+psycopg2",
+        username=user,
+        password=password,
+        host=host,
+        port=int(port),
+        database=database,
+    ).render_as_string(hide_password=False)
+    return f"{base_url}{query}"
 
 
 class Settings:

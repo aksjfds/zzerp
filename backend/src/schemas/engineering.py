@@ -1,0 +1,139 @@
+from typing import Annotated, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ContractModel(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+class PointPayload(ContractModel):
+    x: float
+    y: float
+
+
+class FlowNodeBase(ContractModel):
+    id: str = Field(min_length=1, max_length=100)
+    x: float
+    y: float
+    label: str = Field(min_length=1, max_length=200)
+    label_position: PointPayload | None = None
+    z_index: int | None = None
+    rotation: float | None = None
+
+
+class PartNodePayload(FlowNodeBase):
+    type: Literal["part"]
+    bom_item_id: int = Field(gt=0)
+    part_no: str = Field(min_length=1, max_length=200)
+
+
+class ProcessNodePayload(FlowNodeBase):
+    type: Literal["process"]
+    process_code: str = Field(min_length=1, max_length=100)
+
+
+class AssemblyNodePayload(FlowNodeBase):
+    type: Literal["assembly"]
+    output_name: str = Field(min_length=1, max_length=200)
+
+
+class QcNodePayload(FlowNodeBase):
+    type: Literal["qc"]
+
+
+FlowNodePayload = Annotated[
+    PartNodePayload | ProcessNodePayload | AssemblyNodePayload | QcNodePayload,
+    Field(discriminator="type"),
+]
+
+
+class FlowEdgePayload(ContractModel):
+    id: str = Field(min_length=1, max_length=100)
+    edge_type: str = Field(default="polyline", min_length=1, max_length=100)
+    source_node_id: str = Field(min_length=1, max_length=100)
+    target_node_id: str = Field(min_length=1, max_length=100)
+    source_anchor_id: str | None = None
+    target_anchor_id: str | None = None
+    start_point: PointPayload | None = None
+    end_point: PointPayload | None = None
+    points: list[PointPayload] | None = None
+    label: str | None = Field(default=None, max_length=200)
+    label_position: PointPayload | None = None
+    z_index: int | None = None
+    route_type: Literal["normal", "rework"] = "normal"
+    outcome: Literal["approved", "rejected"] | None = None
+
+
+class ProcessFlowPayload(ContractModel):
+    schema_version: Literal[1] = 1
+    nodes: list[FlowNodePayload] = Field(default_factory=list, max_length=500)
+    edges: list[FlowEdgePayload] = Field(default_factory=list, max_length=2000)
+
+
+class BomItemPayload(ContractModel):
+    id: int | None = Field(default=None, gt=0)
+    part_name: str = Field(min_length=1, max_length=200)
+    part_no: str = Field(min_length=1, max_length=200)
+    pcs: str = Field(min_length=1, max_length=100)
+    remark: str | None = Field(default=None, max_length=1000)
+
+
+class ProductFields(ContractModel):
+    customer_name: str = Field(min_length=1, max_length=200)
+    product_name: str = Field(min_length=1, max_length=200)
+    factory_code: str = Field(min_length=1, max_length=200)
+    customer_code: str = Field(min_length=1, max_length=200)
+
+
+class CreateProductPayload(ProductFields):
+    bom_items: list[BomItemPayload] = Field(min_length=1, max_length=1000)
+
+
+class UpdateProductPayload(ProductFields):
+    expected_version: int = Field(gt=0)
+
+
+class ReplaceBomPayload(ContractModel):
+    expected_version: int = Field(gt=0)
+    bom_items: list[BomItemPayload] = Field(min_length=1, max_length=1000)
+
+
+class UpdateProcessFlowPayload(ContractModel):
+    expected_version: int = Field(gt=0)
+    process_flow: ProcessFlowPayload
+
+
+class BomItemResponse(ContractModel):
+    id: int
+    product_id: int
+    part_name: str
+    part_no: str
+    pcs: str
+    remark: str
+    sort_order: int
+
+
+class ProductSummaryResponse(ProductFields):
+    id: int
+    version: int
+    bom_count: int
+    created_at: str
+    updated_at: str
+
+
+class ProductDetailResponse(ProductFields):
+    id: int
+    version: int
+    bom_items: list[BomItemResponse]
+    process_flow: ProcessFlowPayload
+    created_at: str
+    updated_at: str
+
+
+class ProductListEnvelope(ContractModel):
+    data: list[ProductSummaryResponse]
+
+
+class ProductDetailEnvelope(ContractModel):
+    data: ProductDetailResponse

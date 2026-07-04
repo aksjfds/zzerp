@@ -1,15 +1,14 @@
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
+from auth_dependencies import get_optional_current_user, require_csrf
 from config import get_settings
-from models.user import User
 from schemas.user import LoginPayload
-from security import (
+from services.user_sessions import (
     create_user_session,
     get_csrf_token,
-    get_optional_current_user,
-    require_csrf,
     revoke_user_session,
 )
+from services.authentication import authenticate_user
 
 router = APIRouter(tags=["auth"])
 settings = get_settings()
@@ -18,7 +17,7 @@ settings = get_settings()
 @router.post("/login")
 def login(payload: LoginPayload, response: Response):
     try:
-        user = User.login(
+        user = authenticate_user(
             username=payload.username.strip(),
             password=payload.password,
         )

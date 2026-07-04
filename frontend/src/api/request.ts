@@ -1,4 +1,5 @@
 import axios from 'axios'
+import type { ApiErrorDetail } from './types'
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 
@@ -11,6 +12,19 @@ export const service = axios.create({
   timeout: 10000,
   withCredentials: true,
 })
+
+export function getApiErrorDetail(error: unknown): ApiErrorDetail | null {
+  if (!axios.isAxiosError(error)) return null
+  const detail = error.response?.data?.detail
+  if (!detail || typeof detail !== 'object') return null
+  if (typeof detail.code !== 'string' || typeof detail.message !== 'string') return null
+  return {
+    code: detail.code,
+    message: detail.message,
+    path: typeof detail.path === 'string' ? detail.path : undefined,
+    element_id: typeof detail.element_id === 'string' ? detail.element_id : undefined,
+  }
+}
 
 let csrfToken: string | undefined
 

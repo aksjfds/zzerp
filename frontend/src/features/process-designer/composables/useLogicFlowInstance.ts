@@ -1,0 +1,88 @@
+import { nextTick, onBeforeUnmount, onMounted, shallowRef, type Ref } from 'vue'
+import LogicFlow from '@logicflow/core'
+import { Control, Menu } from '@logicflow/extension'
+import { registerProcessNodes } from '../logicflow/registerNodes'
+import { fromLogicFlowData, toLogicFlowData } from '../logicflow/adapter'
+import type { FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
+
+type Callbacks = {
+  initialFlow: () => ProcessFlow
+  onChange: (flow: ProcessFlow) => void
+  onConnectionError: (message: string) => void
+  onSelectEdge: (edge: FlowEdge | null) => void
+  onSelectNode: (node: FlowNode | null) => void
+}
+
+export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>, callbacks: Callbacks) {
+  const instance = shallowRef<LogicFlow | null>(null)
+
+  function currentFlow() {
+    if (!instance.value) return callbacks.initialFlow()
+    return fromLogicFlowData(instance.value.getGraphRawData())
+  }
+
+  function emitChange() {
+    callbacks.onChange(currentFlow())
+  }
+
+  function renderFlow(flow: ProcessFlow) {
+    instance.value?.renderRawData(toLogicFlowData(flow))
+  }
+
+  onMounted(async () => {
+    await nextTick()
+    if (!container.value) return
+    const lf = new LogicFlow({
+      container: container.value,
+      grid: { size: 20, visible: true },
+      edgeType: 'polyline',
+      keyboard: { enabled: true },
+      plugins: [Control, Menu],
+    })
+    instance.value = lf
+    registerProcessNodes(lf)
+    const menu = lf.extension.menu as Menu
+    menu.setMenuConfig({
+      nodeMenu: [{ text: '删除节点', callback: (node: { id: string }) => lf.deleteNode(node.id) }],
+      edgeMenu: [{ text: '删除连线', callback: (edge: { id: string }) => lf.deleteEdge(edge.id) }],
+      graphMenu: [],
+    })
+    lf.on('edge:add', ({ data }) => {
+      const source = lf.getNodeDataById(data.sourceNodeId)
+      lf.setProperties(data.id, source?.type === 'qc'
+        ? { routeType: 'normal', outcome: 'approved' }
+        : { routeType: 'normal' })
+      if (source?.type === 'qc') lf.updateText(data.id, '合格')
+      emitChange()
+    })
+    lf.on('node:click', ({ data }) => {
+      const node = currentFlow().nodes.find((item) => item.id === data.id) ?? null
+      callbacks.onSelectEdge(null)
+      callbacks.onSelectNode(node)
+    })
+    lf.on('edge:click', ({ data }) => {
+      const edge = currentFlow().edges.find((item) => item.id === data.id) ?? null
+      callbacks.onSelectNode(null)
+      callbacks.onSelectEdge(edge)
+    })
+    lf.on('blank:click', () => {
+      callbacks.onSelectNode(null)
+      callbacks.onSelectEdge(null)
+    })
+    lf.on(
+      'node:add,node:delete,edge:delete,node:drop,node:dragend,node:rotate,node:resize,node:properties-change,edge:adjust,edge:exchange-node,text:update',
+      emitChange,
+    )
+    lf.on('connection:not-allowed', ({ msg }) => {
+      callbacks.onConnectionError(msg || '该连线不符合流程规则')
+    })
+    renderFlow(callbacks.initialFlow())
+  })
+
+  onBeforeUnmount(() => {
+    instance.value?.destroy()
+    instance.value = null
+  })
+
+  return { currentFlow, emitChange, instance, renderFlow }
+}

@@ -1,23 +1,6 @@
 -- ============================================================
--- ZZ ERP 产品流转与工单系统
+-- ZZ ERP 工程产品、BOM 与工艺路线
 -- ============================================================
-
-CREATE TABLE worker (
-    id BIGSERIAL PRIMARY KEY,
-    name TEXT NOT NULL,
-    department TEXT NOT NULL,
-    active BOOLEAN NOT NULL DEFAULT TRUE,
-    UNIQUE (name, department)
-);
-
-
-CREATE TABLE procedure (
-    id BIGSERIAL PRIMARY KEY,
-    procedure_name TEXT NOT NULL,
-    department TEXT NOT NULL,
-    UNIQUE (department, procedure_name)
-);
-
 
 CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
@@ -29,246 +12,6 @@ CREATE TABLE users (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
-
--- 每一行代表一个订单产品。
-CREATE TABLE product (
-    id BIGSERIAL PRIMARY KEY,
-    order_id TEXT NOT NULL,
-    zz_code TEXT NOT NULL,
-    product_name TEXT NOT NULL,
-    delivery_date DATE NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (order_id, zz_code, product_name)
-);
-
-
--- 产品正式经过的部门顺序，例如 stamp -> cnc -> polish -> finished。
--- QC 不是正式归属部门。
-CREATE TABLE product_department_step (
-    id BIGSERIAL PRIMARY KEY,
-    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    sequence_no INT NOT NULL CHECK (sequence_no > 0),
-    department TEXT NOT NULL,
-    UNIQUE (product_id, sequence_no)
-);
-
-
--- 产品正式归属各部门的数量。内部送检不会改变此表的部门。
-CREATE TABLE repository (
-    id BIGSERIAL PRIMARY KEY,
-    department TEXT NOT NULL,
-    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-    UNIQUE (department, product_id)
-);
-
-
--- 磨房主管维护的可复用工艺路线预设。
-CREATE TABLE polish_process_preset (
-    id BIGSERIAL PRIMARY KEY,
-    preset_name TEXT NOT NULL UNIQUE,
-    process_flow TEXT[] NOT NULL,
-    active BOOLEAN NOT NULL DEFAULT TRUE,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    CHECK (cardinality(process_flow) > 0)
-);
-
-
--- 每个产品只保存一条磨房工艺数组，数组位置代表工艺顺序。
-CREATE TABLE polish_process (
-    id BIGSERIAL PRIMARY KEY,
-    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    preset_id BIGINT REFERENCES polish_process_preset(id) ON DELETE SET NULL,
-    process_flow TEXT[] NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    UNIQUE (product_id),
-    CHECK (cardinality(process_flow) > 0)
-);
-
-
--- 每张工单只对应一个工艺、一个工人和一次领取数量。
-CREATE TABLE work_order (
-    id BIGSERIAL PRIMARY KEY,
-    work_order_no TEXT UNIQUE,
-    product_id BIGINT NOT NULL REFERENCES product(id),
-    department TEXT NOT NULL,
-    process_name TEXT NOT NULL,
-    worker_id BIGINT NOT NULL REFERENCES worker(id),
-    issued_quantity INT NOT NULL CHECK (issued_quantity > 0),
-    work_order_type TEXT NOT NULL DEFAULT 'normal'
-        CHECK (work_order_type IN ('normal', 'rework')),
-    rework_request_id BIGINT,
-    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'closed')),
-    created_by BIGINT NOT NULL REFERENCES users(id),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    closed_at TIMESTAMP,
-    note TEXT,
-    CHECK (
-        (work_order_type = 'normal' AND rework_request_id IS NULL)
-        OR (work_order_type = 'rework' AND rework_request_id IS NOT NULL)
-    )
-);
-
-
--- 清洗是磨房工单的分批附加流程，不单独开工单。
-CREATE TABLE polish_cleaning_batch (
-    id BIGSERIAL PRIMARY KEY,
-    work_order_id BIGINT NOT NULL REFERENCES work_order(id),
-    batch_no INT NOT NULL CHECK (batch_no > 0),
-    quantity INT NOT NULL CHECK (quantity > 0),
-    status TEXT NOT NULL CHECK (status IN ('cleaning', 'completed')),
-    sent_by BIGINT NOT NULL REFERENCES users(id),
-    sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    completed_by BIGINT REFERENCES users(id),
-    completed_at TIMESTAMP,
-    UNIQUE (work_order_id, batch_no)
-);
-
-
-CREATE OR REPLACE FUNCTION protect_polish_cleaning_batch()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        RAISE EXCEPTION '清洗批次不允许删除';
-    END IF;
-    IF OLD.status = 'completed' THEN
-        RAISE EXCEPTION '已完成的清洗批次不允许修改';
-    END IF;
-    IF NEW.status <> 'completed'
-       OR NEW.work_order_id IS DISTINCT FROM OLD.work_order_id
-       OR NEW.batch_no IS DISTINCT FROM OLD.batch_no
-       OR NEW.quantity IS DISTINCT FROM OLD.quantity
-       OR NEW.sent_by IS DISTINCT FROM OLD.sent_by
-       OR NEW.sent_at IS DISTINCT FROM OLD.sent_at THEN
-        RAISE EXCEPTION '清洗批次只允许确认完成';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_protect_polish_cleaning_batch
-BEFORE UPDATE OR DELETE ON polish_cleaning_batch
-FOR EACH ROW EXECUTE FUNCTION protect_polish_cleaning_batch();
-
-
--- 需要 QC 时先建立 pending_qc 批次，由 QC 补全结果。
--- 不需要 QC 时由部门主管直接建立 completed 批次。
-CREATE TABLE work_order_batch (
-    id BIGSERIAL PRIMARY KEY,
-    work_order_id BIGINT NOT NULL REFERENCES work_order(id),
-    batch_no INT NOT NULL CHECK (batch_no > 0),
-    submitted_quantity INT NOT NULL CHECK (submitted_quantity > 0),
-    ok_quantity INT,
-    rework_quantity INT,
-    scrap_quantity INT,
-    lost_quantity INT,
-    qc_worker_id BIGINT REFERENCES worker(id),
-    defect_reason TEXT,
-    status TEXT NOT NULL CHECK (status IN ('pending_qc', 'completed')),
-    submitted_by BIGINT NOT NULL REFERENCES users(id),
-    submitted_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    inspected_by BIGINT REFERENCES users(id),
-    inspected_at TIMESTAMP,
-    UNIQUE (work_order_id, batch_no),
-    CHECK (ok_quantity IS NULL OR ok_quantity >= 0),
-    CHECK (rework_quantity IS NULL OR rework_quantity >= 0),
-    CHECK (scrap_quantity IS NULL OR scrap_quantity >= 0),
-    CHECK (lost_quantity IS NULL OR lost_quantity >= 0)
-);
-
-
--- pending_qc 阶段只允许分配或重新分配 QC 工人。
--- 完成后的批次永久不可修改或删除。
-CREATE OR REPLACE FUNCTION protect_work_order_batch_result()
-RETURNS TRIGGER AS $$
-BEGIN
-    IF TG_OP = 'DELETE' THEN
-        RAISE EXCEPTION '工单批次不允许删除';
-    END IF;
-    IF OLD.status = 'completed' THEN
-        RAISE EXCEPTION '已完成的工单批次不允许修改';
-    END IF;
-    IF NEW.status = 'pending_qc' THEN
-        IF ROW(
-            NEW.work_order_id,
-            NEW.batch_no,
-            NEW.submitted_quantity,
-            NEW.ok_quantity,
-            NEW.rework_quantity,
-            NEW.scrap_quantity,
-            NEW.lost_quantity,
-            NEW.defect_reason,
-            NEW.submitted_by,
-            NEW.submitted_at,
-            NEW.inspected_by,
-            NEW.inspected_at
-        ) IS DISTINCT FROM ROW(
-            OLD.work_order_id,
-            OLD.batch_no,
-            OLD.submitted_quantity,
-            OLD.ok_quantity,
-            OLD.rework_quantity,
-            OLD.scrap_quantity,
-            OLD.lost_quantity,
-            OLD.defect_reason,
-            OLD.submitted_by,
-            OLD.submitted_at,
-            OLD.inspected_by,
-            OLD.inspected_at
-        ) THEN
-            RAISE EXCEPTION '待质检批次只允许变更 QC 工人';
-        END IF;
-        RETURN NEW;
-    END IF;
-    IF NEW.status <> 'completed' THEN
-        RAISE EXCEPTION '待质检批次只能更新为已完成';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER trg_protect_work_order_batch_result
-BEFORE UPDATE OR DELETE ON work_order_batch
-FOR EACH ROW EXECUTE FUNCTION protect_work_order_batch_result();
-
-
--- 跨部门返修不改变产品正式归属；目标部门可按工人拆分多张返修工单。
-CREATE TABLE rework_request (
-    id BIGSERIAL PRIMARY KEY,
-    source_work_order_id BIGINT NOT NULL REFERENCES work_order(id),
-    source_batch_id BIGINT REFERENCES work_order_batch(id),
-    product_id BIGINT NOT NULL REFERENCES product(id),
-    source_department TEXT NOT NULL,
-    target_department TEXT NOT NULL,
-    target_process_name TEXT NOT NULL,
-    quantity INT NOT NULL CHECK (quantity > 0),
-    reason TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending'
-        CHECK (status IN ('pending', 'processing', 'closed')),
-    created_by BIGINT NOT NULL REFERENCES users(id),
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    closed_at TIMESTAMP,
-    CHECK (source_department <> target_department)
-);
-
-ALTER TABLE work_order
-ADD CONSTRAINT fk_work_order_rework_request
-FOREIGN KEY (rework_request_id) REFERENCES rework_request(id);
-
-
--- 只记录正式部门流转；部门内部送检由工单批次追踪。
-CREATE TABLE records (
-    id BIGSERIAL PRIMARY KEY,
-    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
-    from_repository TEXT NOT NULL,
-    to_repository TEXT NOT NULL,
-    quantity INT NOT NULL CHECK (quantity > 0),
-    note TEXT,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
-);
-
-
 CREATE TABLE user_sessions (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -278,6 +21,46 @@ CREATE TABLE user_sessions (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- 工程确认后的可复用产品主数据，不代表订单或生产批次。
+CREATE TABLE product (
+    id BIGSERIAL PRIMARY KEY,
+    customer_name TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    factory_code TEXT NOT NULL,
+    customer_code TEXT NOT NULL,
+    version INT NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_product_factory_code UNIQUE (factory_code)
+);
+
+CREATE TABLE product_bom (
+    id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
+    part_name TEXT NOT NULL,
+    part_no TEXT NOT NULL,
+    pcs TEXT NOT NULL,
+    remark TEXT,
+    sort_order INT NOT NULL CHECK (sort_order > 0),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_product_bom_part_no UNIQUE (product_id, part_no)
+);
+
+CREATE TABLE product_process_flow (
+    id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL UNIQUE REFERENCES product(id) ON DELETE CASCADE,
+    flow_json JSONB NOT NULL DEFAULT '{"schema_version": 1, "nodes": [], "edges": []}'::jsonb,
+    CHECK (flow_json->>'schema_version' = '1'),
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (jsonb_typeof(flow_json->'nodes') = 'array'),
+    CHECK (jsonb_typeof(flow_json->'edges') = 'array')
+);
+
+CREATE INDEX idx_product_customer ON product(customer_name, customer_code);
+CREATE INDEX idx_product_bom_product ON product_bom(product_id, sort_order);
+CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
 
 INSERT INTO users (username, password, department, role, permissions) VALUES
 (
@@ -285,57 +68,12 @@ INSERT INTO users (username, password, department, role, permissions) VALUES
     '1',
     'sys',
     'supervisor',
-    'product:view,product:add,record:view,task:view,task:assign,task:complete,sys:user:add'
+    'engineering:product:view,engineering:product:add,engineering:product:edit,engineering:product:delete,sys:user:add'
 ),
-('polish', '1', 'polish', 'supervisor', 'task:view,task:assign,task:complete'),
-('stamp', '1', 'stamp', 'supervisor', 'task:view,task:assign,task:complete'),
-('cnc', '1', 'cnc', 'supervisor', 'task:view,task:assign,task:complete'),
-('assembly', '1', 'assembly', 'supervisor', 'task:view,task:assign,task:complete'),
-('finished', '1', 'finished', 'supervisor', 'task:view,task:assign,task:complete'),
-('qc', '1', 'qc', 'supervisor', 'task:view,task:assign,task:complete');
-
-
-CREATE INDEX idx_department_step_product
-ON product_department_step(product_id, sequence_no);
-
-CREATE INDEX idx_repository_department
-ON repository(department);
-
-CREATE INDEX idx_polish_process_preset_active
-ON polish_process_preset(active, preset_name);
-
-CREATE INDEX idx_work_order_process
-ON work_order(department, product_id, process_name, status);
-
-CREATE INDEX idx_work_order_worker
-ON work_order(worker_id, status);
-
-CREATE INDEX idx_work_order_batch_status
-ON work_order_batch(status, submitted_at);
-
-CREATE INDEX idx_rework_request_source
-ON rework_request(source_department, status, created_at);
-
-CREATE INDEX idx_rework_request_target
-ON rework_request(target_department, status, created_at);
-
-CREATE INDEX idx_work_order_rework_request
-ON work_order(rework_request_id);
-
-CREATE INDEX idx_polish_cleaning_batch_status
-ON polish_cleaning_batch(status, sent_at);
-
-CREATE INDEX idx_records_product
-ON records(product_id, created_at DESC);
-
-CREATE INDEX idx_worker_department
-ON worker(department, active);
-
-CREATE INDEX idx_users_department_role
-ON users(department, role);
-
-CREATE INDEX idx_user_sessions_user_id
-ON user_sessions(user_id);
-
-CREATE INDEX idx_user_sessions_expires_at
-ON user_sessions(expires_at);
+(
+    'engineering',
+    '1',
+    'engineering',
+    'engineer',
+    'engineering:product:view,engineering:product:add,engineering:product:edit,engineering:product:delete'
+);

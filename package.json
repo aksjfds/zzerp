@@ -9,6 +9,7 @@
     "f:build:prod": "pnpm --dir frontend build:prod",
     "f:preview:prod": "pnpm --dir frontend preview:prod",
     "b": "pnpm run b:dev",
+    "b:check": "APP_ENV=development python3 scripts/check_backend.py",
     "b:dev": "APP_ENV=development uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
     "b:prod": "APP_ENV=production uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
   }

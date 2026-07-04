@@ -3,7 +3,7 @@ from datetime import datetime
 from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text, TIMESTAMP, text
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database import Base, SessionLocal
+from database import Base
 
 
 class User(Base):
@@ -22,46 +22,6 @@ class User(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
-
-    @staticmethod
-    def serialize(user: "User") -> dict:
-        return {
-            "id": user.id,
-            "username": user.username,
-            "name": user.username,
-            "department": user.department,
-            "role": user.role,
-            "permissions": [
-                permission.strip()
-                for permission in user.permissions.split(",")
-                if permission.strip()
-            ],
-        }
-
-    @classmethod
-    def login(cls, username: str, password: str) -> dict:
-        with SessionLocal() as session:
-            user = (
-                session.query(cls)
-                .filter(cls.username == username, cls.password == password)
-                .one_or_none()
-            )
-
-            if user is None:
-                raise ValueError("用户名或密码错误")
-
-            return cls.serialize(user)
-
-    @classmethod
-    def get_by_username(cls, username: str) -> dict | None:
-        with SessionLocal() as session:
-            user = session.query(cls).filter(cls.username == username).one_or_none()
-
-            if user is None:
-                return None
-
-            return cls.serialize(user)
-
 
 class UserSession(Base):
     __tablename__ = "user_sessions"

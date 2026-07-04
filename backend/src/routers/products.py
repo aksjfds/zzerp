@@ -1,56 +1,99 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Query, Response, status
 
-from models.production import Product
-from schemas.production import CreateProductPayload
-from security import require_any_permission
-
-router = APIRouter(prefix="/products", tags=["products"])
-
-
-def normalize_text(value: str, field_name: str) -> str:
-    normalized = value.strip()
-    if not normalized:
-        raise ValueError(f"{field_name}不能为空")
-    return normalized
-
-
-@router.get("")
-def list_products(department: str | None = None):
-    resolved_department = department.strip() if department and department.strip() else None
-    return {"data": Product.list_all(department=resolved_department)}
-
-
-@router.get("/{product_id}/departments/{department}/progress")
-def get_department_progress(product_id: int, department: str):
-    try:
-        data = Product.department_progress(
-            product_id=product_id,
-            department=department.strip(),
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return {"data": data}
+from authorization import require_any_permission
+from domain.permissions import PRODUCT_ADD, PRODUCT_DELETE, PRODUCT_EDIT, PRODUCT_VIEW
+from schemas.engineering import (
+    CreateProductPayload,
+    ProductDetailEnvelope,
+    ProductListEnvelope,
+    ReplaceBomPayload,
+    UpdateProcessFlowPayload,
+    UpdateProductPayload,
+)
+from services.engineering_product_commands import (
+    create_product,
+    delete_product,
+    replace_product_bom,
+    update_product_info,
+    update_product_process_flow,
+)
+from services.engineering_product_queries import get_product, list_products
 
 
-@router.post("")
-def create_product(
-    payload: CreateProductPayload,
-    user: dict = Depends(require_any_permission("product:add", csrf=True)),
+router = APIRouter(prefix="/products", tags=["engineering-products"])
+
+
+@router.get("", response_model=ProductListEnvelope)
+def product_list(
+    _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
 ):
-    if user["department"] != "sys":
-        raise HTTPException(status_code=403, detail="只有 admin 可以新增产品")
+    return {"data": list_products()}
 
-    try:
-        process = [department.strip() for department in payload.process if department.strip()]
-        product = Product.create(
-            order_id=normalize_text(payload.order_id, "订单号"),
-            zz_code=normalize_text(payload.zz_code, "本厂编码"),
-            product_name=normalize_text(payload.product_name, "产品名称"),
-            delivery_date=payload.delivery_date,
-            process=process,
-            quantity=payload.quantity,
+
+@router.get("/{product_id}", response_model=ProductDetailEnvelope)
+def product_detail(
+    product_id: int,
+    _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
+):
+    return {"data": get_product(product_id)}
+
+
+@router.post(
+    "",
+    status_code=status.HTTP_201_CREATED,
+    response_model=ProductDetailEnvelope,
+)
+def product_create(
+    payload: CreateProductPayload,
+    _user: dict = Depends(require_any_permission(PRODUCT_ADD, csrf=True)),
+):
+    return {"data": create_product(payload)}
+
+
+@router.put("/{product_id}", response_model=ProductDetailEnvelope)
+def product_update(
+    product_id: int,
+    payload: UpdateProductPayload,
+    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+):
+    return {"data": update_product_info(product_id, payload)}
+
+
+@router.put("/{product_id}/bom", response_model=ProductDetailEnvelope)
+def product_bom_replace(
+    product_id: int,
+    payload: ReplaceBomPayload,
+    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+):
+    return {
+        "data": replace_product_bom(
+            product_id,
+            payload.expected_version,
+            payload.bom_items,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    }
 
-    return {"data": product}
+
+@router.put("/{product_id}/process-flow", response_model=ProductDetailEnvelope)
+def product_process_flow_update(
+    product_id: int,
+    payload: UpdateProcessFlowPayload,
+    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+):
+    return {
+        "data": update_product_process_flow(
+            product_id,
+            payload.expected_version,
+            payload.process_flow,
+        )
+    }
+
+
+@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
+def product_delete(
+    product_id: int,
+    expected_version: int = Query(gt=0),
+    _user: dict = Depends(require_any_permission(PRODUCT_DELETE, csrf=True)),
+):
+    delete_product(product_id, expected_version)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

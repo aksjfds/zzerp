@@ -1,6 +1,4 @@
-import type { Department } from '@/types/production'
-
-export type UserDepartment = Department | 'sys'
+export type UserDepartment = 'engineering' | 'sys'
 
 export type UserProfile = {
   id: number
