@@ -13,8 +13,24 @@ export async function queryProducts() {
   return response.data.data
 }
 
-export async function queryProduct(productId: number) {
-  const response = await service.get<{ data: EngineeringProduct }>(`/products/${productId}`)
+export async function queryProduct(productId: number, version?: number) {
+  const response = await service.get<{ data: EngineeringProduct }>(`/products/${productId}`, {
+    params: version ? { version } : undefined,
+  })
+  return response.data.data
+}
+
+export async function queryProductVersions(productId: number) {
+  const response = await service.get<{ data: number[] }>(`/products/${productId}/versions`)
+  return response.data.data
+}
+
+export async function createProductVersion(productId: number, expectedVersion: number) {
+  const response = await service.post<{ data: EngineeringProduct }>(
+    `/products/${productId}/versions`,
+    undefined,
+    { params: { expected_version: expectedVersion } },
+  )
   return response.data.data
 }
 

@@ -78,7 +78,12 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
     }
   }
   if (type === 'process') {
-    return { ...base, type, process_code: stringValue(properties.processCode) }
+    return {
+      ...base,
+      type,
+      process_code: stringValue(properties.processCode),
+      procedure_id: optionalNumber(properties.procedureId),
+    }
   }
   if (type === 'assembly') {
     return { ...base, type, output_name: stringValue(properties.outputName) }
@@ -110,7 +115,9 @@ function toBusinessEdge(edge: LogicFlow.EdgeData): FlowEdge {
 
 function nodeProperties(node: FlowNode): Record<string, unknown> {
   if (node.type === 'part') return { bomItemId: node.bom_item_id, partNo: node.part_no }
-  if (node.type === 'process') return { processCode: node.process_code }
+  if (node.type === 'process') {
+    return { processCode: node.process_code, procedureId: node.procedure_id }
+  }
   if (node.type === 'assembly') return { outputName: node.output_name }
   return {}
 }
@@ -135,4 +142,8 @@ function stringValue(value: unknown): string {
 function requiredNumber(value: unknown, field: string): number {
   if (typeof value !== 'number') throw new Error(`Missing ${field}`)
   return value
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  return typeof value === 'number' ? value : undefined
 }

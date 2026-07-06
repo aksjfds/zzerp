@@ -6,5 +6,5 @@ class BomItemCommand:
     id: int | None
     part_name: str
     part_no: str
-    pcs: str
+    pcs: int
     remark: str | None

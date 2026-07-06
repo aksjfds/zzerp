@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import type { FlowEdge, FlowNode, RouteType } from '../domain/types'
+import type { ProcedureOption } from '@/api/organization'
 
-defineProps<{ node: FlowNode | null; edge: FlowEdge | null }>()
+defineProps<{
+  node: FlowNode | null
+  edge: FlowEdge | null
+  procedures: ProcedureOption[]
+}>()
 const emit = defineEmits<{
   updateAssembly: [label: string, output_name: string]
   updateProcess: [label: string, process_code: string]
+  updateProcedure: [procedure_id: number]
   updateRoute: [route_type: RouteType]
 }>()
 </script>
@@ -17,6 +23,14 @@ const emit = defineEmits<{
       <ElInput :model-value="node.label" @change="emit('updateProcess', $event, node.process_code)" />
       <label>工序编码</label>
       <ElInput :model-value="node.process_code" @change="emit('updateProcess', node.label, $event)" />
+      <label>关联工艺</label>
+      <ElSelect
+        :model-value="node.procedure_id"
+        placeholder="选择工艺"
+        @update:model-value="emit('updateProcedure', $event)"
+      >
+        <ElOption v-for="item in procedures" :key="item.id" :label="item.procedure_name" :value="item.id" />
+      </ElSelect>
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>

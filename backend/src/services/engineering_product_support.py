@@ -39,7 +39,7 @@ def raise_integrity_error(exc: IntegrityError) -> None:
     if constraint_name == "uq_product_bom_part_no":
         raise DomainError(
             "bom_part_no_conflict",
-            "同一产品内的 BOM 图纸编号不能重复",
+            "同一产品内的 BOM 配件编号不能重复",
             status_code=409,
             path="bom_items",
         ) from exc

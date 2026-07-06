@@ -14,25 +14,41 @@ export function startPartDrag(lf: LogicFlow, item: BomItem) {
   })
 }
 
-export function addProcessNode(lf: LogicFlow, label: string) {
-  return addNode(lf, 'process', label, {
-    processCode: label.toLowerCase().replace(/\s+/g, '_'),
+export function startProcessDrag(
+  lf: LogicFlow,
+  procedureId: number,
+  procedureName: string,
+) {
+  lf.dnd.startDrag({
+    type: 'process',
+    text: procedureName,
+    properties: {
+      processCode: `procedure_${procedureId}`,
+      procedureId,
+    },
   })
 }
 
-export function addAssemblyNode(lf: LogicFlow, outputName: string) {
-  return addNode(lf, 'assembly', outputName, { outputName })
+export function startAssemblyDrag(lf: LogicFlow) {
+  lf.dnd.startDrag({
+    type: 'assembly',
+    text: '装配',
+    properties: { outputName: '装配体' },
+  })
 }
 
-export function addQcNode(lf: LogicFlow) {
-  return addNode(lf, 'qc', 'QC', {})
+export function startQcDrag(lf: LogicFlow) {
+  lf.dnd.startDrag({ type: 'qc', text: 'QC', properties: {} })
 }
 
 export function updateNodeDefinition(
   lf: LogicFlow,
   nodeId: string,
   label: string,
-  property: { key: 'processCode' | 'outputName'; value: string } | null,
+  property: {
+    key: 'processCode' | 'outputName' | 'procedureId'
+    value: string | number
+  } | null,
 ) {
   lf.updateText(nodeId, label)
   if (property) lf.setProperties(nodeId, { [property.key]: property.value })
@@ -49,20 +65,4 @@ export function setQcEdgeRoute(lf: LogicFlow, edgeId: string, routeType: RouteTy
     outcome: isRework ? 'rejected' : 'approved',
   })
   lf.updateText(edgeId, isRework ? '不合格返工' : '合格')
-}
-
-function addNode(
-  lf: LogicFlow,
-  type: 'process' | 'assembly' | 'qc',
-  text: string,
-  properties: Record<string, unknown>,
-) {
-  const count = lf.getGraphRawData().nodes.length
-  return lf.addNode({
-    type,
-    text,
-    x: 300 + ((count + 1) % 4) * 170,
-    y: 120 + Math.floor((count + 1) / 4) * 110,
-    properties,
-  })
 }

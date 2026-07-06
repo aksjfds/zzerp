@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { ElMessageBox } from 'element-plus'
+import { onMounted, ref } from 'vue'
 import '@logicflow/core/es/index.css'
 import '@logicflow/extension/lib/style/index.css'
 import ProcessFlowCanvas from './ProcessFlowCanvas.vue'
@@ -13,13 +12,17 @@ import type {
   ProcessFlow,
   RouteType,
 } from '../domain/types'
+import { queryProcedures, type ProcedureOption } from '@/api/organization'
 
-type NodeProperty = { key: 'processCode' | 'outputName'; value: string } | null
+type NodeProperty = {
+  key: 'processCode' | 'outputName' | 'procedureId'
+  value: string | number
+} | null
 type CanvasApi = {
-  addAssembly: (outputName: string) => void
-  addProcess: (label: string) => void
-  addQc: () => void
   dragPart: (item: BomItem) => void
+  dragAssembly: () => void
+  dragProcess: (procedureId: number, procedureName: string) => void
+  dragQc: () => void
   focusElement: (elementId?: string) => void
   getGraphData: () => ProcessFlow
   renderFlow: (flow: ProcessFlow) => void
@@ -32,35 +35,36 @@ const emit = defineEmits<{ 'update:modelValue': [value: ProcessFlow] }>()
 const canvas = ref<CanvasApi>()
 const selectedNode = ref<FlowNode | null>(null)
 const selectedEdge = ref<FlowEdge | null>(null)
+const procedures = ref<ProcedureOption[]>([])
 
 function updateFlow(flow: ProcessFlow) {
   emit('update:modelValue', flow)
 }
 
-async function promptProcess() {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入工序名称，例如 CNC、粗光、电镀', '添加工序', {
-      inputPattern: /\S+/,
-      inputErrorMessage: '工序名称不能为空',
-    })
-    canvas.value?.addProcess(value.trim())
-  } catch { /* 用户取消 */ }
-}
-
-async function promptAssembly() {
-  try {
-    const { value } = await ElMessageBox.prompt('请输入该节点产出的装配体名称', '添加装配节点', {
-      inputPattern: /\S+/,
-      inputErrorMessage: '装配体名称不能为空',
-    })
-    canvas.value?.addAssembly(value.trim())
-  } catch { /* 用户取消 */ }
+function dragProcedure(procedure: ProcedureOption) {
+  canvas.value?.dragProcess(procedure.id, procedure.procedure_name)
 }
 
 function updateProcess(label: string, process_code: string) {
   if (selectedNode.value?.type !== 'process') return
   canvas.value?.updateNode(selectedNode.value.id, label, { key: 'processCode', value: process_code })
   selectedNode.value = { ...selectedNode.value, label, process_code }
+}
+
+function updateProcedure(procedureId: number) {
+  if (selectedNode.value?.type !== 'process') return
+  const procedure = procedures.value.find((item) => item.id === procedureId)
+  if (!procedure) return
+  canvas.value?.updateNode(
+    selectedNode.value.id,
+    procedure.procedure_name,
+    { key: 'procedureId', value: procedureId },
+  )
+  selectedNode.value = {
+    ...selectedNode.value,
+    label: procedure.procedure_name,
+    procedure_id: procedureId,
+  }
 }
 
 function updateAssembly(label: string, output_name: string) {
@@ -96,6 +100,7 @@ function reload(flow: ProcessFlow) {
 }
 
 defineExpose({ focusElement, getGraphData: graphData, reload })
+onMounted(async () => { procedures.value = await queryProcedures() })
 </script>
 
 <template>
@@ -109,10 +114,11 @@ defineExpose({ focusElement, getGraphData: graphData, reload })
     <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge }">
       <ProcessNodePalette
         :bom-items="bomItems"
+        :procedures="procedures"
         @drag-part="canvas?.dragPart($event)"
-        @add-process="promptProcess"
-        @add-assembly="promptAssembly"
-        @add-qc="canvas?.addQc()"
+        @drag-procedure="dragProcedure"
+        @drag-assembly="canvas?.dragAssembly()"
+        @drag-qc="canvas?.dragQc()"
       />
       <ProcessFlowCanvas
         ref="canvas"
@@ -125,7 +131,9 @@ defineExpose({ focusElement, getGraphData: graphData, reload })
         v-if="selectedNode || selectedEdge"
         :node="selectedNode"
         :edge="selectedEdge"
+        :procedures="procedures"
         @update-process="updateProcess"
+        @update-procedure="updateProcedure"
         @update-assembly="updateAssembly"
         @update-route="updateRoute"
       />

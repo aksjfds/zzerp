@@ -2,6 +2,10 @@ import type { Router } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 
 function getDefaultDashboardPath(department?: string) {
+  if (department === 'business') return '/business/orders'
+  if (['stamp', 'polish', 'qc', 'assembly'].includes(department ?? '')) {
+    return `/${department}`
+  }
   return department ? '/products' : '/login'
 }
 

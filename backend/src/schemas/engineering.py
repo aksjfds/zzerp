@@ -31,6 +31,7 @@ class PartNodePayload(FlowNodeBase):
 class ProcessNodePayload(FlowNodeBase):
     type: Literal["process"]
     process_code: str = Field(min_length=1, max_length=100)
+    procedure_id: int | None = Field(default=None, gt=0)
 
 
 class AssemblyNodePayload(FlowNodeBase):
@@ -75,7 +76,7 @@ class BomItemPayload(ContractModel):
     id: int | None = Field(default=None, gt=0)
     part_name: str = Field(min_length=1, max_length=200)
     part_no: str = Field(min_length=1, max_length=200)
-    pcs: str = Field(min_length=1, max_length=100)
+    pcs: int = Field(gt=0)
     remark: str | None = Field(default=None, max_length=1000)
 
 
@@ -107,9 +108,10 @@ class UpdateProcessFlowPayload(ContractModel):
 class BomItemResponse(ContractModel):
     id: int
     product_id: int
+    product_version: int
     part_name: str
     part_no: str
-    pcs: str
+    pcs: int
     remark: str
     sort_order: int
 
@@ -125,6 +127,7 @@ class ProductSummaryResponse(ProductFields):
 class ProductDetailResponse(ProductFields):
     id: int
     version: int
+    current_version: int
     bom_items: list[BomItemResponse]
     process_flow: ProcessFlowPayload
     created_at: str
@@ -137,3 +140,7 @@ class ProductListEnvelope(ContractModel):
 
 class ProductDetailEnvelope(ContractModel):
     data: ProductDetailResponse
+
+
+class ProductVersionsEnvelope(ContractModel):
+    data: list[int]

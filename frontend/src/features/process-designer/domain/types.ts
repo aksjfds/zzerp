@@ -23,6 +23,7 @@ export type PartFlowNode = FlowNodeBase & {
 export type ProcessFlowNode = FlowNodeBase & {
   type: 'process'
   process_code: string
+  procedure_id?: number
 }
 
 export type AssemblyFlowNode = FlowNodeBase & {
@@ -58,9 +59,10 @@ export type ProcessFlow = {
 
 export type BomItem = {
   id?: number
+  product_version?: number
   part_name: string
   part_no: string
-  pcs: string
+  pcs: number
   remark: string
   sort_order?: number
 }
@@ -83,6 +85,7 @@ export type ProductSummary = ProductFields & {
 export type EngineeringProduct = ProductFields & {
   id: number
   version: number
+  current_version: number
   bom_items: BomItem[]
   process_flow: ProcessFlow
   created_at: string

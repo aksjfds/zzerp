@@ -1,0 +1,44 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+
+from sqlalchemy import BigInteger, Date, ForeignKey, Integer, Text, TIMESTAMP, text
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from database import Base
+
+
+class CustomerOrder(Base):
+    __tablename__ = "customer_order"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_order_no: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    items: Mapped[list[CustomerOrderItem]] = relationship(
+        back_populates="order", cascade="all, delete-orphan", order_by="CustomerOrderItem.id"
+    )
+
+
+class CustomerOrderItem(Base):
+    __tablename__ = "customer_order_item"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    customer_order_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customer_order.id", ondelete="CASCADE"), nullable=False
+    )
+    product_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("product.id"), nullable=False
+    )
+    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    delivery_date: Mapped[date] = mapped_column(Date, nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
+    order: Mapped[CustomerOrder] = relationship(back_populates="items")

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import type { BomItem } from '../domain/types'
+import type { ProcedureOption } from '@/api/organization'
 
-defineProps<{ bomItems: BomItem[] }>()
+defineProps<{ bomItems: BomItem[]; procedures: ProcedureOption[] }>()
 const emit = defineEmits<{
-  addAssembly: []
-  addProcess: []
-  addQc: []
+  dragAssembly: []
+  dragProcedure: [procedure: ProcedureOption]
+  dragQc: []
   dragPart: [item: BomItem]
 }>()
 </script>
@@ -24,10 +25,18 @@ const emit = defineEmits<{
       <strong>{{ item.part_name }}</strong>
       <span>{{ item.part_no }}</span>
     </button>
+    <h3>工艺</h3>
+    <button
+      v-for="procedure in procedures"
+      :key="procedure.id"
+      class="palette-item process"
+      type="button"
+      @mousedown="emit('dragProcedure', procedure)"
+    >＋ {{ procedure.procedure_name }}</button>
+    <p v-if="!procedures.length" class="empty">暂无可用工艺</p>
     <h3>流程节点</h3>
-    <button class="palette-item process" type="button" @click="emit('addProcess')">＋ 工序节点</button>
-    <button class="palette-item assembly" type="button" @click="emit('addAssembly')">＋ 装配节点</button>
-    <button class="palette-item qc" type="button" @click="emit('addQc')">＋ QC 节点</button>
+    <button class="palette-item assembly" type="button" @mousedown="emit('dragAssembly')">装配</button>
+    <button class="palette-item qc" type="button" @mousedown="emit('dragQc')">QC</button>
   </aside>
 </template>
 
@@ -42,4 +51,5 @@ h3 { margin: 0 0 10px; font-size: 14px; }
 .palette-item.assembly { border-color: #e6a23c; }
 .palette-item.qc { border-color: #f56c6c; }
 .palette-item:disabled { cursor: not-allowed; opacity: .45; }
+.empty { margin: 0; color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

@@ -4,11 +4,11 @@ import { ElMessage } from 'element-plus'
 import type { BomItem, FlowEdge, FlowNode, ProcessFlow, RouteType } from '../domain/types'
 import { useLogicFlowInstance } from '../composables/useLogicFlowInstance'
 import {
-  addAssemblyNode,
-  addProcessNode,
-  addQcNode,
   setQcEdgeRoute,
   startPartDrag,
+  startAssemblyDrag,
+  startProcessDrag,
+  startQcDrag,
   updateNodeDefinition,
 } from '../logicflow/commands'
 
@@ -39,16 +39,16 @@ function dragPart(item: BomItem) {
   }
 }
 
-function addProcess(label: string) {
-  withInstance((lf) => { addProcessNode(lf, label); emitChange() })
+function dragProcess(procedureId: number, procedureName: string) {
+  withInstance((lf) => startProcessDrag(lf, procedureId, procedureName))
 }
 
-function addAssembly(outputName: string) {
-  withInstance((lf) => { addAssemblyNode(lf, outputName); emitChange() })
+function dragAssembly() {
+  withInstance(startAssemblyDrag)
 }
 
-function addQc() {
-  withInstance((lf) => { addQcNode(lf); emitChange() })
+function dragQc() {
+  withInstance(startQcDrag)
 }
 
 function updateNode(nodeId: string, label: string, property: Parameters<typeof updateNodeDefinition>[3]) {
@@ -70,10 +70,10 @@ function focusElement(elementId?: string) {
 }
 
 defineExpose({
-  addAssembly,
-  addProcess,
-  addQc,
   dragPart,
+  dragAssembly,
+  dragProcess,
+  dragQc,
   focusElement,
   getGraphData: currentFlow,
   renderFlow,

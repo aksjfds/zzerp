@@ -14,7 +14,11 @@ class EngineeringProductRepository:
     def list_with_bom_counts(self) -> list[tuple[Product, int]]:
         statement = (
             select(Product, func.count(ProductBom.id))
-            .outerjoin(ProductBom, ProductBom.product_id == Product.id)
+            .outerjoin(
+                ProductBom,
+                (ProductBom.product_id == Product.id)
+                & (ProductBom.product_version == Product.version),
+            )
             .group_by(Product.id)
             .order_by(Product.updated_at.desc(), Product.id.desc())
         )
@@ -25,7 +29,7 @@ class EngineeringProductRepository:
             select(Product)
             .options(
                 selectinload(Product.bom_items),
-                selectinload(Product.process_flow),
+                selectinload(Product.process_flows),
             )
             .where(Product.id == product_id)
         )
@@ -43,16 +47,20 @@ class EngineeringProductRepository:
     def replace_bom(
         self,
         product: Product,
+        product_version: int,
         bom_items: list[BomItemCommand],
     ) -> list[ProductBom]:
-        existing_by_id = {item.id: item for item in product.bom_items}
+        version_items = [
+            item for item in product.bom_items if item.product_version == product_version
+        ]
+        existing_by_id = {item.id: item for item in version_items}
         submitted_ids = {item.id for item in bom_items if item.id is not None}
 
         # Free existing unique part numbers first so two rows can exchange numbers.
         token = uuid4().hex
         for item_id in submitted_ids:
             existing_by_id[item_id].part_no = f"__updating__{token}_{item_id}"
-        for item in list(product.bom_items):
+        for item in version_items:
             if item.id not in submitted_ids:
                 product.bom_items.remove(item)
         self.session.flush()
@@ -60,7 +68,7 @@ class EngineeringProductRepository:
         result: list[ProductBom] = []
         for index, payload in enumerate(bom_items, start=1):
             if payload.id is None:
-                item = ProductBom()
+                item = ProductBom(product_version=product_version)
                 product.bom_items.append(item)
             else:
                 item = existing_by_id[payload.id]
@@ -73,8 +81,20 @@ class EngineeringProductRepository:
         self.session.flush()
         return result
 
-    def set_process_flow(self, product: Product, flow_json: dict) -> None:
-        if product.process_flow is None:
-            product.process_flow = ProductProcessFlow(flow_json=flow_json)
+    def set_process_flow(
+        self, product: Product, product_version: int, flow_json: dict
+    ) -> None:
+        process_flow = next(
+            (
+                item
+                for item in product.process_flows
+                if item.product_version == product_version
+            ),
+            None,
+        )
+        if process_flow is None:
+            product.process_flows.append(
+                ProductProcessFlow(product_version=product_version, flow_json=flow_json)
+            )
         else:
-            product.process_flow.flow_json = flow_json
+            process_flow.flow_json = flow_json

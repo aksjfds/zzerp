@@ -8,7 +8,7 @@ Product-domain and request-validation failures use one response shape:
 {
   "detail": {
     "code": "bom_part_no_conflict",
-    "message": "BOM 图纸编号重复：Z8412-01",
+    "message": "BOM 配件编号重复：Z8412-01",
     "path": "bom_items.1.part_no"
   }
 }

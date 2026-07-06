@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import { defineStore } from 'pinia'
 import {
   createProduct as createProductApi,
+  createProductVersion as createProductVersionApi,
   deleteProduct as deleteProductApi,
   queryProduct,
   queryProducts,
@@ -33,10 +34,10 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     }
   }
 
-  async function loadProduct(productId: number) {
+  async function loadProduct(productId: number, version?: number) {
     loading.value = true
     try {
-      activeProduct.value = await queryProduct(productId)
+      activeProduct.value = await queryProduct(productId, version)
       return activeProduct.value
     } finally {
       loading.value = false
@@ -87,6 +88,14 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     products.value = products.value.filter((product) => product.id !== productId)
   }
 
+  async function createVersion(productId: number, expectedVersion: number) {
+    return withSaving(async () => {
+      const product = await createProductVersionApi(productId, expectedVersion)
+      commitActive(product)
+      return product
+    })
+  }
+
   function commitActive(product: EngineeringProduct) {
     activeProduct.value = product
     const summary: ProductSummary = {
@@ -115,6 +124,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
   return {
     activeProduct,
     createProduct,
+    createVersion,
     loadProduct,
     loadProducts,
     loading,

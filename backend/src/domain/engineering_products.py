@@ -22,7 +22,7 @@ def validate_bom_identity(
         if item.part_no in part_number_indexes:
             raise DomainViolation(
                 "bom_part_no_conflict",
-                f"BOM 图纸编号重复：{item.part_no}",
+                f"BOM 配件编号重复：{item.part_no}",
                 path=f"bom_items.{index}.part_no",
             )
         part_number_indexes[item.part_no] = index

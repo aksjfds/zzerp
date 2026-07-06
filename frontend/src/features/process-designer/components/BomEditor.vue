@@ -4,18 +4,18 @@ import type { BomItem } from '../domain/types'
 const props = defineProps<{ modelValue: BomItem[] }>()
 const emit = defineEmits<{ 'update:modelValue': [value: BomItem[]] }>()
 
-function update(index: number, field: keyof BomItem, value: string) {
+function update(index: number, field: keyof BomItem, value: string | number | undefined) {
   const rows = props.modelValue.map((item) => ({ ...item }))
   const row = rows[index]
   if (!row) return
-  Object.assign(row, { [field]: value })
+  Object.assign(row, { [field]: field === 'pcs' ? (value ?? 1) : value })
   emit('update:modelValue', rows)
 }
 
 function addRow() {
   emit('update:modelValue', [
     ...props.modelValue,
-    { part_name: '', part_no: '', pcs: '1 pcs', remark: '' },
+    { part_name: '', part_no: '', pcs: 1, remark: '' },
   ])
 }
 
@@ -25,13 +25,15 @@ function removeRow(index: number) {
 
 function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
   const item = props.modelValue[index]
-  if (!item?.[field].trim()) return '必填'
+  if (!item) return '必填'
+  if (field === 'pcs') return item.pcs > 0 ? '' : '必须大于 0'
+  if (!item[field].trim()) return '必填'
   if (
     field === 'part_no'
     && props.modelValue.some((row, rowIndex) =>
       rowIndex !== index && row.part_no.trim() === item.part_no.trim(),
     )
-  ) return '图纸编号重复'
+  ) return '配件编号重复'
   return ''
 }
 </script>
@@ -41,7 +43,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
     <div class="section-heading">
       <div>
         <h2>BOM 明细</h2>
-        <p>配件名称、图纸编号和用量必填；保存后可拖入流程图。</p>
+        <p>配件名称、配件编号和用量必填；保存后可拖入流程图。</p>
       </div>
       <ElButton type="primary" plain @click="addRow">新增 BOM 行</ElButton>
     </div>
@@ -58,7 +60,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
           </ElFormItem>
         </template>
       </ElTableColumn>
-      <ElTableColumn label="图纸编号" min-width="170">
+      <ElTableColumn label="配件编号" min-width="170">
         <template #default="{ row, $index }">
           <ElFormItem :error="fieldError($index, 'part_no')">
             <ElInput
@@ -72,9 +74,12 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
       <ElTableColumn label="用量" width="140">
         <template #default="{ row, $index }">
           <ElFormItem :error="fieldError($index, 'pcs')">
-            <ElInput
+            <ElInputNumber
               :model-value="row.pcs"
-              placeholder="1 pcs"
+              :min="1"
+              :step="1"
+              :precision="0"
+              controls-position="right"
               @update:model-value="update($index, 'pcs', $event)"
             />
           </ElFormItem>

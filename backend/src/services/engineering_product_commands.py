@@ -1,10 +1,12 @@
 from datetime import datetime
+from copy import deepcopy
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
 from database import SessionLocal
 from domain.engineering_products import validate_bom_identity, validate_expected_version
+from domain.models import BomItemCommand
 from models.engineering import Product
 from repositories.engineering_products import EngineeringProductRepository
 from schemas.engineering import (
@@ -21,7 +23,7 @@ from services.engineering_product_support import (
     raise_stale_data_error,
     validated_flow,
 )
-from services.errors import product_not_found
+from services.errors import DomainError, product_not_found
 from services.process_flow_mapping import synchronize_part_metadata
 
 
@@ -44,8 +46,8 @@ def create_product(payload: CreateProductPayload) -> dict:
             )
             repository.add(product)
             repository.flush()
-            repository.replace_bom(product, items)
-            repository.set_process_flow(product, empty_process_flow())
+            repository.replace_bom(product, product.version, items)
+            repository.set_process_flow(product, product.version, empty_process_flow())
             return _result(repository, product)
     except IntegrityError as exc:
         raise_integrity_error(exc)
@@ -85,20 +87,37 @@ def replace_product_bom(
             validate_expected_version(product.version, expected_version)
             commands = bom_commands(items)
             retained_ids = validate_bom_identity(
-                commands, {item.id for item in product.bom_items}
+                commands,
+                {
+                    item.id
+                    for item in product.bom_items
+                    if item.product_version == product.version
+                },
             )
             current_flow = None
-            if product.process_flow is not None:
-                current_flow = ProcessFlowPayload.model_validate(product.process_flow.flow_json)
+            process_flow_record = next(
+                (
+                    item
+                    for item in product.process_flows
+                    if item.product_version == product.version
+                ),
+                None,
+            )
+            if process_flow_record is not None:
+                current_flow = ProcessFlowPayload.model_validate(
+                    process_flow_record.flow_json
+                )
                 validated_flow(current_flow, retained_ids)
-            saved_items = repository.replace_bom(product, commands)
+            saved_items = repository.replace_bom(product, product.version, commands)
             if current_flow is not None:
                 synchronized = synchronize_part_metadata(
                     current_flow,
                     {item.id: (item.part_name, item.part_no) for item in saved_items},
                 )
                 repository.set_process_flow(
-                    product, synchronized.model_dump(exclude_none=True)
+                    product,
+                    product.version,
+                    synchronized.model_dump(exclude_none=True),
                 )
             product.updated_at = datetime.now()
             return _result(repository, product)
@@ -122,10 +141,23 @@ def update_product_process_flow(
             validate_expected_version(product.version, expected_version)
             flow = synchronize_part_metadata(
                 process_flow,
-                {item.id: (item.part_name, item.part_no) for item in product.bom_items},
+                {
+                    item.id: (item.part_name, item.part_no)
+                    for item in product.bom_items
+                    if item.product_version == product.version
+                },
             )
             repository.set_process_flow(
-                product, validated_flow(flow, {item.id for item in product.bom_items})
+                product,
+                product.version,
+                validated_flow(
+                    flow,
+                    {
+                        item.id
+                        for item in product.bom_items
+                        if item.product_version == product.version
+                    },
+                ),
             )
             product.updated_at = datetime.now()
             return _result(repository, product)
@@ -142,5 +174,60 @@ def delete_product(product_id: int, expected_version: int) -> None:
                 raise product_not_found()
             validate_expected_version(product.version, expected_version)
             repository.delete(product)
+    except IntegrityError as exc:
+        raise DomainError(
+            "product_in_use",
+            "产品已被客户订单引用，不能删除",
+            status_code=409,
+        ) from exc
     except StaleDataError as exc:
         raise_stale_data_error(exc)
+
+
+def create_product_version(product_id: int, expected_version: int) -> dict:
+    with SessionLocal.begin() as session:
+        repository = EngineeringProductRepository(session)
+        product = repository.get(product_id)
+        if product is None:
+            raise product_not_found()
+        validate_expected_version(product.version, expected_version)
+        source_version = product.version
+        next_version = source_version + 1
+        source_items = [
+            item for item in product.bom_items if item.product_version == source_version
+        ]
+        copied_items = repository.replace_bom(
+            product,
+            next_version,
+            [
+                BomItemCommand(
+                    id=None,
+                    part_name=item.part_name,
+                    part_no=item.part_no,
+                    pcs=item.pcs,
+                    remark=item.remark,
+                )
+                for item in source_items
+            ],
+        )
+        repository.flush()
+        id_map = {
+            source.id: copied.id
+            for source, copied in zip(source_items, copied_items, strict=True)
+        }
+        source_flow = next(
+            (
+                item.flow_json
+                for item in product.process_flows
+                if item.product_version == source_version
+            ),
+            empty_process_flow(),
+        )
+        copied_flow = deepcopy(source_flow)
+        for node in copied_flow.get("nodes", []):
+            if node.get("type") == "part":
+                node["bom_item_id"] = id_map[node["bom_item_id"]]
+        repository.set_process_flow(product, next_version, copied_flow)
+        product.version = next_version
+        product.updated_at = datetime.now()
+        return _result(repository, product)

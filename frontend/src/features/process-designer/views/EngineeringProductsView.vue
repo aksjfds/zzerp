@@ -42,6 +42,16 @@ async function removeProduct(productId: number, version: number, productName: st
   }
 }
 
+async function createVersion(productId: number, version: number) {
+  try {
+    const product = await store.createVersion(productId, version)
+    ElMessage.success(`已创建 V${product.version}`)
+    router.push(`/products/${productId}`)
+  } catch (error) {
+    ElMessage.error(getApiErrorDetail(error)?.message || '创建新版本失败')
+  }
+}
+
 async function logout() {
   await authStore.logout()
   router.replace('/login')
@@ -78,8 +88,9 @@ onMounted(store.loadProducts)
         <ElTableColumn prop="factory_code" label="本厂型号" min-width="140" />
         <ElTableColumn prop="customer_code" label="客户型号" min-width="140" />
         <ElTableColumn prop="bom_count" label="BOM 行数" width="100" align="center" />
+        <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.version }}</template></ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" min-width="160" />
-        <ElTableColumn label="操作" width="150" fixed="right">
+        <ElTableColumn label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <ElButton
               v-permission="PRODUCT_PERMISSIONS.edit"
@@ -87,6 +98,11 @@ onMounted(store.loadProducts)
               type="primary"
               @click="router.push(`/products/${row.id}`)"
             >编辑</ElButton>
+            <ElButton
+              v-permission="PRODUCT_PERMISSIONS.edit"
+              link
+              @click="createVersion(row.id, row.version)"
+            >新版本</ElButton>
             <ElButton
               v-permission="PRODUCT_PERMISSIONS.delete"
               link

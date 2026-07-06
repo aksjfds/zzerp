@@ -9,6 +9,7 @@ import { useEngineeringProductsStore } from '@/stores/engineeringProducts'
 import { useProductEditorForm } from '../composables/useProductEditorForm'
 import { useProductSaveActions } from '../composables/useProductSaveActions'
 import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
+import { queryProductVersions } from '../api/engineeringProducts'
 
 type FlowEditorApi = {
   focusElement: (elementId?: string) => void
@@ -22,6 +23,8 @@ const store = useEngineeringProductsStore()
 const baseFormRef = ref<FormInstance>()
 const flowEditor = ref<FlowEditorApi>()
 const editorReady = ref(false)
+const versions = ref<number[]>([])
+const currentVersion = ref<number>()
 const {
   applyProduct,
   baseDirty,
@@ -41,6 +44,9 @@ const productId = computed(() => {
   const value = Number(route.params.productId)
   return Number.isInteger(value) && value > 0 ? value : null
 })
+const readOnly = computed(() => Boolean(
+  form.version && currentVersion.value && form.version !== currentVersion.value,
+))
 
 const baseRules: FormRules<ProductFields> = {
   customer_name: [{ required: true, whitespace: true, message: '请输入客户名称', trigger: 'blur' }],
@@ -93,16 +99,27 @@ function updateBom(items: BomItem[]) {
 
 useUnsavedChangesGuard(hasUnsavedChanges)
 
+async function loadVersion(version?: number) {
+  if (!productId.value) return
+  const product = await store.loadProduct(productId.value, version)
+  applyProduct(product)
+  currentVersion.value = product.current_version
+  editorReady.value = true
+  markSaved(['base', 'bom', 'flow'])
+  await router.replace({ query: version ? { version: String(version) } : {} })
+}
+
 onMounted(async () => {
   if (!productId.value) {
     markSaved(['base', 'bom', 'flow'])
     return
   }
   try {
-    const product = await store.loadProduct(productId.value)
-    applyProduct(product)
-    editorReady.value = true
-    markSaved(['base', 'bom', 'flow'])
+    versions.value = await queryProductVersions(productId.value)
+    const requestedVersion = Number(route.query.version)
+    await loadVersion(Number.isInteger(requestedVersion) && requestedVersion > 0
+      ? requestedVersion
+      : undefined)
   } catch {
     ElMessage.error('产品不存在或加载失败')
     router.replace('/products')
@@ -118,6 +135,14 @@ onMounted(async () => {
         <h1>{{ productId ? form.product_name || '编辑产品' : '录入新产品' }}</h1>
       </div>
       <div>
+        <ElSelect
+          v-if="productId"
+          :model-value="form.version"
+          style="width: 110px; margin-right: 10px"
+          @change="loadVersion"
+        >
+          <ElOption v-for="version in versions" :key="version" :label="`V${version}`" :value="version" />
+        </ElSelect>
         <ElButton @click="router.push('/products')">返回列表</ElButton>
         <ElButton
           v-if="!productId"
@@ -131,9 +156,9 @@ onMounted(async () => {
     <section class="editor-card basic-section">
       <div class="section-heading">
         <div><h2>产品基础信息</h2><span>所有字段均为必填</span></div>
-        <ElButton v-if="productId" type="primary" plain :disabled="!baseDirty" :loading="store.saving" @click="saveBase">保存基础信息</ElButton>
+        <ElButton v-if="productId && !readOnly" type="primary" plain :disabled="!baseDirty" :loading="store.saving" @click="saveBase">保存基础信息</ElButton>
       </div>
-      <ElForm ref="baseFormRef" :model="form" :rules="baseRules" label-position="top">
+      <ElForm ref="baseFormRef" :model="form" :rules="baseRules" :disabled="readOnly" label-position="top">
         <div class="form-grid">
           <ElFormItem prop="customer_name" label="客户名称"><ElInput v-model="form.customer_name" /></ElFormItem>
           <ElFormItem prop="product_name" label="产品名称"><ElInput v-model="form.product_name" /></ElFormItem>
@@ -145,16 +170,17 @@ onMounted(async () => {
 
     <section class="editor-card">
       <div class="section-action">
-        <ElButton v-if="productId" type="primary" plain :disabled="!bomDirty" :loading="store.saving" @click="saveBom">保存 BOM</ElButton>
+        <ElButton v-if="productId && !readOnly" type="primary" plain :disabled="!bomDirty" :loading="store.saving" @click="saveBom">保存 BOM</ElButton>
       </div>
-      <BomEditor :model-value="form.bom_items" @update:model-value="updateBom" />
+      <div :class="{ 'read-only-content': readOnly }"><BomEditor :model-value="form.bom_items" @update:model-value="updateBom" /></div>
     </section>
 
     <section class="editor-card">
       <ElAlert v-if="!productId" title="请先保存产品基础信息和 BOM，再配置工序流程" type="info" :closable="false" show-icon />
       <template v-else-if="editorReady">
-        <div class="section-action"><ElButton type="primary" plain :disabled="!flowDirty" :loading="store.saving" @click="saveFlow">保存工序流程</ElButton></div>
-        <ProcessFlowEditor ref="flowEditor" v-model="form.process_flow" :bom-items="form.bom_items" />
+        <ElAlert v-if="readOnly" title="历史版本为只读" type="info" :closable="false" />
+        <div v-if="!readOnly" class="section-action"><ElButton type="primary" plain :disabled="!flowDirty" :loading="store.saving" @click="saveFlow">保存工序流程</ElButton></div>
+        <div :class="{ 'read-only-content': readOnly }"><ProcessFlowEditor ref="flowEditor" v-model="form.process_flow" :bom-items="form.bom_items" /></div>
       </template>
       <div v-else v-loading="true" class="flow-loading">正在加载流程图</div>
     </section>
@@ -176,5 +202,6 @@ onMounted(async () => {
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
 .basic-section :deep(.el-form-item) { margin-bottom: 12px; }
 .flow-loading { display: grid; min-height: 260px; place-items: center; color: var(--el-text-color-secondary); }
+.read-only-content { pointer-events: none; opacity: .82; }
 @media (max-width: 680px) { .editor-page { padding: 12px; } .editor-header { align-items: flex-start; flex-direction: column; } .form-grid { grid-template-columns: 1fr; } }
 </style>

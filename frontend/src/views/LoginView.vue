@@ -14,6 +14,8 @@ const loginForm = reactive({
 })
 
 function getDefaultDashboardPath(department?: string) {
+  if (department === 'business') return '/business/orders'
+  if (['stamp', 'polish', 'qc', 'assembly'].includes(department ?? '')) return `/${department}`
   return department ? '/products' : '/login'
 }
 
@@ -47,7 +49,7 @@ async function submitLogin() {
 
       <ElForm class="login-form" :model="loginForm" label-position="top" @keyup.enter="submitLogin">
         <ElFormItem label="用户名">
-          <ElInput v-model="loginForm.username" clearable placeholder="admin / engineering" />
+          <ElInput v-model="loginForm.username" clearable placeholder="请输入部门账号" />
         </ElFormItem>
         <ElFormItem label="密码">
           <ElInput v-model="loginForm.password" type="password" show-password placeholder="请输入密码" />

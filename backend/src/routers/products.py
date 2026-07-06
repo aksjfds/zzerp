@@ -6,18 +6,24 @@ from schemas.engineering import (
     CreateProductPayload,
     ProductDetailEnvelope,
     ProductListEnvelope,
+    ProductVersionsEnvelope,
     ReplaceBomPayload,
     UpdateProcessFlowPayload,
     UpdateProductPayload,
 )
 from services.engineering_product_commands import (
+    create_product_version,
     create_product,
     delete_product,
     replace_product_bom,
     update_product_info,
     update_product_process_flow,
 )
-from services.engineering_product_queries import get_product, list_products
+from services.engineering_product_queries import (
+    get_product,
+    list_product_versions,
+    list_products,
+)
 
 
 router = APIRouter(prefix="/products", tags=["engineering-products"])
@@ -33,9 +39,27 @@ def product_list(
 @router.get("/{product_id}", response_model=ProductDetailEnvelope)
 def product_detail(
     product_id: int,
+    version: int | None = Query(default=None, gt=0),
     _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
 ):
-    return {"data": get_product(product_id)}
+    return {"data": get_product(product_id, version)}
+
+
+@router.get("/{product_id}/versions", response_model=ProductVersionsEnvelope)
+def product_versions(
+    product_id: int,
+    _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
+):
+    return {"data": list_product_versions(product_id)}
+
+
+@router.post("/{product_id}/versions", response_model=ProductDetailEnvelope)
+def product_version_create(
+    product_id: int,
+    expected_version: int = Query(gt=0),
+    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+):
+    return {"data": create_product_version(product_id, expected_version)}
 
 
 @router.post(
