@@ -280,26 +280,41 @@ def create_assembly_work_order(
         if worker_id and (worker is None or worker.department_id != assembly_department.id):
             raise DomainError("worker_invalid", "工人不属于装配部门")
         material_quantities: dict[int, int] = {}
+        repositories_by_source: dict[str, list[tuple[Repository, ProductionItem]]] = {}
         for repository, input_item in zip(repositories, input_items, strict=True):
+            repositories_by_source.setdefault(repository.source_flow_node_id, []).append(
+                (repository, input_item)
+            )
+        for source_id, source_repositories in repositories_by_source.items():
+            first_item = source_repositories[0][1]
             bom_item = (
-                session.get(ProductBom, input_item.product_bom_id)
-                if input_item.product_bom_id
+                session.get(ProductBom, first_item.product_bom_id)
+                if first_item.product_bom_id
                 else None
             )
-            required_quantity = required_material_quantity(
-                quantity, _production_item_unit_quantity(session, input_item, bom_item)
+            remaining_required = required_material_quantity(
+                quantity, _production_item_unit_quantity(session, first_item, bom_item)
             )
-            material_quantities[repository.id] = required_quantity
-            reserved = session.scalar(
-                select(func.coalesce(func.sum(WorkOrderMaterial.quantity), 0))
-                .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
-                .where(
-                    WorkOrderMaterial.repository_id == repository.id,
-                    WorkOrder.status == "open",
+            for repository, _ in source_repositories:
+                reserved = session.scalar(
+                    select(func.coalesce(func.sum(WorkOrderMaterial.quantity), 0))
+                    .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
+                    .where(
+                        WorkOrderMaterial.repository_id == repository.id,
+                        WorkOrder.status == "open",
+                    )
                 )
-            )
-            if required_quantity > repository.quantity - reserved:
-                raise DomainError("assembly_quantity_exceeded", "装配数量超过输入物料可用数量")
+                allocated = min(max(repository.quantity - reserved, 0), remaining_required)
+                if allocated:
+                    material_quantities[repository.id] = allocated
+                    remaining_required -= allocated
+                if remaining_required == 0:
+                    break
+            if remaining_required:
+                raise DomainError(
+                    "assembly_quantity_exceeded",
+                    f"来源节点 {source_id} 的可用物料不足",
+                )
         order = WorkOrder(
             repository_id=None,
             production_item_id=input_items[0].id,
@@ -314,6 +329,8 @@ def create_assembly_work_order(
         _mark_order_planned(session, input_items[0])
         order.work_order_no = f"WO-{datetime.now():%Y%m%d}-{order.id:06d}"
         for repository in repositories:
+            if repository.id not in material_quantities:
+                continue
             session.add(
                 WorkOrderMaterial(
                     work_order_id=order.id,

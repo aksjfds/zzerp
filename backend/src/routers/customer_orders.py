@@ -22,6 +22,7 @@ from services.customer_orders import (
     list_orders,
     update_order,
 )
+from services.customer_order_production import get_customer_order_production
 
 
 router = APIRouter(prefix="/customer-orders", tags=["customer-orders"])
@@ -51,6 +52,14 @@ def customer_order_detail(
     _: dict = Depends(require_any_permission(ORDER_VIEW)),
 ):
     return {"data": get_order(order_id)}
+
+
+@router.get("/{order_id}/production-status")
+def customer_order_production_status(
+    order_id: int,
+    _: dict = Depends(require_any_permission(ORDER_VIEW)),
+):
+    return {"data": get_customer_order_production(order_id)}
 
 
 @router.put("/{order_id}", response_model=CustomerOrderEnvelope)

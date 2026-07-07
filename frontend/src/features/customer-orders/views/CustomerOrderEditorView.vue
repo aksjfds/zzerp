@@ -3,23 +3,29 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
+import ProductionFlowViewer from '../components/ProductionFlowViewer.vue'
 import { queryProduct, queryProducts } from '@/features/process-designer/api/engineeringProducts'
 import type { EngineeringProduct, ProductSummary } from '@/features/process-designer/domain/types'
-import { createCustomerOrder, queryCustomerOrder, updateCustomerOrder } from '../api/customerOrders'
-import type { CustomerOrderItem, CustomerOrderPayload } from '../domain/types'
+import { createCustomerOrder, queryCustomerOrder, queryCustomerOrderProduction, updateCustomerOrder } from '../api/customerOrders'
+import type { CustomerOrderItem, CustomerOrderPayload, CustomerOrderProduction } from '../domain/types'
 
 const route = useRoute()
 const router = useRouter()
+const props = withDefaults(defineProps<{ orderId?: number; embedded?: boolean }>(), {
+  orderId: undefined,
+  embedded: false,
+})
 const products = ref<ProductSummary[]>([])
 const productLoading = ref(false)
 let productSearchSequence = 0
 const status = ref('draft')
 const revision = ref<number | null>(null)
+const production = ref<CustomerOrderProduction>()
 const form = reactive({
   customer_order_no: '', customer_name: '', remark: '', items: [] as CustomerOrderItem[],
 })
-const orderId = computed(() => Number(route.params.orderId) || null)
-const readOnly = computed(() => status.value !== 'draft')
+const effectiveOrderId = computed(() => props.orderId ?? (Number(route.params.orderId) || null))
+const readOnly = computed(() => props.embedded || status.value !== 'draft')
 
 function addItem() {
   form.items.push({ product_id: 0, quantity: 1, delivery_date: '', remark: '' })
@@ -77,7 +83,7 @@ async function save() {
       })),
       expected_revision: revision.value ?? undefined,
     }
-    if (orderId.value) await updateCustomerOrder(orderId.value, payload)
+    if (effectiveOrderId.value) await updateCustomerOrder(effectiveOrderId.value, payload)
     else await createCustomerOrder(payload)
     ElMessage.success('客户订单已保存')
     router.push('/business/orders')
@@ -88,8 +94,9 @@ async function save() {
 
 onMounted(async () => {
   await searchProducts()
-  if (orderId.value) {
-    const order = await queryCustomerOrder(orderId.value)
+  if (effectiveOrderId.value) {
+    const order = await queryCustomerOrder(effectiveOrderId.value)
+    production.value = await queryCustomerOrderProduction(effectiveOrderId.value)
     status.value = order.status
     revision.value = order.revision
     Object.assign(form, {
@@ -110,9 +117,9 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="editor-page">
-    <header><div><span>业务部</span><h1>{{ orderId ? '客户订单详情' : '创建客户订单' }}</h1></div><div><ElButton @click="router.push('/business/orders')">返回</ElButton><ElButton v-if="!readOnly" type="primary" @click="save">保存草稿</ElButton></div></header>
-    <section class="card">
+  <main class="editor-page" :class="{ embedded: props.embedded }">
+    <header v-if="!props.embedded"><div><span>业务部</span><h1>{{ effectiveOrderId ? '客户订单详情' : '创建客户订单' }}</h1></div><div><ElButton @click="router.push('/business/orders')">返回</ElButton><ElButton v-if="!readOnly" type="primary" @click="save">保存草稿</ElButton></div></header>
+    <section v-if="!effectiveOrderId" class="card">
       <ElForm :model="form" :disabled="readOnly" label-position="top">
         <div class="grid"><ElFormItem label="客户订单编号"><ElInput v-model="form.customer_order_no" /></ElFormItem><ElFormItem label="客户名称"><ElInput v-model="form.customer_name" /></ElFormItem></div>
         <ElFormItem label="备注"><ElInput v-model="form.remark" type="textarea" /></ElFormItem>
@@ -129,11 +136,26 @@ onMounted(async () => {
         <ElTableColumn v-if="!readOnly" label="操作" width="80"><template #default="{ $index }"><ElButton link type="danger" @click="form.items.splice($index, 1)">删除</ElButton></template></ElTableColumn>
       </ElTable>
     </section>
+    <section v-if="effectiveOrderId && production" class="card">
+      <div class="heading"><h2>生产情况</h2></div>
+      <div class="product-status-list">
+        <section
+          v-for="productStatus in production.products"
+          :key="productStatus.customer_order_item_id"
+          class="product-status-section"
+        >
+          <h3>{{ productStatus.factory_code }} · {{ productStatus.product_name }} · 订单数量 {{ productStatus.order_quantity }}</h3>
+          <ProductionFlowViewer :flow="productStatus.process_flow" :stats="productStatus.node_stats" />
+        </section>
+      </div>
+    </section>
   </main>
 </template>
 
 <style scoped>
 .editor-page { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
+.editor-page.embedded { min-height: 0; padding: 0; background: transparent; }
+.editor-page.embedded .card { box-shadow: none; }
 header, .card { border: 1px solid var(--erp-border); border-radius: 10px; background: white; box-shadow: var(--erp-shadow-sm); }
 header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 18px 22px; }
 header span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
@@ -142,4 +164,6 @@ header h1 { margin: 5px 0 0; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .heading h2 { margin: 0; font-size: 18px; }
+.product-status-section { margin-top: 14px; padding: 14px; border: 1px solid var(--erp-border); border-radius: 8px; }
+.product-status-section h3 { margin: 0 0 12px; }
 </style>

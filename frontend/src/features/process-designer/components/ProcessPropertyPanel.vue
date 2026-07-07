@@ -37,7 +37,7 @@ const emit = defineEmits<{
       <label>显示名称</label>
       <ElInput :model-value="node.label" @change="emit('updateAssembly', $event, node.output_name, node.output_pcs)" />
       <label>装配体名称</label>
-      <ElInput :model-value="node.output_name" @change="emit('updateAssembly', node.label, $event, node.output_pcs)" />
+      <ElInput :model-value="node.output_name" disabled placeholder="根据输入配件自动生成" />
       <label>每件产品所需装配体数量</label>
       <ElInputNumber :model-value="node.output_pcs" :min="1" @change="emit('updateAssembly', node.label, node.output_name, $event || 1)" />
     </template>

@@ -5,6 +5,7 @@ import { getApiErrorDetail } from '@/api/request'
 import type { useEngineeringProductsStore } from '@/stores/engineeringProducts'
 import {
   synchronizeFlowPartMetadata,
+  synchronizeAssemblyNames,
   type BomItem,
   type EngineeringProduct,
   type ProcessFlow,
@@ -96,12 +97,13 @@ export function useProductSaveActions(options: Options) {
 
   async function saveFlow() {
     if (!productId.value || form.revision === null || !flowEditor.value) return
-    form.process_flow = flowEditor.value.getGraphData()
+    form.process_flow = synchronizeAssemblyNames(flowEditor.value.getGraphData())
     try {
       const product = await store.saveProcessFlow(productId.value, form.revision, form.process_flow)
       form.version = product.version
       form.revision = product.revision
       form.process_flow = product.process_flow
+      flowEditor.value.reload(product.process_flow)
       markSaved(['flow'])
       ElMessage.success('工序流程已保存')
     } catch (error) {

@@ -4,8 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
-import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
+import CustomerOrderEditorView from './CustomerOrderEditorView.vue'
 import {
   cancelCustomerOrder,
   confirmCustomerOrder,
@@ -22,6 +22,8 @@ const orders = ref<CustomerOrder[]>([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = 50
+const detailVisible = ref(false)
+const activeOrderId = ref<number>()
 const statusLabels = {
   draft: '草稿', confirmed: '已确认', planned: '已排产', cancelled: '已取消', closed: '已完成',
 }
@@ -57,6 +59,15 @@ async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete'
   }
 }
 
+async function openOrder(order: CustomerOrder) {
+  if (order.status === 'draft') {
+    await router.push(`/business/orders/${order.id}`)
+    return
+  }
+  activeOrderId.value = order.id
+  detailVisible.value = true
+}
+
 async function logout() {
   await authStore.logout()
   router.replace('/login')
@@ -71,7 +82,7 @@ onMounted(loadOrders)
       <div><span>业务部</span><h1>客户订单</h1></div>
       <div>
         <ElButton @click="logout">退出登录</ElButton>
-        <ElButton v-permission="PRODUCT_PERMISSIONS.view" @click="router.push('/products')">产品资料</ElButton>
+        <!-- <ElButton v-permission="PRODUCT_PERMISSIONS.view" @click="router.push('/products')">产品资料</ElButton> -->
         <ElButton v-permission="ORDER_PERMISSIONS.add" type="primary" @click="router.push('/business/orders/new')">创建客户订单</ElButton>
       </div>
     </header>
@@ -81,13 +92,13 @@ onMounted(loadOrders)
         <ElTableColumn prop="customer_order_no" label="订单编号" min-width="160" />
         <ElTableColumn prop="customer_name" label="客户名称" min-width="140" />
         <ElTableColumn label="产品明细" min-width="260">
-          <template #default="{ row }"><div v-for="item in row.items" :key="item.id">{{ item.factory_code }} · V{{ item.product_version }} · {{ item.quantity }}</div></template>
+          <template #default="{ row }"><div v-for="item in row.items" :key="item.id">{{ item.factory_code }}-{{ item.product_name }}-{{ item.quantity }}个</div></template>
         </ElTableColumn>
         <ElTableColumn label="状态" width="100"><template #default="{ row }">{{ statusLabels[row.status as keyof typeof statusLabels] }}</template></ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" width="170" />
         <ElTableColumn label="操作" width="240" fixed="right">
           <template #default="{ row }">
-            <ElButton link @click="router.push(`/business/orders/${row.id}`)">{{ row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
+            <ElButton link @click="openOrder(row)">{{ row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
             <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.confirm" link type="primary" @click="act(row, 'confirm')">确认</ElButton>
             <ElButton v-if="['draft', 'confirmed', 'planned'].includes(row.status)" v-permission="ORDER_PERMISSIONS.cancel" link type="warning" @click="act(row, 'cancel')">取消</ElButton>
             <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.edit" link type="danger" @click="act(row, 'delete')">删除</ElButton>
@@ -103,6 +114,10 @@ onMounted(loadOrders)
         @current-change="loadOrders"
       />
     </section>
+    <ElDialog v-model="detailVisible" title="客户订单详情" width="min(1100px, 92vw)" destroy-on-close>
+      <CustomerOrderEditorView v-if="activeOrderId" :order-id="activeOrderId" embedded />
+      <template #footer><ElButton @click="detailVisible = false">关闭</ElButton></template>
+    </ElDialog>
   </main>
 </template>
 

@@ -114,7 +114,7 @@ export function synchronizeFlowPartMetadata(flow: ProcessFlow, bomItems: BomItem
   const metadata = new Map(
     bomItems.flatMap((item) => item.id ? [[item.id, item] as const] : []),
   )
-  return {
+  const synchronized = {
     ...flow,
     nodes: flow.nodes.map((node) => {
       if (node.type !== 'part') return node
@@ -122,4 +122,32 @@ export function synchronizeFlowPartMetadata(flow: ProcessFlow, bomItems: BomItem
       return item ? { ...node, label: item.part_name, part_no: item.part_no } : node
     }),
   }
+  return synchronizeAssemblyNames(synchronized)
+}
+
+export function synchronizeAssemblyNames(flow: ProcessFlow): ProcessFlow {
+  const nodes = flow.nodes.map(node => ({ ...node }))
+  const byId = new Map(nodes.map(node => [node.id, node]))
+  const incoming = new Map<string, string[]>()
+  flow.edges.filter(edge => edge.route_type === 'normal').forEach((edge) => {
+    incoming.set(edge.target_node_id, [...(incoming.get(edge.target_node_id) || []), edge.source_node_id])
+  })
+  const cache = new Map<string, string[]>()
+  function names(nodeId: string, visiting = new Set<string>()): string[] {
+    if (cache.has(nodeId)) return cache.get(nodeId)!
+    if (visiting.has(nodeId)) return []
+    const node = byId.get(nodeId)
+    if (!node) return []
+    if (node.type === 'part') return [node.label]
+    const result: string[] = []
+    const nextVisiting = new Set(visiting).add(nodeId)
+    for (const sourceId of incoming.get(nodeId) || []) {
+      for (const name of names(sourceId, nextVisiting)) if (!result.includes(name)) result.push(name)
+    }
+    cache.set(nodeId, result)
+    if (node.type === 'assembly' && result.length) node.output_name = `${result.join('-')}装配体`
+    return result
+  }
+  nodes.forEach(node => names(node.id))
+  return { ...flow, nodes }
 }

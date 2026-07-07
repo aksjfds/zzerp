@@ -103,6 +103,45 @@ const assemblyCapacity = computed(() => {
     Math.floor(item.available_quantity / item.assembly_unit_quantity)
   )))
 })
+const assemblyGroups = computed(() => {
+  const groups = new Map<string, RepositoryItem[]>()
+  filteredItems.value.forEach((item) => {
+    const key = `${item.customer_order_item_id}:${item.flow_node_id}`
+    groups.set(key, [...(groups.get(key) || []), item])
+  })
+  return [...groups.entries()].map(([key, groupItems]) => {
+    const sources = new Map<string, RepositoryItem[]>()
+    groupItems.forEach(item => sources.set(
+      item.source_flow_node_id,
+      [...(sources.get(item.source_flow_node_id) || []), item],
+    ))
+    const capacity = Math.min(...[...sources.values()].map(sourceItems => (
+      Math.floor(
+        sourceItems.reduce((sum, item) => sum + item.available_quantity, 0)
+        / sourceItems[0].assembly_unit_quantity,
+      )
+    )))
+    const names = [...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))]
+    return {
+      key,
+      items: groupItems,
+      capacity,
+      name: `${names.join('-')}装配体`,
+      orderNo: groupItems[0].customer_order_no,
+      sources: [...sources.values()].map(sourceItems => ({
+        name: sourceItems[0].part_name,
+        available: sourceItems.reduce((sum, item) => sum + item.available_quantity, 0),
+        required: sourceItems[0].assembly_unit_quantity,
+      })),
+    }
+  })
+})
+
+function openAssemblyGroup(group: (typeof assemblyGroups.value)[number]) {
+  assemblySelections.value.clear()
+  group.items.forEach(item => assemblySelections.value.set(item.id, item))
+  openWorkOrder(group.items[0])
+}
 async function loadItems() {
   const sequence = ++loadSequence
   loading.value = true
@@ -388,7 +427,17 @@ onMounted(loadItems)
     <section class="workspace-grid">
       <div class="content-card">
         <div class="toolbar"><ElInput v-model="keyword" clearable placeholder="搜索当前页的订单、产品或配件" /></div>
+        <div v-if="isAssembly" v-loading="loading" class="assembly-groups">
+          <article v-for="group in assemblyGroups" :key="group.key" class="assembly-group-card">
+            <strong>{{ group.name }}</strong>
+            <p>{{ group.orderNo }} · 可装配 {{ group.capacity }}</p>
+            <ul><li v-for="source in group.sources" :key="source.name">{{ source.name }}：可用 {{ source.available }} / 每件 {{ source.required }}</li></ul>
+            <ElButton type="primary" :disabled="group.capacity < 1" @click="openAssemblyGroup(group)">开装配工单</ElButton>
+          </article>
+          <ElEmpty v-if="!loading && !assemblyGroups.length" description="暂无可装配物料" :image-size="72" />
+        </div>
         <RepositoryCards
+          v-else
           :items="filteredItems"
           :loading="loading"
           :selected-id="selectedRepositoryId"
@@ -407,13 +456,6 @@ onMounted(loadItems)
           :total="repositoryTotal"
           @current-change="loadItems"
         />
-        <ElButton
-          v-if="isAssembly"
-          type="primary"
-          class="assembly-create"
-          :disabled="activeAssemblyRepositoryIds.length < 2 || assemblyCapacity < 1"
-          @click="openWorkOrder(selectedAssemblyItems[0]!)"
-        >为所选物料开装配工单</ElButton>
       </div>
       <div class="content-card work-orders">
         <div class="history-selector">
@@ -504,6 +546,10 @@ onMounted(loadItems)
 .toolbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .toolbar .el-input { width: 360px; }
 .assembly-create { width: 100%; margin-top: 14px; }
+.assembly-groups { display: grid; gap: 12px; min-height: 150px; }
+.assembly-group-card { padding: 14px; border: 1px solid var(--erp-border); border-radius: 8px; background: #f8fafc; }
+.assembly-group-card p, .assembly-group-card li { color: var(--el-text-color-secondary); font-size: 13px; }
+.assembly-group-card ul { padding-left: 18px; }
 .workspace-grid { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
 .work-orders { min-height: 260px; }
 .history-selector { display: flex; gap: 12px; align-items: center; margin-bottom: 14px; }
