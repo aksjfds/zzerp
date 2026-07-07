@@ -18,6 +18,7 @@ def serialize_product_summary(product: Product, bom_count: int) -> dict:
     return {
         "id": product.id,
         "version": product.version,
+        "revision": product.revision,
         "customer_name": product.customer_name,
         "product_name": product.product_name,
         "factory_code": product.factory_code,
@@ -40,6 +41,7 @@ def serialize_product_detail(
         "id": product.id,
         "version": version,
         "current_version": product.version,
+        "revision": product.revision,
         "customer_name": product.customer_name,
         "product_name": product.product_name,
         "factory_code": product.factory_code,

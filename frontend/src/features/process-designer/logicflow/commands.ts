@@ -33,7 +33,7 @@ export function startAssemblyDrag(lf: LogicFlow) {
   lf.dnd.startDrag({
     type: 'assembly',
     text: '装配',
-    properties: { outputName: '装配体' },
+    properties: { outputName: '装配体', outputPcs: 1 },
   })
 }
 
@@ -46,7 +46,7 @@ export function updateNodeDefinition(
   nodeId: string,
   label: string,
   property: {
-    key: 'processCode' | 'outputName' | 'procedureId'
+    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId'
     value: string | number
   } | null,
 ) {

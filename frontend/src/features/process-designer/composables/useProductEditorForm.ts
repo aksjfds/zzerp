@@ -10,6 +10,7 @@ import {
 export function useProductEditorForm() {
   const form = reactive<ProductForm>({
     version: null,
+    revision: null,
     customer_name: '',
     product_name: '',
     factory_code: '',
@@ -78,6 +79,7 @@ export function useProductEditorForm() {
   function applyProduct(product: EngineeringProduct) {
     Object.assign(form, {
       version: product.version,
+      revision: product.revision,
       customer_name: product.customer_name,
       product_name: product.product_name,
       factory_code: product.factory_code,

@@ -16,6 +16,7 @@ export type CustomerOrder = {
   customer_order_no: string
   customer_name: string
   status: CustomerOrderStatus
+  revision: number
   remark: string
   items: CustomerOrderItem[]
   created_at: string
@@ -27,4 +28,5 @@ export type CustomerOrderPayload = {
   customer_name: string
   remark: string
   items: Array<Pick<CustomerOrderItem, 'product_id' | 'quantity' | 'delivery_date' | 'remark'>>
+  expected_revision?: number
 }

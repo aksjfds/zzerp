@@ -8,7 +8,7 @@ defineProps<{
   procedures: ProcedureOption[]
 }>()
 const emit = defineEmits<{
-  updateAssembly: [label: string, output_name: string]
+  updateAssembly: [label: string, output_name: string, output_pcs: number]
   updateProcess: [label: string, process_code: string]
   updateProcedure: [procedure_id: number]
   updateRoute: [route_type: RouteType]
@@ -35,9 +35,11 @@ const emit = defineEmits<{
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>
       <label>显示名称</label>
-      <ElInput :model-value="node.label" @change="emit('updateAssembly', $event, node.output_name)" />
+      <ElInput :model-value="node.label" @change="emit('updateAssembly', $event, node.output_name, node.output_pcs)" />
       <label>装配体名称</label>
-      <ElInput :model-value="node.output_name" @change="emit('updateAssembly', node.label, $event)" />
+      <ElInput :model-value="node.output_name" @change="emit('updateAssembly', node.label, $event, node.output_pcs)" />
+      <label>每件产品所需装配体数量</label>
+      <ElInputNumber :model-value="node.output_pcs" :min="1" @change="emit('updateAssembly', node.label, node.output_name, $event || 1)" />
     </template>
     <template v-else-if="node">
       <h3>{{ node.type === 'part' ? '配件节点' : 'QC 节点' }}</h3>

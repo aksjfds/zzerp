@@ -51,5 +51,5 @@ def raise_stale_data_error(exc: StaleDataError) -> None:
         "product_version_conflict",
         "产品资料已被其他用户更新，请重新加载后再保存",
         status_code=409,
-        path="expected_version",
+        path="expected_revision",
     ) from exc

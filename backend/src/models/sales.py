@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, Date, ForeignKey, Integer, Text, TIMESTAMP, text
+from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Integer, Text, TIMESTAMP, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -10,11 +10,19 @@ from database import Base
 
 class CustomerOrder(Base):
     __tablename__ = "customer_order"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('draft', 'confirmed', 'planned', 'cancelled', 'closed')",
+            name="ck_customer_order_status",
+        ),
+        CheckConstraint("revision > 0", name="ck_customer_order_revision"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_order_no: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     customer_name: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
@@ -29,6 +37,10 @@ class CustomerOrder(Base):
 
 class CustomerOrderItem(Base):
     __tablename__ = "customer_order_item"
+    __table_args__ = (
+        CheckConstraint("product_version > 0", name="ck_order_item_version"),
+        CheckConstraint("quantity > 0", name="ck_order_item_quantity"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_order_id: Mapped[int] = mapped_column(

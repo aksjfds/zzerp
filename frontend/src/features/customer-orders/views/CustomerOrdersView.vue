@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
+import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
 import {
   cancelCustomerOrder,
@@ -18,6 +19,9 @@ const authStore = useAuthStore()
 const loading = ref(false)
 const keyword = ref('')
 const orders = ref<CustomerOrder[]>([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = 50
 const statusLabels = {
   draft: '草稿', confirmed: '已确认', planned: '已排产', cancelled: '已取消', closed: '已完成',
 }
@@ -30,7 +34,11 @@ const filteredOrders = computed(() => {
 
 async function loadOrders() {
   loading.value = true
-  try { orders.value = await queryCustomerOrders() }
+  try {
+    const result = await queryCustomerOrders(page.value, pageSize)
+    orders.value = result.items
+    total.value = result.total
+  }
   catch { ElMessage.error('客户订单加载失败') }
   finally { loading.value = false }
 }
@@ -38,9 +46,9 @@ async function loadOrders() {
 async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete') {
   try {
     await ElMessageBox.confirm('确认执行该操作？', '客户订单', { type: 'warning' })
-    if (action === 'confirm') await confirmCustomerOrder(order.id)
-    else if (action === 'cancel') await cancelCustomerOrder(order.id)
-    else await deleteCustomerOrder(order.id)
+    if (action === 'confirm') await confirmCustomerOrder(order.id, order.revision)
+    else if (action === 'cancel') await cancelCustomerOrder(order.id, order.revision)
+    else await deleteCustomerOrder(order.id, order.revision)
     await loadOrders()
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') {
@@ -63,11 +71,12 @@ onMounted(loadOrders)
       <div><span>业务部</span><h1>客户订单</h1></div>
       <div>
         <ElButton @click="logout">退出登录</ElButton>
+        <ElButton v-permission="PRODUCT_PERMISSIONS.view" @click="router.push('/products')">产品资料</ElButton>
         <ElButton v-permission="ORDER_PERMISSIONS.add" type="primary" @click="router.push('/business/orders/new')">创建客户订单</ElButton>
       </div>
     </header>
     <section class="content-card">
-      <ElInput v-model="keyword" clearable placeholder="搜索订单编号或客户" class="search" />
+      <ElInput v-model="keyword" clearable placeholder="搜索当前页的订单编号或客户" class="search" />
       <ElTable v-loading="loading" :data="filteredOrders" border>
         <ElTableColumn prop="customer_order_no" label="订单编号" min-width="160" />
         <ElTableColumn prop="customer_name" label="客户名称" min-width="140" />
@@ -80,11 +89,19 @@ onMounted(loadOrders)
           <template #default="{ row }">
             <ElButton link @click="router.push(`/business/orders/${row.id}`)">{{ row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
             <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.confirm" link type="primary" @click="act(row, 'confirm')">确认</ElButton>
-            <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.cancel" link type="warning" @click="act(row, 'cancel')">取消</ElButton>
+            <ElButton v-if="['draft', 'confirmed', 'planned'].includes(row.status)" v-permission="ORDER_PERMISSIONS.cancel" link type="warning" @click="act(row, 'cancel')">取消</ElButton>
             <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.edit" link type="danger" @click="act(row, 'delete')">删除</ElButton>
           </template>
         </ElTableColumn>
       </ElTable>
+      <ElPagination
+        v-model:current-page="page"
+        class="pagination"
+        layout="prev, pager, next, total"
+        :page-size="pageSize"
+        :total="total"
+        @current-change="loadOrders"
+      />
     </section>
   </main>
 </template>
@@ -97,4 +114,5 @@ onMounted(loadOrders)
 .page-header h1 { margin: 5px 0 0; }
 .content-card { padding: 20px; }
 .search { width: 360px; margin-bottom: 16px; }
+.pagination { justify-content: flex-end; margin-top: 16px; }
 </style>

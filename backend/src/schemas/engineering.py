@@ -31,12 +31,13 @@ class PartNodePayload(FlowNodeBase):
 class ProcessNodePayload(FlowNodeBase):
     type: Literal["process"]
     process_code: str = Field(min_length=1, max_length=100)
-    procedure_id: int | None = Field(default=None, gt=0)
+    procedure_id: int = Field(gt=0)
 
 
 class AssemblyNodePayload(FlowNodeBase):
     type: Literal["assembly"]
     output_name: str = Field(min_length=1, max_length=200)
+    output_pcs: int = Field(default=1, gt=0)
 
 
 class QcNodePayload(FlowNodeBase):
@@ -92,16 +93,16 @@ class CreateProductPayload(ProductFields):
 
 
 class UpdateProductPayload(ProductFields):
-    expected_version: int = Field(gt=0)
+    expected_revision: int = Field(gt=0)
 
 
 class ReplaceBomPayload(ContractModel):
-    expected_version: int = Field(gt=0)
+    expected_revision: int = Field(gt=0)
     bom_items: list[BomItemPayload] = Field(min_length=1, max_length=1000)
 
 
 class UpdateProcessFlowPayload(ContractModel):
-    expected_version: int = Field(gt=0)
+    expected_revision: int = Field(gt=0)
     process_flow: ProcessFlowPayload
 
 
@@ -119,6 +120,7 @@ class BomItemResponse(ContractModel):
 class ProductSummaryResponse(ProductFields):
     id: int
     version: int
+    revision: int
     bom_count: int
     created_at: str
     updated_at: str
@@ -128,6 +130,7 @@ class ProductDetailResponse(ProductFields):
     id: int
     version: int
     current_version: int
+    revision: int
     bom_items: list[BomItemResponse]
     process_flow: ProcessFlowPayload
     created_at: str
@@ -136,6 +139,7 @@ class ProductDetailResponse(ProductFields):
 
 class ProductListEnvelope(ContractModel):
     data: list[ProductSummaryResponse]
+    total: int
 
 
 class ProductDetailEnvelope(ContractModel):

@@ -15,7 +15,7 @@ import type {
 import { queryProcedures, type ProcedureOption } from '@/api/organization'
 
 type NodeProperty = {
-  key: 'processCode' | 'outputName' | 'procedureId'
+  key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId'
   value: string | number
 } | null
 type CanvasApi = {
@@ -67,10 +67,11 @@ function updateProcedure(procedureId: number) {
   }
 }
 
-function updateAssembly(label: string, output_name: string) {
+function updateAssembly(label: string, output_name: string, output_pcs: number) {
   if (selectedNode.value?.type !== 'assembly') return
   canvas.value?.updateNode(selectedNode.value.id, label, { key: 'outputName', value: output_name })
-  selectedNode.value = { ...selectedNode.value, label, output_name }
+  canvas.value?.updateNode(selectedNode.value.id, label, { key: 'outputPcs', value: output_pcs })
+  selectedNode.value = { ...selectedNode.value, label, output_name, output_pcs }
 }
 
 function updateRoute(routeType: RouteType) {

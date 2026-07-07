@@ -2,12 +2,12 @@ from domain.errors import DomainViolation
 from domain.models import BomItemCommand
 
 
-def validate_expected_version(actual: int, expected: int) -> None:
+def validate_expected_revision(actual: int, expected: int) -> None:
     if actual != expected:
         raise DomainViolation(
             "product_version_conflict",
             "产品资料已被其他用户更新，请重新加载后再保存",
-            path="expected_version",
+            path="expected_revision",
             status_code=409,
         )
 

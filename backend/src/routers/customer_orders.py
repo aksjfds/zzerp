@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Response, status
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from authorization import require_any_permission
 from domain.permissions import (
@@ -28,8 +28,13 @@ router = APIRouter(prefix="/customer-orders", tags=["customer-orders"])
 
 
 @router.get("", response_model=CustomerOrderListEnvelope)
-def customer_order_list(_: dict = Depends(require_any_permission(ORDER_VIEW))):
-    return {"data": list_orders()}
+def customer_order_list(
+    page: int = Query(default=1, gt=0),
+    page_size: int = Query(default=50, gt=0, le=200),
+    _: dict = Depends(require_any_permission(ORDER_VIEW)),
+):
+    data, total = list_orders(page, page_size)
+    return {"data": data, "total": total}
 
 
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=CustomerOrderEnvelope)
@@ -60,23 +65,26 @@ def customer_order_update(
 @router.post("/{order_id}/confirm", response_model=CustomerOrderEnvelope)
 def customer_order_confirm(
     order_id: int,
+    expected_revision: int = Query(gt=0),
     _: dict = Depends(require_any_permission(ORDER_CONFIRM, csrf=True)),
 ):
-    return {"data": change_status(order_id, "confirmed")}
+    return {"data": change_status(order_id, "confirmed", expected_revision)}
 
 
 @router.post("/{order_id}/cancel", response_model=CustomerOrderEnvelope)
 def customer_order_cancel(
     order_id: int,
+    expected_revision: int = Query(gt=0),
     _: dict = Depends(require_any_permission(ORDER_CANCEL, csrf=True)),
 ):
-    return {"data": change_status(order_id, "cancelled")}
+    return {"data": change_status(order_id, "cancelled", expected_revision)}
 
 
 @router.delete("/{order_id}", status_code=status.HTTP_204_NO_CONTENT)
 def customer_order_delete(
     order_id: int,
+    expected_revision: int = Query(gt=0),
     _: dict = Depends(require_any_permission(ORDER_EDIT, csrf=True)),
 ):
-    delete_order(order_id)
+    delete_order(order_id, expected_revision)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

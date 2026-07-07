@@ -3,15 +3,18 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
-import { queryProducts } from '@/features/process-designer/api/engineeringProducts'
-import type { ProductSummary } from '@/features/process-designer/domain/types'
+import { queryProduct, queryProducts } from '@/features/process-designer/api/engineeringProducts'
+import type { EngineeringProduct, ProductSummary } from '@/features/process-designer/domain/types'
 import { createCustomerOrder, queryCustomerOrder, updateCustomerOrder } from '../api/customerOrders'
 import type { CustomerOrderItem, CustomerOrderPayload } from '../domain/types'
 
 const route = useRoute()
 const router = useRouter()
 const products = ref<ProductSummary[]>([])
+const productLoading = ref(false)
+let productSearchSequence = 0
 const status = ref('draft')
+const revision = ref<number | null>(null)
 const form = reactive({
   customer_order_no: '', customer_name: '', remark: '', items: [] as CustomerOrderItem[],
 })
@@ -24,6 +27,39 @@ function addItem() {
 
 function product(productId: number) {
   return products.value.find((item) => item.id === productId)
+}
+
+function asSummary(item: EngineeringProduct): ProductSummary {
+  return {
+    id: item.id,
+    version: item.current_version,
+    revision: item.revision,
+    customer_name: item.customer_name,
+    product_name: item.product_name,
+    factory_code: item.factory_code,
+    customer_code: item.customer_code,
+    bom_count: item.bom_items.length,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+  }
+}
+
+async function searchProducts(keyword = '') {
+  const sequence = ++productSearchSequence
+  productLoading.value = true
+  try {
+    const result = await queryProducts(1, 50, keyword)
+    if (sequence !== productSearchSequence) return
+    const selected = products.value.filter(item => (
+      form.items.some(orderItem => orderItem.product_id === item.id)
+    ))
+    products.value = [
+      ...selected,
+      ...result.items.filter(item => !selected.some(selectedItem => selectedItem.id === item.id)),
+    ]
+  } finally {
+    if (sequence === productSearchSequence) productLoading.value = false
+  }
 }
 
 async function save() {
@@ -39,6 +75,7 @@ async function save() {
       items: form.items.map(({ product_id, quantity, delivery_date, remark }) => ({
         product_id, quantity, delivery_date, remark,
       })),
+      expected_revision: revision.value ?? undefined,
     }
     if (orderId.value) await updateCustomerOrder(orderId.value, payload)
     else await createCustomerOrder(payload)
@@ -50,16 +87,24 @@ async function save() {
 }
 
 onMounted(async () => {
-  products.value = await queryProducts()
+  await searchProducts()
   if (orderId.value) {
     const order = await queryCustomerOrder(orderId.value)
     status.value = order.status
+    revision.value = order.revision
     Object.assign(form, {
       customer_order_no: order.customer_order_no,
       customer_name: order.customer_name,
       remark: order.remark,
       items: order.items.map((item): CustomerOrderItem => ({ ...item })),
     })
+    const missingIds = [...new Set(
+      order.items.map(item => item.product_id).filter(id => !product(id)),
+    )]
+    if (missingIds.length) {
+      const missing = await Promise.all(missingIds.map(id => queryProduct(id)))
+      products.value.push(...missing.map(asSummary))
+    }
   } else addItem()
 })
 </script>
@@ -76,7 +121,7 @@ onMounted(async () => {
     <section class="card" :class="{ readonly: readOnly }">
       <div class="heading"><h2>产品明细</h2><ElButton v-if="!readOnly" @click="addItem">新增产品</ElButton></div>
       <ElTable :data="form.items" border>
-        <ElTableColumn label="产品" min-width="220"><template #default="{ row }"><ElSelect v-model="row.product_id" :disabled="readOnly" filterable><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" /></ElSelect></template></ElTableColumn>
+        <ElTableColumn label="产品" min-width="220"><template #default="{ row }"><ElSelect v-model="row.product_id" :disabled="readOnly" filterable remote :remote-method="searchProducts" :loading="productLoading"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" /></ElSelect></template></ElTableColumn>
         <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.product_version ?? product(row.product_id)?.version ?? '-' }}</template></ElTableColumn>
         <ElTableColumn label="数量" width="140"><template #default="{ row }"><ElInputNumber v-model="row.quantity" :disabled="readOnly" :min="1" /></template></ElTableColumn>
         <ElTableColumn label="交期" width="170"><template #default="{ row }"><ElDatePicker v-model="row.delivery_date" :disabled="readOnly" value-format="YYYY-MM-DD" /></template></ElTableColumn>

@@ -31,9 +31,13 @@ router = APIRouter(prefix="/products", tags=["engineering-products"])
 
 @router.get("", response_model=ProductListEnvelope)
 def product_list(
+    page: int = Query(default=1, gt=0),
+    page_size: int = Query(default=50, gt=0, le=200),
+    keyword: str | None = Query(default=None, max_length=200),
     _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
 ):
-    return {"data": list_products()}
+    data, total = list_products(page, page_size, keyword)
+    return {"data": data, "total": total}
 
 
 @router.get("/{product_id}", response_model=ProductDetailEnvelope)
@@ -56,10 +60,10 @@ def product_versions(
 @router.post("/{product_id}/versions", response_model=ProductDetailEnvelope)
 def product_version_create(
     product_id: int,
-    expected_version: int = Query(gt=0),
+    expected_revision: int = Query(gt=0),
     _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
 ):
-    return {"data": create_product_version(product_id, expected_version)}
+    return {"data": create_product_version(product_id, expected_revision)}
 
 
 @router.post(
@@ -92,7 +96,7 @@ def product_bom_replace(
     return {
         "data": replace_product_bom(
             product_id,
-            payload.expected_version,
+            payload.expected_revision,
             payload.bom_items,
         )
     }
@@ -107,7 +111,7 @@ def product_process_flow_update(
     return {
         "data": update_product_process_flow(
             product_id,
-            payload.expected_version,
+            payload.expected_revision,
             payload.process_flow,
         )
     }
@@ -116,8 +120,8 @@ def product_process_flow_update(
 @router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
 def product_delete(
     product_id: int,
-    expected_version: int = Query(gt=0),
+    expected_revision: int = Query(gt=0),
     _user: dict = Depends(require_any_permission(PRODUCT_DELETE, csrf=True)),
 ):
-    delete_product(product_id, expected_version)
+    delete_product(product_id, expected_revision)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

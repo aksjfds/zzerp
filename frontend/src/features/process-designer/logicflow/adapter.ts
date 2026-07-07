@@ -82,11 +82,16 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
       ...base,
       type,
       process_code: stringValue(properties.processCode),
-      procedure_id: optionalNumber(properties.procedureId),
+      procedure_id: requiredNumber(properties.procedureId, 'procedureId'),
     }
   }
   if (type === 'assembly') {
-    return { ...base, type, output_name: stringValue(properties.outputName) }
+    return {
+      ...base,
+      type,
+      output_name: stringValue(properties.outputName),
+      output_pcs: requiredNumber(properties.outputPcs ?? 1, 'outputPcs'),
+    }
   }
   return { ...base, type: 'qc' }
 }
@@ -118,7 +123,9 @@ function nodeProperties(node: FlowNode): Record<string, unknown> {
   if (node.type === 'process') {
     return { processCode: node.process_code, procedureId: node.procedure_id }
   }
-  if (node.type === 'assembly') return { outputName: node.output_name }
+  if (node.type === 'assembly') {
+    return { outputName: node.output_name, outputPcs: node.output_pcs }
+  }
   return {}
 }
 
@@ -142,8 +149,4 @@ function stringValue(value: unknown): string {
 function requiredNumber(value: unknown, field: string): number {
   if (typeof value !== 'number') throw new Error(`Missing ${field}`)
   return value
-}
-
-function optionalNumber(value: unknown): number | undefined {
-  return typeof value === 'number' ? value : undefined
 }

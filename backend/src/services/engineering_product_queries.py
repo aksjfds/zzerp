@@ -8,13 +8,18 @@ from services.engineering_product_support import empty_process_flow
 from services.errors import product_not_found
 
 
-def list_products() -> list[dict]:
+def list_products(
+    page: int, page_size: int, keyword: str | None = None
+) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         repository = EngineeringProductRepository(session)
-        return [
+        data = [
             serialize_product_summary(product, bom_count)
-            for product, bom_count in repository.list_with_bom_counts()
+            for product, bom_count in repository.list_with_bom_counts(
+                (page - 1) * page_size, page_size, keyword
+            )
         ]
+        return data, repository.count(keyword)
 
 
 def get_product(product_id: int, version: int | None = None) -> dict:

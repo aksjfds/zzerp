@@ -25,12 +25,17 @@ invalid request field or domain object.
 - `PUT /products/{product_id}/process-flow`: replace the complete process flow.
 - `DELETE /products/{product_id}`: delete the product, BOM and process flow.
 
-Product responses include an integer `version`. Every update body must send that value as `expected_version`.
-Delete sends it as the `expected_version` query parameter. Each successful write returns a new version. A stale
+Product responses include a business `version` and an integer `revision`. Every update body must send the
+latest revision as `expected_revision`. Delete sends it as the `expected_revision` query parameter. Each
+successful write increments `revision`; creating a product version increments the business `version`. A stale
 write is rejected with `product_version_conflict` instead of overwriting another user's changes.
 
 The split prevents newly inserted BOM rows and their generated IDs from being mixed with stale process-flow
 references in one request.
+
+Once any customer order references a product, its shared base information is frozen so historical orders do not
+silently display renamed products or factory codes. BOM and process-flow data are frozen per business version;
+create a new product version before changing either section.
 
 ## Process-flow version
 
@@ -55,6 +60,7 @@ editor to focus the invalid node or edge.
 For a non-empty flow:
 
 - each part node references a valid BOM row, and a BOM row appears at most once;
+- each part node connects directly to exactly one first process node;
 - all nodes belong to one connected graph;
 - normal edges form a directed acyclic graph;
 - assembly nodes have at least two normal inputs;

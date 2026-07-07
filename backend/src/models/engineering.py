@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, JSON, Text, TIMESTAMP, UniqueConstraint, text
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, Integer, JSON, Text, TIMESTAMP, UniqueConstraint, text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -17,6 +17,8 @@ class Product(Base):
     __tablename__ = "product"
     __table_args__ = (
         UniqueConstraint("factory_code", name="uq_product_factory_code"),
+        CheckConstraint("version > 0", name="ck_product_version"),
+        CheckConstraint("revision > 0", name="ck_product_revision"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -25,6 +27,7 @@ class Product(Base):
     factory_code: Mapped[str] = mapped_column(Text, nullable=False)
     customer_code: Mapped[str] = mapped_column(Text, nullable=False)
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
@@ -52,6 +55,9 @@ class ProductBom(Base):
         UniqueConstraint(
             "product_id", "product_version", "part_no", name="uq_product_bom_part_no"
         ),
+        CheckConstraint("product_version > 0", name="ck_product_bom_version"),
+        CheckConstraint("pcs > 0", name="ck_product_bom_pcs"),
+        CheckConstraint("sort_order > 0", name="ck_product_bom_sort_order"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -84,6 +90,7 @@ class ProductProcessFlow(Base):
         UniqueConstraint(
             "product_id", "product_version", name="uq_product_process_flow_version"
         ),
+        CheckConstraint("product_version > 0", name="ck_process_flow_version"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

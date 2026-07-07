@@ -61,11 +61,20 @@ def validate_process_flow(
                 )
             part_node_by_bom[node.bom_item_id] = node.id
 
+    missing_bom_ids = bom_ids - set(part_node_by_bom)
+    if missing_bom_ids:
+        _fail(
+            "missing_bom_part_nodes",
+            "每条 BOM 明细都必须在流程图中有对应配件节点",
+            "process_flow.nodes",
+        )
+
     edge_ids: set[str] = set()
     edge_keys: set[tuple[str, str, str, str | None]] = set()
     normal_incoming: dict[str, int] = defaultdict(int)
     normal_outgoing: dict[str, int] = defaultdict(int)
     normal_adjacency: dict[str, list[str]] = defaultdict(list)
+    normal_targets: dict[str, list[str]] = defaultdict(list)
     normal_indegree = {node_id: 0 for node_id in node_map}
     undirected: dict[str, set[str]] = defaultdict(set)
     qc_approved: dict[str, int] = defaultdict(int)
@@ -93,14 +102,16 @@ def validate_process_flow(
         if edge.route_type == "rework":
             if source.type != "qc":
                 _fail("rework_source_must_be_qc", "返工连线只能从 QC 节点发出", path, edge.id)
-            if target.type not in {"process", "assembly"}:
-                _fail("invalid_rework_target", "返工只能返回工序或装配节点", path, edge.id)
+            if target.type != "process":
+                _fail("invalid_rework_target", "返工只能返回工艺节点", path, edge.id)
             if edge.outcome != "rejected":
                 _fail("invalid_rework_outcome", "返工连线必须标记为 rejected", path, edge.id)
             qc_rework[source.id] += 1
             rework_edges.append((edge.id, source.id, target.id))
         else:
             if source.type == "qc":
+                if target.type == "qc":
+                    _fail("consecutive_qc_not_allowed", "QC 节点不能直接连接另一个 QC 节点", path, edge.id)
                 if edge.outcome != "approved":
                     _fail("invalid_qc_approved_edge", "QC 正常出口必须标记为 approved", path, edge.id)
                 qc_approved[source.id] += 1
@@ -109,6 +120,7 @@ def validate_process_flow(
             normal_incoming[target.id] += 1
             normal_outgoing[source.id] += 1
             normal_adjacency[source.id].append(target.id)
+            normal_targets[source.id].append(target.id)
             normal_indegree[target.id] += 1
 
     for index, node in enumerate(flow.nodes):
@@ -117,7 +129,17 @@ def validate_process_flow(
             if normal_incoming[node.id] != 0:
                 _fail("part_has_incoming_edge", "配件节点不能有普通输入连线", path, node.id)
             if normal_outgoing[node.id] == 0:
-                _fail("part_has_no_output", "配件节点必须连接后续工序或装配", path, node.id)
+                _fail("part_has_no_output", "配件节点必须连接首道工艺节点", path, node.id)
+            if (
+                normal_outgoing[node.id] == 1
+                and node_map[normal_targets[node.id][0]].type != "process"
+            ):
+                _fail(
+                    "part_first_node_must_be_process",
+                    "配件节点的第一个执行节点必须是工艺节点",
+                    path,
+                    node.id,
+                )
         else:
             minimum = 2 if node.type == "assembly" else 1
             if normal_incoming[node.id] < minimum:
@@ -128,6 +150,8 @@ def validate_process_flow(
                 _fail("qc_approved_edge_count", "QC 节点必须且只能有一条合格出口", path, node.id)
             if qc_rework[node.id] > 1:
                 _fail("qc_rework_edge_count", "QC 节点最多只能有一条返工出口", path, node.id)
+        elif normal_outgoing[node.id] > 1:
+            _fail("multiple_normal_outputs", "普通节点最多只能有一条后续连线", path, node.id)
 
     _validate_normal_dag(node_map, normal_adjacency, normal_indegree)
     _validate_connected(node_map, undirected)

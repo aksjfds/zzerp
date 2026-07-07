@@ -11,8 +11,10 @@ import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 const router = useRouter()
 const authStore = useAuthStore()
 const store = useEngineeringProductsStore()
-const { loading, products } = storeToRefs(store)
+const { loading, products, productTotal } = storeToRefs(store)
 const keyword = ref('')
+const page = ref(1)
+const pageSize = 50
 
 const filteredProducts = computed(() => {
   const value = keyword.value.trim().toLowerCase()
@@ -25,7 +27,7 @@ const filteredProducts = computed(() => {
   ].some((item) => item.toLowerCase().includes(value)))
 })
 
-async function removeProduct(productId: number, version: number, productName: string) {
+async function removeProduct(productId: number, revision: number, productName: string) {
   try {
     await ElMessageBox.confirm(`确认删除产品“${productName}”及其 BOM 和流程图？`, '删除产品', {
       type: 'warning',
@@ -35,16 +37,18 @@ async function removeProduct(productId: number, version: number, productName: st
     return
   }
   try {
-    await store.removeProduct(productId, version)
+    await store.removeProduct(productId, revision)
+    if (!products.value.length && page.value > 1) page.value -= 1
+    await store.loadProducts(page.value, pageSize)
     ElMessage.success('产品已删除')
   } catch (error) {
     ElMessage.error(getApiErrorDetail(error)?.message || '产品删除失败')
   }
 }
 
-async function createVersion(productId: number, version: number) {
+async function createVersion(productId: number, revision: number) {
   try {
-    const product = await store.createVersion(productId, version)
+    const product = await store.createVersion(productId, revision)
     ElMessage.success(`已创建 V${product.version}`)
     router.push(`/products/${productId}`)
   } catch (error) {
@@ -57,7 +61,7 @@ async function logout() {
   router.replace('/login')
 }
 
-onMounted(store.loadProducts)
+onMounted(() => store.loadProducts(page.value, pageSize))
 </script>
 
 <template>
@@ -79,8 +83,8 @@ onMounted(store.loadProducts)
     </header>
     <section class="content-card">
       <div class="toolbar">
-        <ElInput v-model="keyword" clearable placeholder="搜索客户、产品或型号" />
-        <span>共 {{ filteredProducts.length }} 个产品</span>
+        <ElInput v-model="keyword" clearable placeholder="搜索当前页的客户、产品或型号" />
+        <span>当前页 {{ filteredProducts.length }} 个，共 {{ productTotal }} 个产品</span>
       </div>
       <ElTable v-loading="loading" :data="filteredProducts" border>
         <ElTableColumn prop="customer_name" label="客户名称" min-width="150" />
@@ -93,25 +97,33 @@ onMounted(store.loadProducts)
         <ElTableColumn label="操作" width="220" fixed="right">
           <template #default="{ row }">
             <ElButton
-              v-permission="PRODUCT_PERMISSIONS.edit"
+              v-permission="PRODUCT_PERMISSIONS.view"
               link
               type="primary"
               @click="router.push(`/products/${row.id}`)"
-            >编辑</ElButton>
+            >{{ authStore.hasPermission(PRODUCT_PERMISSIONS.edit) ? '编辑' : '查看' }}</ElButton>
             <ElButton
               v-permission="PRODUCT_PERMISSIONS.edit"
               link
-              @click="createVersion(row.id, row.version)"
+              @click="createVersion(row.id, row.revision)"
             >新版本</ElButton>
             <ElButton
               v-permission="PRODUCT_PERMISSIONS.delete"
               link
               type="danger"
-              @click="removeProduct(row.id, row.version, row.product_name)"
+              @click="removeProduct(row.id, row.revision, row.product_name)"
             >删除</ElButton>
           </template>
         </ElTableColumn>
       </ElTable>
+      <ElPagination
+        v-model:current-page="page"
+        class="pagination"
+        layout="prev, pager, next, total"
+        :page-size="pageSize"
+        :total="productTotal"
+        @current-change="store.loadProducts($event, pageSize)"
+      />
     </section>
   </main>
 </template>
@@ -127,5 +139,6 @@ onMounted(store.loadProducts)
 .content-card { padding: 20px; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 13px; }
 .toolbar .el-input { max-width: 360px; }
+.pagination { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 680px) { .page-shell { padding: 12px; } .page-header { flex-direction: column; } }
 </style>

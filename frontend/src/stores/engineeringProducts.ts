@@ -21,14 +21,17 @@ import type {
 
 export const useEngineeringProductsStore = defineStore('engineeringProducts', () => {
   const products = ref<ProductSummary[]>([])
+  const productTotal = ref(0)
   const activeProduct = ref<EngineeringProduct | null>(null)
   const loading = ref(false)
   const saving = ref(false)
 
-  async function loadProducts() {
+  async function loadProducts(page = 1, pageSize = 50) {
     loading.value = true
     try {
-      products.value = await queryProducts()
+      const result = await queryProducts(page, pageSize)
+      products.value = result.items
+      productTotal.value = result.total
     } finally {
       loading.value = false
     }
@@ -58,39 +61,40 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     })
   }
 
-  async function saveProductInfo(productId: number, version: number, fields: ProductFields) {
+  async function saveProductInfo(productId: number, revision: number, fields: ProductFields) {
     return withSaving(async () => {
-      const product = await updateProductInfo(productId, version, fields)
+      const product = await updateProductInfo(productId, revision, fields)
       commitActive(product)
       return product
     })
   }
 
-  async function saveProductBom(productId: number, version: number, bomItems: BomItem[]) {
+  async function saveProductBom(productId: number, revision: number, bomItems: BomItem[]) {
     return withSaving(async () => {
-      const product = await replaceProductBom(productId, version, bomItems)
+      const product = await replaceProductBom(productId, revision, bomItems)
       commitActive(product)
       return product
     })
   }
 
-  async function saveProcessFlow(productId: number, version: number, flow: ProcessFlow) {
+  async function saveProcessFlow(productId: number, revision: number, flow: ProcessFlow) {
     return withSaving(async () => {
-      const product = await updateProductProcessFlow(productId, version, flow)
+      const product = await updateProductProcessFlow(productId, revision, flow)
       commitActive(product)
       return product
     })
   }
 
-  async function removeProduct(productId: number, expectedVersion: number) {
-    await deleteProductApi(productId, expectedVersion)
+  async function removeProduct(productId: number, expectedRevision: number) {
+    await deleteProductApi(productId, expectedRevision)
     if (activeProduct.value?.id === productId) activeProduct.value = null
     products.value = products.value.filter((product) => product.id !== productId)
+    productTotal.value = Math.max(productTotal.value - 1, 0)
   }
 
-  async function createVersion(productId: number, expectedVersion: number) {
+  async function createVersion(productId: number, expectedRevision: number) {
     return withSaving(async () => {
-      const product = await createProductVersionApi(productId, expectedVersion)
+      const product = await createProductVersionApi(productId, expectedRevision)
       commitActive(product)
       return product
     })
@@ -101,6 +105,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     const summary: ProductSummary = {
       id: product.id,
       version: product.version,
+      revision: product.revision,
       customer_name: product.customer_name,
       product_name: product.product_name,
       factory_code: product.factory_code,
@@ -129,6 +134,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     loadProducts,
     loading,
     products,
+    productTotal,
     removeProduct,
     saveProcessFlow,
     saveProductBom,

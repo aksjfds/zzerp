@@ -15,4 +15,6 @@ export const ORDER_PERMISSIONS = {
 
 export const PRODUCTION_PERMISSIONS = {
   view: 'production:view',
+  manage: 'production:manage',
+  inspect: 'qc:inspect',
 } as const

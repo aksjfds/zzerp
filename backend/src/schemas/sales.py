@@ -22,6 +22,7 @@ class CustomerOrderCreate(SalesModel):
 
 
 class CustomerOrderUpdate(CustomerOrderCreate):
+    expected_revision: int = Field(gt=0)
     customer_order_no: str | None = Field(default=None, min_length=1, max_length=200)
     customer_name: str | None = Field(default=None, min_length=1, max_length=200)
 
@@ -42,6 +43,7 @@ class CustomerOrderResponse(SalesModel):
     customer_order_no: str
     customer_name: str
     status: str
+    revision: int
     remark: str
     items: list[CustomerOrderItemResponse]
     created_at: str
@@ -54,3 +56,4 @@ class CustomerOrderEnvelope(SalesModel):
 
 class CustomerOrderListEnvelope(SalesModel):
     data: list[CustomerOrderResponse]
+    total: int

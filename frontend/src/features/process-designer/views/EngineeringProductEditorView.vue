@@ -6,6 +6,8 @@ import BomEditor from '../components/BomEditor.vue'
 import ProcessFlowEditor from '../components/ProcessFlowEditor.vue'
 import { type BomItem, type ProcessFlow, type ProductFields } from '../domain/types'
 import { useEngineeringProductsStore } from '@/stores/engineeringProducts'
+import { useAuthStore } from '@/stores/auth'
+import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 import { useProductEditorForm } from '../composables/useProductEditorForm'
 import { useProductSaveActions } from '../composables/useProductSaveActions'
 import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
@@ -20,6 +22,7 @@ type FlowEditorApi = {
 const route = useRoute()
 const router = useRouter()
 const store = useEngineeringProductsStore()
+const authStore = useAuthStore()
 const baseFormRef = ref<FormInstance>()
 const flowEditor = ref<FlowEditorApi>()
 const editorReady = ref(false)
@@ -45,7 +48,8 @@ const productId = computed(() => {
   return Number.isInteger(value) && value > 0 ? value : null
 })
 const readOnly = computed(() => Boolean(
-  form.version && currentVersion.value && form.version !== currentVersion.value,
+  !authStore.hasPermission(PRODUCT_PERMISSIONS.edit)
+  || (form.version && currentVersion.value && form.version !== currentVersion.value),
 ))
 
 const baseRules: FormRules<ProductFields> = {

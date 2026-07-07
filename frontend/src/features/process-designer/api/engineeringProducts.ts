@@ -8,9 +8,11 @@ import type {
   ProductSummary,
 } from '../domain/types'
 
-export async function queryProducts() {
-  const response = await service.get<{ data: ProductSummary[] }>('/products')
-  return response.data.data
+export async function queryProducts(page = 1, pageSize = 50, keyword?: string) {
+  const response = await service.get<{ data: ProductSummary[]; total: number }>('/products', {
+    params: { page, page_size: pageSize, keyword: keyword || undefined },
+  })
+  return { items: response.data.data, total: response.data.total }
 }
 
 export async function queryProduct(productId: number, version?: number) {
@@ -25,11 +27,11 @@ export async function queryProductVersions(productId: number) {
   return response.data.data
 }
 
-export async function createProductVersion(productId: number, expectedVersion: number) {
+export async function createProductVersion(productId: number, expectedRevision: number) {
   const response = await service.post<{ data: EngineeringProduct }>(
     `/products/${productId}/versions`,
     undefined,
-    { params: { expected_version: expectedVersion } },
+    { params: { expected_revision: expectedRevision } },
   )
   return response.data.data
 }
@@ -41,42 +43,42 @@ export async function createProduct(payload: CreateProductPayload) {
 
 export async function updateProductInfo(
   productId: number,
-  expectedVersion: number,
+  expectedRevision: number,
   payload: ProductFields,
 ) {
   const response = await service.put<{ data: EngineeringProduct }>(
     `/products/${productId}`,
-    { ...payload, expected_version: expectedVersion },
+    { ...payload, expected_revision: expectedRevision },
   )
   return response.data.data
 }
 
 export async function replaceProductBom(
   productId: number,
-  expectedVersion: number,
+  expectedRevision: number,
   bomItems: BomItem[],
 ) {
   const response = await service.put<{ data: EngineeringProduct }>(
     `/products/${productId}/bom`,
-    { expected_version: expectedVersion, bom_items: bomItems },
+    { expected_revision: expectedRevision, bom_items: bomItems },
   )
   return response.data.data
 }
 
 export async function updateProductProcessFlow(
   productId: number,
-  expectedVersion: number,
+  expectedRevision: number,
   processFlow: ProcessFlow,
 ) {
   const response = await service.put<{ data: EngineeringProduct }>(
     `/products/${productId}/process-flow`,
-    { expected_version: expectedVersion, process_flow: processFlow },
+    { expected_revision: expectedRevision, process_flow: processFlow },
   )
   return response.data.data
 }
 
-export async function deleteProduct(productId: number, expectedVersion: number) {
+export async function deleteProduct(productId: number, expectedRevision: number) {
   await service.delete(`/products/${productId}`, {
-    params: { expected_version: expectedVersion },
+    params: { expected_revision: expectedRevision },
   })
 }

@@ -69,7 +69,7 @@ const router = createRouter({
       path: '/products/:productId(\\d+)',
       name: 'engineering-product-edit',
       component: EngineeringProductEditorView,
-      meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.edit] },
+      meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.view] },
     },
   ],
 })

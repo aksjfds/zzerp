@@ -23,12 +23,13 @@ export type PartFlowNode = FlowNodeBase & {
 export type ProcessFlowNode = FlowNodeBase & {
   type: 'process'
   process_code: string
-  procedure_id?: number
+  procedure_id: number
 }
 
 export type AssemblyFlowNode = FlowNodeBase & {
   type: 'assembly'
   output_name: string
+  output_pcs: number
 }
 
 export type QcFlowNode = FlowNodeBase & { type: 'qc' }
@@ -77,6 +78,7 @@ export type ProductFields = {
 export type ProductSummary = ProductFields & {
   id: number
   version: number
+  revision: number
   bom_count: number
   created_at: string
   updated_at: string
@@ -86,6 +88,7 @@ export type EngineeringProduct = ProductFields & {
   id: number
   version: number
   current_version: number
+  revision: number
   bom_items: BomItem[]
   process_flow: ProcessFlow
   created_at: string
@@ -96,6 +99,7 @@ export type CreateProductPayload = ProductFields & { bom_items: BomItem[] }
 
 export type ProductForm = ProductFields & {
   version: number | null
+  revision: number | null
   bom_items: BomItem[]
   process_flow: ProcessFlow
 }

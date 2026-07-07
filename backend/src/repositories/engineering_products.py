@@ -11,7 +11,10 @@ class EngineeringProductRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def list_with_bom_counts(self) -> list[tuple[Product, int]]:
+    def list_with_bom_counts(
+        self, offset: int = 0, limit: int = 50, keyword: str | None = None
+    ) -> list[tuple[Product, int]]:
+        condition = self._search_condition(keyword)
         statement = (
             select(Product, func.count(ProductBom.id))
             .outerjoin(
@@ -19,10 +22,31 @@ class EngineeringProductRepository:
                 (ProductBom.product_id == Product.id)
                 & (ProductBom.product_version == Product.version),
             )
+            .where(condition)
             .group_by(Product.id)
             .order_by(Product.updated_at.desc(), Product.id.desc())
+            .offset(offset)
+            .limit(limit)
         )
         return [(product, count) for product, count in self.session.execute(statement).all()]
+
+    def count(self, keyword: str | None = None) -> int:
+        return self.session.scalar(
+            select(func.count(Product.id)).where(self._search_condition(keyword))
+        ) or 0
+
+    @staticmethod
+    def _search_condition(keyword: str | None):
+        value = (keyword or "").strip()
+        if not value:
+            return True
+        pattern = f"%{value}%"
+        return (
+            Product.customer_name.ilike(pattern)
+            | Product.product_name.ilike(pattern)
+            | Product.factory_code.ilike(pattern)
+            | Product.customer_code.ilike(pattern)
+        )
 
     def get(self, product_id: int) -> Product | None:
         statement = (
