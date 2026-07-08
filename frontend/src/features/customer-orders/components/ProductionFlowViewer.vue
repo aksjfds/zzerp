@@ -4,9 +4,9 @@ import '@logicflow/extension/lib/style/index.css'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import LogicFlow from '@logicflow/core'
 import { Control } from '@logicflow/extension'
-import { registerProcessNodes } from '@/features/process-designer/logicflow/registerNodes'
-import { toLogicFlowData } from '@/features/process-designer/logicflow/adapter'
-import type { ProcessFlow } from '@/features/process-designer/domain/types'
+import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
+import { toLogicFlowData } from '@/shared/process-flow/adapter'
+import type { ProcessFlow } from '@/shared/process-flow/types'
 import type { ProductionNodeStat } from '../domain/types'
 
 const props = defineProps<{

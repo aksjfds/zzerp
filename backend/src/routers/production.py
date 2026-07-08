@@ -4,7 +4,6 @@ from authorization import require_any_permission
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from schemas.production import (
     PendingQcListEnvelope,
-    ProductionObjectListEnvelope,
     AssemblyWorkOrderCreate,
     QcInspection,
     RepositoryListEnvelope,
@@ -23,31 +22,12 @@ from services.work_orders import (
     inspect_batch,
     list_department_work_orders,
     list_department_workers,
-    list_department_production_objects,
     list_qc_batches,
     submit_work_order,
 )
 
 
 router = APIRouter(tags=["production"])
-
-
-@router.get(
-    "/departments/{department_code}/production-objects",
-    response_model=ProductionObjectListEnvelope,
-)
-def department_production_objects(
-    department_code: str,
-    page: int = Query(default=1, gt=0),
-    page_size: int = Query(default=50, gt=0, le=200),
-    user: dict = Depends(require_any_permission(PRODUCTION_VIEW, QC_INSPECT)),
-):
-    if user["department"] not in {"sys", department_code}:
-        raise HTTPException(status_code=403, detail="无权访问该部门")
-    data, total = list_department_production_objects(
-        department_code, page, page_size
-    )
-    return {"data": data, "total": total}
 
 
 @router.get(
@@ -171,7 +151,6 @@ def qc_batch_inspect(
         "data": inspect_batch(
             batch_id,
             payload,
-            user["name"],
             user["department"],
         )
     }

@@ -1,0 +1,43 @@
+import { service } from '@/api/request'
+
+export type OrderProduct = {
+  id: number
+  version: number
+  revision: number
+  customer_name: string
+  product_name: string
+  factory_code: string
+  customer_code: string
+  bom_count: number
+  created_at: string
+  updated_at: string
+}
+
+type ProductDetail = Omit<OrderProduct, 'version' | 'bom_count'> & {
+  current_version: number
+  bom_items: unknown[]
+}
+
+export async function queryOrderProducts(keyword?: string) {
+  const response = await service.get<{ data: OrderProduct[] }>('/products', {
+    params: { page: 1, page_size: 50, keyword: keyword || undefined },
+  })
+  return response.data.data
+}
+
+export async function queryOrderProduct(productId: number): Promise<OrderProduct> {
+  const response = await service.get<{ data: ProductDetail }>(`/products/${productId}`)
+  const product = response.data.data
+  return {
+    id: product.id,
+    version: product.current_version,
+    revision: product.revision,
+    customer_name: product.customer_name,
+    product_name: product.product_name,
+    factory_code: product.factory_code,
+    customer_code: product.customer_code,
+    bom_count: product.bom_items.length,
+    created_at: product.created_at,
+    updated_at: product.updated_at,
+  }
+}

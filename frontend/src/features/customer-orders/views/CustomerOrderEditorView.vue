@@ -4,8 +4,7 @@ import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
 import ProductionFlowViewer from '../components/ProductionFlowViewer.vue'
-import { queryProduct, queryProducts } from '@/features/process-designer/api/engineeringProducts'
-import type { EngineeringProduct, ProductSummary } from '@/features/process-designer/domain/types'
+import { queryOrderProduct, queryOrderProducts, type OrderProduct } from '../api/orderProducts'
 import { createCustomerOrder, queryCustomerOrder, queryCustomerOrderProduction, updateCustomerOrder } from '../api/customerOrders'
 import type { CustomerOrderItem, CustomerOrderPayload, CustomerOrderProduction } from '../domain/types'
 
@@ -15,7 +14,7 @@ const props = withDefaults(defineProps<{ orderId?: number; embedded?: boolean }>
   orderId: undefined,
   embedded: false,
 })
-const products = ref<ProductSummary[]>([])
+const products = ref<OrderProduct[]>([])
 const productLoading = ref(false)
 let productSearchSequence = 0
 const status = ref('draft')
@@ -35,33 +34,18 @@ function product(productId: number) {
   return products.value.find((item) => item.id === productId)
 }
 
-function asSummary(item: EngineeringProduct): ProductSummary {
-  return {
-    id: item.id,
-    version: item.current_version,
-    revision: item.revision,
-    customer_name: item.customer_name,
-    product_name: item.product_name,
-    factory_code: item.factory_code,
-    customer_code: item.customer_code,
-    bom_count: item.bom_items.length,
-    created_at: item.created_at,
-    updated_at: item.updated_at,
-  }
-}
-
 async function searchProducts(keyword = '') {
   const sequence = ++productSearchSequence
   productLoading.value = true
   try {
-    const result = await queryProducts(1, 50, keyword)
+    const result = await queryOrderProducts(keyword)
     if (sequence !== productSearchSequence) return
     const selected = products.value.filter(item => (
       form.items.some(orderItem => orderItem.product_id === item.id)
     ))
     products.value = [
       ...selected,
-      ...result.items.filter(item => !selected.some(selectedItem => selectedItem.id === item.id)),
+      ...result.filter(item => !selected.some(selectedItem => selectedItem.id === item.id)),
     ]
   } finally {
     if (sequence === productSearchSequence) productLoading.value = false
@@ -109,8 +93,8 @@ onMounted(async () => {
       order.items.map(item => item.product_id).filter(id => !product(id)),
     )]
     if (missingIds.length) {
-      const missing = await Promise.all(missingIds.map(id => queryProduct(id)))
-      products.value.push(...missing.map(asSummary))
+      const missing = await Promise.all(missingIds.map(id => queryOrderProduct(id)))
+      products.value.push(...missing)
     }
   } else addItem()
 })

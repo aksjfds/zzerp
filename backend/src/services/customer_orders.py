@@ -1,11 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
-from models.engineering import Product, ProductBom, ProductProcessFlow
-from models.production import ProductionItem, WorkOrder, WorkOrderBatch
+from services.production_flow import load_product_flow
+from models.engineering import Product, ProductBom
 from models.organization import Procedure
 from models.sales import CustomerOrder, CustomerOrderItem
 from repositories.customer_orders import CustomerOrderRepository
@@ -13,6 +13,7 @@ from schemas.sales import CustomerOrderCreate, CustomerOrderItemInput, CustomerO
 from schemas.engineering import ProcessFlowPayload
 from domain.process_flow import validate_process_flow
 from services.errors import DomainError
+from services.production_order_lifecycle import cancel_order_production, initialize_order_production
 
 
 def _not_found() -> DomainError:
@@ -71,20 +72,17 @@ def _resolve_products(session, items: list[CustomerOrderItemInput]) -> dict[int,
                 ProductBom.product_version == product.version,
             )
         ).all())
-        has_flow = session.scalar(
-            select(ProductProcessFlow.id).where(
-                ProductProcessFlow.product_id == product.id,
-                ProductProcessFlow.product_version == product.version,
-            ).limit(1)
-        )
-        flow = session.get(ProductProcessFlow, has_flow) if has_flow else None
-        if not bom_ids or flow is None or not flow.flow_json.get("nodes"):
+        try:
+            flow, _ = load_product_flow(session, product.id, product.version)
+        except DomainError:
+            flow = None
+        if not bom_ids or flow is None or not flow.get("nodes"):
             raise DomainError(
                 "product_engineering_data_missing",
                 f"产品 {product.factory_code} 缺少当前版本 BOM 或流程图",
                 path="items",
             )
-        validated = ProcessFlowPayload.model_validate(flow.flow_json)
+        validated = ProcessFlowPayload.model_validate(flow)
         validate_process_flow(validated, bom_ids)
         procedure_ids = {
             node.procedure_id for node in validated.nodes if node.type == "process"
@@ -221,38 +219,12 @@ def change_status(order_id: int, target: str, expected_revision: int) -> dict:
         if target == "confirmed":
             if order.status != "draft":
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许确认")
-            from services.production_repositories import provision_order_repositories
-
-            provision_order_repositories(session, order)
+            initialize_order_production(session, order)
         elif target == "cancelled":
             if order.status not in {"draft", "confirmed", "planned"}:
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许取消")
             if order.status != "draft":
-                work_orders = session.scalars(
-                    select(WorkOrder)
-                    .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
-                    .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-                    .where(CustomerOrderItem.customer_order_id == order.id)
-                ).all()
-                if any(item.completed_quantity > 0 for item in work_orders):
-                    raise DomainError("customer_order_started", "订单已经产生生产完成数量，不能取消")
-                if work_orders:
-                    batch_count = session.scalar(
-                        select(func.count(WorkOrderBatch.id)).where(
-                            WorkOrderBatch.work_order_id.in_([item.id for item in work_orders])
-                        )
-                    )
-                    if batch_count:
-                        raise DomainError("customer_order_started", "订单已经送检，不能取消")
-                for item in work_orders:
-                    session.delete(item)
-                production_items = session.scalars(
-                    select(ProductionItem)
-                    .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-                    .where(CustomerOrderItem.customer_order_id == order.id)
-                ).all()
-                for item in production_items:
-                    session.delete(item)
+                cancel_order_production(session, order)
         else:
             raise DomainError("invalid_customer_order_status", "不支持的订单状态操作")
         order.status = target

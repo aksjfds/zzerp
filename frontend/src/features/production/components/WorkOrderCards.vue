@@ -22,11 +22,11 @@ function statusType(item: WorkOrder) {
   <div v-loading="loading" class="work-order-list">
     <article v-for="item in items" :key="item.id" class="work-order-card">
       <div class="heading">
-        <div><strong>{{ item.work_order_no }}</strong><span>{{ item.procedure_name }}</span></div>
+        <div><strong>工单 {{ item.work_order_no }}</strong><span>{{ item.procedure_name }}</span></div>
         <ElTag :type="statusType(item)">{{ statusText(item) }}</ElTag>
       </div>
       <div class="meta">
-        <span>{{ item.part_no }} - {{ item.part_name }}</span>
+        <span>{{ item.part_no === item.part_name ? item.part_name : `${item.part_no} - ${item.part_name}` }}</span>
         <span>执行工人：{{ item.worker_name || '未分配' }}</span>
         <span>创建：{{ item.created_at }}</span>
       </div>

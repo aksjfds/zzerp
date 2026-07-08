@@ -1,10 +1,11 @@
 from datetime import datetime
 
-from sqlalchemy import exists, func, or_, select, union_all
+from sqlalchemy import exists, func, or_, select
 
 from database import SessionLocal
 from domain.assembly import matches_assembly_sources, required_material_quantity
-from models.engineering import ProductBom, ProductProcessFlow
+from services.production_flow import load_production_flow, normal_target
+from models.engineering import ProductBom
 from models.organization import Department, Procedure, Worker, Workshop
 from models.production import (
     ProductionItem,
@@ -15,31 +16,18 @@ from models.production import (
 )
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
+from services.work_order_presenters import (
+    item_display as _item_display,
+    qc_repository_id as _qc_repository_id,
+    serialize_batch as _serialize_batch,
+    serialize_work_order as _serialize_work_order,
+    work_order_context as _work_order_context,
+)
 
 
 def _item_context(session, production_item: ProductionItem):
-    order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
-    bom_item = (
-        session.get(ProductBom, production_item.product_bom_id)
-        if production_item.product_bom_id
-        else None
-    )
-    if order_item is None:
-        raise DomainError("production_context_missing", "生产订单明细不存在")
-    flow_cache = session.info.setdefault("product_process_flow_cache", {})
-    flow_key = (order_item.product_id, order_item.product_version)
-    if flow_key not in flow_cache:
-        flow_cache[flow_key] = session.scalar(
-            select(ProductProcessFlow).where(
-                ProductProcessFlow.product_id == order_item.product_id,
-                ProductProcessFlow.product_version == order_item.product_version,
-            )
-        )
-    flow = flow_cache[flow_key]
-    if flow is None:
-        raise DomainError("production_context_missing", "生产资料不完整")
-    nodes = {item["id"]: item for item in flow.flow_json.get("nodes", [])}
-    return order_item, bom_item, flow.flow_json, nodes
+    context = load_production_flow(session, production_item)
+    return context.order_item, context.bom_item, context.flow, context.nodes
 
 
 def _node_context(session, production_item: ProductionItem, node_id: str):
@@ -61,16 +49,7 @@ def _production_item_unit_quantity(
 
 
 def _normal_target(flow: dict, nodes: dict, node_id: str):
-    targets = [
-        nodes.get(edge.get("target_node_id"))
-        for edge in flow.get("edges", [])
-        if edge.get("source_node_id") == node_id
-        and edge.get("route_type", "normal") == "normal"
-    ]
-    targets = [item for item in targets if item is not None]
-    if len(targets) > 1:
-        raise DomainError("ambiguous_flow_target", "当前节点存在多个普通出口")
-    return targets[0] if targets else None
+    return normal_target(flow, nodes, node_id)
 
 
 def _target_department(session, node: dict) -> int:
@@ -474,10 +453,16 @@ def _submit_assembly_work_order(session, order: WorkOrder, quantity: int, user_d
     return _serialize_work_order(session, order)
 
 
-def inspect_batch(batch_id: int, payload, qc_worker_name: str, user_department: str) -> dict:
+def inspect_batch(batch_id: int, payload, user_department: str) -> dict:
     if user_department not in {"sys", "qc"}:
         raise DomainError("qc_access_denied", "只有 QC 可以录入质检结果", status_code=403)
     with SessionLocal.begin() as session:
+        qc_department = session.scalar(
+            select(Department).where(Department.department_code == "qc")
+        )
+        qc_worker = session.get(Worker, payload.qc_worker_id)
+        if qc_department is None or qc_worker is None or qc_worker.department_id != qc_department.id:
+            raise DomainError("qc_worker_invalid", "请选择有效的 QC 工人")
         batch = session.get(WorkOrderBatch, batch_id, with_for_update=True)
         if batch is None:
             raise DomainError("qc_batch_not_found", "送检批次不存在", status_code=404)
@@ -541,7 +526,7 @@ def inspect_batch(batch_id: int, payload, qc_worker_name: str, user_department: 
         batch.rework_quantity = payload.rework_quantity
         batch.scrap_quantity = payload.scrap_quantity
         batch.lost_quantity = payload.lost_quantity
-        batch.qc_worker_name = qc_worker_name
+        batch.qc_worker_name = qc_worker.worker_name
         batch.defect_reason = (payload.defect_reason or "").strip() or None
         batch.recorded_at = datetime.now()
         session.flush()
@@ -634,97 +619,6 @@ def list_department_workers(department_code: str) -> list[dict]:
         ]
 
 
-def list_department_production_objects(
-    department_code: str, page: int, page_size: int
-) -> tuple[list[dict], int]:
-    with SessionLocal() as session:
-        department = session.scalar(
-            select(Department).where(Department.department_code == department_code)
-        )
-        if department is None:
-            raise DomainError("department_not_found", "部门不存在", status_code=404)
-
-        if department_code == "qc":
-            output_source = (
-                select(
-                    WorkOrderBatch.id.label("event_id"),
-                    WorkOrder.production_item_id.label("production_item_id"),
-                )
-                .select_from(WorkOrderBatch)
-                .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
-            )
-            material_source = (
-                select(
-                    WorkOrderBatch.id.label("event_id"),
-                    WorkOrderMaterial.production_item_id.label("production_item_id"),
-                )
-                .select_from(WorkOrderBatch)
-                .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
-                .join(WorkOrderMaterial, WorkOrderMaterial.work_order_id == WorkOrder.id)
-            )
-            source = union_all(output_source, material_source).subquery()
-        else:
-            work_order_condition = (
-                WorkOrder.procedure_id.is_(None)
-                if department_code == "assembly"
-                else Workshop.department_id == department.id
-            )
-            output_source = (
-                select(
-                    WorkOrder.id.label("event_id"),
-                    WorkOrder.production_item_id.label("production_item_id"),
-                )
-                .select_from(WorkOrder)
-                .outerjoin(Procedure, Procedure.id == WorkOrder.procedure_id)
-                .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
-                .where(work_order_condition)
-            )
-            if department_code == "assembly":
-                material_source = (
-                    select(
-                        WorkOrder.id.label("event_id"),
-                        WorkOrderMaterial.production_item_id.label("production_item_id"),
-                    )
-                    .select_from(WorkOrder)
-                    .join(WorkOrderMaterial, WorkOrderMaterial.work_order_id == WorkOrder.id)
-                    .where(WorkOrder.procedure_id.is_(None))
-                )
-                source = union_all(output_source, material_source).subquery()
-            else:
-                source = output_source.subquery()
-
-        grouped = (
-            select(
-                source.c.production_item_id,
-                func.max(source.c.event_id).label("latest_event_id"),
-            )
-            .group_by(source.c.production_item_id)
-            .subquery()
-        )
-        total = session.scalar(select(func.count()).select_from(grouped)) or 0
-        production_item_ids = session.scalars(
-            select(grouped.c.production_item_id)
-            .order_by(grouped.c.latest_event_id.desc(), grouped.c.production_item_id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        ).all()
-        result = []
-        for production_item_id in production_item_ids:
-            production_item = session.get(ProductionItem, production_item_id)
-            order_item, bom_item, _, _ = _item_context(session, production_item)
-            customer_order = session.get(CustomerOrder, order_item.customer_order_id)
-            part_no, part_name = _item_display(session, production_item, bom_item)
-            result.append(
-                {
-                    "production_item_id": production_item.id,
-                    "customer_order_no": customer_order.customer_order_no,
-                    "part_no": part_no,
-                    "part_name": part_name,
-                }
-            )
-        return result, total
-
-
 def list_qc_batches(
     page: int, page_size: int, production_item_id: int | None = None
 ) -> tuple[list[dict], int]:
@@ -757,7 +651,7 @@ def list_qc_batches(
         for batch in batches:
             order = session.get(WorkOrder, batch.work_order_id)
             customer_order, bom_item, production_item = _work_order_context(session, order)
-            part_no, part_name = _item_display(session, production_item, bom_item)
+            part_no, part_name = _item_display(session, production_item)
             data = _serialize_batch(batch)
             data.update(
                 {
@@ -773,110 +667,3 @@ def list_qc_batches(
             )
             result.append(data)
         return result, total
-
-
-def _qc_repository_id(session, order: WorkOrder, batch: WorkOrderBatch) -> int | None:
-    department_id = session.scalar(
-        select(Department.id).where(Department.department_code == "qc")
-    )
-    return session.scalar(
-        select(Repository.id).where(
-            Repository.production_item_id == order.production_item_id,
-            Repository.flow_node_id == batch.flow_node_id,
-            Repository.source_flow_node_id == order.flow_node_id,
-            Repository.department_id == department_id,
-        )
-    )
-
-
-def _work_order_context(session, order: WorkOrder):
-    production_item = session.get(ProductionItem, order.production_item_id)
-    order_item, bom_item, _, _ = _item_context(session, production_item)
-    customer_order = session.get(CustomerOrder, order_item.customer_order_id)
-    return customer_order, bom_item, production_item
-
-
-def _item_display(session, production_item: ProductionItem, bom_item):
-    if bom_item is not None:
-        return bom_item.part_no, bom_item.part_name
-    _, _, _, nodes = _item_context(session, production_item)
-    node = nodes.get(production_item.origin_flow_node_id, {})
-    name = node.get("output_name") or node.get("label") or "装配体"
-    return name, name
-
-
-def _serialize_batch(batch: WorkOrderBatch) -> dict:
-    return {
-        "id": batch.id,
-        "work_order_id": batch.work_order_id,
-        "submitted_quantity": batch.submitted_quantity,
-        "flow_node_id": batch.flow_node_id,
-        "qualified_quantity": batch.qualified_quantity,
-        "rework_quantity": batch.rework_quantity,
-        "scrap_quantity": batch.scrap_quantity,
-        "lost_quantity": batch.lost_quantity,
-        "qc_worker_name": batch.qc_worker_name,
-        "defect_reason": batch.defect_reason,
-        "recorded_at": batch.recorded_at.isoformat(timespec="minutes") if batch.recorded_at else None,
-    }
-
-
-def _serialize_work_order(session, order: WorkOrder) -> dict:
-    customer_order, bom_item, production_item = _work_order_context(session, order)
-    part_no, part_name = _item_display(session, production_item, bom_item)
-    if order.procedure_id is None:
-        _, _, _, nodes = _item_context(session, production_item)
-        assembly_node = nodes.get(order.flow_node_id, {})
-        part_name = (
-            assembly_node.get("output_name")
-            or assembly_node.get("label")
-            or "装配体"
-        )
-        part_no = part_name
-    worker = session.get(Worker, order.worker_id) if order.worker_id else None
-    batch_cache = session.info.get("work_order_batch_cache")
-    batches = (
-        batch_cache.get(order.id, [])
-        if batch_cache is not None
-        else session.scalars(
-            select(WorkOrderBatch)
-            .where(WorkOrderBatch.work_order_id == order.id)
-            .order_by(WorkOrderBatch.id)
-        ).all()
-    )
-    submitted_quantity = order.completed_quantity
-    completed_batches = [item for item in batches if item.recorded_at is not None]
-    pending_batches = [item for item in batches if item.recorded_at is None]
-    return {
-        "id": order.id,
-        "work_order_no": order.work_order_no,
-        "repository_id": order.repository_id,
-        "production_item_id": order.production_item_id,
-        "customer_order_no": customer_order.customer_order_no,
-        "part_no": part_no,
-        "part_name": part_name,
-        "procedure_name": order.procedure_name,
-        "worker_id": order.worker_id,
-        "worker_name": worker.worker_name if worker else None,
-        "quantity": order.quantity,
-        "submitted_quantity": submitted_quantity,
-        "processing_quantity": max(order.quantity - submitted_quantity, 0),
-        "pending_qc_quantity": sum(item.submitted_quantity for item in pending_batches),
-        "qualified_quantity": sum(item.qualified_quantity or 0 for item in completed_batches),
-        "rework_quantity": sum(item.rework_quantity or 0 for item in completed_batches),
-        "scrap_quantity": sum(item.scrap_quantity or 0 for item in completed_batches),
-        "lost_quantity": sum(item.lost_quantity or 0 for item in completed_batches),
-        "status": order.status,
-        "created_at": order.created_at.isoformat(timespec="minutes"),
-        "closed_at": order.closed_at.isoformat(timespec="minutes") if order.closed_at else None,
-        "batches": [_serialize_batch(item) for item in batches],
-        "input_production_item_ids": (
-            session.info["work_order_material_cache"].get(order.id, [])
-            if "work_order_material_cache" in session.info
-            else session.scalars(
-                select(WorkOrderMaterial.production_item_id).where(
-                    WorkOrderMaterial.work_order_id == order.id
-                )
-            ).all()
-        ),
-    }

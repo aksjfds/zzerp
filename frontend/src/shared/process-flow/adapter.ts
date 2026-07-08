@@ -6,7 +6,7 @@ import {
   type FlowNodeType,
   type FlowPoint,
   type ProcessFlow,
-} from '../domain/types'
+} from './types'
 
 const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'assembly', 'qc'])
 

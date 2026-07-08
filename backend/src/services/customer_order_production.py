@@ -3,7 +3,8 @@ from collections import defaultdict
 from sqlalchemy import select
 
 from database import SessionLocal
-from models.engineering import Product, ProductBom, ProductProcessFlow
+from services.production_flow import load_product_flow
+from models.engineering import Product, ProductBom
 from models.production import ProductionItem, Repository, WorkOrder, WorkOrderBatch, WorkOrderMaterial
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
@@ -25,14 +26,12 @@ def get_customer_order_production(order_id: int) -> dict:
 
 def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
     product = session.get(Product, order_item.product_id)
-    flow_record = session.scalar(
-        select(ProductProcessFlow).where(
-            ProductProcessFlow.product_id == order_item.product_id,
-            ProductProcessFlow.product_version == order_item.product_version,
+    try:
+        flow, nodes = load_product_flow(
+            session, order_item.product_id, order_item.product_version
         )
-    )
-    flow = flow_record.flow_json if flow_record else {"schema_version": 1, "nodes": [], "edges": []}
-    nodes = {node["id"]: node for node in flow.get("nodes", [])}
+    except DomainError:
+        flow, nodes = {"schema_version": 1, "nodes": [], "edges": []}, {}
     bom_items = session.scalars(
         select(ProductBom).where(
             ProductBom.product_id == order_item.product_id,

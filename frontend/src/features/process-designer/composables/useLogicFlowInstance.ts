@@ -1,8 +1,8 @@
 import { nextTick, onBeforeUnmount, onMounted, shallowRef, type Ref } from 'vue'
 import LogicFlow from '@logicflow/core'
 import { Control, Menu } from '@logicflow/extension'
-import { registerProcessNodes } from '../logicflow/registerNodes'
-import { fromLogicFlowData, toLogicFlowData } from '../logicflow/adapter'
+import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
+import { fromLogicFlowData, toLogicFlowData } from '@/shared/process-flow/adapter'
 import type { FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 
 type Callbacks = {

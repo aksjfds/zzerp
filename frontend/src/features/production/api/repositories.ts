@@ -1,25 +1,12 @@
 import { service } from '@/api/request'
 import type {
   PendingQcBatch,
-  ProductionObject,
   QcInspectionPayload,
   RepositoryItem,
   WorkOrder,
   WorkOrderBatch,
   WorkerItem,
 } from '../domain/types'
-
-export async function queryDepartmentProductionObjects(
-  departmentCode: string,
-  page = 1,
-  pageSize = 50,
-) {
-  const response = await service.get<{ data: ProductionObject[]; total: number }>(
-    `/departments/${departmentCode}/production-objects`,
-    { params: { page, page_size: pageSize } },
-  )
-  return { items: response.data.data, total: response.data.total }
-}
 
 export async function queryDepartmentRepositories(departmentCode: string, page = 1, pageSize = 50) {
   const response = await service.get<{ data: RepositoryItem[]; total: number }>(

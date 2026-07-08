@@ -1,4 +1,4 @@
-import type { ProcessFlow } from '@/features/process-designer/domain/types'
+import type { ProcessFlow } from '@/shared/process-flow/types'
 
 export type CustomerOrderStatus = 'draft' | 'confirmed' | 'planned' | 'cancelled' | 'closed'
 

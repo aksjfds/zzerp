@@ -1,7 +1,8 @@
 from sqlalchemy import func, select
 
 from database import SessionLocal
-from models.engineering import Product, ProductBom, ProductProcessFlow
+from services.production_flow import load_product_flow, load_production_flow
+from models.engineering import Product, ProductBom
 from models.organization import Department, Procedure, Workshop
 from models.production import ProductionItem, Repository, WorkOrder, WorkOrderMaterial
 from models.sales import CustomerOrder, CustomerOrderItem
@@ -18,22 +19,25 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
             )
             .order_by(ProductBom.sort_order)
         ).all()
-        process_flow = session.scalar(
-            select(ProductProcessFlow).where(
-                ProductProcessFlow.product_id == order_item.product_id,
-                ProductProcessFlow.product_version == order_item.product_version,
+        try:
+            flow, nodes = load_product_flow(
+                session, order_item.product_id, order_item.product_version
             )
-        )
-        if not bom_items or process_flow is None:
+        except DomainError:
             raise DomainError(
                 "product_engineering_data_missing",
                 "订单产品版本缺少 BOM 或流程图",
                 path="items",
             )
-        nodes = {node["id"]: node for node in process_flow.flow_json.get("nodes", [])}
+        if not bom_items:
+            raise DomainError(
+                "product_engineering_data_missing",
+                "订单产品版本缺少 BOM 或流程图",
+                path="items",
+            )
         normal_edges = [
             edge
-            for edge in process_flow.flow_json.get("edges", [])
+            for edge in flow.get("edges", [])
             if edge.get("route_type", "normal") == "normal"
         ]
         for node in nodes.values():
@@ -186,49 +190,14 @@ def _serialize_repository(
     department: Department,
     reserved: int,
 ) -> dict:
-    flow_cache = session.info.setdefault("product_process_flow_cache", {})
-    flow_key = (order_item.product_id, order_item.product_version)
-    if flow_key not in flow_cache:
-        flow_cache[flow_key] = session.scalar(
-            select(ProductProcessFlow).where(
-                ProductProcessFlow.product_id == order_item.product_id,
-                ProductProcessFlow.product_version == order_item.product_version,
-            )
-        )
-    flow = flow_cache[flow_key]
-    node = next(
-        (
-            item
-            for item in flow.flow_json.get("nodes", [])
-            if item.get("id") == row.flow_node_id
-        ),
-        {},
-    )
-    source_node = next(
-        (
-            item
-            for item in flow.flow_json.get("nodes", [])
-            if item.get("id") == row.source_flow_node_id
-        ),
-        {},
-    )
+    context = load_production_flow(session, production_item)
+    node = context.nodes.get(row.flow_node_id, {})
+    source_node = context.nodes.get(row.source_flow_node_id, {})
     procedure_id = node.get("procedure_id")
     procedure = session.get(Procedure, procedure_id) if procedure_id else None
     workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
-    origin_node = next(
-        (
-            item
-            for item in flow.flow_json.get("nodes", [])
-            if item.get("id") == production_item.origin_flow_node_id
-        ),
-        {},
-    )
-    item_name = (
-        bom_item.part_name
-        if bom_item
-        else origin_node.get("output_name") or origin_node.get("label") or "装配体"
-    )
-    item_no = bom_item.part_no if bom_item else item_name
+    origin_node = context.nodes.get(production_item.origin_flow_node_id, {})
+    item_no, item_name = context.item_name(production_item)
     return {
         "id": row.id,
         "production_item_id": production_item.id,

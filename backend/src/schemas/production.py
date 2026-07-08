@@ -50,18 +50,6 @@ class WorkerListEnvelope(ProductionModel):
     data: list[WorkerResponse]
 
 
-class ProductionObjectResponse(ProductionModel):
-    production_item_id: int
-    customer_order_no: str
-    part_no: str
-    part_name: str
-
-
-class ProductionObjectListEnvelope(ProductionModel):
-    data: list[ProductionObjectResponse]
-    total: int
-
-
 class WorkOrderCreate(ProductionModel):
     repository_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
@@ -79,6 +67,7 @@ class WorkOrderSubmission(ProductionModel):
 
 
 class QcInspection(ProductionModel):
+    qc_worker_id: int = Field(gt=0)
     qualified_quantity: int = Field(ge=0)
     rework_quantity: int = Field(ge=0)
     scrap_quantity: int = Field(ge=0)

@@ -25,13 +25,6 @@ export type RepositoryItem = {
   delivery_date: string
 }
 
-export type ProductionObject = {
-  production_item_id: number
-  customer_order_no: string
-  part_no: string
-  part_name: string
-}
-
 export type WorkOrderBatch = {
   id: number
   work_order_id: number
@@ -91,6 +84,7 @@ export type WorkerItem = {
 }
 
 export type QcInspectionPayload = {
+  qc_worker_id: number
   qualified_quantity: number
   rework_quantity: number
   scrap_quantity: number
