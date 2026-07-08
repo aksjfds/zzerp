@@ -23,6 +23,7 @@ from services.work_order_presenters import (
     serialize_work_order as _serialize_work_order,
     work_order_context as _work_order_context,
 )
+from services.production_movements import record_movement
 
 
 def _item_context(session, production_item: ProductionItem):
@@ -77,9 +78,9 @@ def _move_to_node(
     node: dict | None,
     quantity: int,
     source_node_id: str,
-) -> None:
+) -> int | None:
     if quantity <= 0 or node is None:
-        return
+        return None
     # One stable item lock serializes every position change for that item.
     session.get(ProductionItem, production_item.id, with_for_update=True)
     department_id = _target_department(session, node)
@@ -105,6 +106,7 @@ def _move_to_node(
         )
     else:
         target.quantity += quantity
+    return department_id
 
 
 def _consume_repository(session, repository: Repository, quantity: int) -> None:
@@ -349,19 +351,36 @@ def submit_work_order(work_order_id: int, quantity: int, user_department: str) -
             session, production_item, repository.flow_node_id
         )
         target = _normal_target(flow, nodes, node["id"])
+        batch = None
         if target is not None and target.get("type") == "qc":
-            session.add(
-                WorkOrderBatch(
-                    work_order_id=order.id,
-                    submitted_quantity=quantity,
-                    flow_node_id=target["id"],
-                )
+            batch = WorkOrderBatch(
+                work_order_id=order.id,
+                submitted_quantity=quantity,
+                flow_node_id=target["id"],
             )
-            _move_to_node(session, production_item, target, quantity, node["id"])
+            session.add(batch)
+            session.flush()
+            target_department_id = _move_to_node(
+                session, production_item, target, quantity, node["id"]
+            )
         else:
             if quantity != remaining:
                 raise DomainError("partial_completion_not_allowed", "非 QC 工艺必须一次完成剩余数量")
-            _move_to_node(session, production_item, target, quantity, node["id"])
+            target_department_id = _move_to_node(
+                session, production_item, target, quantity, node["id"]
+            )
+        record_movement(
+            session,
+            production_item=production_item,
+            quantity=quantity,
+            movement_type="process",
+            source_flow_node_id=node["id"],
+            target_flow_node_id=target.get("id") if target else None,
+            source_department_id=repository.department_id,
+            target_department_id=target_department_id,
+            work_order_id=order.id,
+            work_order_batch_id=batch.id if batch else None,
+        )
         will_delete_repository = repository.quantity == quantity
         if will_delete_repository:
             order.repository_id = None
@@ -417,6 +436,17 @@ def _submit_assembly_work_order(session, order: WorkOrder, quantity: int, user_d
         repository = session.get(Repository, material.repository_id, with_for_update=True)
         if repository is None or repository.quantity < material.quantity:
             raise DomainError("assembly_material_insufficient", "装配输入库存不足")
+        material_item = session.get(ProductionItem, material.production_item_id)
+        record_movement(
+            session,
+            production_item=material_item,
+            quantity=material.quantity,
+            movement_type="assembly_input",
+            source_flow_node_id=repository.flow_node_id,
+            target_flow_node_id=None,
+            source_department_id=repository.department_id,
+            work_order_id=order.id,
+        )
         if repository.quantity == material.quantity:
             material.repository_id = None
         _consume_repository(session, repository, material.quantity)
@@ -430,20 +460,33 @@ def _submit_assembly_work_order(session, order: WorkOrder, quantity: int, user_d
     order.production_item_id = output_item.id
     target = _normal_target(flow, nodes, assembly_node["id"])
     output_quantity = quantity * int(assembly_node.get("output_pcs", 1))
+    batch = None
     if target is not None and target.get("type") == "qc":
-        session.add(
-            WorkOrderBatch(
-                work_order_id=order.id,
-                submitted_quantity=output_quantity,
-                flow_node_id=target["id"],
-            )
+        batch = WorkOrderBatch(
+            work_order_id=order.id,
+            submitted_quantity=output_quantity,
+            flow_node_id=target["id"],
         )
-    _move_to_node(
+        session.add(batch)
+        session.flush()
+    target_department_id = _move_to_node(
         session,
         output_item,
         target,
         output_quantity,
         assembly_node["id"],
+    )
+    record_movement(
+        session,
+        production_item=output_item,
+        quantity=output_quantity,
+        movement_type="assembly_output",
+        source_flow_node_id=assembly_node["id"],
+        target_flow_node_id=target.get("id") if target else None,
+        source_department_id=_target_department(session, assembly_node),
+        target_department_id=target_department_id,
+        work_order_id=order.id,
+        work_order_batch_id=batch.id if batch else None,
     )
     order.completed_quantity += quantity
     order.status = "closed"
@@ -510,17 +553,63 @@ def inspect_batch(batch_id: int, payload, user_department: str) -> dict:
         rework_targets = [item for item in rework_targets if item is not None]
         if payload.rework_quantity and len(rework_targets) != 1:
             raise DomainError("rework_target_missing", "QC 返工数量缺少唯一返工目标")
-        _move_to_node(
+        approved_department_id = _move_to_node(
             session, production_item, approved, payload.qualified_quantity, qc_node["id"]
         )
+        record_movement(
+            session,
+            production_item=production_item,
+            quantity=payload.qualified_quantity,
+            movement_type="qc_qualified",
+            source_flow_node_id=qc_node["id"],
+            target_flow_node_id=approved.get("id") if approved else None,
+            source_department_id=qc_department_id,
+            target_department_id=approved_department_id,
+            work_order_id=order.id,
+            work_order_batch_id=batch.id,
+        )
         if payload.rework_quantity:
-            _move_to_node(
+            rework_department_id = _move_to_node(
                 session,
                 production_item,
                 rework_targets[0],
                 payload.rework_quantity,
                 qc_node["id"],
             )
+            record_movement(
+                session,
+                production_item=production_item,
+                quantity=payload.rework_quantity,
+                movement_type="qc_rework",
+                source_flow_node_id=qc_node["id"],
+                target_flow_node_id=rework_targets[0]["id"],
+                source_department_id=qc_department_id,
+                target_department_id=rework_department_id,
+                work_order_id=order.id,
+                work_order_batch_id=batch.id,
+            )
+        record_movement(
+            session,
+            production_item=production_item,
+            quantity=payload.scrap_quantity,
+            movement_type="scrap",
+            source_flow_node_id=qc_node["id"],
+            target_flow_node_id=None,
+            source_department_id=qc_department_id,
+            work_order_id=order.id,
+            work_order_batch_id=batch.id,
+        )
+        record_movement(
+            session,
+            production_item=production_item,
+            quantity=payload.lost_quantity,
+            movement_type="lost",
+            source_flow_node_id=qc_node["id"],
+            target_flow_node_id=None,
+            source_department_id=qc_department_id,
+            work_order_id=order.id,
+            work_order_batch_id=batch.id,
+        )
         _consume_repository(session, qc_repository, total)
         batch.qualified_quantity = payload.qualified_quantity
         batch.rework_quantity = payload.rework_quantity

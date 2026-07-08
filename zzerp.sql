@@ -184,10 +184,37 @@ CREATE TABLE work_order_batch (
     )
 );
 
+CREATE TABLE production_movement (
+    id BIGSERIAL PRIMARY KEY,
+    production_item_id BIGINT NOT NULL
+        REFERENCES production_item(id) ON DELETE CASCADE,
+    source_flow_node_id TEXT,
+    target_flow_node_id TEXT,
+    source_department_id BIGINT REFERENCES department(id),
+    target_department_id BIGINT REFERENCES department(id),
+    quantity INT NOT NULL CHECK (quantity > 0),
+    movement_type TEXT NOT NULL CHECK (
+        movement_type IN (
+            'initial', 'process', 'assembly_input', 'assembly_output',
+            'qc_qualified', 'qc_rework', 'scrap', 'lost'
+        )
+    ),
+    work_order_id BIGINT REFERENCES work_order(id) ON DELETE SET NULL,
+    work_order_batch_id BIGINT REFERENCES work_order_batch(id) ON DELETE SET NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX idx_product_customer ON product(customer_name, customer_code);
 CREATE INDEX idx_product_bom_product ON product_bom(product_id, sort_order);
 CREATE INDEX idx_product_bom_version ON product_bom(product_id, product_version, sort_order);
 CREATE INDEX idx_customer_order_item_order ON customer_order_item(customer_order_id);
+CREATE INDEX idx_production_movement_item_created
+    ON production_movement(production_item_id, created_at);
+CREATE INDEX idx_production_movement_target_department_created
+    ON production_movement(target_department_id, created_at);
+CREATE INDEX idx_production_movement_work_order ON production_movement(work_order_id);
+CREATE INDEX idx_production_movement_batch ON production_movement(work_order_batch_id);
+CREATE INDEX idx_production_movement_target_node ON production_movement(target_flow_node_id);
 CREATE INDEX idx_repository_department ON repository(department_id);
 CREATE INDEX idx_production_item_order_item ON production_item(customer_order_item_id);
 CREATE INDEX idx_repository_production_item ON repository(production_item_id);

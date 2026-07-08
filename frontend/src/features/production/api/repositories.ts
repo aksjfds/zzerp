@@ -8,10 +8,17 @@ import type {
   WorkerItem,
 } from '../domain/types'
 
-export async function queryDepartmentRepositories(departmentCode: string, page = 1, pageSize = 50) {
+export async function queryDepartmentRepositories(
+  departmentCode: string,
+) {
   const response = await service.get<{ data: RepositoryItem[]; total: number }>(
     `/departments/${departmentCode}/repositories`,
-    { params: { page, page_size: pageSize } },
+    {
+      params: {
+        page: 1,
+        page_size: 10000,
+      },
+    },
   )
   return { items: response.data.data, total: response.data.total }
 }

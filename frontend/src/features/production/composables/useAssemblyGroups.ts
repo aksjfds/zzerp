@@ -8,6 +8,8 @@ export type AssemblyGroup = {
   productName: string
   name: string
   orderNo: string
+  status: RepositoryItem['work_status']
+  arrivedAt: string | null
   sources: Array<{ name: string; available: number; required: number }>
 }
 
@@ -42,6 +44,10 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
         productName: groupItems[0].product_name,
         name: `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`,
         orderNo: groupItems[0].customer_order_no,
+        status: groupItems.some(item => item.work_status === 'processing')
+          ? 'processing'
+          : groupItems.every(item => item.work_status === 'completed') ? 'completed' : 'unprocessed',
+        arrivedAt: groupItems.map(item => item.arrived_at).filter(Boolean).sort().at(-1) || null,
         sources: [...sources.values()].map(sourceItems => ({
           name: sourceItems[0].part_name,
           available: sourceItems.reduce((sum, item) => sum + item.available_quantity, 0),
@@ -52,7 +58,9 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
   })
   function selectGroup(group: AssemblyGroup) {
     selections.value.clear()
-    group.items.forEach(item => selections.value.set(item.id, item))
+    group.items.forEach((item) => {
+      if (item.repository_id) selections.value.set(item.repository_id, item)
+    })
   }
   return { capacity, clear: () => selections.value.clear(), groups, selectGroup, selectedIds, selectedItems }
 }

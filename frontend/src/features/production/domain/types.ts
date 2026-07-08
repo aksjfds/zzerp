@@ -1,5 +1,6 @@
 export type RepositoryItem = {
-  id: number
+  card_key: string
+  repository_id: number | null
   production_item_id: number
   customer_order_item_id: number
   customer_order_no: string
@@ -23,6 +24,16 @@ export type RepositoryItem = {
   available_quantity: number
   assembly_unit_quantity: number
   delivery_date: string
+  arrived_at: string | null
+  work_status: 'unprocessed' | 'processing' | 'completed'
+  can_create_work_order: boolean
+}
+
+export type RepositoryFilters = {
+  keyword: string
+  arrived_from: string | null
+  arrived_to: string | null
+  work_status: 'all' | 'unprocessed' | 'processing' | 'completed'
 }
 
 export type WorkOrderBatch = {

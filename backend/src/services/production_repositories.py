@@ -1,12 +1,12 @@
-from sqlalchemy import func, select
+from sqlalchemy import select
 
-from database import SessionLocal
-from services.production_flow import load_product_flow, load_production_flow
-from models.engineering import Product, ProductBom
-from models.organization import Department, Procedure, Workshop
-from models.production import ProductionItem, Repository, WorkOrder, WorkOrderMaterial
-from models.sales import CustomerOrder, CustomerOrderItem
+from models.engineering import ProductBom
+from models.organization import Procedure, Workshop
+from models.production import ProductionItem, Repository
+from models.sales import CustomerOrder
 from services.errors import DomainError
+from services.production_flow import load_product_flow
+from services.production_movements import record_movement
 
 
 def provision_order_repositories(session, order: CustomerOrder) -> None:
@@ -36,8 +36,7 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
                 path="items",
             )
         normal_edges = [
-            edge
-            for edge in flow.get("edges", [])
+            edge for edge in flow.get("edges", [])
             if edge.get("route_type", "normal") == "normal"
         ]
         for node in nodes.values():
@@ -68,8 +67,7 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
             if len(targets) != 1 or targets[0] is None or targets[0].get("type") != "process":
                 _invalid_first_process(bom_item.part_name, "必须直接连接且只连接一道首工艺")
             process_node = targets[0]
-            procedure_id = process_node.get("procedure_id")
-            procedure = session.get(Procedure, procedure_id) if procedure_id else None
+            procedure = session.get(Procedure, process_node.get("procedure_id"))
             if procedure is None:
                 _invalid_first_process(bom_item.part_name, "首工艺未关联有效工艺")
             workshop = session.get(Workshop, procedure.workshop_id)
@@ -82,14 +80,22 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
             )
             session.add(production_item)
             session.flush()
-            session.add(
-                Repository(
-                    production_item_id=production_item.id,
-                    flow_node_id=process_node["id"],
-                    source_flow_node_id=part_node["id"],
-                    department_id=workshop.department_id,
-                    quantity=order_item.quantity * bom_item.pcs,
-                )
+            quantity = order_item.quantity * bom_item.pcs
+            session.add(Repository(
+                production_item_id=production_item.id,
+                flow_node_id=process_node["id"],
+                source_flow_node_id=part_node["id"],
+                department_id=workshop.department_id,
+                quantity=quantity,
+            ))
+            record_movement(
+                session,
+                production_item=production_item,
+                quantity=quantity,
+                movement_type="initial",
+                source_flow_node_id=part_node["id"],
+                target_flow_node_id=process_node["id"],
+                target_department_id=workshop.department_id,
             )
 
 
@@ -99,130 +105,3 @@ def _invalid_first_process(part_name: str, reason: str) -> None:
         f"配件“{part_name}”{reason}",
         path="process_flow",
     )
-
-
-def list_department_repositories(
-    department_code: str, page: int, page_size: int
-) -> tuple[list[dict], int]:
-    with SessionLocal() as session:
-        department = session.scalar(
-            select(Department).where(Department.department_code == department_code)
-        )
-        if department is None:
-            raise DomainError("department_not_found", "部门不存在", status_code=404)
-        base = (
-            select(
-                Repository,
-                ProductionItem,
-                CustomerOrderItem,
-                CustomerOrder,
-                Product,
-                ProductBom,
-            )
-            .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
-            .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-            .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
-            .join(Product, Product.id == CustomerOrderItem.product_id)
-            .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
-            .where(Repository.department_id == department.id)
-        )
-        total = session.scalar(
-            select(func.count()).select_from(base.subquery())
-        ) or 0
-        rows = session.execute(
-            base.order_by(Repository.id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        ).all()
-        repository_ids = [row.Repository.id for row in rows]
-        reserved_by_id: dict[int, int] = {}
-        if repository_ids:
-            for repository_id, reserved in session.execute(
-                select(
-                    WorkOrder.repository_id,
-                    func.sum(WorkOrder.quantity - WorkOrder.completed_quantity),
-                )
-                .where(
-                    WorkOrder.repository_id.in_(repository_ids),
-                    WorkOrder.status == "open",
-                )
-                .group_by(WorkOrder.repository_id)
-            ):
-                reserved_by_id[repository_id] = reserved
-            for repository_id, reserved in session.execute(
-                select(
-                    WorkOrderMaterial.repository_id,
-                    func.sum(WorkOrderMaterial.quantity),
-                )
-                .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
-                .where(
-                    WorkOrderMaterial.repository_id.in_(repository_ids),
-                    WorkOrder.status == "open",
-                )
-                .group_by(WorkOrderMaterial.repository_id)
-            ):
-                reserved_by_id[repository_id] = reserved_by_id.get(repository_id, 0) + reserved
-        data = [
-            _serialize_repository(
-                session,
-                row.Repository,
-                row.ProductionItem,
-                row.CustomerOrderItem,
-                row.CustomerOrder,
-                row.Product,
-                row.ProductBom,
-                department,
-                reserved_by_id.get(row.Repository.id, 0),
-            )
-            for row in rows
-        ]
-        return data, total
-
-
-def _serialize_repository(
-    session,
-    row: Repository,
-    production_item: ProductionItem,
-    order_item: CustomerOrderItem,
-    order: CustomerOrder,
-    product: Product,
-    bom_item: ProductBom | None,
-    department: Department,
-    reserved: int,
-) -> dict:
-    context = load_production_flow(session, production_item)
-    node = context.nodes.get(row.flow_node_id, {})
-    source_node = context.nodes.get(row.source_flow_node_id, {})
-    procedure_id = node.get("procedure_id")
-    procedure = session.get(Procedure, procedure_id) if procedure_id else None
-    workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
-    origin_node = context.nodes.get(production_item.origin_flow_node_id, {})
-    item_no, item_name = context.item_name(production_item)
-    return {
-        "id": row.id,
-        "production_item_id": production_item.id,
-        "customer_order_item_id": order_item.id,
-        "customer_order_no": order.customer_order_no,
-        "customer_name": order.customer_name,
-        "product_id": product.id,
-        "product_version": order_item.product_version,
-        "product_name": product.product_name,
-        "factory_code": product.factory_code,
-        "product_bom_id": bom_item.id if bom_item else None,
-        "part_name": item_name,
-        "part_no": item_no,
-        "flow_node_id": row.flow_node_id,
-        "source_flow_node_id": row.source_flow_node_id,
-        "source_node_label": source_node.get("label", "未知来源"),
-        "procedure_name": procedure.procedure_name if procedure else node.get("label", ""),
-        "workshop_name": workshop.workshop_name if workshop else "",
-        "department_id": department.id,
-        "department_name": department.department_name,
-        "department_code": department.department_code,
-        "quantity": row.quantity,
-        "available_quantity": max(row.quantity - reserved, 0),
-        "assembly_unit_quantity": (
-            bom_item.pcs if bom_item else int(origin_node.get("output_pcs", 1))
-        ),
-        "delivery_date": order_item.delivery_date,
-    }

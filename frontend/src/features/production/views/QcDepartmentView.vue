@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
 import QcBatchCards from '../components/QcBatchCards.vue'
 import QcInspectionDialog from '../components/QcInspectionDialog.vue'
@@ -14,7 +15,7 @@ import '../styles/workspace.css'
 const workspace = useDepartmentWorkspace('qc', true)
 const {
   items, loading, pageSize,
-  repositoryPage, repositoryTotal, selectedProductionItemId, selectedRepository, selectedRepositoryId, workers,
+  repositoryPage, repositoryTotal, selectedProductionItemId, selectedRepository, selectedCardKey, workers,
 } = workspace
 const batches = ref<PendingQcBatch[]>([])
 const activeBatch = ref<PendingQcBatch>()
@@ -58,18 +59,24 @@ async function saveInspection(payload: QcInspectionPayload) {
   finally { submitting.value = false }
 }
 async function refresh() { historyPage.value = 1; await workspace.refresh(); await loadDetails() }
+async function applyFilters(filters: Parameters<typeof workspace.search>[0]) {
+  historyPage.value = 1
+  await workspace.search(filters)
+  await loadDetails()
+}
 onMounted(async () => { await workspace.load(); await loadDetails() })
 </script>
 
 <template>
   <main class="production-page">
     <DepartmentPageHeader department-name="QC部门" description="待质检配件与质检结果录入。" @refresh="refresh" />
+    <RepositoryFilterBar @search="applyFilters" />
     <section class="production-workspace">
       <div class="production-card">
-        <RepositoryCards :items="items" :loading="loading" :selected-id="selectedRepositoryId"
+        <RepositoryCards :items="items" :loading="loading" :selected-key="selectedCardKey"
           :allow-work-order="false" @select="selectRepository" />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total"
-          :page-size="pageSize" :total="repositoryTotal" @current-change="workspace.loadRepositories" />
+          :page-size="pageSize" :total="repositoryTotal" />
       </div>
       <div class="production-card production-details">
         <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{

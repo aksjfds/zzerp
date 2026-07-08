@@ -4,14 +4,11 @@ import type { RepositoryItem } from '../domain/types'
 defineProps<{
   items: RepositoryItem[]
   loading: boolean
-  selectedId?: number | null
-  selectedIds?: number[]
-  multiSelectable?: boolean
+  selectedKey?: string | null
   allowWorkOrder?: boolean
 }>()
 const emit = defineEmits<{
   select: [item: RepositoryItem]
-  toggle: [item: RepositoryItem]
   createWorkOrder: [item: RepositoryItem]
 }>()
 </script>
@@ -20,31 +17,29 @@ const emit = defineEmits<{
   <div v-loading="loading" class="repository-cards">
     <article
       v-for="item in items"
-      :key="item.id"
+      :key="item.card_key"
       class="repository-card"
-      :class="{ selected: item.id === selectedId }"
+      :class="{ selected: item.card_key === selectedKey }"
       tabindex="0"
       @click="emit('select', item)"
       @keydown.enter="emit('select', item)"
     >
-      <ElCheckbox
-        v-if="multiSelectable"
-        class="input-selector"
-        :model-value="selectedIds?.includes(item.id)"
-        @click.stop
-        @change="emit('toggle', item)"
-      >装配输入</ElCheckbox>
       <div class="card-heading">
-        <strong>{{ item.part_no }} - {{ item.part_name }}</strong>
+        <strong>{{ item.part_no === item.part_name ? item.part_name : `${item.part_no} - ${item.part_name}` }}</strong>
+        <ElTag :type="item.work_status === 'processing' ? 'warning' : item.work_status === 'completed' ? 'success' : 'info'" size="small">
+          {{ item.work_status === 'processing' ? '加工中' : item.work_status === 'completed' ? '已完成' : '未加工' }}
+        </ElTag>
       </div>
       <dl>
+        <div><dt>产品</dt><dd>{{ item.factory_code }} · {{ item.product_name }}</dd></div>
         <div><dt>订单编号</dt><dd>{{ item.customer_order_no }}</dd></div>
         <div><dt>当前工艺</dt><dd>{{ item.procedure_name }}</dd></div>
         <div><dt>来源节点</dt><dd>{{ item.source_node_label }}</dd></div>
-        <div><dt>数量</dt><dd>{{ item.quantity }}</dd></div>
+        <div><dt>当前数量</dt><dd>{{ item.quantity }}</dd></div>
+        <div><dt>到达时间</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
       </dl>
       <ElButton
-        v-if="allowWorkOrder && item.available_quantity > 0"
+        v-if="allowWorkOrder && item.can_create_work_order && item.repository_id && item.available_quantity > 0"
         type="primary"
         plain
         size="small"
@@ -69,5 +64,4 @@ dt { color: var(--el-text-color-secondary); }
 dd { margin: 0; overflow-wrap: anywhere; }
 .repository-cards :deep(.el-empty) { grid-column: 1 / -1; }
 .create-button { width: 100%; margin-top: 12px; }
-.input-selector { margin-bottom: 8px; }
 </style>

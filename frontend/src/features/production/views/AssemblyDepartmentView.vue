@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import AssemblyGroupCards from '../components/AssemblyGroupCards.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
@@ -28,14 +29,18 @@ const submitting = ref(false)
 const loadDetails = workOrderList.load
 async function loadAll() { await workspace.loadRepositories(); await loadDetails() }
 function openGroup(group: AssemblyGroup) {
+  selectGroup(group)
   assembly.selectGroup(group)
   const maximum = assembly.capacity.value
   if (maximum < 1) return ElMessage.warning('所选物料的可装配数量不足')
   const item = group.items[0]
-  workspace.selectRepository(item)
-  selectedProductionItemId.value = item.production_item_id
   activeRepository.value = { ...item, quantity: maximum, available_quantity: maximum }
   dialogVisible.value = true
+}
+function selectGroup(group: AssemblyGroup) {
+  const item = group.items[0]
+  workspace.selectRepository(item)
+  workOrderList.reset()
   void loadDetails()
 }
 async function saveWorkOrder(payload: { quantity: number; workerId: number | null }) {
@@ -51,17 +56,24 @@ async function saveWorkOrder(payload: { quantity: number; workerId: number | nul
 }
 const workOrderActions = useWorkOrderActions(loadAll)
 async function refresh() { workOrderList.reset(); assembly.clear(); await workspace.refresh(); await loadDetails() }
+async function applyFilters(filters: Parameters<typeof workspace.search>[0]) {
+  workOrderList.reset()
+  assembly.clear()
+  await workspace.search(filters)
+  await loadDetails()
+}
 onMounted(async () => { await workspace.load(); await loadDetails() })
 </script>
 
 <template>
   <main class="production-page">
     <DepartmentPageHeader department-name="装配部门" description="到达装配节点的配件资料与装配工单。" @refresh="refresh" />
+    <RepositoryFilterBar @search="applyFilters" />
     <section class="production-workspace">
       <div class="production-card">
-        <AssemblyGroupCards :groups="assembly.groups.value" :loading="loading" @open="openGroup" />
+        <AssemblyGroupCards :groups="assembly.groups.value" :loading="loading" @select="selectGroup" @open="openGroup" />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total"
-          :page-size="pageSize" :total="repositoryTotal" @current-change="workspace.loadRepositories" />
+          :page-size="pageSize" :total="repositoryTotal" />
       </div>
       <div class="production-card production-details">
         <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{

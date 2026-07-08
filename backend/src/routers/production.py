@@ -1,3 +1,5 @@
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from authorization import require_any_permission
@@ -14,7 +16,7 @@ from schemas.production import (
     WorkOrderBatchEnvelope,
     WorkerListEnvelope,
 )
-from services.production_repositories import list_department_repositories
+from services.production_cards import list_production_cards
 from services.work_orders import (
     create_work_order,
     create_assembly_work_order,
@@ -37,12 +39,20 @@ router = APIRouter(tags=["production"])
 def department_repositories(
     department_code: str,
     page: int = Query(default=1, gt=0),
-    page_size: int = Query(default=50, gt=0, le=200),
+    page_size: int = Query(default=50, gt=0, le=10000),
+    keyword: str | None = Query(default=None, max_length=200),
+    arrived_from: date | None = None,
+    arrived_to: date | None = None,
+    work_status: str = Query(default="all", pattern="^(all|unprocessed|processing|completed)$"),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     if user["department"] not in {"sys", department_code}:
         raise HTTPException(status_code=403, detail="无权访问该部门")
-    data, total = list_department_repositories(department_code, page, page_size)
+    if arrived_from and arrived_to and arrived_from > arrived_to:
+        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
+    data, total = list_production_cards(
+        department_code, page, page_size, keyword, arrived_from, arrived_to, work_status
+    )
     return {"data": data, "total": total}
 
 

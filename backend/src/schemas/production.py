@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -8,7 +9,8 @@ class ProductionModel(BaseModel):
 
 
 class RepositoryResponse(ProductionModel):
-    id: int
+    card_key: str
+    repository_id: int | None
     production_item_id: int
     customer_order_item_id: int
     customer_order_no: str
@@ -32,6 +34,9 @@ class RepositoryResponse(ProductionModel):
     available_quantity: int
     assembly_unit_quantity: int
     delivery_date: date
+    arrived_at: str | None
+    work_status: Literal["unprocessed", "processing", "completed"]
+    can_create_work_order: bool
 
 
 class RepositoryListEnvelope(ProductionModel):

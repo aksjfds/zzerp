@@ -3,6 +3,7 @@ import { onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
@@ -16,7 +17,7 @@ const props = defineProps<{ departmentCode: string; departmentName: string; desc
 const workspace = useDepartmentWorkspace(props.departmentCode, true)
 const {
   items, loading, pageSize,
-  repositoryPage, repositoryTotal, selectedProductionItemId, selectedRepository, selectedRepositoryId, workers,
+  repositoryPage, repositoryTotal, selectedProductionItemId, selectedRepository, selectedCardKey, workers,
 } = workspace
 const workOrderList = useWorkOrderList(props.departmentCode, selectedProductionItemId, pageSize)
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
@@ -40,10 +41,10 @@ function openWorkOrder(item: RepositoryItem) {
   dialogVisible.value = true
 }
 async function saveWorkOrder(payload: { quantity: number; workerId: number | null }) {
-  if (!activeRepository.value) return
+  if (!activeRepository.value?.repository_id) return
   submitting.value = true
   try {
-    await createWorkOrder(activeRepository.value.id, payload.quantity, payload.workerId)
+    await createWorkOrder(activeRepository.value.repository_id, payload.quantity, payload.workerId)
     dialogVisible.value = false
     await loadAll()
     ElMessage.success('工单已创建')
@@ -56,16 +57,22 @@ async function refresh() {
   await workspace.refresh()
   await loadDetails()
 }
+async function applyFilters(filters: Parameters<typeof workspace.search>[0]) {
+  workOrderList.reset()
+  await workspace.search(filters)
+  await loadDetails()
+}
 onMounted(async () => { await workspace.load(); await loadDetails() })
 </script>
 
 <template>
   <main class="production-page">
     <DepartmentPageHeader :department-name="departmentName" :description="description" @refresh="refresh" />
+    <RepositoryFilterBar @search="applyFilters" />
     <section class="production-workspace">
       <div class="production-card">
-      <RepositoryCards :items="items" :loading="loading" :selected-id="selectedRepositoryId" allow-work-order @select="selectRepository" @create-work-order="openWorkOrder" />
-        <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total" :page-size="pageSize" :total="repositoryTotal" @current-change="workspace.loadRepositories" />
+      <RepositoryCards :items="items" :loading="loading" :selected-key="selectedCardKey" allow-work-order @select="selectRepository" @create-work-order="openWorkOrder" />
+        <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total" :page-size="pageSize" :total="repositoryTotal" />
       </div>
       <div class="production-card production-details">
         <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{ selectedRepository.part_name }}</strong><span>{{ selectedRepository.customer_order_no }} · {{ selectedRepository.procedure_name }}</span></div>

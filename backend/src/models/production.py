@@ -173,3 +173,52 @@ class WorkOrderMaterial(Base):
         BigInteger, ForeignKey("production_item.id"), nullable=False
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
+class ProductionMovement(Base):
+    __tablename__ = "production_movement"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_production_movement_quantity_positive"),
+        CheckConstraint(
+            "movement_type IN ('initial', 'process', 'assembly_input', "
+            "'assembly_output', 'qc_qualified', 'qc_rework', 'scrap', 'lost')",
+            name="ck_production_movement_type",
+        ),
+        Index(
+            "idx_production_movement_item_created",
+            "production_item_id",
+            "created_at",
+        ),
+        Index(
+            "idx_production_movement_target_department_created",
+            "target_department_id",
+            "created_at",
+        ),
+        Index("idx_production_movement_work_order", "work_order_id"),
+        Index("idx_production_movement_batch", "work_order_batch_id"),
+        Index("idx_production_movement_target_node", "target_flow_node_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    production_item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("production_item.id", ondelete="CASCADE"), nullable=False
+    )
+    source_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_department_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("department.id"), nullable=True
+    )
+    target_department_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("department.id"), nullable=True
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    movement_type: Mapped[str] = mapped_column(Text, nullable=False)
+    work_order_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("work_order.id", ondelete="SET NULL"), nullable=True
+    )
+    work_order_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("work_order_batch.id", ondelete="SET NULL"), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
