@@ -75,7 +75,7 @@ onMounted(async () => { await workspace.load(); await loadDetails() })
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total" :page-size="pageSize" :total="repositoryTotal" />
       </div>
       <div class="production-card production-details">
-        <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{ selectedRepository.part_name }}</strong><span>{{ selectedRepository.customer_order_no }} · {{ selectedRepository.procedure_name }}</span></div>
+        <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no === selectedRepository.part_name ? selectedRepository.part_name : `${selectedRepository.part_no} - ${selectedRepository.part_name}` }}</strong><span>{{ selectedRepository.customer_order_no }} · {{ selectedRepository.procedure_name }}</span></div>
         <WorkOrderCards :items="workOrders" :loading="detailLoading" @submit="workOrderActions.submit" @cancel="workOrderActions.cancel" />
         <ElPagination v-model:current-page="historyPage" class="production-pagination" layout="prev, pager, next, total" :page-size="pageSize" :total="historyTotal" @current-change="loadDetails" />
       </div>

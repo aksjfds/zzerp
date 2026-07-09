@@ -12,7 +12,7 @@ import {
   updateNodeDefinition,
 } from '../logicflow/commands'
 
-const props = defineProps<{ modelValue: ProcessFlow }>()
+const props = defineProps<{ modelValue: ProcessFlow; readonly?: boolean }>()
 const emit = defineEmits<{
   'update:modelValue': [flow: ProcessFlow]
   selectEdge: [edge: FlowEdge | null]
@@ -32,6 +32,7 @@ function withInstance(action: (lf: NonNullable<typeof instance.value>) => void) 
 }
 
 function dragPart(item: BomItem) {
+  if (props.readonly) return
   try {
     withInstance((lf) => startPartDrag(lf, item))
   } catch (error) {
@@ -40,22 +41,27 @@ function dragPart(item: BomItem) {
 }
 
 function dragProcess(procedureId: number, procedureName: string) {
+  if (props.readonly) return
   withInstance((lf) => startProcessDrag(lf, procedureId, procedureName))
 }
 
 function dragAssembly() {
+  if (props.readonly) return
   withInstance(startAssemblyDrag)
 }
 
 function dragQc() {
+  if (props.readonly) return
   withInstance(startQcDrag)
 }
 
 function updateNode(nodeId: string, label: string, property: Parameters<typeof updateNodeDefinition>[3]) {
+  if (props.readonly) return
   withInstance((lf) => { updateNodeDefinition(lf, nodeId, label, property); emitChange() })
 }
 
 function updateRoute(edgeId: string, routeType: RouteType) {
+  if (props.readonly) return
   try {
     withInstance((lf) => { setQcEdgeRoute(lf, edgeId, routeType); emitChange() })
   } catch (error) {
@@ -82,8 +88,9 @@ defineExpose({
 })
 </script>
 
-<template><div ref="containerRef" class="flow-canvas" /></template>
+<template><div ref="containerRef" class="flow-canvas" :class="{ 'is-readonly': readonly }" /></template>
 
 <style scoped>
 .flow-canvas { min-width: 0; height: 560px; background: #fff; }
+.flow-canvas.is-readonly { cursor: default; pointer-events: none; }
 </style>

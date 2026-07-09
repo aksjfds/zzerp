@@ -5,6 +5,16 @@ import LogicFlow, {
   RectNodeModel,
 } from '@logicflow/core'
 
+function fourMidpointAnchors(model: { id: string; x: number; y: number; width: number; height: number }) {
+  const { id, x, y, width, height } = model
+  return [
+    { id: `${id}_0`, name: 'top', x, y: y - height / 2 },
+    { id: `${id}_1`, name: 'right', x: x + width / 2, y },
+    { id: `${id}_2`, name: 'bottom', x, y: y + height / 2 },
+    { id: `${id}_3`, name: 'left', x: x - width / 2, y },
+  ]
+}
+
 class PartNodeModel extends RectNodeModel {
   initNodeData(data: LogicFlow.NodeConfig) {
     super.initNodeData(data)
@@ -23,6 +33,10 @@ class PartNodeModel extends RectNodeModel {
   getNodeStyle() {
     return { ...super.getNodeStyle(), fill: '#ecf5ff', stroke: '#409eff', strokeWidth: 2 }
   }
+
+  getDefaultAnchor() {
+    return fourMidpointAnchors(this)
+  }
 }
 
 class ProcessNodeModel extends RectNodeModel {
@@ -35,6 +49,10 @@ class ProcessNodeModel extends RectNodeModel {
   getNodeStyle() {
     return { ...super.getNodeStyle(), fill: '#f0f9eb', stroke: '#67c23a', strokeWidth: 2 }
   }
+
+  getDefaultAnchor() {
+    return fourMidpointAnchors(this)
+  }
 }
 
 class AssemblyNodeModel extends DiamondNodeModel {
@@ -46,6 +64,10 @@ class AssemblyNodeModel extends DiamondNodeModel {
   getNodeStyle() {
     return { ...super.getNodeStyle(), fill: '#fdf6ec', stroke: '#e6a23c', strokeWidth: 2 }
   }
+
+  getDefaultAnchor() {
+    return fourMidpointAnchors(this)
+  }
 }
 
 class QcNodeModel extends DiamondNodeModel {
@@ -56,6 +78,10 @@ class QcNodeModel extends DiamondNodeModel {
 
   getNodeStyle() {
     return { ...super.getNodeStyle(), fill: '#fef0f0', stroke: '#f56c6c', strokeWidth: 2 }
+  }
+
+  getDefaultAnchor() {
+    return fourMidpointAnchors(this)
   }
 }
 

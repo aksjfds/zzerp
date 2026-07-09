@@ -30,7 +30,7 @@ type CanvasApi = {
   updateRoute: (edgeId: string, routeType: RouteType) => void
 }
 
-const props = defineProps<{ modelValue: ProcessFlow; bomItems: BomItem[] }>()
+const props = defineProps<{ modelValue: ProcessFlow; bomItems: BomItem[]; readonly?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: ProcessFlow] }>()
 const canvas = ref<CanvasApi>()
 const selectedNode = ref<FlowNode | null>(null)
@@ -38,21 +38,23 @@ const selectedEdge = ref<FlowEdge | null>(null)
 const procedures = ref<ProcedureOption[]>([])
 
 function updateFlow(flow: ProcessFlow) {
+  if (props.readonly) return
   emit('update:modelValue', flow)
 }
 
 function dragProcedure(procedure: ProcedureOption) {
+  if (props.readonly) return
   canvas.value?.dragProcess(procedure.id, procedure.procedure_name)
 }
 
 function updateProcess(label: string, process_code: string) {
-  if (selectedNode.value?.type !== 'process') return
+  if (props.readonly || selectedNode.value?.type !== 'process') return
   canvas.value?.updateNode(selectedNode.value.id, label, { key: 'processCode', value: process_code })
   selectedNode.value = { ...selectedNode.value, label, process_code }
 }
 
 function updateProcedure(procedureId: number) {
-  if (selectedNode.value?.type !== 'process') return
+  if (props.readonly || selectedNode.value?.type !== 'process') return
   const procedure = procedures.value.find((item) => item.id === procedureId)
   if (!procedure) return
   canvas.value?.updateNode(
@@ -68,14 +70,14 @@ function updateProcedure(procedureId: number) {
 }
 
 function updateAssembly(label: string, output_name: string, output_pcs: number) {
-  if (selectedNode.value?.type !== 'assembly') return
+  if (props.readonly || selectedNode.value?.type !== 'assembly') return
   canvas.value?.updateNode(selectedNode.value.id, label, { key: 'outputName', value: output_name })
   canvas.value?.updateNode(selectedNode.value.id, label, { key: 'outputPcs', value: output_pcs })
   selectedNode.value = { ...selectedNode.value, label, output_name, output_pcs }
 }
 
 function updateRoute(routeType: RouteType) {
-  if (!selectedEdge.value) return
+  if (props.readonly || !selectedEdge.value) return
   canvas.value?.updateRoute(selectedEdge.value.id, routeType)
   selectedEdge.value = {
     ...selectedEdge.value,
@@ -112,8 +114,9 @@ onMounted(async () => { procedures.value = await queryProcedures() })
         <p>拖入配件后连接工序和装配节点；选择节点或 QC 连线可编辑属性。</p>
       </div>
     </div>
-    <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge }">
+    <div class="designer-shell" :class="{ 'has-property': !readonly && (selectedNode || selectedEdge), 'is-readonly': readonly }">
       <ProcessNodePalette
+        v-if="!readonly"
         :bom-items="bomItems"
         :procedures="procedures"
         @drag-part="canvas?.dragPart($event)"
@@ -124,12 +127,13 @@ onMounted(async () => { procedures.value = await queryProcedures() })
       <ProcessFlowCanvas
         ref="canvas"
         :model-value="modelValue"
+        :readonly="readonly"
         @update:model-value="updateFlow"
         @select-node="selectedNode = $event"
         @select-edge="selectedEdge = $event"
       />
       <ProcessPropertyPanel
-        v-if="selectedNode || selectedEdge"
+        v-if="!readonly && (selectedNode || selectedEdge)"
         :node="selectedNode"
         :edge="selectedEdge"
         :procedures="procedures"
@@ -148,6 +152,7 @@ h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
 .designer-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 560px; border: 1px solid var(--erp-border); border-radius: 8px; overflow: hidden; }
 .designer-shell.has-property { grid-template-columns: 190px minmax(0, 1fr) 220px; }
+.designer-shell.is-readonly { grid-template-columns: minmax(0, 1fr); }
 @media (max-width: 900px) {
   .designer-shell, .designer-shell.has-property { grid-template-columns: 150px minmax(600px, 1fr); overflow-x: auto; }
   .designer-shell :deep(.property-panel) { display: none; }

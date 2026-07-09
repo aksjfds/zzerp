@@ -1,5 +1,9 @@
 from database import SessionLocal
 from repositories.engineering_products import EngineeringProductRepository
+from services.engineering_product_editability import (
+    is_base_info_editable,
+    is_product_version_editable,
+)
 from services.engineering_product_mapper import (
     serialize_product_detail,
     serialize_product_summary,
@@ -33,7 +37,13 @@ def get_product(product_id: int, version: int | None = None) -> dict:
         } | {item.product_version for item in product.bom_items}
         if requested_version not in available_versions:
             raise product_not_found()
-        return serialize_product_detail(product, empty_process_flow(), requested_version)
+        return serialize_product_detail(
+            product,
+            empty_process_flow(),
+            requested_version,
+            base_info_editable=is_base_info_editable(session, product_id),
+            version_editable=is_product_version_editable(session, product_id, requested_version),
+        )
 
 
 def list_product_versions(product_id: int) -> list[int]:

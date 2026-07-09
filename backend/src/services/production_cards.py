@@ -17,6 +17,7 @@ from models.production import (
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
 from services.production_flow import load_production_flow
+from services.work_order_presenters import production_item_name
 
 
 def list_production_cards(
@@ -105,6 +106,9 @@ def _current_card(
     procedure = session.get(Procedure, node.get("procedure_id")) if node.get("procedure_id") else None
     workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
     part_no, part_name = context.item_name(production_item)
+    if context.bom_item is None:
+        part_name = production_item_name(session, production_item, set())
+        part_no = part_name
     return {
         "card_key": f"repository:{repository.id}",
         "repository_id": repository.id,
@@ -202,6 +206,9 @@ def _historical_card(session, production_item_id, node_id, department, movement)
     procedure = session.get(Procedure, node.get("procedure_id")) if node.get("procedure_id") else None
     workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
     part_no, part_name = context.item_name(production_item)
+    if context.bom_item is None:
+        part_name = production_item_name(session, production_item, set())
+        part_no = part_name
     return {
         "card_key": f"history:{production_item_id}:{node_id}:{movement.id}",
         "repository_id": None,

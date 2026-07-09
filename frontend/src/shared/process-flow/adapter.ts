@@ -9,10 +9,17 @@ import {
 } from './types'
 
 const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'assembly', 'qc'])
+const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }> = {
+  part: { halfWidth: 75, halfHeight: 28 },
+  process: { halfWidth: 75, halfHeight: 28 },
+  assembly: { halfWidth: 88, halfHeight: 54 },
+  qc: { halfWidth: 68, halfHeight: 48 },
+}
 
 export function toLogicFlowData(flow: ProcessFlow): LogicFlow.GraphConfigData {
+  const normalizedFlow = normalizeEdgeAnchors(flow)
   return {
-    nodes: flow.nodes.map((node) => ({
+    nodes: normalizedFlow.nodes.map((node) => ({
       id: node.id,
       type: node.type,
       x: node.x,
@@ -24,7 +31,7 @@ export function toLogicFlowData(flow: ProcessFlow): LogicFlow.GraphConfigData {
       rotate: node.rotation,
       properties: nodeProperties(node),
     })),
-    edges: flow.edges.map((edge) => ({
+    edges: normalizedFlow.edges.map((edge) => ({
       id: edge.id,
       type: edge.edge_type,
       sourceNodeId: edge.source_node_id,
@@ -46,10 +53,12 @@ export function toLogicFlowData(flow: ProcessFlow): LogicFlow.GraphConfigData {
 }
 
 export function fromLogicFlowData(data: LogicFlow.GraphData): ProcessFlow {
+  const nodes = data.nodes.map(toBusinessNode)
+  const edges = data.edges.map((edge) => toBusinessEdge(edge, nodes))
   return {
     schema_version: PROCESS_FLOW_SCHEMA_VERSION,
-    nodes: data.nodes.map(toBusinessNode),
-    edges: data.edges.map(toBusinessEdge),
+    nodes,
+    edges,
   }
 }
 
@@ -96,9 +105,9 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
   return { ...base, type: 'qc' }
 }
 
-function toBusinessEdge(edge: LogicFlow.EdgeData): FlowEdge {
+function toBusinessEdge(edge: LogicFlow.EdgeData, nodes: FlowNode[]): FlowEdge {
   const properties = edge.properties ?? {}
-  return {
+  return normalizeEdgeAnchor({
     id: edge.id,
     edge_type: edge.type,
     source_node_id: edge.sourceNodeId,
@@ -115,7 +124,7 @@ function toBusinessEdge(edge: LogicFlow.EdgeData): FlowEdge {
     outcome: properties.outcome === 'approved' || properties.outcome === 'rejected'
       ? properties.outcome
       : undefined,
-  }
+  }, nodes)
 }
 
 function nodeProperties(node: FlowNode): Record<string, unknown> {
@@ -149,4 +158,89 @@ function stringValue(value: unknown): string {
 function requiredNumber(value: unknown, field: string): number {
   if (typeof value !== 'number') throw new Error(`Missing ${field}`)
   return value
+}
+
+function normalizeEdgeAnchors(flow: ProcessFlow): ProcessFlow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map(node => ({ ...node })),
+    edges: flow.edges.map(edge => normalizeEdgeAnchor(edge, flow.nodes)),
+  }
+}
+
+function normalizeEdgeAnchor(edge: FlowEdge, nodes: FlowNode[]): FlowEdge {
+  const nodeMap = new Map(nodes.map(node => [node.id, node]))
+  const source = nodeMap.get(edge.source_node_id)
+  const target = nodeMap.get(edge.target_node_id)
+  if (!source || !target) return { ...edge }
+
+  const sourceAnchor = resolveAnchor(source, target, edge.source_anchor_id, edge.start_point)
+  const targetAnchor = resolveAnchor(target, source, edge.target_anchor_id, edge.end_point)
+  return {
+    ...edge,
+    source_anchor_id: sourceAnchor.id,
+    target_anchor_id: targetAnchor.id,
+    start_point: sourceAnchor.point,
+    end_point: targetAnchor.point,
+    points: normalizeEdgePoints(edge.points, sourceAnchor.point, targetAnchor.point),
+  }
+}
+
+function resolveAnchor(
+  node: FlowNode,
+  opposite: FlowNode,
+  anchorId?: string,
+  referencePoint?: FlowPoint,
+): { id: string; point: FlowPoint } {
+  const anchors = nodeAnchors(node)
+  const matched = anchorId ? anchors.find(anchor => anchor.id === anchorId) : undefined
+  if (matched) return matched
+  if (referencePoint) return nearestAnchor(anchors, referencePoint)
+  return directionalAnchor(anchors, node, opposite)
+}
+
+function nodeAnchors(node: FlowNode): Array<{ id: string; point: FlowPoint }> {
+  const size = NODE_SIZE[node.type]
+  return [
+    { id: `${node.id}_0`, point: { x: node.x, y: node.y - size.halfHeight } },
+    { id: `${node.id}_1`, point: { x: node.x + size.halfWidth, y: node.y } },
+    { id: `${node.id}_2`, point: { x: node.x, y: node.y + size.halfHeight } },
+    { id: `${node.id}_3`, point: { x: node.x - size.halfWidth, y: node.y } },
+  ]
+}
+
+function nearestAnchor(
+  anchors: Array<{ id: string; point: FlowPoint }>,
+  point: FlowPoint,
+): { id: string; point: FlowPoint } {
+  return anchors.reduce((best, anchor) => (
+    distance(anchor.point, point) < distance(best.point, point) ? anchor : best
+  ))
+}
+
+function directionalAnchor(
+  anchors: Array<{ id: string; point: FlowPoint }>,
+  node: FlowNode,
+  opposite: FlowNode,
+): { id: string; point: FlowPoint } {
+  const dx = opposite.x - node.x
+  const dy = opposite.y - node.y
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return anchors[dx >= 0 ? 1 : 3]
+  }
+  return anchors[dy >= 0 ? 2 : 0]
+}
+
+function normalizeEdgePoints(
+  points: FlowPoint[] | undefined,
+  startPoint: FlowPoint,
+  endPoint: FlowPoint,
+): FlowPoint[] | undefined {
+  if (!points?.length) return undefined
+  if (points.length === 1) return [startPoint, endPoint]
+  return [startPoint, ...points.slice(1, -1), endPoint]
+}
+
+function distance(a: FlowPoint, b: FlowPoint): number {
+  return (a.x - b.x) ** 2 + (a.y - b.y) ** 2
 }

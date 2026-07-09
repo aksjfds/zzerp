@@ -63,25 +63,18 @@ export function useProductSaveActions(options: Options) {
     }
   }
 
-  async function saveBase() {
-    if (!productId.value || form.revision === null || !await validateBase()) return
-    try {
-      const product = await store.saveProductInfo(productId.value, form.revision, normalizedFields())
-      Object.assign(form, normalizedFields(), { version: product.version, revision: product.revision })
-      markSaved(['base'])
-      ElMessage.success('产品基础信息已保存')
-    } catch (error) {
-      showSaveError(error, '基础信息保存失败')
-    }
-  }
-
   async function saveBom() {
-    if (!productId.value || form.revision === null) return
+    if (!productId.value || form.revision === null || form.version === null) return
     const bomError = validateBom()
     if (bomError) return ElMessage.error(bomError)
     try {
       const localFlow = flowEditor.value?.getGraphData() ?? form.process_flow
-      const product = await store.saveProductBom(productId.value, form.revision, normalizedBom())
+      const product = await store.saveProductBom(
+        productId.value,
+        form.revision,
+        form.version,
+        normalizedBom(),
+      )
       form.version = product.version
       form.revision = product.revision
       form.bom_items = product.bom_items.map((item) => ({ ...item }))
@@ -96,10 +89,15 @@ export function useProductSaveActions(options: Options) {
   }
 
   async function saveFlow() {
-    if (!productId.value || form.revision === null || !flowEditor.value) return
+    if (!productId.value || form.revision === null || form.version === null || !flowEditor.value) return
     form.process_flow = synchronizeAssemblyNames(flowEditor.value.getGraphData())
     try {
-      const product = await store.saveProcessFlow(productId.value, form.revision, form.process_flow)
+      const product = await store.saveProcessFlow(
+        productId.value,
+        form.revision,
+        form.version,
+        form.process_flow,
+      )
       form.version = product.version
       form.revision = product.revision
       form.process_flow = product.process_flow
@@ -121,5 +119,5 @@ export function useProductSaveActions(options: Options) {
     )
   }
 
-  return { createProduct, saveBase, saveBom, saveFlow }
+  return { createProduct, saveBom, saveFlow }
 }

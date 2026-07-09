@@ -30,7 +30,8 @@ export function useProductEditorForm() {
   const baseDirty = computed(() => baseSnapshot.value !== serializeBase())
   const bomDirty = computed(() => bomSnapshot.value !== JSON.stringify(form.bom_items))
   const flowDirty = computed(() => flowSnapshot.value !== JSON.stringify(form.process_flow))
-  const hasUnsavedChanges = computed(() => baseDirty.value || bomDirty.value || flowDirty.value)
+  const versionDirty = computed(() => bomDirty.value || flowDirty.value)
+  const allDirty = computed(() => baseDirty.value || versionDirty.value)
 
   function markSaved(sections: Array<'base' | 'bom' | 'flow'>) {
     if (sections.includes('base')) baseSnapshot.value = serializeBase()
@@ -98,10 +99,11 @@ export function useProductEditorForm() {
     flowDirty,
     flowSnapshot,
     form,
-    hasUnsavedChanges,
+    allDirty,
     markSaved,
     normalizedBom,
     normalizedFields,
     validateBom,
+    versionDirty,
   }
 }

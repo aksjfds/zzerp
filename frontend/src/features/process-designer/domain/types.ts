@@ -89,6 +89,8 @@ export type EngineeringProduct = ProductFields & {
   version: number
   current_version: number
   revision: number
+  base_info_editable: boolean
+  version_editable: boolean
   bom_items: BomItem[]
   process_flow: ProcessFlow
   created_at: string

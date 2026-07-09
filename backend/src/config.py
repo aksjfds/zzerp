@@ -1,5 +1,6 @@
 from functools import lru_cache
 import os
+import re
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -69,6 +70,7 @@ def _build_database_url() -> str:
 class Settings:
     database_url: str
     allowed_origins: list[str]
+    allowed_origin_regex: str | None
     session_cookie_name: str
     session_expire_hours: int
     cookie_secure: bool
@@ -84,6 +86,7 @@ class Settings:
             ).split(",")
             if origin.strip()
         ]
+        self.allowed_origin_regex = os.getenv("ALLOWED_ORIGIN_REGEX") or None
         self.session_cookie_name = os.getenv("SESSION_COOKIE_NAME", "zzerp_session")
         self.session_expire_hours = int(os.getenv("SESSION_EXPIRE_HOURS", "12"))
         self.cookie_secure = os.getenv("COOKIE_SECURE", "true").lower() in {
@@ -95,6 +98,17 @@ class Settings:
 
         if self.cookie_samesite not in {"lax", "strict", "none"}:
             raise RuntimeError("COOKIE_SAMESITE must be lax, strict, or none")
+
+        if self.allowed_origin_regex:
+            re.compile(self.allowed_origin_regex)
+
+    def allows_origin(self, origin: str) -> bool:
+        if origin in self.allowed_origins or "*" in self.allowed_origins:
+            return True
+        return bool(
+            self.allowed_origin_regex
+            and re.fullmatch(self.allowed_origin_regex, origin)
+        )
 
 
 @lru_cache

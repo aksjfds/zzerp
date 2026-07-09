@@ -25,8 +25,15 @@ const pageSize = 50
 const detailVisible = ref(false)
 const activeOrderId = ref<number>()
 const statusLabels = {
-  draft: '草稿', confirmed: '已确认', planned: '已排产', cancelled: '已取消', closed: '已完成',
+  draft: '草稿', confirmed: '已确认', planned: '生产中', cancelled: '已取消', closed: '已完成',
 }
+const statusTagTypes = {
+  draft: 'info',
+  confirmed: 'primary',
+  planned: 'warning',
+  cancelled: 'danger',
+  closed: 'success',
+} as const
 const filteredOrders = computed(() => {
   const value = keyword.value.trim().toLowerCase()
   return value ? orders.value.filter((item) =>
@@ -89,12 +96,18 @@ onMounted(loadOrders)
     <section class="content-card">
       <ElInput v-model="keyword" clearable placeholder="搜索当前页的订单编号或客户" class="search" />
       <ElTable v-loading="loading" :data="filteredOrders" border>
-        <ElTableColumn prop="customer_order_no" label="订单编号" min-width="160" />
-        <ElTableColumn prop="customer_name" label="客户名称" min-width="140" />
+        <ElTableColumn prop="customer_name" label="客户名称" />
+        <ElTableColumn prop="customer_order_no" label="订单编号"/>
         <ElTableColumn label="产品明细" min-width="260">
           <template #default="{ row }"><div v-for="item in row.items" :key="item.id">{{ item.factory_code }}-{{ item.product_name }}-{{ item.quantity }}个</div></template>
         </ElTableColumn>
-        <ElTableColumn label="状态" width="100"><template #default="{ row }">{{ statusLabels[row.status as keyof typeof statusLabels] }}</template></ElTableColumn>
+        <ElTableColumn label="状态" width="100">
+          <template #default="{ row }">
+            <ElTag :type="statusTagTypes[row.status as keyof typeof statusTagTypes]" effect="light">
+              {{ statusLabels[row.status as keyof typeof statusLabels] }}
+            </ElTag>
+          </template>
+        </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" width="170" />
         <ElTableColumn label="操作" width="240" fixed="right">
           <template #default="{ row }">

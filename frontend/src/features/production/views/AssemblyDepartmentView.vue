@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
@@ -25,6 +25,12 @@ const { items: workOrders, loading: detailLoading, page: historyPage, total: his
 const activeRepository = ref<RepositoryItem>()
 const dialogVisible = ref(false)
 const submitting = ref(false)
+const selectedGroupKey = computed(() => selectedRepository.value
+  ? `${selectedRepository.value.customer_order_item_id}:${selectedRepository.value.flow_node_id}`
+  : null)
+const selectedGroup = computed(() => assembly.groups.value.find(
+  group => group.key === selectedGroupKey.value,
+))
 
 const loadDetails = workOrderList.load
 async function loadAll() { await workspace.loadRepositories(); await loadDetails() }
@@ -71,13 +77,14 @@ onMounted(async () => { await workspace.load(); await loadDetails() })
     <RepositoryFilterBar @search="applyFilters" />
     <section class="production-workspace">
       <div class="production-card">
-        <AssemblyGroupCards :groups="assembly.groups.value" :loading="loading" @select="selectGroup" @open="openGroup" />
+        <AssemblyGroupCards :groups="assembly.groups.value" :loading="loading" :selected-key="selectedGroupKey"
+          @select="selectGroup" @open="openGroup" />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total"
           :page-size="pageSize" :total="repositoryTotal" />
       </div>
       <div class="production-card production-details">
         <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{
-          selectedRepository.part_name }}</strong><span>{{ selectedRepository.customer_order_no }} · {{
+          selectedGroup?.name || selectedRepository.part_name }}</strong><span>{{ selectedRepository.customer_order_no }} · {{
               selectedRepository.procedure_name }}</span></div>
         <WorkOrderCards :items="workOrders" :loading="detailLoading" @submit="workOrderActions.submit"
           @cancel="workOrderActions.cancel" />

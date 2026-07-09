@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
+from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
@@ -45,9 +45,24 @@ async def handle_request_validation_error(_request: Request, exc: RequestValidat
         detail["path"] = path
     return JSONResponse(status_code=422, content={"detail": detail})
 
+
+@app.exception_handler(ResponseValidationError)
+async def handle_response_validation_error(_request: Request, exc: ResponseValidationError):
+    error = exc.errors()[0] if exc.errors() else {}
+    location = error.get("loc", ())
+    path = ".".join(str(part) for part in location if part != "response") or None
+    detail = {
+        "code": "response_validation_failed",
+        "message": "服务端返回数据结构不符合接口定义",
+    }
+    if path:
+        detail["path"] = path
+    return JSONResponse(status_code=500, content={"detail": detail})
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.allowed_origins,
+    allow_origin_regex=settings.allowed_origin_regex,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-CSRF-Token"],
@@ -58,7 +73,7 @@ app.add_middleware(
 async def validate_request_origin(request: Request, call_next):
     if request.method in {"POST", "PUT", "PATCH", "DELETE"}:
         origin = request.headers.get("origin")
-        if origin and origin not in settings.allowed_origins:
+        if origin and not settings.allows_origin(origin):
             return JSONResponse(status_code=403, content={"detail": "请求来源不受信任"})
 
     return await call_next(request)

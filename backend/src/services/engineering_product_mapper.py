@@ -30,7 +30,12 @@ def serialize_product_summary(product: Product, bom_count: int) -> dict:
 
 
 def serialize_product_detail(
-    product: Product, empty_flow: dict, requested_version: int | None = None
+    product: Product,
+    empty_flow: dict,
+    requested_version: int | None = None,
+    *,
+    base_info_editable: bool = True,
+    version_editable: bool = True,
 ) -> dict:
     version = requested_version or product.version
     bom_items = [item for item in product.bom_items if item.product_version == version]
@@ -42,6 +47,8 @@ def serialize_product_detail(
         "version": version,
         "current_version": product.version,
         "revision": product.revision,
+        "base_info_editable": base_info_editable,
+        "version_editable": version_editable,
         "customer_name": product.customer_name,
         "product_name": product.product_name,
         "factory_code": product.factory_code,

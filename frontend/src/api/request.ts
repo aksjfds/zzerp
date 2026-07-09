@@ -1,11 +1,8 @@
 import axios from 'axios'
 import type { ApiErrorDetail } from './types'
 
-const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
-
-if (import.meta.env.PROD && !import.meta.env.VITE_API_BASE_URL) {
-  throw new Error('Missing VITE_API_BASE_URL for production build')
-}
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL
+  || `${window.location.protocol}//${window.location.hostname}:8000`
 
 export const service = axios.create({
   baseURL: apiBaseUrl,
@@ -16,6 +13,12 @@ export const service = axios.create({
 export function getApiErrorDetail(error: unknown): ApiErrorDetail | null {
   if (!axios.isAxiosError(error)) return null
   const detail = error.response?.data?.detail
+  if (typeof detail === 'string') {
+    return {
+      code: `http_${error.response?.status || 'error'}`,
+      message: detail,
+    }
+  }
   if (!detail || typeof detail !== 'object') return null
   if (typeof detail.code !== 'string' || typeof detail.message !== 'string') return null
   return {

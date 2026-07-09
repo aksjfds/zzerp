@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import BomEditor from '../components/BomEditor.vue'
 import ProcessFlowEditor from '../components/ProcessFlowEditor.vue'
 import { type BomItem, type ProcessFlow, type ProductFields } from '../domain/types'
@@ -11,7 +11,8 @@ import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 import { useProductEditorForm } from '../composables/useProductEditorForm'
 import { useProductSaveActions } from '../composables/useProductSaveActions'
 import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
-import { queryProductVersions } from '../api/engineeringProducts'
+import { useProductVersionLoader } from '../composables/useProductVersionLoader'
+import { getApiErrorDetail } from '@/api/request'
 
 type FlowEditorApi = {
   focusElement: (elementId?: string) => void
@@ -26,31 +27,27 @@ const authStore = useAuthStore()
 const baseFormRef = ref<FormInstance>()
 const flowEditor = ref<FlowEditorApi>()
 const editorReady = ref(false)
-const versions = ref<number[]>([])
-const currentVersion = ref<number>()
 const {
   applyProduct,
-  baseDirty,
   bomDirty,
   bomSnapshot,
   flowDirty,
   flowSnapshot,
   form,
-  hasUnsavedChanges,
   markSaved,
   normalizedBom,
   normalizedFields,
   validateBom,
+  versionDirty: rawVersionDirty,
 } = useProductEditorForm()
 
 const productId = computed(() => {
   const value = Number(route.params.productId)
   return Number.isInteger(value) && value > 0 ? value : null
 })
-const readOnly = computed(() => Boolean(
-  !authStore.hasPermission(PRODUCT_PERMISSIONS.edit)
-  || (form.version && currentVersion.value && form.version !== currentVersion.value),
-))
+const mode = computed(() => route.query.mode === 'view' ? 'view' : 'edit')
+const canEditProduct = computed(() => authStore.hasPermission(PRODUCT_PERMISSIONS.edit))
+const baseReadOnly = computed(() => Boolean(productId.value))
 
 const baseRules: FormRules<ProductFields> = {
   customer_name: [{ required: true, whitespace: true, message: '请输入客户名称', trigger: 'blur' }],
@@ -68,7 +65,7 @@ async function validateBase() {
   }
 }
 
-const { createProduct, saveBase, saveBom, saveFlow } = useProductSaveActions({
+const { createProduct, saveBom, saveFlow } = useProductSaveActions({
   applyProduct,
   bomSnapshot,
   editorReady,
@@ -84,6 +81,33 @@ const { createProduct, saveBase, saveBom, saveFlow } = useProductSaveActions({
   validateBase,
   validateBom,
 })
+
+const {
+  baseInfoEditable,
+  currentVersion,
+  loadProductVersion,
+  loadingProduct,
+  reloadVersions,
+  switchVersion,
+  versionEditable,
+  versions,
+} = useProductVersionLoader({
+  applyProduct,
+  editorReady,
+  markSaved,
+  mode,
+  productId,
+  router,
+  store,
+  versionDirty: rawVersionDirty,
+})
+const selectedVersion = computed(() => form.version || currentVersion.value)
+const versionDirty = computed(() => !loadingProduct.value && rawVersionDirty.value)
+const versionReadOnly = computed(() => Boolean(
+  mode.value === 'view'
+  || !canEditProduct.value
+  || !versionEditable.value,
+))
 
 function updateBom(items: BomItem[]) {
   const nextIds = new Set(items.flatMap((item) => item.id ? [item.id] : []))
@@ -101,16 +125,76 @@ function updateBom(items: BomItem[]) {
   form.bom_items = items
 }
 
-useUnsavedChangesGuard(hasUnsavedChanges)
+useUnsavedChangesGuard(versionDirty)
 
-async function loadVersion(version?: number) {
-  if (!productId.value) return
-  const product = await store.loadProduct(productId.value, version)
-  applyProduct(product)
-  currentVersion.value = product.current_version
-  editorReady.value = true
-  markSaved(['base', 'bom', 'flow'])
-  await router.replace({ query: version ? { version: String(version) } : {} })
+async function enterEditMode() {
+  await router.replace({
+    query: { mode: 'edit', ...(form.version ? { version: String(form.version) } : {}) },
+  })
+}
+
+async function returnViewMode() {
+  if (versionDirty.value) {
+    try {
+      await ElMessageBox.confirm('当前版本 BOM 或流程有未保存内容，返回查看会丢失修改，是否继续？', '未保存修改', {
+        type: 'warning',
+        confirmButtonText: '返回查看',
+        cancelButtonText: '继续编辑',
+      })
+    } catch {
+      return
+    }
+    if (form.version) await loadProductVersion(form.version)
+  }
+  await router.replace({
+    query: { mode: 'view', ...(form.version ? { version: String(form.version) } : {}) },
+  })
+}
+
+async function createVersion() {
+  if (!productId.value || form.revision === null || !selectedVersion.value) return
+  if (versionDirty.value) {
+    ElMessage.warning('当前版本 BOM 或流程有未保存内容，请先保存后再创建新版本')
+    return
+  }
+  try {
+    const product = await store.createVersion(productId.value, form.revision, selectedVersion.value)
+    await reloadVersions()
+    await loadProductVersion(product.version)
+    ElMessage.success(`已创建 V${product.version}`)
+  } catch (error) {
+    ElMessage.error(getApiErrorDetail(error)?.message || '创建新版本失败')
+  }
+}
+
+async function deleteSelectedVersion() {
+  if (!productId.value || !selectedVersion.value || form.revision === null) return
+  if (versionDirty.value) {
+    ElMessage.warning('当前版本 BOM 或流程有未保存内容，请先保存或切换查看模式后再删除版本')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确认删除 V${selectedVersion.value}？该版本的 BOM 和流程图会一起删除。`,
+      '删除产品版本',
+      { type: 'warning', confirmButtonText: '删除' },
+    )
+  } catch {
+    return
+  }
+  try {
+    const product = await store.removeProductVersion(productId.value, selectedVersion.value, form.revision)
+    if (!product) {
+      ElMessage.success('产品已删除')
+      await router.replace('/products')
+      return
+    }
+    await reloadVersions()
+    await loadProductVersion(product.version)
+    ElMessage.success('版本已删除')
+  } catch (error) {
+    ElMessage.error(getApiErrorDetail(error)?.message || '版本删除失败')
+  }
 }
 
 onMounted(async () => {
@@ -119,9 +203,9 @@ onMounted(async () => {
     return
   }
   try {
-    versions.value = await queryProductVersions(productId.value)
+    await reloadVersions()
     const requestedVersion = Number(route.query.version)
-    await loadVersion(Number.isInteger(requestedVersion) && requestedVersion > 0
+    await loadProductVersion(Number.isInteger(requestedVersion) && requestedVersion > 0
       ? requestedVersion
       : undefined)
   } catch {
@@ -135,18 +219,43 @@ onMounted(async () => {
   <main class="editor-page">
     <header class="editor-header">
       <div>
-        <div class="page-kicker">工程部 / {{ productId ? '编辑产品' : '录入产品' }}</div>
-        <h1>{{ productId ? form.product_name || '编辑产品' : '录入新产品' }}</h1>
+        <div class="page-kicker">工程部 / {{ productId ? mode === 'view' ? '查看产品' : '编辑产品' : '录入产品' }}</div>
+        <h1>{{ productId ? form.product_name || (mode === 'view' ? '查看产品' : '编辑产品') : '录入新产品' }}</h1>
       </div>
-      <div>
+      <div class="editor-actions">
         <ElSelect
           v-if="productId"
           :model-value="form.version"
-          style="width: 110px; margin-right: 10px"
-          @change="loadVersion"
+          style="width: 110px"
+          @change="switchVersion"
         >
           <ElOption v-for="version in versions" :key="version" :label="`V${version}`" :value="version" />
         </ElSelect>
+        <ElButton
+          v-if="productId && mode === 'view' && canEditProduct"
+          type="primary"
+          plain
+          @click="enterEditMode"
+        >进入编辑</ElButton>
+        <ElButton
+          v-if="productId && mode === 'edit'"
+          plain
+          @click="returnViewMode"
+        >返回查看</ElButton>
+        <ElButton
+          type="primary"
+          v-if="productId && mode === 'edit' && canEditProduct"
+          :loading="store.saving"
+          @click="createVersion"
+        >基于此版本创建新版</ElButton>
+        <ElButton
+          v-if="productId && mode === 'edit'"
+          v-permission="PRODUCT_PERMISSIONS.delete"
+          type="danger"
+          plain
+          :loading="store.saving"
+          @click="deleteSelectedVersion"
+        >删除当前版本</ElButton>
         <ElButton @click="router.push('/products')">返回列表</ElButton>
         <ElButton
           v-if="!productId"
@@ -159,32 +268,59 @@ onMounted(async () => {
 
     <section class="editor-card basic-section">
       <div class="section-heading">
-        <div><h2>产品基础信息</h2><span>所有字段均为必填</span></div>
-        <ElButton v-if="productId && !readOnly" type="primary" plain :disabled="!baseDirty" :loading="store.saving" @click="saveBase">保存基础信息</ElButton>
+        <div>
+          <h2>产品基础信息</h2>
+          <span>产品级资料，所有版本共享；创建订单后不可修改。</span>
+        </div>
       </div>
-      <ElForm ref="baseFormRef" :model="form" :rules="baseRules" :disabled="readOnly" label-position="top">
+      <ElAlert
+        v-if="productId && !baseInfoEditable"
+        class="section-alert"
+        title="产品基础信息为共享资料，已有订单引用后固定为只读。"
+        type="info"
+        :closable="false"
+      />
+      <ElForm ref="baseFormRef" :model="form" :rules="baseRules" :disabled="baseReadOnly" label-position="top">
         <div class="form-grid">
-          <ElFormItem prop="customer_name" label="客户名称"><ElInput v-model="form.customer_name" /></ElFormItem>
+          <ElFormItem prop="factory_code" label="厂编"><ElInput v-model="form.factory_code" /></ElFormItem>
           <ElFormItem prop="product_name" label="产品名称"><ElInput v-model="form.product_name" /></ElFormItem>
-          <ElFormItem prop="factory_code" label="产品的本厂型号"><ElInput v-model="form.factory_code" /></ElFormItem>
-          <ElFormItem prop="customer_code" label="产品的客户型号"><ElInput v-model="form.customer_code" /></ElFormItem>
+          <ElFormItem prop="customer_name" label="客户名称"><ElInput v-model="form.customer_name" /></ElFormItem>
+          <ElFormItem prop="customer_code" label="客编"><ElInput v-model="form.customer_code" /></ElFormItem>
         </div>
       </ElForm>
     </section>
 
     <section class="editor-card">
       <div class="section-action">
-        <ElButton v-if="productId && !readOnly" type="primary" plain :disabled="!bomDirty" :loading="store.saving" @click="saveBom">保存 BOM</ElButton>
+        <ElButton v-if="productId && !versionReadOnly" type="primary" plain :disabled="!bomDirty" :loading="store.saving" @click="saveBom">保存 BOM</ElButton>
       </div>
-      <div :class="{ 'read-only-content': readOnly }"><BomEditor :model-value="form.bom_items" @update:model-value="updateBom" /></div>
+      <ElAlert
+        v-if="productId && mode === 'edit' && !versionEditable"
+        class="section-alert"
+        title="当前版本已被订单或生产记录引用，BOM 不可修改。请基于此版本创建新版后修改。"
+        type="warning"
+        :closable="false"
+      />
+      <div><BomEditor :model-value="form.bom_items" :readonly="versionReadOnly" @update:model-value="updateBom" /></div>
     </section>
 
     <section class="editor-card">
       <ElAlert v-if="!productId" title="请先保存产品基础信息和 BOM，再配置工序流程" type="info" :closable="false" show-icon />
       <template v-else-if="editorReady">
-        <ElAlert v-if="readOnly" title="历史版本为只读" type="info" :closable="false" />
-        <div v-if="!readOnly" class="section-action"><ElButton type="primary" plain :disabled="!flowDirty" :loading="store.saving" @click="saveFlow">保存工序流程</ElButton></div>
-        <div :class="{ 'read-only-content': readOnly }"><ProcessFlowEditor ref="flowEditor" v-model="form.process_flow" :bom-items="form.bom_items" /></div>
+        <ElAlert v-if="mode === 'view'" title="查看模式为只读" type="info" :closable="false" />
+        <ElAlert
+          v-else-if="!versionEditable"
+          title="当前版本已被订单或生产记录引用，工序流程不可修改。请基于此版本创建新版后修改。"
+          type="warning"
+          :closable="false"
+        />
+        <div v-if="!versionReadOnly" class="section-action"><ElButton type="primary" plain :disabled="!flowDirty" :loading="store.saving" @click="saveFlow">保存工序流程</ElButton></div>
+        <ProcessFlowEditor
+          ref="flowEditor"
+          v-model="form.process_flow"
+          :bom-items="form.bom_items"
+          :readonly="versionReadOnly"
+        />
       </template>
       <div v-else v-loading="true" class="flow-loading">正在加载流程图</div>
     </section>
@@ -196,6 +332,8 @@ onMounted(async () => {
 .editor-header, .editor-card { border: 1px solid var(--erp-border); border-radius: 10px; background: #fff; box-shadow: var(--erp-shadow-sm); }
 .editor-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; padding: 18px 22px; }
 .editor-header h1 { margin: 5px 0 0; font-size: 23px; }
+.editor-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
+.editor-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
 .editor-card { margin-bottom: 18px; padding: 20px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }

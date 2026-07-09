@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { BomItem } from '../domain/types'
 
-const props = defineProps<{ modelValue: BomItem[] }>()
+const props = defineProps<{ modelValue: BomItem[]; readonly?: boolean }>()
 const emit = defineEmits<{ 'update:modelValue': [value: BomItem[]] }>()
 
 function update(index: number, field: keyof BomItem, value: string | number | undefined) {
+  if (props.readonly) return
   const rows = props.modelValue.map((item) => ({ ...item }))
   const row = rows[index]
   if (!row) return
@@ -13,6 +14,7 @@ function update(index: number, field: keyof BomItem, value: string | number | un
 }
 
 function addRow() {
+  if (props.readonly) return
   emit('update:modelValue', [
     ...props.modelValue,
     { part_name: '', part_no: '', pcs: 1, remark: '' },
@@ -20,6 +22,7 @@ function addRow() {
 }
 
 function removeRow(index: number) {
+  if (props.readonly) return
   emit('update:modelValue', props.modelValue.filter((_, itemIndex) => itemIndex !== index))
 }
 
@@ -45,7 +48,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
         <h2>BOM 明细</h2>
         <p>配件名称、配件编号和用量必填；保存后可拖入流程图。</p>
       </div>
-      <ElButton type="primary" plain @click="addRow">新增 BOM 行</ElButton>
+      <ElButton v-if="!readonly" type="primary" plain @click="addRow">新增 BOM 行</ElButton>
     </div>
     <ElTable :data="modelValue" border empty-text="请新增至少一条 BOM 明细">
       <ElTableColumn type="index" label="#" width="54" />
@@ -54,6 +57,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
           <ElFormItem :error="fieldError($index, 'part_name')">
             <ElInput
               :model-value="row.part_name"
+              :disabled="readonly"
               placeholder="例如：主体"
               @update:model-value="update($index, 'part_name', $event)"
             />
@@ -65,6 +69,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
           <ElFormItem :error="fieldError($index, 'part_no')">
             <ElInput
               :model-value="row.part_no"
+              :disabled="readonly"
               placeholder="例如：Z8412-01"
               @update:model-value="update($index, 'part_no', $event)"
             />
@@ -76,6 +81,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
           <ElFormItem :error="fieldError($index, 'pcs')">
             <ElInputNumber
               :model-value="row.pcs"
+              :disabled="readonly"
               :min="1"
               :step="1"
               :precision="0"
@@ -89,12 +95,13 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
         <template #default="{ row, $index }">
           <ElInput
             :model-value="row.remark"
+            :disabled="readonly"
             placeholder="可为空"
             @update:model-value="update($index, 'remark', $event)"
           />
         </template>
       </ElTableColumn>
-      <ElTableColumn label="操作" width="84" fixed="right">
+      <ElTableColumn v-if="!readonly" label="操作" width="84" fixed="right">
         <template #default="{ $index }">
           <ElButton type="danger" link @click="removeRow($index)">删除</ElButton>
         </template>

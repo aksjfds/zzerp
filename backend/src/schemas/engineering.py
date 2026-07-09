@@ -98,11 +98,13 @@ class UpdateProductPayload(ProductFields):
 
 class ReplaceBomPayload(ContractModel):
     expected_revision: int = Field(gt=0)
+    product_version: int = Field(gt=0)
     bom_items: list[BomItemPayload] = Field(min_length=1, max_length=1000)
 
 
 class UpdateProcessFlowPayload(ContractModel):
     expected_revision: int = Field(gt=0)
+    product_version: int = Field(gt=0)
     process_flow: ProcessFlowPayload
 
 
@@ -131,6 +133,8 @@ class ProductDetailResponse(ProductFields):
     version: int
     current_version: int
     revision: int
+    base_info_editable: bool
+    version_editable: bool
     bom_items: list[BomItemResponse]
     process_flow: ProcessFlowPayload
     created_at: str

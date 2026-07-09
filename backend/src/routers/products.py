@@ -15,6 +15,7 @@ from services.engineering_product_commands import (
     create_product_version,
     create_product,
     delete_product,
+    delete_product_version,
     replace_product_bom,
     update_product_info,
     update_product_process_flow,
@@ -61,9 +62,21 @@ def product_versions(
 def product_version_create(
     product_id: int,
     expected_revision: int = Query(gt=0),
+    source_version: int | None = Query(default=None, gt=0),
     _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
 ):
-    return {"data": create_product_version(product_id, expected_revision)}
+    return {"data": create_product_version(product_id, expected_revision, source_version)}
+
+
+@router.delete("/{product_id}/versions/{product_version}")
+def product_version_delete(
+    product_id: int,
+    product_version: int,
+    expected_revision: int = Query(gt=0),
+    _user: dict = Depends(require_any_permission(PRODUCT_DELETE, csrf=True)),
+):
+    product = delete_product_version(product_id, product_version, expected_revision)
+    return {"data": product}
 
 
 @router.post(
@@ -97,6 +110,7 @@ def product_bom_replace(
         "data": replace_product_bom(
             product_id,
             payload.expected_revision,
+            payload.product_version,
             payload.bom_items,
         )
     }
@@ -112,6 +126,7 @@ def product_process_flow_update(
         "data": update_product_process_flow(
             product_id,
             payload.expected_revision,
+            payload.product_version,
             payload.process_flow,
         )
     }

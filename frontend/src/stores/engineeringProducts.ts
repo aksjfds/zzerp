@@ -4,6 +4,7 @@ import {
   createProduct as createProductApi,
   createProductVersion as createProductVersionApi,
   deleteProduct as deleteProductApi,
+  deleteProductVersion as deleteProductVersionApi,
   queryProduct,
   queryProducts,
   replaceProductBom,
@@ -69,17 +70,27 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     })
   }
 
-  async function saveProductBom(productId: number, revision: number, bomItems: BomItem[]) {
+  async function saveProductBom(
+    productId: number,
+    revision: number,
+    productVersion: number,
+    bomItems: BomItem[],
+  ) {
     return withSaving(async () => {
-      const product = await replaceProductBom(productId, revision, bomItems)
+      const product = await replaceProductBom(productId, revision, productVersion, bomItems)
       commitActive(product)
       return product
     })
   }
 
-  async function saveProcessFlow(productId: number, revision: number, flow: ProcessFlow) {
+  async function saveProcessFlow(
+    productId: number,
+    revision: number,
+    productVersion: number,
+    flow: ProcessFlow,
+  ) {
     return withSaving(async () => {
-      const product = await updateProductProcessFlow(productId, revision, flow)
+      const product = await updateProductProcessFlow(productId, revision, productVersion, flow)
       commitActive(product)
       return product
     })
@@ -92,11 +103,29 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     productTotal.value = Math.max(productTotal.value - 1, 0)
   }
 
-  async function createVersion(productId: number, expectedRevision: number) {
+  async function createVersion(productId: number, expectedRevision: number, sourceVersion?: number) {
     return withSaving(async () => {
-      const product = await createProductVersionApi(productId, expectedRevision)
+      const product = await createProductVersionApi(productId, expectedRevision, sourceVersion)
       commitActive(product)
       return product
+    })
+  }
+
+  async function removeProductVersion(
+    productId: number,
+    productVersion: number,
+    expectedRevision: number,
+  ) {
+    return withSaving(async () => {
+      const product = await deleteProductVersionApi(productId, productVersion, expectedRevision)
+      if (product) {
+        commitActive(product)
+        return product
+      }
+      if (activeProduct.value?.id === productId) activeProduct.value = null
+      products.value = products.value.filter((item) => item.id !== productId)
+      productTotal.value = Math.max(productTotal.value - 1, 0)
+      return null
     })
   }
 
@@ -136,6 +165,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     products,
     productTotal,
     removeProduct,
+    removeProductVersion,
     saveProcessFlow,
     saveProductBom,
     saveProductInfo,
