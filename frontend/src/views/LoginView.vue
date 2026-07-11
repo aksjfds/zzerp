@@ -13,7 +13,9 @@ const loginForm = reactive({
   password: '',
 })
 
-function getDefaultDashboardPath(department?: string) {
+function getDefaultDashboardPath(user: { username: string; department?: string; role?: string }) {
+  if (user.username === 'admin' || user.role === 'admin') return '/admin'
+  const department = user.department
   if (department === 'business') return '/business/orders'
   if (['stamp', 'polish', 'qc', 'assembly'].includes(department ?? '')) return `/${department}`
   return department ? '/products' : '/login'
@@ -27,7 +29,7 @@ async function submitLogin() {
 
   try {
     const user = await authStore.login(loginForm)
-    const defaultPath = getDefaultDashboardPath(user.department)
+    const defaultPath = getDefaultDashboardPath(user)
     const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : defaultPath
     router.replace(redirect)
   } catch {

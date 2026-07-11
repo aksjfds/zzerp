@@ -14,6 +14,7 @@ import {
 } from '../api/customerOrders'
 import type { CustomerOrder } from '../domain/types'
 
+const props = defineProps<{ embedded?: boolean }>()
 const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(false)
@@ -84,8 +85,8 @@ onMounted(loadOrders)
 </script>
 
 <template>
-  <main class="page-shell">
-    <header class="page-header">
+  <main class="page-shell" :class="{ embedded: props.embedded }">
+    <header v-if="!props.embedded" class="page-header">
       <div><span>业务部</span><h1>客户订单</h1></div>
       <div>
         <ElButton @click="logout">退出登录</ElButton>
@@ -93,7 +94,7 @@ onMounted(loadOrders)
         <ElButton v-permission="ORDER_PERMISSIONS.add" type="primary" @click="router.push('/business/orders/new')">创建客户订单</ElButton>
       </div>
     </header>
-    <section class="content-card">
+    <section class="content-card" :class="{ embedded: props.embedded }">
       <ElInput v-model="keyword" clearable placeholder="搜索当前页的订单编号或客户" class="search" />
       <ElTable v-loading="loading" :data="filteredOrders" border>
         <ElTableColumn prop="customer_name" label="客户名称" />
@@ -136,11 +137,13 @@ onMounted(loadOrders)
 
 <style scoped>
 .page-shell { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
+.page-shell.embedded { min-height: auto; padding: 0; background: transparent; }
 .page-header, .content-card { border: 1px solid var(--erp-border); border-radius: 10px; background: white; box-shadow: var(--erp-shadow-sm); }
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 20px 24px; }
 .page-header span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
 .page-header h1 { margin: 5px 0 0; }
 .content-card { padding: 20px; }
+.content-card.embedded { border: 0; box-shadow: none; padding: 0; }
 .search { width: 360px; margin-bottom: 16px; }
 .pagination { justify-content: flex-end; margin-top: 16px; }
 </style>

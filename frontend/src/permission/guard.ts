@@ -1,7 +1,11 @@
 import type { Router } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import type { UserProfile } from '@/types/auth'
 
-function getDefaultDashboardPath(department?: string) {
+function getDefaultDashboardPath(user?: UserProfile | null) {
+  if (!user) return '/login'
+  if (user.username === 'admin' || user.role === 'admin') return '/admin'
+  const department = user.department
   if (department === 'business') return '/business/orders'
   if (['stamp', 'polish', 'qc', 'assembly'].includes(department ?? '')) {
     return `/${department}`
@@ -27,7 +31,7 @@ export function setupRouterGuard(router: Router) {
     }
 
     if (to.path === '/login' && authStore.isLoggedIn) {
-      return getDefaultDashboardPath(authStore.department)
+      return getDefaultDashboardPath(authStore.user)
     }
 
     const permissions = to.meta.permissions as string[] | undefined

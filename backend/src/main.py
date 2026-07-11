@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from config import get_settings
 from domain.errors import DomainViolation
-from routers import auth, customer_orders, organization, production, products
+from routers import admin, auth, customer_orders, organization, production, products
 from services.errors import DomainError
 
 app = FastAPI(title="zzerp")
@@ -80,6 +80,7 @@ async def validate_request_origin(request: Request, call_next):
 
 
 app.include_router(auth.router)
+app.include_router(admin.router)
 app.include_router(products.router)
 app.include_router(organization.router)
 app.include_router(customer_orders.router)

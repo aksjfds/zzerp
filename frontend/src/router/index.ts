@@ -12,6 +12,7 @@ import StampDepartmentView from '@/features/production/views/StampDepartmentView
 import PolishDepartmentView from '@/features/production/views/PolishDepartmentView.vue'
 import QcDepartmentView from '@/features/production/views/QcDepartmentView.vue'
 import AssemblyDepartmentView from '@/features/production/views/AssemblyDepartmentView.vue'
+import AdminDashboardView from '@/features/admin/views/AdminDashboardView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -34,6 +35,12 @@ const router = createRouter({
     {
       path: '/assembly', name: 'assembly-department', component: AssemblyDepartmentView,
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
+    },
+    {
+      path: '/admin',
+      name: 'admin-dashboard',
+      component: AdminDashboardView,
+      meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view, PRODUCTION_PERMISSIONS.view] },
     },
     {
       path: '/business/orders',
