@@ -1,7 +1,7 @@
 import { ref, type ComputedRef, type Ref } from 'vue'
 import type { Router } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
-import type { useEngineeringProductsStore } from '@/stores/engineeringProducts'
+import type { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { queryProductVersions } from '../api/engineeringProducts'
 import type { EngineeringProduct } from '../domain/types'
 

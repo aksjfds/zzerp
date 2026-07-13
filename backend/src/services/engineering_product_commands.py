@@ -1,13 +1,10 @@
 from datetime import datetime
-from copy import deepcopy
-
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
 from database import SessionLocal
 from domain.engineering_products import validate_bom_identity, validate_expected_revision
-from domain.models import BomItemCommand
 from models.engineering import Product
 from models.organization import Procedure
 from repositories.engineering_products import EngineeringProductRepository
@@ -17,7 +14,7 @@ from schemas.engineering import (
     ProcessFlowPayload,
     UpdateProductPayload,
 )
-from services.engineering_product_mapper import serialize_product_detail
+from services.engineering_product_command_support import command_result, ensure_version_exists
 from services.engineering_product_editability import (
     ensure_base_info_editable,
     ensure_product_version_editable,
@@ -31,25 +28,6 @@ from services.engineering_product_support import (
 )
 from services.errors import DomainError, product_not_found
 from services.process_flow_mapping import synchronize_part_metadata
-
-
-def _result(
-    repository: EngineeringProductRepository,
-    product: Product,
-    requested_version: int | None = None,
-) -> dict:
-    repository.flush()
-    return serialize_product_detail(product, empty_process_flow(), requested_version)
-
-
-def _ensure_version_exists(product: Product, product_version: int) -> None:
-    versions = {
-        item.product_version for item in product.bom_items
-    } | {
-        item.product_version for item in product.process_flows
-    }
-    if product_version not in versions:
-        raise product_not_found()
 
 def _ensure_procedures_exist(session, flow: ProcessFlowPayload) -> None:
     procedure_ids = {
@@ -84,7 +62,7 @@ def create_product(payload: CreateProductPayload) -> dict:
             repository.flush()
             repository.replace_bom(product, product.version, items)
             repository.set_process_flow(product, product.version, empty_process_flow())
-            return _result(repository, product)
+            return command_result(repository, product)
     except IntegrityError as exc:
         raise_integrity_error(exc)
 
@@ -105,7 +83,7 @@ def update_product_info(product_id: int, payload: UpdateProductPayload) -> dict:
                 and product.customer_code == payload.customer_code
             )
             if unchanged:
-                return _result(repository, product)
+                return command_result(repository, product)
             ensure_base_info_editable(session, product.id)
             product.customer_name = payload.customer_name
             product.product_name = payload.product_name
@@ -113,12 +91,11 @@ def update_product_info(product_id: int, payload: UpdateProductPayload) -> dict:
             product.customer_code = payload.customer_code
             product.updated_at = datetime.now()
             product.revision += 1
-            return _result(repository, product)
+            return command_result(repository, product)
     except IntegrityError as exc:
         raise_integrity_error(exc)
     except StaleDataError as exc:
         raise_stale_data_error(exc)
-
 
 def replace_product_bom(
     product_id: int,
@@ -134,7 +111,7 @@ def replace_product_bom(
                 raise product_not_found()
             session.refresh(product, with_for_update=True)
             validate_expected_revision(product.revision, expected_revision)
-            _ensure_version_exists(product, product_version)
+            ensure_version_exists(product, product_version)
             ensure_product_version_editable(session, product.id, product_version)
             commands = bom_commands(items)
             retained_ids = validate_bom_identity(
@@ -172,7 +149,7 @@ def replace_product_bom(
                 )
             product.updated_at = datetime.now()
             product.revision += 1
-            return _result(repository, product, product_version)
+            return command_result(repository, product, product_version)
     except IntegrityError as exc:
         raise_integrity_error(exc)
     except StaleDataError as exc:
@@ -193,7 +170,7 @@ def update_product_process_flow(
                 raise product_not_found()
             session.refresh(product, with_for_update=True)
             validate_expected_revision(product.revision, expected_revision)
-            _ensure_version_exists(product, product_version)
+            ensure_version_exists(product, product_version)
             ensure_product_version_editable(session, product.id, product_version)
             flow = synchronize_part_metadata(
                 process_flow,
@@ -218,7 +195,7 @@ def update_product_process_flow(
             )
             product.updated_at = datetime.now()
             product.revision += 1
-            return _result(repository, product, product_version)
+            return command_result(repository, product, product_version)
     except IntegrityError as exc:
         raise_integrity_error(exc)
     except StaleDataError as exc:
@@ -243,118 +220,3 @@ def delete_product(product_id: int, expected_revision: int) -> None:
         ) from exc
     except StaleDataError as exc:
         raise_stale_data_error(exc)
-
-
-def delete_product_version(
-    product_id: int,
-    product_version: int,
-    expected_revision: int,
-) -> dict | None:
-    try:
-        with SessionLocal.begin() as session:
-            repository = EngineeringProductRepository(session)
-            product = repository.get(product_id)
-            if product is None:
-                raise product_not_found()
-            session.refresh(product, with_for_update=True)
-            validate_expected_revision(product.revision, expected_revision)
-            versions = sorted(
-                {
-                    item.product_version for item in product.bom_items
-                } | {
-                    item.product_version for item in product.process_flows
-                }
-            )
-            if product_version not in versions:
-                raise product_not_found()
-            ensure_product_version_editable(session, product.id, product_version)
-            if len(versions) == 1:
-                repository.delete(product)
-                return None
-
-            for item in list(product.bom_items):
-                if item.product_version == product_version:
-                    product.bom_items.remove(item)
-            for item in list(product.process_flows):
-                if item.product_version == product_version:
-                    product.process_flows.remove(item)
-            remaining_versions = [version for version in versions if version != product_version]
-            product.version = max(remaining_versions)
-            product.revision += 1
-            product.updated_at = datetime.now()
-            return _result(repository, product)
-    except IntegrityError as exc:
-        raise DomainError(
-            "product_version_in_use",
-            "当前产品版本已被订单或生产数据引用，不能删除",
-            status_code=409,
-        ) from exc
-    except StaleDataError as exc:
-        raise_stale_data_error(exc)
-
-
-def create_product_version(
-    product_id: int,
-    expected_revision: int,
-    source_version: int | None = None,
-) -> dict:
-    try:
-        with SessionLocal.begin() as session:
-            repository = EngineeringProductRepository(session)
-            product = repository.get(product_id)
-            if product is None:
-                raise product_not_found()
-            session.refresh(product, with_for_update=True)
-            validate_expected_revision(product.revision, expected_revision)
-            copy_from_version = source_version or product.version
-            available_versions = {
-                item.product_version for item in product.bom_items
-            } | {
-                item.product_version for item in product.process_flows
-            }
-            if copy_from_version not in available_versions:
-                raise product_not_found()
-            next_version = max(available_versions | {product.version}) + 1
-            source_items = [
-                item
-                for item in product.bom_items
-                if item.product_version == copy_from_version
-            ]
-            copied_items = repository.replace_bom(
-                product,
-                next_version,
-                [
-                    BomItemCommand(
-                        id=None,
-                        part_name=item.part_name,
-                        part_no=item.part_no,
-                        pcs=item.pcs,
-                        remark=item.remark,
-                    )
-                    for item in source_items
-                ],
-            )
-            repository.flush()
-            id_map = {
-                source.id: copied.id
-                for source, copied in zip(source_items, copied_items, strict=True)
-            }
-            source_flow = next(
-                (
-                    item.flow_json
-                    for item in product.process_flows
-                    if item.product_version == copy_from_version
-                ),
-                empty_process_flow(),
-            )
-            copied_flow = deepcopy(source_flow)
-            for node in copied_flow.get("nodes", []):
-                if node.get("type") == "part":
-                    node["bom_item_id"] = id_map[node["bom_item_id"]]
-            repository.set_process_flow(product, next_version, copied_flow)
-            product.version = next_version
-            product.revision += 1
-            product.updated_at = datetime.now()
-            return _result(repository, product)
-    except IntegrityError as exc:
-        raise_integrity_error(exc)

@@ -1,27 +1,5 @@
 import { service } from '@/api/request'
-import type {
-  PendingQcBatch,
-  QcInspectionPayload,
-  RepositoryItem,
-  WorkOrder,
-  WorkOrderBatch,
-  WorkerItem,
-} from '../domain/types'
-
-export async function queryDepartmentRepositories(
-  departmentCode: string,
-) {
-  const response = await service.get<{ data: RepositoryItem[]; total: number }>(
-    `/departments/${departmentCode}/repositories`,
-    {
-      params: {
-        page: 1,
-        page_size: 10000,
-      },
-    },
-  )
-  return { items: response.data.data, total: response.data.total }
-}
+import type { WorkOrder } from '../domain/types'
 
 export async function queryDepartmentWorkOrders(
   departmentCode: string,
@@ -34,13 +12,6 @@ export async function queryDepartmentWorkOrders(
     { params: { page, page_size: pageSize, production_item_id: productionItemId || undefined } },
   )
   return { items: response.data.data, total: response.data.total }
-}
-
-export async function queryDepartmentWorkers(departmentCode: string) {
-  const response = await service.get<{ data: WorkerItem[] }>(
-    `/departments/${departmentCode}/workers`,
-  )
-  return response.data.data
 }
 
 export async function createWorkOrder(
@@ -80,26 +51,6 @@ export async function submitWorkOrder(workOrderId: number, quantity: number) {
 export async function cancelWorkOrder(workOrderId: number) {
   const response = await service.post<{ data: WorkOrder }>(
     `/work-orders/${workOrderId}/cancel`,
-  )
-  return response.data.data
-}
-
-export async function queryPendingQcBatches(
-  page = 1,
-  pageSize = 50,
-  productionItemId?: number | null,
-) {
-  const response = await service.get<{ data: PendingQcBatch[]; total: number }>(
-    '/qc/work-order-batches',
-    { params: { page, page_size: pageSize, production_item_id: productionItemId || undefined } },
-  )
-  return { items: response.data.data, total: response.data.total }
-}
-
-export async function inspectQcBatch(batchId: number, payload: QcInspectionPayload) {
-  const response = await service.post<{ data: WorkOrderBatch }>(
-    `/qc/work-order-batches/${batchId}/inspection`,
-    payload,
   )
   return response.data.data
 }

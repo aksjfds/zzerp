@@ -3,7 +3,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import {
   cancelWorkOrder, queryDepartmentWorkOrders, submitWorkOrder,
-} from '../api/repositories'
+} from '../api/workOrders'
 import type { WorkOrder } from '../domain/types'
 
 export function useWorkOrderList(

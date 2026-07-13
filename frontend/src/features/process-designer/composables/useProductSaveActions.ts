@@ -2,7 +2,7 @@ import type { Ref } from 'vue'
 import type { Router } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import type { useEngineeringProductsStore } from '@/stores/engineeringProducts'
+import type { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import {
   synchronizeFlowPartMetadata,
   synchronizeAssemblyNames,
@@ -13,7 +13,7 @@ import {
   type ProductForm,
 } from '../domain/types'
 
-type FlowEditorApi = {
+export type FlowEditorApi = {
   focusElement: (elementId?: string) => void
   getGraphData: () => ProcessFlow
   reload: (flow: ProcessFlow) => void

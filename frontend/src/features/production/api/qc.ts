@@ -1,0 +1,26 @@
+import { service } from '@/api/request'
+import type {
+  PendingQcBatch,
+  QcInspectionPayload,
+  WorkOrderBatch,
+} from '../domain/types'
+
+export async function queryPendingQcBatches(
+  page = 1,
+  pageSize = 50,
+  productionItemId?: number | null,
+) {
+  const response = await service.get<{ data: PendingQcBatch[]; total: number }>(
+    '/qc/work-order-batches',
+    { params: { page, page_size: pageSize, production_item_id: productionItemId || undefined } },
+  )
+  return { items: response.data.data, total: response.data.total }
+}
+
+export async function inspectQcBatch(batchId: number, payload: QcInspectionPayload) {
+  const response = await service.post<{ data: WorkOrderBatch }>(
+    `/qc/work-order-batches/${batchId}/inspection`,
+    payload,
+  )
+  return response.data.data
+}

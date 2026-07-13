@@ -199,7 +199,10 @@ function resolveAnchor(
   return directionalAnchor(anchors, node, opposite)
 }
 
-function nodeAnchors(node: FlowNode): Array<{ id: string; point: FlowPoint }> {
+type NodeAnchor = { id: string; point: FlowPoint }
+type NodeAnchors = [NodeAnchor, NodeAnchor, NodeAnchor, NodeAnchor]
+
+function nodeAnchors(node: FlowNode): NodeAnchors {
   const size = NODE_SIZE[node.type]
   return [
     { id: `${node.id}_0`, point: { x: node.x, y: node.y - size.halfHeight } },
@@ -210,7 +213,7 @@ function nodeAnchors(node: FlowNode): Array<{ id: string; point: FlowPoint }> {
 }
 
 function nearestAnchor(
-  anchors: Array<{ id: string; point: FlowPoint }>,
+  anchors: NodeAnchor[],
   point: FlowPoint,
 ): { id: string; point: FlowPoint } {
   return anchors.reduce((best, anchor) => (
@@ -219,7 +222,7 @@ function nearestAnchor(
 }
 
 function directionalAnchor(
-  anchors: Array<{ id: string; point: FlowPoint }>,
+  anchors: NodeAnchors,
   node: FlowNode,
   opposite: FlowNode,
 ): { id: string; point: FlowPoint } {

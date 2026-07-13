@@ -3,7 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { useEngineeringProductsStore } from '@/stores/engineeringProducts'
+import { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 
 const router = useRouter()

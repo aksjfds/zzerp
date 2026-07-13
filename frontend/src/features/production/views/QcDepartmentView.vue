@@ -1,70 +1,25 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { getApiErrorDetail } from '@/api/request'
+import { onMounted } from 'vue'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
 import QcBatchCards from '../components/QcBatchCards.vue'
 import QcInspectionDialog from '../components/QcInspectionDialog.vue'
-import { useDepartmentWorkspace } from '../composables/useDepartmentWorkspace'
-import { inspectQcBatch, queryPendingQcBatches } from '../api/repositories'
-import type { PendingQcBatch, QcInspectionPayload, RepositoryItem } from '../domain/types'
+import { useQcDepartment } from '../composables/useQcDepartment'
 import '../styles/workspace.css'
 
-const workspace = useDepartmentWorkspace('qc', true)
+const controller = useQcDepartment()
+const { workspace } = controller
 const {
   items, loading, pageSize,
-  repositoryPage, repositoryTotal, selectedProductionItemId, selectedRepository, selectedCardKey, workers,
+  repositoryPage, repositoryTotal, selectedRepository, selectedCardKey, workers,
 } = workspace
-const batches = ref<PendingQcBatch[]>([])
-const activeBatch = ref<PendingQcBatch>()
-const detailLoading = ref(false)
-const historyPage = ref(1)
-const historyTotal = ref(0)
-const dialogVisible = ref(false)
-const submitting = ref(false)
-
-async function loadDetails() {
-  batches.value = []
-  historyTotal.value = 0
-  if (!selectedProductionItemId.value) return
-  detailLoading.value = true
-  try {
-    const result = await queryPendingQcBatches(historyPage.value, pageSize, selectedProductionItemId.value)
-    batches.value = result.items
-    historyTotal.value = result.total
-  } catch { ElMessage.warning('关联质检记录加载失败') }
-  finally { detailLoading.value = false }
-}
-async function loadAll() { await workspace.loadRepositories(); await loadDetails() }
-function selectRepository(item: RepositoryItem) {
-  workspace.selectRepository(item)
-  historyPage.value = 1
-  void loadDetails()
-}
-function openInspection(batch: PendingQcBatch) {
-  activeBatch.value = batch
-  dialogVisible.value = true
-}
-async function saveInspection(payload: QcInspectionPayload) {
-  if (!activeBatch.value) return
-  submitting.value = true
-  try {
-    await inspectQcBatch(activeBatch.value.id, payload)
-    dialogVisible.value = false
-    await loadAll()
-    ElMessage.success('QC 结果已录入')
-  } catch (error) { ElMessage.error(getApiErrorDetail(error)?.message || 'QC 结果录入失败') }
-  finally { submitting.value = false }
-}
-async function refresh() { historyPage.value = 1; await workspace.refresh(); await loadDetails() }
-async function applyFilters(filters: Parameters<typeof workspace.search>[0]) {
-  historyPage.value = 1
-  await workspace.search(filters)
-  await loadDetails()
-}
-onMounted(async () => { await workspace.load(); await loadDetails() })
+const {
+  activeBatch, applyFilters, batches, detailLoading, dialogVisible,
+  historyPage, historyTotal, load, loadDetails, openInspection,
+  refresh, saveInspection, selectRepository, submitting,
+} = controller
+onMounted(load)
 </script>
 
 <template>

@@ -3,6 +3,7 @@ import { reactive } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { getDefaultDashboardPath } from '@/permission/defaultRoute'
 
 const authStore = useAuthStore()
 const route = useRoute()
@@ -12,14 +13,6 @@ const loginForm = reactive({
   username: '',
   password: '',
 })
-
-function getDefaultDashboardPath(user: { username: string; department?: string; role?: string }) {
-  if (user.username === 'admin' || user.role === 'admin') return '/admin'
-  const department = user.department
-  if (department === 'business') return '/business/orders'
-  if (['stamp', 'polish', 'qc', 'assembly'].includes(department ?? '')) return `/${department}`
-  return department ? '/products' : '/login'
-}
 
 async function submitLogin() {
   if (!loginForm.username.trim() || !loginForm.password) {

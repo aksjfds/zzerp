@@ -12,13 +12,15 @@ from schemas.engineering import (
     UpdateProductPayload,
 )
 from services.engineering_product_commands import (
-    create_product_version,
     create_product,
     delete_product,
-    delete_product_version,
     replace_product_bom,
     update_product_info,
     update_product_process_flow,
+)
+from services.engineering_product_versions import (
+    create_product_version,
+    delete_product_version,
 )
 from services.engineering_product_queries import (
     get_product,

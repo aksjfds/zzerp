@@ -5,7 +5,7 @@ from fastapi.responses import JSONResponse
 
 from config import get_settings
 from domain.errors import DomainViolation
-from routers import admin, auth, customer_orders, organization, production, products
+from routers import admin, auth, customer_orders, organization, production, products, qc, work_orders
 from services.errors import DomainError
 
 app = FastAPI(title="zzerp")
@@ -85,6 +85,8 @@ app.include_router(products.router)
 app.include_router(organization.router)
 app.include_router(customer_orders.router)
 app.include_router(production.router)
+app.include_router(work_orders.router)
+app.include_router(qc.router)
 
 
 @app.get("/")

@@ -1,81 +1,82 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { setupRouterGuard } from '@/permission/guard'
-import LoginView from '@/views/LoginView.vue'
-import EngineeringProductsView from '@/features/process-designer/views/EngineeringProductsView.vue'
-import EngineeringProductEditorView from '@/features/process-designer/views/EngineeringProductEditorView.vue'
-import ForbiddenView from '@/views/ForbiddenView.vue'
-import { PRODUCT_PERMISSIONS } from '@/permission/constants'
-import { ORDER_PERMISSIONS, PRODUCTION_PERMISSIONS } from '@/permission/constants'
-import CustomerOrdersView from '@/features/customer-orders/views/CustomerOrdersView.vue'
-import CustomerOrderEditorView from '@/features/customer-orders/views/CustomerOrderEditorView.vue'
-import StampDepartmentView from '@/features/production/views/StampDepartmentView.vue'
-import PolishDepartmentView from '@/features/production/views/PolishDepartmentView.vue'
-import QcDepartmentView from '@/features/production/views/QcDepartmentView.vue'
-import AssemblyDepartmentView from '@/features/production/views/AssemblyDepartmentView.vue'
-import AdminDashboardView from '@/features/admin/views/AdminDashboardView.vue'
+import { ORDER_PERMISSIONS, PRODUCT_PERMISSIONS, PRODUCTION_PERMISSIONS } from '@/permission/constants'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
   routes: [
     { path: '/', redirect: '/login' },
-    { path: '/login', name: 'login', component: LoginView },
-    { path: '/forbidden', name: 'forbidden', component: ForbiddenView, meta: { requiresAuth: true } },
     {
-      path: '/stamp', name: 'stamp-department', component: StampDepartmentView,
+      path: '/login',
+      name: 'login',
+      component: () => import('@/views/LoginView.vue'),
+    },
+    {
+      path: '/forbidden',
+      name: 'forbidden',
+      component: () => import('@/views/ForbiddenView.vue'),
+      meta: { requiresAuth: true },
+    },
+    {
+      path: '/stamp', name: 'stamp-department',
+      component: () => import('@/features/production/views/StampDepartmentView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
-      path: '/polish', name: 'polish-department', component: PolishDepartmentView,
+      path: '/polish', name: 'polish-department',
+      component: () => import('@/features/production/views/PolishDepartmentView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
-      path: '/qc', name: 'qc-department', component: QcDepartmentView,
+      path: '/qc', name: 'qc-department',
+      component: () => import('@/features/production/views/QcDepartmentView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
-      path: '/assembly', name: 'assembly-department', component: AssemblyDepartmentView,
+      path: '/assembly', name: 'assembly-department',
+      component: () => import('@/features/production/views/AssemblyDepartmentView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
       path: '/admin',
       name: 'admin-dashboard',
-      component: AdminDashboardView,
+      component: () => import('@/features/admin/views/AdminDashboardView.vue'),
       meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view, PRODUCTION_PERMISSIONS.view] },
     },
     {
       path: '/business/orders',
       name: 'customer-orders',
-      component: CustomerOrdersView,
+      component: () => import('@/features/customer-orders/views/CustomerOrdersView.vue'),
       meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view] },
     },
     {
       path: '/business/orders/new',
       name: 'customer-order-create',
-      component: CustomerOrderEditorView,
+      component: () => import('@/features/customer-orders/views/CustomerOrderEditorView.vue'),
       meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.add] },
     },
     {
       path: '/business/orders/:orderId(\\d+)',
       name: 'customer-order-edit',
-      component: CustomerOrderEditorView,
+      component: () => import('@/features/customer-orders/views/CustomerOrderEditorView.vue'),
       meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view] },
     },
     {
       path: '/products',
       name: 'engineering-products',
-      component: EngineeringProductsView,
+      component: () => import('@/features/process-designer/views/EngineeringProductsView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.view] },
     },
     {
       path: '/products/new',
       name: 'engineering-product-create',
-      component: EngineeringProductEditorView,
+      component: () => import('@/features/process-designer/views/EngineeringProductEditorView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.add] },
     },
     {
       path: '/products/:productId(\\d+)',
       name: 'engineering-product-edit',
-      component: EngineeringProductEditorView,
+      component: () => import('@/features/process-designer/views/EngineeringProductEditorView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.view] },
     },
   ],

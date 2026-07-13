@@ -1,24 +1,18 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import BomEditor from '../components/BomEditor.vue'
 import ProcessFlowEditor from '../components/ProcessFlowEditor.vue'
-import { type BomItem, type ProcessFlow, type ProductFields } from '../domain/types'
-import { useEngineeringProductsStore } from '@/stores/engineeringProducts'
+import { type BomItem, type ProductFields } from '../domain/types'
+import { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { useAuthStore } from '@/stores/auth'
 import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 import { useProductEditorForm } from '../composables/useProductEditorForm'
-import { useProductSaveActions } from '../composables/useProductSaveActions'
+import { useProductSaveActions, type FlowEditorApi } from '../composables/useProductSaveActions'
 import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
 import { useProductVersionLoader } from '../composables/useProductVersionLoader'
-import { getApiErrorDetail } from '@/api/request'
-
-type FlowEditorApi = {
-  focusElement: (elementId?: string) => void
-  getGraphData: () => ProcessFlow
-  reload: (flow: ProcessFlow) => void
-}
+import { useProductVersionActions } from '../composables/useProductVersionActions'
 
 const route = useRoute()
 const router = useRouter()
@@ -127,75 +121,16 @@ function updateBom(items: BomItem[]) {
 
 useUnsavedChangesGuard(versionDirty)
 
-async function enterEditMode() {
-  await router.replace({
-    query: { mode: 'edit', ...(form.version ? { version: String(form.version) } : {}) },
-  })
-}
-
-async function returnViewMode() {
-  if (versionDirty.value) {
-    try {
-      await ElMessageBox.confirm('当前版本 BOM 或流程有未保存内容，返回查看会丢失修改，是否继续？', '未保存修改', {
-        type: 'warning',
-        confirmButtonText: '返回查看',
-        cancelButtonText: '继续编辑',
-      })
-    } catch {
-      return
-    }
-    if (form.version) await loadProductVersion(form.version)
-  }
-  await router.replace({
-    query: { mode: 'view', ...(form.version ? { version: String(form.version) } : {}) },
-  })
-}
-
-async function createVersion() {
-  if (!productId.value || form.revision === null || !selectedVersion.value) return
-  if (versionDirty.value) {
-    ElMessage.warning('当前版本 BOM 或流程有未保存内容，请先保存后再创建新版本')
-    return
-  }
-  try {
-    const product = await store.createVersion(productId.value, form.revision, selectedVersion.value)
-    await reloadVersions()
-    await loadProductVersion(product.version)
-    ElMessage.success(`已创建 V${product.version}`)
-  } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '创建新版本失败')
-  }
-}
-
-async function deleteSelectedVersion() {
-  if (!productId.value || !selectedVersion.value || form.revision === null) return
-  if (versionDirty.value) {
-    ElMessage.warning('当前版本 BOM 或流程有未保存内容，请先保存或切换查看模式后再删除版本')
-    return
-  }
-  try {
-    await ElMessageBox.confirm(
-      `确认删除 V${selectedVersion.value}？该版本的 BOM 和流程图会一起删除。`,
-      '删除产品版本',
-      { type: 'warning', confirmButtonText: '删除' },
-    )
-  } catch {
-    return
-  }
-  try {
-    const product = await store.removeProductVersion(productId.value, selectedVersion.value, form.revision)
-    if (!product) {
-      ElMessage.success('产品已删除')
-      await router.replace('/products')
-      return
-    }
-    await reloadVersions()
-    await loadProductVersion(product.version)
-    ElMessage.success('版本已删除')
-  } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '版本删除失败')
-  }
-}
+const { createVersion, deleteSelectedVersion, enterEditMode, returnViewMode } = useProductVersionActions({
+  form,
+  loadProductVersion,
+  productId,
+  reloadVersions,
+  router,
+  selectedVersion,
+  store,
+  versionDirty,
+})
 
 onMounted(async () => {
   if (!productId.value) {

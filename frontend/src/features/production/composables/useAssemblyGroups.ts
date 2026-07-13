@@ -29,6 +29,7 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
       grouped.set(key, [...(grouped.get(key) || []), item])
     })
     return [...grouped.entries()].map(([key, groupItems]) => {
+      const firstItem = groupItems[0]!
       const sources = new Map<string, RepositoryItem[]>()
       groupItems.forEach(item => sources.set(
         item.source_flow_node_id,
@@ -39,19 +40,19 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
         items: groupItems,
         capacity: Math.min(...[...sources.values()].map(sourceItems => Math.floor(
           sourceItems.reduce((sum, item) => sum + item.available_quantity, 0)
-            / sourceItems[0].assembly_unit_quantity,
+            / sourceItems[0]!.assembly_unit_quantity,
         ))),
-        productName: groupItems[0].product_name,
+        productName: firstItem.product_name,
         name: `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`,
-        orderNo: groupItems[0].customer_order_no,
+        orderNo: firstItem.customer_order_no,
         status: groupItems.some(item => item.work_status === 'processing')
           ? 'processing'
           : groupItems.every(item => item.work_status === 'completed') ? 'completed' : 'unprocessed',
         arrivedAt: groupItems.map(item => item.arrived_at).filter(Boolean).sort().at(-1) || null,
         sources: [...sources.values()].map(sourceItems => ({
-          name: sourceItems[0].part_name,
+          name: sourceItems[0]!.part_name,
           available: sourceItems.reduce((sum, item) => sum + item.available_quantity, 0),
-          required: sourceItems[0].assembly_unit_quantity,
+          required: sourceItems[0]!.assembly_unit_quantity,
         })),
       }
     })

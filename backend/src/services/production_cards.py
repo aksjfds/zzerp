@@ -1,7 +1,6 @@
-from collections import defaultdict
-from datetime import date, datetime, time, timedelta
+from datetime import date
 
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import select
 
 from database import SessionLocal
 from models.engineering import Product, ProductBom
@@ -16,6 +15,15 @@ from models.production import (
 )
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
+from services.production_card_filters import (
+    filter_and_paginate_assembly_groups,
+    filter_and_paginate_cards,
+)
+from services.production_card_status import (
+    arrival_time,
+    position_status,
+    reserved_quantities,
+)
 from services.production_flow import load_production_flow
 from services.work_order_presenters import production_item_name
 
@@ -41,17 +49,12 @@ def list_production_cards(
         }
         cards.extend(_historical_cards(session, department, current_positions))
         if department_code == "assembly":
-            return _filter_and_paginate_assembly_groups(
+            return filter_and_paginate_assembly_groups(
                 cards, page, page_size, keyword, arrived_from, arrived_to, work_status
             )
-        cards = [
-            item for item in cards
-            if _matches_filters(item, keyword, arrived_from, arrived_to, work_status)
-        ]
-        cards.sort(key=lambda item: (item["arrived_at"] or "", item["card_key"]), reverse=True)
-        total = len(cards)
-        start = (page - 1) * page_size
-        return cards[start:start + page_size], total
+        return filter_and_paginate_cards(
+            cards, page, page_size, keyword, arrived_from, arrived_to, work_status
+        )
 
 
 def _current_cards(session, department: Department) -> list[dict]:
@@ -65,7 +68,7 @@ def _current_cards(session, department: Department) -> list[dict]:
         .where(Repository.department_id == department.id)
     ).all()
     repository_ids = [row.Repository.id for row in rows]
-    reserved_by_id = _reserved_quantities(session, repository_ids)
+    reserved_by_id = reserved_quantities(session, repository_ids)
     return [
         _current_card(
             session, row.Repository, row.ProductionItem, row.CustomerOrderItem,
@@ -74,26 +77,6 @@ def _current_cards(session, department: Department) -> list[dict]:
         )
         for row in rows
     ]
-
-
-def _reserved_quantities(session, repository_ids: list[int]) -> dict[int, int]:
-    result: dict[int, int] = {}
-    if not repository_ids:
-        return result
-    for repository_id, quantity in session.execute(
-        select(WorkOrder.repository_id, func.sum(WorkOrder.quantity - WorkOrder.completed_quantity))
-        .where(WorkOrder.repository_id.in_(repository_ids), WorkOrder.status == "open")
-        .group_by(WorkOrder.repository_id)
-    ):
-        result[repository_id] = quantity
-    for repository_id, quantity in session.execute(
-        select(WorkOrderMaterial.repository_id, func.sum(WorkOrderMaterial.quantity))
-        .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
-        .where(WorkOrderMaterial.repository_id.in_(repository_ids), WorkOrder.status == "open")
-        .group_by(WorkOrderMaterial.repository_id)
-    ):
-        result[repository_id] = result.get(repository_id, 0) + quantity
-    return result
 
 
 def _current_card(
@@ -137,10 +120,10 @@ def _current_card(
             context.nodes.get(production_item.origin_flow_node_id, {}).get("output_pcs", 1)
         ),
         "delivery_date": order_item.delivery_date,
-        "arrived_at": _arrival_time(
+        "arrived_at": arrival_time(
             session, production_item.id, repository.flow_node_id, department.id
         ),
-        "work_status": _position_status(
+        "work_status": position_status(
             session, department.department_code, production_item.id, repository.flow_node_id
         ),
         "can_create_work_order": department.department_code != "qc",
@@ -239,105 +222,3 @@ def _historical_card(session, production_item_id, node_id, department, movement)
         "work_status": "completed",
         "can_create_work_order": False,
     }
-
-
-def _position_status(session, department_code, production_item_id, node_id):
-    if department_code == "qc":
-        pending = session.scalar(
-            select(func.count(WorkOrderBatch.id))
-            .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
-            .where(
-                WorkOrder.production_item_id == production_item_id,
-                WorkOrderBatch.flow_node_id == node_id,
-                WorkOrderBatch.recorded_at.is_(None),
-            )
-        )
-        return "unprocessed" if pending else "completed"
-    statement = select(WorkOrder).where(WorkOrder.flow_node_id == node_id)
-    if department_code == "assembly":
-        statement = statement.where(or_(
-            WorkOrder.production_item_id == production_item_id,
-            exists(select(WorkOrderMaterial.id).where(
-                WorkOrderMaterial.work_order_id == WorkOrder.id,
-                WorkOrderMaterial.production_item_id == production_item_id,
-            )),
-        ))
-    else:
-        statement = statement.where(WorkOrder.production_item_id == production_item_id)
-    orders = [item for item in session.scalars(statement).all() if item.status != "cancelled"]
-    if any(item.status == "open" for item in orders):
-        return "processing"
-    latest_closed = max(
-        (item.closed_at for item in orders if item.status == "closed" and item.closed_at),
-        default=None,
-    )
-    latest_arrival = session.scalar(
-        select(func.max(ProductionMovement.created_at)).where(
-            ProductionMovement.production_item_id == production_item_id,
-            ProductionMovement.target_flow_node_id == node_id,
-        )
-    )
-    return "completed" if latest_closed and (
-        latest_arrival is None or latest_closed >= latest_arrival
-    ) else "unprocessed"
-
-
-def _arrival_time(session, production_item_id, node_id, department_id):
-    value = session.scalar(
-        select(func.max(ProductionMovement.created_at)).where(
-            ProductionMovement.production_item_id == production_item_id,
-            ProductionMovement.target_flow_node_id == node_id,
-            ProductionMovement.target_department_id == department_id,
-        )
-    )
-    return value.isoformat(timespec="minutes") if value else None
-
-
-def _matches_filters(item, keyword, arrived_from, arrived_to, work_status):
-    if work_status != "all" and item["work_status"] != work_status:
-        return False
-    arrived_at = datetime.fromisoformat(item["arrived_at"]) if item["arrived_at"] else None
-    if arrived_from and (arrived_at is None or arrived_at < datetime.combine(arrived_from, time.min)):
-        return False
-    if arrived_to and (arrived_at is None or arrived_at >= datetime.combine(arrived_to + timedelta(days=1), time.min)):
-        return False
-    value = (keyword or "").strip().lower()
-    if not value:
-        return True
-    haystack = " ".join((item["product_name"], item["factory_code"], item["part_name"], item["part_no"])).lower()
-    tokens = [part for part in value.removesuffix("装配体").replace("-", " ").split() if part]
-    return value in haystack or bool(tokens) and all(token in haystack for token in tokens)
-
-
-def _filter_and_paginate_assembly_groups(
-    cards, page, page_size, keyword, arrived_from, arrived_to, work_status
-):
-    groups = defaultdict(list)
-    for item in cards:
-        key = (item["customer_order_item_id"], item["flow_node_id"])
-        groups[key].append(item)
-    filtered = []
-    for group in groups.values():
-        status = "processing" if any(item["work_status"] == "processing" for item in group) else (
-            "completed" if all(item["work_status"] == "completed" for item in group) else "unprocessed"
-        )
-        arrived_at = max((item["arrived_at"] or "" for item in group), default="") or None
-        representative = {
-            **group[0],
-            "work_status": status,
-            "arrived_at": arrived_at,
-            "part_name": "-".join(dict.fromkeys(item["part_name"] for item in group)),
-            "part_no": " ".join(item["part_no"] for item in group),
-        }
-        if not _matches_filters(
-            representative, keyword, arrived_from, arrived_to, work_status
-        ):
-            continue
-        for item in group:
-            item["work_status"] = status
-            item["arrived_at"] = arrived_at
-        filtered.append(group)
-    ordered = sorted(filtered, key=lambda group: group[0]["arrived_at"] or "", reverse=True)
-    total = len(ordered)
-    selected = ordered[(page - 1) * page_size:page * page_size]
-    return [item for group in selected for item in group], total

@@ -1,6 +1,6 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { queryDepartmentRepositories, queryDepartmentWorkers } from '../api/repositories'
+import { queryDepartmentRepositories, queryDepartmentWorkers } from '../api/departmentRepositories'
 import type { RepositoryFilters, RepositoryItem, WorkerItem } from '../domain/types'
 
 const EMPTY_FILTERS = (): RepositoryFilters => ({
