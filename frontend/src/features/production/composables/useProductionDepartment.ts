@@ -6,7 +6,10 @@ import type { RepositoryFilters, RepositoryItem } from '../domain/types'
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
 import { useWorkOrderActions, useWorkOrderList } from './useWorkOrders'
 
-export function useProductionDepartment(departmentCode: string) {
+export function useProductionDepartment(
+  departmentCode: string,
+  mode: 'production' | 'purchase' = 'production',
+) {
   const workspace = useDepartmentWorkspace(departmentCode, true)
   const workOrderList = useWorkOrderList(
     departmentCode,
@@ -49,7 +52,7 @@ export function useProductionDepartment(departmentCode: string) {
       )
       dialogVisible.value = false
       await reloadWorkspace()
-      ElMessage.success('工单已创建')
+      ElMessage.success(mode === 'purchase' ? '外购入库单已创建' : '工单已创建')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
     } finally {
@@ -59,14 +62,23 @@ export function useProductionDepartment(departmentCode: string) {
 
   async function refresh() {
     workOrderList.reset()
-    await workspace.refresh()
+    const refreshRequest = workspace.refresh()
     await loadDetails()
+    await refreshRequest
+  }
+
+  async function changeRepositoryPage(page: number) {
+    workOrderList.reset()
+    const pageRequest = workspace.changePage(page)
+    await loadDetails()
+    await pageRequest
   }
 
   async function applyFilters(filters: RepositoryFilters) {
     workOrderList.reset()
-    workspace.search(filters)
+    const searchRequest = workspace.search(filters)
     await loadDetails()
+    await searchRequest
   }
 
   async function load() {
@@ -77,6 +89,7 @@ export function useProductionDepartment(departmentCode: string) {
   return {
     activeRepository,
     applyFilters,
+    changeRepositoryPage,
     dialogVisible,
     load,
     loadDetails,
@@ -85,7 +98,7 @@ export function useProductionDepartment(departmentCode: string) {
     saveWorkOrder,
     selectRepository,
     submitting,
-    workOrderActions: useWorkOrderActions(reloadWorkspace),
+    workOrderActions: useWorkOrderActions(reloadWorkspace, mode),
     workOrderList,
     workspace,
   }

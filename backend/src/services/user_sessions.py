@@ -1,9 +1,10 @@
-from datetime import datetime, timedelta
+from datetime import timedelta
 import hashlib
 import secrets
 
 from config import get_settings
 from database import SessionLocal
+from domain.time import utc_now
 from models.user import UserSession
 from repositories.auth import delete_expired_sessions, find_session, find_session_user
 from services.authentication import serialize_user
@@ -27,7 +28,7 @@ def _hash_token(token: str) -> str:
 def create_user_session(user_id: int) -> tuple[str, str]:
     session_token = secrets.token_urlsafe(48)
     csrf_token = secrets.token_urlsafe(32)
-    now = datetime.now()
+    now = utc_now()
     with SessionLocal.begin() as session:
         delete_expired_sessions(session, now)
         session.add(
@@ -57,7 +58,7 @@ def get_csrf_token(session_token: str | None) -> str:
         user_session = find_session(session, _hash_token(session_token))
         if user_session is None:
             raise InvalidSession
-        if user_session.expires_at <= datetime.now():
+        if user_session.expires_at <= utc_now():
             raise ExpiredSession
         return user_session.csrf_token
 
@@ -65,7 +66,7 @@ def get_csrf_token(session_token: str | None) -> str:
 def resolve_user(session_token: str | None) -> dict:
     if not session_token:
         raise InvalidSession
-    now = datetime.now()
+    now = utc_now()
     with SessionLocal.begin() as session:
         result = find_session_user(session, _hash_token(session_token))
         if result is None:

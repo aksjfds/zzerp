@@ -12,6 +12,7 @@ defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
         <li v-for="source in group.sources" :key="source.name">{{ source.name }}：可用 {{ source.available }} / 每件用量 {{
           source.required }}</li>
           <li>可装配 {{ group.capacity }}</li>
+          <li v-if="!group.complete">等待其余装配物料到齐</li>
       </ul>
       <ElButton type="primary" :disabled="group.capacity < 1" @click.stop="$emit('open', group)">开装配工单</ElButton>
     </article>

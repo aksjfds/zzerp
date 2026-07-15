@@ -47,7 +47,7 @@ export function useAssemblyDepartment() {
     if (!firstItem) return
     selectGroup(group)
     assembly.selectGroup(group)
-    const maximum = assembly.capacity.value
+    const maximum = group.capacity
     if (maximum < 1) {
       ElMessage.warning('所选物料的可装配数量不足')
       return
@@ -82,15 +82,25 @@ export function useAssemblyDepartment() {
   async function refresh() {
     workOrderList.reset()
     assembly.clear()
-    await workspace.refresh()
+    const refreshRequest = workspace.refresh()
     await loadDetails()
+    await refreshRequest
+  }
+
+  async function changeRepositoryPage(page: number) {
+    workOrderList.reset()
+    assembly.clear()
+    const pageRequest = workspace.changePage(page)
+    await loadDetails()
+    await pageRequest
   }
 
   async function applyFilters(filters: RepositoryFilters) {
     workOrderList.reset()
     assembly.clear()
-    workspace.search(filters)
+    const searchRequest = workspace.search(filters)
     await loadDetails()
+    await searchRequest
   }
 
   async function load() {
@@ -102,6 +112,7 @@ export function useAssemblyDepartment() {
     activeRepository,
     applyFilters,
     assembly,
+    changeRepositoryPage,
     dialogVisible,
     load,
     loadDetails,

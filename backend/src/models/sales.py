@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
-from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, Integer, Text, TIMESTAMP, text
+from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, ForeignKeyConstraint, Index, Integer, Text, TIMESTAMP, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
@@ -16,6 +16,7 @@ class CustomerOrder(Base):
             name="ck_customer_order_status",
         ),
         CheckConstraint("revision > 0", name="ck_customer_order_revision"),
+        Index("idx_customer_order_updated", text("updated_at DESC"), text("id DESC")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -25,10 +26,10 @@ class CustomerOrder(Base):
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
     updated_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP, nullable=False, server_default=text("CURRENT_TIMESTAMP")
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
     items: Mapped[list[CustomerOrderItem]] = relationship(
         back_populates="order", cascade="all, delete-orphan", order_by="CustomerOrderItem.id"
@@ -38,6 +39,18 @@ class CustomerOrder(Base):
 class CustomerOrderItem(Base):
     __tablename__ = "customer_order_item"
     __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_id", "product_version"],
+            ["product_version.product_id", "product_version.version"],
+        ),
+        UniqueConstraint(
+            "id",
+            "product_id",
+            "product_version",
+            name="uq_customer_order_item_id_version",
+        ),
+        Index("idx_customer_order_item_product_version", "product_id", "product_version"),
+        Index("idx_customer_order_item_order", "customer_order_id"),
         CheckConstraint("product_version > 0", name="ck_order_item_version"),
         CheckConstraint("quantity > 0", name="ck_order_item_quantity"),
     )

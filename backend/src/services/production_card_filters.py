@@ -1,6 +1,8 @@
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 
+from domain.time import BUSINESS_TIMEZONE
+
 
 def filter_and_paginate_cards(
     cards: list[dict],
@@ -38,8 +40,15 @@ def filter_and_paginate_assembly_groups(
     for item in cards:
         groups[(item["customer_order_item_id"], item["flow_node_id"])].append(item)
 
-    filtered_groups = []
-    for group in groups.values():
+    filtered_groups: list[tuple[tuple[int, str], list[dict]]] = []
+    for group_key, group in groups.items():
+        required_sources = {
+            source_id
+            for item in group
+            for source_id in item["assembly_required_source_ids"]
+        }
+        present_sources = {item["source_flow_node_id"] for item in group}
+        group_complete = bool(required_sources) and required_sources == present_sources
         status = _group_status(group)
         arrived_at = max((item["arrived_at"] or "" for item in group), default="") or None
         representative = {
@@ -56,16 +65,21 @@ def filter_and_paginate_assembly_groups(
         for item in group:
             item["work_status"] = status
             item["arrived_at"] = arrived_at
-        filtered_groups.append(group)
+            item["assembly_group_complete"] = group_complete
+        filtered_groups.append((group_key, group))
 
     ordered = sorted(
         filtered_groups,
-        key=lambda group: group[0]["arrived_at"] or "",
+        key=lambda entry: (
+            entry[1][0]["arrived_at"] or "",
+            entry[0][0],
+            entry[0][1],
+        ),
         reverse=True,
     )
     total = len(ordered)
     selected = ordered[(page - 1) * page_size:page * page_size]
-    return [item for group in selected for item in group], total
+    return [item for _, group in selected for item in group], total
 
 
 def matches_filters(
@@ -79,12 +93,15 @@ def matches_filters(
         return False
     arrived_at = datetime.fromisoformat(item["arrived_at"]) if item["arrived_at"] else None
     if arrived_from and (
-        arrived_at is None or arrived_at < datetime.combine(arrived_from, time.min)
+        arrived_at is None
+        or arrived_at < datetime.combine(arrived_from, time.min, BUSINESS_TIMEZONE)
     ):
         return False
     if arrived_to and (
         arrived_at is None
-        or arrived_at >= datetime.combine(arrived_to + timedelta(days=1), time.min)
+        or arrived_at >= datetime.combine(
+            arrived_to + timedelta(days=1), time.min, BUSINESS_TIMEZONE
+        )
     ):
         return False
     value = (keyword or "").strip().lower()

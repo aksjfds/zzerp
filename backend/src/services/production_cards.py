@@ -1,8 +1,9 @@
-from datetime import date
+from datetime import date, datetime, time, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select, tuple_
 
 from database import SessionLocal
+from domain.time import BUSINESS_TIMEZONE, business_iso
 from models.engineering import Product, ProductBom
 from models.organization import Department, Procedure, Workshop
 from models.production import (
@@ -20,8 +21,7 @@ from services.production_card_filters import (
     filter_and_paginate_cards,
 )
 from services.production_card_status import (
-    arrival_time,
-    position_status,
+    position_statuses,
     reserved_quantities,
 )
 from services.production_flow import load_production_flow
@@ -43,11 +43,31 @@ def list_production_cards(
         )
         if department is None:
             raise DomainError("department_not_found", "部门不存在", status_code=404)
-        cards = _current_cards(session, department)
-        current_positions = {
-            (item["production_item_id"], item["flow_node_id"]) for item in cards
-        }
-        cards.extend(_historical_cards(session, department, current_positions))
+        cards = []
+        if work_status != "completed" or department_code == "qc":
+            cards.extend(
+                _current_cards(
+                    session, department, keyword, arrived_from, arrived_to
+                )
+            )
+        if work_status in {"all", "completed"}:
+            current_position_pairs = set(
+                session.execute(
+                    select(Repository.production_item_id, Repository.flow_node_id)
+                    .where(Repository.department_id == department.id)
+                    .distinct()
+                ).all()
+            )
+            cards.extend(
+                _historical_cards(
+                    session,
+                    department,
+                    current_position_pairs,
+                    keyword,
+                    arrived_from,
+                    arrived_to,
+                )
+            )
         if department_code == "assembly":
             return filter_and_paginate_assembly_groups(
                 cards, page, page_size, keyword, arrived_from, arrived_to, work_status
@@ -57,31 +77,173 @@ def list_production_cards(
         )
 
 
-def _current_cards(session, department: Department) -> list[dict]:
-    rows = session.execute(
-        select(Repository, ProductionItem, CustomerOrderItem, CustomerOrder, Product, ProductBom)
+def _current_cards(
+    session,
+    department: Department,
+    keyword: str | None,
+    arrived_from: date | None,
+    arrived_to: date | None,
+) -> list[dict]:
+    latest_arrivals = (
+        select(
+            ProductionMovement.production_item_id.label("production_item_id"),
+            ProductionMovement.target_flow_node_id.label("flow_node_id"),
+            ProductionMovement.source_flow_node_id.label("source_flow_node_id"),
+            func.max(ProductionMovement.created_at).label("arrived_at"),
+        )
+        .select_from(ProductionMovement)
+        .join(
+            Repository,
+            and_(
+                Repository.production_item_id == ProductionMovement.production_item_id,
+                Repository.flow_node_id == ProductionMovement.target_flow_node_id,
+                Repository.source_flow_node_id == ProductionMovement.source_flow_node_id,
+                Repository.department_id == ProductionMovement.target_department_id,
+            ),
+        )
+        .where(
+            ProductionMovement.target_department_id == department.id,
+            Repository.department_id == department.id,
+        )
+        .group_by(
+            ProductionMovement.production_item_id,
+            ProductionMovement.target_flow_node_id,
+            ProductionMovement.source_flow_node_id,
+        )
+        .subquery()
+    )
+    statement = (
+        select(
+            Repository,
+            ProductionItem,
+            CustomerOrderItem,
+            CustomerOrder,
+            Product,
+            ProductBom,
+            latest_arrivals.c.arrived_at,
+        )
         .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
         .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
         .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
         .join(Product, Product.id == CustomerOrderItem.product_id)
         .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
+        .outerjoin(
+            latest_arrivals,
+            and_(
+                latest_arrivals.c.production_item_id == Repository.production_item_id,
+                latest_arrivals.c.flow_node_id == Repository.flow_node_id,
+                latest_arrivals.c.source_flow_node_id
+                == Repository.source_flow_node_id,
+            ),
+        )
         .where(Repository.department_id == department.id)
-    ).all()
+    )
+    # Assembly filters are applied only after complete material groups are built.
+    if department.department_code != "assembly":
+        statement = _apply_current_source_filters(
+            statement,
+            latest_arrivals.c.arrived_at,
+            keyword,
+            arrived_from,
+            arrived_to,
+        )
+    rows = session.execute(statement).all()
     repository_ids = [row.Repository.id for row in rows]
     reserved_by_id = reserved_quantities(session, repository_ids)
+    positions = list(dict.fromkeys(
+        (
+            row.ProductionItem.id,
+            row.Repository.flow_node_id,
+            row.Repository.source_flow_node_id,
+        )
+        for row in rows
+    ))
+    arrived_by_position = {
+        (
+            row.ProductionItem.id,
+            row.Repository.flow_node_id,
+            row.Repository.source_flow_node_id,
+        ): row.arrived_at
+        for row in rows
+    }
+    status_by_position = position_statuses(
+        session, department.id, department.department_code, positions
+    )
     return [
         _current_card(
             session, row.Repository, row.ProductionItem, row.CustomerOrderItem,
             row.CustomerOrder, row.Product, row.ProductBom, department,
             reserved_by_id.get(row.Repository.id, 0),
+            arrived_by_position.get((
+                row.ProductionItem.id,
+                row.Repository.flow_node_id,
+                row.Repository.source_flow_node_id,
+            )),
+            status_by_position[(
+                row.ProductionItem.id,
+                row.Repository.flow_node_id,
+                row.Repository.source_flow_node_id,
+            )],
         )
         for row in rows
     ]
 
 
+def _apply_current_source_filters(
+    statement,
+    arrival,
+    keyword: str | None,
+    arrived_from: date | None,
+    arrived_to: date | None,
+):
+    if arrived_from:
+        statement = statement.where(
+            arrival >= datetime.combine(arrived_from, time.min, BUSINESS_TIMEZONE)
+        )
+    if arrived_to:
+        statement = statement.where(
+            arrival < datetime.combine(
+                arrived_to + timedelta(days=1), time.min, BUSINESS_TIMEZONE
+            )
+        )
+
+    keyword_filter = _source_keyword_filter(keyword)
+    if keyword_filter is not None:
+        statement = statement.where(keyword_filter)
+    return statement
+
+
+def _source_keyword_filter(keyword: str | None):
+    value = (keyword or "").strip().lower()
+    if not value:
+        return None
+    tokens = [
+        item
+        for item in value.removesuffix("装配体").replace("-", " ").split()
+        if item
+    ]
+    searchable_columns = (
+        Product.product_name,
+        Product.factory_code,
+        ProductBom.part_name,
+        ProductBom.part_no,
+    )
+    token_filter = and_(
+        *[
+            or_(*(column.ilike(f"%{token}%") for column in searchable_columns))
+            for token in tokens
+        ]
+    ) if tokens else None
+    return (
+        or_(ProductionItem.product_bom_id.is_(None), token_filter)
+        if token_filter is not None
+        else None
+    )
+
+
 def _current_card(
     session, repository, production_item, order_item, order, product, bom_item,
-    department, reserved,
+    department, reserved, arrived_at, work_status,
 ) -> dict:
     context = load_production_flow(session, production_item)
     node = context.nodes.get(repository.flow_node_id, {})
@@ -92,7 +254,7 @@ def _current_card(
     if context.bom_item is None:
         part_name = production_item_name(session, production_item, set())
         part_no = part_name
-    return {
+    card = {
         "card_key": f"repository:{repository.id}",
         "repository_id": repository.id,
         "production_item_id": production_item.id,
@@ -119,59 +281,136 @@ def _current_card(
         "assembly_unit_quantity": bom_item.pcs if bom_item else int(
             context.nodes.get(production_item.origin_flow_node_id, {}).get("output_pcs", 1)
         ),
+        "assembly_required_source_ids": [],
+        "assembly_group_complete": department.department_code != "assembly",
         "delivery_date": order_item.delivery_date,
-        "arrived_at": arrival_time(
-            session, production_item.id, repository.flow_node_id, department.id
-        ),
-        "work_status": position_status(
-            session, department.department_code, production_item.id, repository.flow_node_id
-        ),
+        "arrived_at": business_iso(arrived_at),
+        "work_status": work_status,
         "can_create_work_order": department.department_code != "qc",
     }
+    if department.department_code == "assembly":
+        card["assembly_required_source_ids"] = _normal_input_source_ids(
+            context.flow, repository.flow_node_id
+        )
+    return card
 
 
-def _historical_cards(session, department, current_positions) -> list[dict]:
+def _historical_cards(
+    session,
+    department,
+    current_position_pairs,
+    keyword: str | None,
+    arrived_from: date | None,
+    arrived_to: date | None,
+) -> list[dict]:
     if department.department_code == "qc":
-        rows = session.execute(
-            select(WorkOrderBatch, WorkOrder)
+        candidates = session.execute(
+            select(WorkOrder.production_item_id, WorkOrderBatch.flow_node_id)
             .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
             .where(WorkOrderBatch.recorded_at.is_not(None))
+            .distinct()
         ).all()
-        candidates = [(row.WorkOrder.production_item_id, row.WorkOrderBatch.flow_node_id) for row in rows]
-    else:
-        condition = WorkOrder.procedure_id.is_(None) if department.department_code == "assembly" else Workshop.department_id == department.id
-        orders = session.execute(
-            select(WorkOrder)
-            .outerjoin(Procedure, Procedure.id == WorkOrder.procedure_id)
-            .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
-            .where(condition, WorkOrder.status == "closed")
-        ).scalars().all()
-        if department.department_code == "assembly":
-            candidates = [
-                (production_item_id, order.flow_node_id)
-                for order in orders
-                for production_item_id in session.scalars(
-                    select(WorkOrderMaterial.production_item_id).where(
-                        WorkOrderMaterial.work_order_id == order.id
-                    )
-                )
-            ]
-        else:
-            candidates = [(order.production_item_id, order.flow_node_id) for order in orders]
-    cards = []
-    for production_item_id, node_id in dict.fromkeys(candidates):
-        if (production_item_id, node_id) in current_positions:
-            continue
-        movement = session.scalar(
-            select(ProductionMovement)
-            .where(
-                ProductionMovement.production_item_id == production_item_id,
-                ProductionMovement.target_department_id == department.id,
-                ProductionMovement.target_flow_node_id == node_id,
+    elif department.department_code == "assembly":
+        candidates = session.execute(
+            select(
+                WorkOrderMaterial.production_item_id,
+                WorkOrder.flow_node_id,
             )
-            .order_by(ProductionMovement.created_at.desc(), ProductionMovement.id.desc())
-            .limit(1)
+            .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
+            .where(WorkOrder.procedure_id.is_(None), WorkOrder.status == "closed")
+            .distinct()
+        ).all()
+    else:
+        candidates = session.execute(
+            select(WorkOrder.production_item_id, WorkOrder.flow_node_id)
+            .join(Procedure, Procedure.id == WorkOrder.procedure_id)
+            .join(Workshop, Workshop.id == Procedure.workshop_id)
+            .where(
+                Workshop.department_id == department.id,
+                WorkOrder.status == "closed",
+            )
+            .distinct()
+        ).all()
+    candidate_positions = list(candidates)
+    apply_member_filters = department.department_code != "assembly"
+    keyword_filter = _source_keyword_filter(keyword) if apply_member_filters else None
+    if candidate_positions and keyword_filter is not None:
+        candidate_item_ids = {item[0] for item in candidate_positions}
+        matching_item_ids = set(
+            session.scalars(
+                select(ProductionItem.id)
+                .join(
+                    CustomerOrderItem,
+                    CustomerOrderItem.id == ProductionItem.customer_order_item_id,
+                )
+                .join(Product, Product.id == CustomerOrderItem.product_id)
+                .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
+                .where(
+                    ProductionItem.id.in_(candidate_item_ids),
+                    keyword_filter,
+                )
+            )
         )
+        candidate_positions = [
+            position
+            for position in candidate_positions
+            if position[0] in matching_item_ids
+        ]
+    ranked_movements = (
+        select(
+            ProductionMovement.id.label("movement_id"),
+            ProductionMovement.production_item_id,
+            ProductionMovement.target_flow_node_id,
+            ProductionMovement.created_at.label("movement_created_at"),
+            func.row_number().over(
+                partition_by=(
+                    ProductionMovement.production_item_id,
+                    ProductionMovement.target_flow_node_id,
+                ),
+                order_by=(
+                    ProductionMovement.created_at.desc(),
+                    ProductionMovement.id.desc(),
+                ),
+            ).label("position_rank"),
+        )
+        .where(
+            ProductionMovement.target_department_id == department.id,
+            tuple_(
+                ProductionMovement.production_item_id,
+                ProductionMovement.target_flow_node_id,
+            ).in_(candidate_positions),
+        )
+        .subquery()
+    ) if candidate_positions else None
+    latest_movements = {}
+    if ranked_movements is not None:
+        movement_ids = select(ranked_movements.c.movement_id).where(
+            ranked_movements.c.position_rank == 1
+        )
+        if apply_member_filters and arrived_from:
+            movement_ids = movement_ids.where(
+                ranked_movements.c.movement_created_at
+                >= datetime.combine(arrived_from, time.min, BUSINESS_TIMEZONE)
+            )
+        if apply_member_filters and arrived_to:
+            movement_ids = movement_ids.where(
+                ranked_movements.c.movement_created_at
+                < datetime.combine(
+                    arrived_to + timedelta(days=1), time.min, BUSINESS_TIMEZONE
+                )
+            )
+        latest_movements = {
+            (item.production_item_id, item.target_flow_node_id): item
+            for item in session.scalars(
+                select(ProductionMovement).where(ProductionMovement.id.in_(movement_ids))
+            )
+        }
+
+    cards = []
+    for production_item_id, node_id in candidate_positions:
+        if (production_item_id, node_id) in current_position_pairs:
+            continue
+        movement = latest_movements.get((production_item_id, node_id))
         if movement is None:
             continue
         cards.append(_historical_card(session, production_item_id, node_id, department, movement))
@@ -192,7 +431,7 @@ def _historical_card(session, production_item_id, node_id, department, movement)
     if context.bom_item is None:
         part_name = production_item_name(session, production_item, set())
         part_no = part_name
-    return {
+    card = {
         "card_key": f"history:{production_item_id}:{node_id}:{movement.id}",
         "repository_id": None,
         "production_item_id": production_item_id,
@@ -217,8 +456,25 @@ def _historical_card(session, production_item_id, node_id, department, movement)
         "quantity": 0,
         "available_quantity": 0,
         "assembly_unit_quantity": context.bom_item.pcs if context.bom_item else 1,
+        "assembly_required_source_ids": [],
+        "assembly_group_complete": department.department_code != "assembly",
         "delivery_date": order_item.delivery_date,
-        "arrived_at": movement.created_at.isoformat(timespec="minutes"),
+        "arrived_at": business_iso(movement.created_at),
         "work_status": "completed",
         "can_create_work_order": False,
     }
+    if department.department_code == "assembly":
+        card["assembly_required_source_ids"] = _normal_input_source_ids(
+            context.flow, node_id
+        )
+    return card
+
+
+def _normal_input_source_ids(flow: dict, node_id: str) -> list[str]:
+    return list(dict.fromkeys(
+        edge["source_node_id"]
+        for edge in flow.get("edges", [])
+        if edge.get("target_node_id") == node_id
+        and edge.get("route_type", "normal") == "normal"
+        and edge.get("source_node_id")
+    ))

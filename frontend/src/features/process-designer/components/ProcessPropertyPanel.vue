@@ -29,7 +29,12 @@ const emit = defineEmits<{
         placeholder="选择工艺"
         @update:model-value="emit('updateProcedure', $event)"
       >
-        <ElOption v-for="item in procedures" :key="item.id" :label="item.procedure_name" :value="item.id" />
+        <ElOption
+          v-for="item in procedures"
+          :key="item.id"
+          :label="`${item.procedure_name}${item.procedure_type === 'purchase_receipt' ? '（外购）' : ''}`"
+          :value="item.id"
+        />
       </ElSelect>
     </template>
     <template v-else-if="node?.type === 'assembly'">

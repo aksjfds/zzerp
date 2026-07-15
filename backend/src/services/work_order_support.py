@@ -1,10 +1,15 @@
-from datetime import datetime
-
 from sqlalchemy import func, select
 
 from models.engineering import ProductBom
+from domain.time import utc_now
 from models.organization import Department, Procedure, Workshop
-from models.production import ProductionItem, Repository, WorkOrder, WorkOrderBatch
+from models.production import (
+    ProductionItem,
+    Repository,
+    WorkOrder,
+    WorkOrderBatch,
+    WorkOrderMaterial,
+)
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
 from services.production_flow import ProductionFlowContext, load_production_flow
@@ -91,11 +96,34 @@ def move_to_node(
 
 
 def consume_repository(session, repository: Repository, quantity: int) -> None:
-    repository.quantity -= quantity
-    if repository.quantity < 0:
+    remaining_quantity = repository.quantity - quantity
+    if remaining_quantity < 0:
         raise DomainError("repository_quantity_insufficient", "当前库存数量不足")
-    if repository.quantity == 0:
+    if remaining_quantity == 0:
+        # Older closed work orders/material allocations can still point at the
+        # same position after earlier partial consumption. Release every such
+        # reference before removing the exhausted row; immutable movements keep
+        # the historical source position.
+        referencing_orders = session.scalars(
+            select(WorkOrder)
+            .where(WorkOrder.repository_id == repository.id)
+            .with_for_update()
+        ).all()
+        referencing_materials = session.scalars(
+            select(WorkOrderMaterial)
+            .where(WorkOrderMaterial.repository_id == repository.id)
+            .with_for_update()
+        ).all()
+        for order in referencing_orders:
+            order.repository_id = None
+        for material in referencing_materials:
+            material.repository_id = None
+        # Do not write quantity=0 because the repository check requires a
+        # positive value.
+        session.flush()
         session.delete(repository)
+    else:
+        repository.quantity = remaining_quantity
 
 
 def mark_order_planned(session, production_item: ProductionItem) -> None:
@@ -105,7 +133,7 @@ def mark_order_planned(session, production_item: ProductionItem) -> None:
     if customer_order.status == "confirmed":
         customer_order.status = "planned"
         customer_order.revision += 1
-        customer_order.updated_at = datetime.now()
+        customer_order.updated_at = utc_now()
 
 
 def refresh_order_closed(session, production_item: ProductionItem) -> None:
@@ -143,4 +171,4 @@ def refresh_order_closed(session, production_item: ProductionItem) -> None:
     if not position_count and not open_order_count and not pending_qc_count:
         customer_order.status = "closed"
         customer_order.revision += 1
-        customer_order.updated_at = datetime.now()
+        customer_order.updated_at = utc_now()

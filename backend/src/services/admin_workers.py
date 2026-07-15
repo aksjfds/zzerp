@@ -3,15 +3,16 @@ from __future__ import annotations
 from collections import defaultdict
 from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from database import SessionLocal
+from domain.time import BUSINESS_TIMEZONE, business_iso
 from models.organization import Department, Worker, Workshop
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch
 from services.work_order_presenters import item_display
 
 
-PRODUCTION_DEPARTMENT_CODES = ("stamp", "polish", "qc", "assembly")
+PRODUCTION_DEPARTMENT_CODES = ("stamp", "polish", "qc", "assembly", "warehouse")
 
 
 def worker_overview() -> list[dict]:
@@ -56,14 +57,25 @@ def worker_history(worker_id: int, month: str) -> list[dict]:
         month_start, month_end = _month_bounds(month)
         work_orders = session.scalars(
             select(WorkOrder)
-            .where(WorkOrder.worker_id == worker_id)
-            .order_by(WorkOrder.created_at.desc(), WorkOrder.id.desc())
+            .where(
+                WorkOrder.worker_id == worker_id,
+                func.coalesce(WorkOrder.closed_at, WorkOrder.created_at) >= month_start,
+                func.coalesce(WorkOrder.closed_at, WorkOrder.created_at) < month_end,
+            )
+            .order_by(
+                func.coalesce(WorkOrder.closed_at, WorkOrder.created_at).desc(),
+                WorkOrder.id.desc(),
+            )
         ).all()
         qc_order_ids = [
             row[0]
             for row in session.execute(
                 select(WorkOrderBatch.work_order_id)
-                .where(WorkOrderBatch.qc_worker_name == worker.worker_name)
+                .where(
+                    WorkOrderBatch.qc_worker_id == worker.id,
+                    WorkOrderBatch.recorded_at >= month_start,
+                    WorkOrderBatch.recorded_at < month_end,
+                )
                 .distinct()
             ).all()
         ]
@@ -92,7 +104,7 @@ def worker_history(worker_id: int, month: str) -> list[dict]:
         for order in work_orders:
             order_batches = batch_map.get(order.id, [])
             worker_batches = [
-                item for item in order_batches if item.qc_worker_name == worker.worker_name
+                item for item in order_batches if item.qc_worker_id == worker.id
             ]
             date_for_range = _history_date_for_worker(worker, order, worker_batches)
             if date_for_range < month_start or date_for_range >= month_end:
@@ -126,7 +138,7 @@ def _serialize_history_item(
     production_item = session.get(ProductionItem, order.production_item_id)
     _, item_name = item_display(session, production_item) if production_item else ("", "未知配件")
     worker_batches = [
-        item for item in batches if item.qc_worker_name == worker.worker_name
+        item for item in batches if item.qc_worker_id == worker.id
     ]
     if worker_batches and order.worker_id != worker.id:
         completed_quantity = sum(item.submitted_quantity for item in worker_batches)
@@ -155,7 +167,7 @@ def _serialize_history_item(
         "lost_quantity": lost_quantity,
         "scrap_quantity": scrap_quantity,
         "status": status,
-        "completed_at": completed_at.isoformat(timespec="minutes") if completed_at else None,
+        "completed_at": business_iso(completed_at),
     }
 
 
@@ -175,11 +187,11 @@ def _history_date_for_worker(
 def _month_bounds(month: str) -> tuple[datetime, datetime]:
     try:
         year, month_number = (int(item) for item in month.split("-", 1))
-        start = datetime(year, month_number, 1)
+        start = datetime(year, month_number, 1, tzinfo=BUSINESS_TIMEZONE)
     except ValueError as exc:
         raise ValueError("月份格式不正确") from exc
     if month_number == 12:
-        end = datetime(year + 1, 1, 1)
+        end = datetime(year + 1, 1, 1, tzinfo=BUSINESS_TIMEZONE)
     else:
-        end = datetime(year, month_number + 1, 1)
+        end = datetime(year, month_number + 1, 1, tzinfo=BUSINESS_TIMEZONE)
     return start, end

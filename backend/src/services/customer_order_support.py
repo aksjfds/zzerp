@@ -1,6 +1,7 @@
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
+from domain.time import business_iso
 from domain.process_flow import validate_process_flow
 from models.engineering import Product, ProductBom
 from models.organization import Procedure
@@ -57,8 +58,8 @@ def serialize_order(
             }
             for item in order.items
         ],
-        "created_at": order.created_at.isoformat(timespec="minutes"),
-        "updated_at": order.updated_at.isoformat(timespec="minutes"),
+        "created_at": business_iso(order.created_at),
+        "updated_at": business_iso(order.updated_at),
     }
 
 

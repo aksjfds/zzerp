@@ -1,10 +1,19 @@
 import { service } from '@/api/request'
-import type { RepositoryItem, WorkerItem } from '../domain/types'
+import type { RepositoryFilters, RepositoryItem, WorkerItem } from '../domain/types'
 
-export async function queryDepartmentRepositories(departmentCode: string) {
+export type DepartmentRepositoryQuery = RepositoryFilters & {
+  page: number
+  page_size: number
+}
+
+export async function queryDepartmentRepositories(
+  departmentCode: string,
+  params: DepartmentRepositoryQuery,
+  signal?: AbortSignal,
+) {
   const response = await service.get<{ data: RepositoryItem[]; total: number }>(
     `/departments/${departmentCode}/repositories`,
-    { params: { page: 1, page_size: 10000 } },
+    { params, signal },
   )
   return { items: response.data.data, total: response.data.total }
 }

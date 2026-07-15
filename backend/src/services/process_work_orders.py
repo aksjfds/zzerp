@@ -1,8 +1,7 @@
-from datetime import datetime
-
 from sqlalchemy import select
 
 from database import SessionLocal
+from domain.time import business_now, utc_now
 from models.organization import Department, Procedure, Worker, Workshop
 from models.production import ProductionItem, Repository, WorkOrder, WorkOrderBatch
 from services.assembly_work_orders import submit_assembly_work_order
@@ -61,6 +60,7 @@ def create_work_order(
             repository_id=repository.id,
             production_item_id=production_item.id,
             procedure_id=procedure.id,
+            procedure_type=procedure.procedure_type,
             procedure_name=procedure.procedure_name,
             flow_node_id=node["id"],
             worker_id=worker_id,
@@ -69,7 +69,7 @@ def create_work_order(
         session.add(order)
         session.flush()
         mark_order_planned(session, production_item)
-        order.work_order_no = f"WO-{datetime.now():%Y%m%d}-{order.id:06d}"
+        order.work_order_no = f"WO-{business_now():%Y%m%d}-{order.id:06d}"
         session.flush()
         return serialize_work_order(session, order)
 
@@ -101,6 +101,7 @@ def submit_work_order(work_order_id: int, quantity: int, user_department: str) -
             raise DomainError("submission_quantity_exceeded", "提交数量超过工单剩余数量")
         context, node = node_context(session, production_item, repository.flow_node_id)
         target = context.normal_target(node["id"])
+        is_purchase_receipt = order.procedure_type == "purchase_receipt"
         batch = None
         if target is not None and target.get("type") == "qc":
             batch = WorkOrderBatch(
@@ -114,7 +115,7 @@ def submit_work_order(work_order_id: int, quantity: int, user_department: str) -
                 session, production_item, target, quantity, node["id"]
             )
         else:
-            if quantity != remaining:
+            if quantity != remaining and not is_purchase_receipt:
                 raise DomainError("partial_completion_not_allowed", "非 QC 工艺必须一次完成剩余数量")
             target_department_id = move_to_node(
                 session, production_item, target, quantity, node["id"]
@@ -124,7 +125,7 @@ def submit_work_order(work_order_id: int, quantity: int, user_department: str) -
             session,
             production_item=production_item,
             quantity=quantity,
-            movement_type="process",
+            movement_type="purchase_receipt" if is_purchase_receipt else "process",
             source_flow_node_id=node["id"],
             target_flow_node_id=target.get("id") if target else None,
             source_department_id=repository.department_id,
@@ -132,13 +133,19 @@ def submit_work_order(work_order_id: int, quantity: int, user_department: str) -
             work_order_id=order.id,
             work_order_batch_id=batch.id if batch else None,
         )
+        # Persist the submission while the work order is still open; database
+        # validation intentionally rejects submissions to closed orders.
+        session.flush()
         if repository.quantity == quantity:
             order.repository_id = None
+            # Release the composite repository reference before deleting an
+            # exhausted repository row.
+            session.flush()
         consume_repository(session, repository, quantity)
         order.completed_quantity += quantity
         if quantity == remaining:
             order.status = "closed"
-            order.closed_at = datetime.now()
+            order.closed_at = utc_now()
         session.flush()
         refresh_order_closed(session, production_item)
         return serialize_work_order(session, order)
@@ -160,6 +167,6 @@ def cancel_work_order(work_order_id: int, user_department: str) -> dict:
         if user_department not in {"sys", department_code}:
             raise DomainError("department_access_denied", "无权取消该工单", status_code=403)
         order.status = "cancelled"
-        order.closed_at = datetime.now()
+        order.closed_at = utc_now()
         session.flush()
         return serialize_work_order(session, order)

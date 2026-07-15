@@ -1,11 +1,14 @@
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import func, select, tuple_
 
 from models.production import (
-    ProductionMovement,
+    Repository,
     WorkOrder,
     WorkOrderBatch,
     WorkOrderMaterial,
 )
+
+
+PositionKey = tuple[int, str, str]
 
 
 def reserved_quantities(session, repository_ids: list[int]) -> dict[int, int]:
@@ -34,70 +37,84 @@ def reserved_quantities(session, repository_ids: list[int]) -> dict[int, int]:
     return result
 
 
-def position_status(
+def position_statuses(
     session,
+    department_id: int,
     department_code: str,
-    production_item_id: int,
-    node_id: str,
-) -> str:
+    positions: list[PositionKey],
+) -> dict[PositionKey, str]:
+    if not positions:
+        return {}
     if department_code == "qc":
-        pending = session.scalar(
-            select(func.count(WorkOrderBatch.id))
-            .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
-            .where(
-                WorkOrder.production_item_id == production_item_id,
-                WorkOrderBatch.flow_node_id == node_id,
-                WorkOrderBatch.recorded_at.is_(None),
-            )
+        pending_positions = set(
+            session.execute(
+                select(
+                    WorkOrder.production_item_id,
+                    WorkOrderBatch.flow_node_id,
+                    WorkOrder.flow_node_id,
+                )
+                .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
+                .where(
+                    tuple_(
+                        WorkOrder.production_item_id,
+                        WorkOrderBatch.flow_node_id,
+                        WorkOrder.flow_node_id,
+                    ).in_(positions),
+                    WorkOrderBatch.recorded_at.is_(None),
+                )
+            ).all()
         )
-        return "unprocessed" if pending else "completed"
+        return {
+            position: "unprocessed" if position in pending_positions else "completed"
+            for position in positions
+        }
 
-    statement = select(WorkOrder).where(WorkOrder.flow_node_id == node_id)
     if department_code == "assembly":
-        statement = statement.where(
-            or_(
-                WorkOrder.production_item_id == production_item_id,
-                exists(
-                    select(WorkOrderMaterial.id).where(
-                        WorkOrderMaterial.work_order_id == WorkOrder.id,
-                        WorkOrderMaterial.production_item_id == production_item_id,
-                    )
-                ),
-            )
+        processing_positions = set(
+            session.execute(
+                select(
+                    Repository.production_item_id,
+                    Repository.flow_node_id,
+                    Repository.source_flow_node_id,
+                )
+                .join(
+                    WorkOrderMaterial,
+                    WorkOrderMaterial.repository_id == Repository.id,
+                )
+                .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
+                .where(
+                    Repository.department_id == department_id,
+                    tuple_(
+                        Repository.production_item_id,
+                        Repository.flow_node_id,
+                        Repository.source_flow_node_id,
+                    ).in_(positions),
+                    WorkOrder.status == "open",
+                )
+            ).all()
         )
     else:
-        statement = statement.where(WorkOrder.production_item_id == production_item_id)
-    orders = [
-        item for item in session.scalars(statement).all() if item.status != "cancelled"
-    ]
-    if any(item.status == "open" for item in orders):
-        return "processing"
-    latest_closed = max(
-        (item.closed_at for item in orders if item.status == "closed" and item.closed_at),
-        default=None,
-    )
-    latest_arrival = session.scalar(
-        select(func.max(ProductionMovement.created_at)).where(
-            ProductionMovement.production_item_id == production_item_id,
-            ProductionMovement.target_flow_node_id == node_id,
+        processing_positions = set(
+            session.execute(
+                select(
+                    Repository.production_item_id,
+                    Repository.flow_node_id,
+                    Repository.source_flow_node_id,
+                )
+                .join(WorkOrder, WorkOrder.repository_id == Repository.id)
+                .where(
+                    Repository.department_id == department_id,
+                    tuple_(
+                        Repository.production_item_id,
+                        Repository.flow_node_id,
+                        Repository.source_flow_node_id,
+                    ).in_(positions),
+                    WorkOrder.status == "open",
+                )
+            ).all()
         )
-    )
-    return "completed" if latest_closed and (
-        latest_arrival is None or latest_closed >= latest_arrival
-    ) else "unprocessed"
 
-
-def arrival_time(
-    session,
-    production_item_id: int,
-    node_id: str,
-    department_id: int,
-) -> str | None:
-    value = session.scalar(
-        select(func.max(ProductionMovement.created_at)).where(
-            ProductionMovement.production_item_id == production_item_id,
-            ProductionMovement.target_flow_node_id == node_id,
-            ProductionMovement.target_department_id == department_id,
-        )
-    )
-    return value.isoformat(timespec="minutes") if value else None
+    return {
+        position: "processing" if position in processing_positions else "unprocessed"
+        for position in positions
+    }

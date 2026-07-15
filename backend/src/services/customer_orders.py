@@ -1,9 +1,8 @@
-from datetime import datetime
-
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
+from domain.time import utc_now
 from models.engineering import Product
 from models.sales import CustomerOrder
 from repositories.customer_orders import CustomerOrderRepository
@@ -75,7 +74,7 @@ def update_order(order_id: int, payload: CustomerOrderUpdate) -> dict:
             if payload.customer_name is not None:
                 order.customer_name = payload.customer_name
             order.remark = payload.remark or None
-            order.updated_at = datetime.now()
+            order.updated_at = utc_now()
             order.revision += 1
             replace_order_items(order, payload.items, products)
             session.flush()
@@ -103,7 +102,7 @@ def change_status(order_id: int, target: str, expected_revision: int) -> dict:
         else:
             raise DomainError("invalid_customer_order_status", "不支持的订单状态操作")
         order.status = target
-        order.updated_at = datetime.now()
+        order.updated_at = utc_now()
         order.revision += 1
         session.flush()
         return serialize_order(session, order)

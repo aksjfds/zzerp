@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import type { RepositoryItem } from '../domain/types'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   items: RepositoryItem[]
   loading: boolean
   selectedKey?: string | null
   allowWorkOrder?: boolean
-}>()
+  mode?: 'production' | 'purchase'
+}>(), { mode: 'production' })
 const emit = defineEmits<{
   select: [item: RepositoryItem]
   createWorkOrder: [item: RepositoryItem]
@@ -27,7 +28,11 @@ const emit = defineEmits<{
       <div class="card-heading">
         <strong>{{ item.part_no === item.part_name ? item.part_name : `${item.part_no} - ${item.part_name}` }}</strong>
         <ElTag :type="item.work_status === 'processing' ? 'warning' : item.work_status === 'completed' ? 'success' : 'info'" size="small">
-          {{ item.work_status === 'processing' ? '加工中' : item.work_status === 'completed' ? '已完成' : '未加工' }}
+          {{ item.work_status === 'processing'
+            ? (props.mode === 'purchase' ? '采购中' : '加工中')
+            : item.work_status === 'completed'
+              ? (props.mode === 'purchase' ? '已入库' : '已完成')
+              : (props.mode === 'purchase' ? '待采购' : '未加工') }}
         </ElTag>
       </div>
       <dl>
@@ -35,8 +40,8 @@ const emit = defineEmits<{
         <div><dt>订单编号</dt><dd>{{ item.customer_order_no }}</dd></div>
         <div><dt>当前工艺</dt><dd>{{ item.procedure_name }}</dd></div>
         <div><dt>来源节点</dt><dd>{{ item.source_node_label }}</dd></div>
-        <div><dt>当前数量</dt><dd>{{ item.quantity }}</dd></div>
-        <div><dt>到达时间</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
+        <div><dt>{{ props.mode === 'purchase' ? '需求数量' : '当前数量' }}</dt><dd>{{ item.quantity }}</dd></div>
+        <div><dt>{{ props.mode === 'purchase' ? '需求时间' : '到达时间' }}</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
       </dl>
       <ElButton
         v-if="allowWorkOrder && item.can_create_work_order && item.repository_id && item.available_quantity > 0"
@@ -45,7 +50,7 @@ const emit = defineEmits<{
         size="small"
         class="create-button"
         @click.stop="emit('createWorkOrder', item)"
-      >开工单</ElButton>
+      >{{ props.mode === 'purchase' ? '建外购单' : '开工单' }}</ElButton>
     </article>
     <ElEmpty v-if="!loading && !items.length" description="当前部门暂无配件或装配体" :image-size="72" />
   </div>

@@ -1,5 +1,4 @@
 from copy import deepcopy
-from datetime import datetime
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
@@ -7,6 +6,8 @@ from sqlalchemy.orm.exc import StaleDataError
 from database import SessionLocal
 from domain.engineering_products import validate_expected_revision
 from domain.models import BomItemCommand
+from domain.time import utc_now
+from models.engineering import ProductVersion
 from repositories.engineering_products import EngineeringProductRepository
 from services.engineering_product_command_support import command_result, product_versions
 from services.engineering_product_editability import ensure_product_version_editable
@@ -37,6 +38,8 @@ def create_product_version(
             if copy_from_version not in available_versions:
                 raise product_not_found()
             next_version = max(available_versions | {product.version}) + 1
+            product.versions.append(ProductVersion(version=next_version))
+            repository.flush()
             source_items = [
                 item
                 for item in product.bom_items
@@ -76,7 +79,7 @@ def create_product_version(
             repository.set_process_flow(product, next_version, copied_flow)
             product.version = next_version
             product.revision += 1
-            product.updated_at = datetime.now()
+            product.updated_at = utc_now()
             return command_result(repository, product)
     except IntegrityError as exc:
         raise_integrity_error(exc)
@@ -109,9 +112,12 @@ def delete_product_version(
             for item in list(product.process_flows):
                 if item.product_version == product_version:
                     product.process_flows.remove(item)
+            for item in list(product.versions):
+                if item.version == product_version:
+                    product.versions.remove(item)
             product.version = max(version for version in versions if version != product_version)
             product.revision += 1
-            product.updated_at = datetime.now()
+            product.updated_at = utc_now()
             return command_result(repository, product)
     except IntegrityError as exc:
         raise DomainError(

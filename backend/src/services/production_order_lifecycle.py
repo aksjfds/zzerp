@@ -29,6 +29,9 @@ def cancel_order_production(session, order: CustomerOrder) -> None:
             raise DomainError("customer_order_started", "订单已经送检，不能取消")
     for work_order in work_orders:
         session.delete(work_order)
+    # Remove work-order/material references before production-item cascades
+    # delete their repositories and initial movement rows.
+    session.flush()
     production_items = session.scalars(
         select(ProductionItem)
         .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)

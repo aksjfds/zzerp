@@ -7,7 +7,7 @@ const emit = defineEmits<{
 }>()
 const form = reactive({
   keyword: '',
-  dates: [] as string[],
+  dates: null as string[] | null,
   work_status: 'all' as RepositoryFilters['work_status'],
 })
 
@@ -15,18 +15,18 @@ let timer: ReturnType<typeof setTimeout> | undefined
 function apply() {
   emit('search', {
     keyword: form.keyword.trim(),
-    arrived_from: form.dates[0] || null,
-    arrived_to: form.dates[1] || null,
+    arrived_from: form.dates?.[0] || null,
+    arrived_to: form.dates?.[1] || null,
     work_status: form.work_status,
   })
 }
 function schedule() {
   clearTimeout(timer)
-  timer = setTimeout(apply, 100)
+  timer = setTimeout(apply, 350)
 }
 function reset() {
   form.keyword = ''
-  form.dates = []
+  form.dates = null
   form.work_status = 'all'
 }
 watch(form, schedule)

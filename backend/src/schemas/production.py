@@ -33,6 +33,8 @@ class RepositoryResponse(ProductionModel):
     quantity: int
     available_quantity: int
     assembly_unit_quantity: int
+    assembly_required_source_ids: list[str]
+    assembly_group_complete: bool
     delivery_date: date
     arrived_at: str | None
     work_status: Literal["unprocessed", "processing", "completed"]
@@ -89,6 +91,7 @@ class WorkOrderBatchResponse(ProductionModel):
     rework_quantity: int | None
     scrap_quantity: int | None
     lost_quantity: int | None
+    qc_worker_id: int | None
     qc_worker_name: str | None
     defect_reason: str | None
     recorded_at: str | None

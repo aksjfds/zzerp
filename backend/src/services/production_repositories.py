@@ -75,6 +75,8 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
                 _invalid_first_process(bom_item.part_name, "首工艺没有有效车间")
             production_item = ProductionItem(
                 customer_order_item_id=order_item.id,
+                product_id=order_item.product_id,
+                product_version=order_item.product_version,
                 product_bom_id=bom_item.id,
                 origin_flow_node_id=part_node["id"],
             )

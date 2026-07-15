@@ -30,6 +30,10 @@ latest revision as `expected_revision`. Delete sends it as the `expected_revisio
 successful write increments `revision`; creating a product version increments the business `version`. A stale
 write is rejected with `product_version_conflict` instead of overwriting another user's changes.
 
+Product versions are persisted in the `product_version` registry. BOM rows, process-flow documents, and customer
+order items reference `(product_id, product_version)` through database foreign keys, so an order cannot reference
+a version that does not exist.
+
 The split prevents newly inserted BOM rows and their generated IDs from being mixed with stale process-flow
 references in one request.
 

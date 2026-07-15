@@ -1,3 +1,4 @@
+from domain.time import business_iso
 from models.engineering import Product, ProductBom
 
 
@@ -24,8 +25,8 @@ def serialize_product_summary(product: Product, bom_count: int) -> dict:
         "factory_code": product.factory_code,
         "customer_code": product.customer_code,
         "bom_count": bom_count,
-        "created_at": product.created_at.isoformat(timespec="minutes"),
-        "updated_at": product.updated_at.isoformat(timespec="minutes"),
+        "created_at": business_iso(product.created_at),
+        "updated_at": business_iso(product.updated_at),
     }
 
 
@@ -55,6 +56,6 @@ def serialize_product_detail(
         "customer_code": product.customer_code,
         "bom_items": [serialize_bom(item) for item in bom_items],
         "process_flow": process_flow.flow_json if process_flow else empty_flow,
-        "created_at": product.created_at.isoformat(timespec="minutes"),
-        "updated_at": product.updated_at.isoformat(timespec="minutes"),
+        "created_at": business_iso(product.created_at),
+        "updated_at": business_iso(product.updated_at),
     }

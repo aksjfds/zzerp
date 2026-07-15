@@ -15,11 +15,7 @@ def command_result(
 
 
 def product_versions(product: Product) -> set[int]:
-    return {
-        item.product_version for item in product.bom_items
-    } | {
-        item.product_version for item in product.process_flows
-    }
+    return {item.version for item in product.versions}
 
 
 def ensure_version_exists(product: Product, product_version: int) -> None:

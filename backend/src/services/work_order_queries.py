@@ -72,7 +72,7 @@ def list_qc_batches(
     with SessionLocal() as session:
         statement = select(WorkOrderBatch).join(
             WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id
-        )
+        ).where(WorkOrderBatch.recorded_at.is_(None))
         if production_item_id is not None:
             statement = statement.where(_related_to_production_item(production_item_id))
         total = session.scalar(

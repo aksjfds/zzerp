@@ -4,6 +4,7 @@ export type ProcedureOption = {
   id: number
   workshop_id: number
   procedure_name: string
+  procedure_type: 'standard' | 'purchase_receipt'
 }
 
 export async function queryProcedures() {

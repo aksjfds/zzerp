@@ -5,6 +5,7 @@ export type AssemblyGroup = {
   key: string
   items: RepositoryItem[]
   capacity: number
+  complete: boolean
   productName: string
   name: string
   orderNo: string
@@ -15,13 +16,7 @@ export type AssemblyGroup = {
 
 export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
   const selections = ref(new Map<number, RepositoryItem>())
-  const selectedItems = computed(() => [...selections.value.values()])
   const selectedIds = computed(() => [...selections.value.keys()])
-  const capacity = computed(() => selectedItems.value.length < 2 ? 0 : Math.min(
-    ...selectedItems.value.map(item => Math.floor(
-      item.available_quantity / item.assembly_unit_quantity,
-    )),
-  ))
   const groups = computed<AssemblyGroup[]>(() => {
     const grouped = new Map<string, RepositoryItem[]>()
     items.value.forEach((item) => {
@@ -30,6 +25,7 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
     })
     return [...grouped.entries()].map(([key, groupItems]) => {
       const firstItem = groupItems[0]!
+      const complete = groupItems.every(item => item.assembly_group_complete)
       const sources = new Map<string, RepositoryItem[]>()
       groupItems.forEach(item => sources.set(
         item.source_flow_node_id,
@@ -38,10 +34,13 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
       return {
         key,
         items: groupItems,
-        capacity: Math.min(...[...sources.values()].map(sourceItems => Math.floor(
-          sourceItems.reduce((sum, item) => sum + item.available_quantity, 0)
-            / sourceItems[0]!.assembly_unit_quantity,
-        ))),
+        capacity: complete
+          ? Math.min(...[...sources.values()].map(sourceItems => Math.floor(
+            sourceItems.reduce((sum, item) => sum + item.available_quantity, 0)
+              / sourceItems[0]!.assembly_unit_quantity,
+          )))
+          : 0,
+        complete,
         productName: firstItem.product_name,
         name: `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`,
         orderNo: firstItem.customer_order_no,
@@ -63,5 +62,5 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
       if (item.repository_id) selections.value.set(item.repository_id, item)
     })
   }
-  return { capacity, clear: () => selections.value.clear(), groups, selectGroup, selectedIds, selectedItems }
+  return { clear: () => selections.value.clear(), groups, selectGroup, selectedIds }
 }

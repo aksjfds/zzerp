@@ -16,7 +16,7 @@ const {
 } = workspace
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
 const {
-  activeRepository, applyFilters, dialogVisible, load, loadDetails, openGroup,
+  activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails, openGroup,
   refresh, saveWorkOrder, selectGroup, selectedGroup, selectedGroupKey, submitting,
 } = controller
 onMounted(load)
@@ -31,7 +31,7 @@ onMounted(load)
         <AssemblyGroupCards :groups="assembly.groups.value" :loading="loading" :selected-key="selectedGroupKey"
           @select="selectGroup" @open="openGroup" />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total"
-          :page-size="pageSize" :total="repositoryTotal" />
+          :page-size="pageSize" :total="repositoryTotal" @current-change="changeRepositoryPage" />
       </div>
       <div class="production-card production-details">
         <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{

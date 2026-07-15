@@ -16,7 +16,7 @@ const {
 } = workspace
 const {
   activeBatch, applyFilters, batches, detailLoading, dialogVisible,
-  historyPage, historyTotal, load, loadDetails, openInspection,
+  changeRepositoryPage, historyPage, historyTotal, load, loadDetails, openInspection,
   refresh, saveInspection, selectRepository, submitting,
 } = controller
 onMounted(load)
@@ -31,7 +31,7 @@ onMounted(load)
         <RepositoryCards :items="items" :loading="loading" :selected-key="selectedCardKey"
           :allow-work-order="false" @select="selectRepository" />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total"
-          :page-size="pageSize" :total="repositoryTotal" />
+          :page-size="pageSize" :total="repositoryTotal" @current-change="changeRepositoryPage" />
       </div>
       <div class="production-card production-details">
         <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{

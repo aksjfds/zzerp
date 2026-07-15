@@ -32,9 +32,7 @@ def get_product(product_id: int, version: int | None = None) -> dict:
         if product is None:
             raise product_not_found()
         requested_version = version or product.version
-        available_versions = {
-            item.product_version for item in product.process_flows
-        } | {item.product_version for item in product.bom_items}
+        available_versions = {item.version for item in product.versions}
         if requested_version not in available_versions:
             raise product_not_found()
         return serialize_product_detail(
@@ -51,8 +49,4 @@ def list_product_versions(product_id: int) -> list[int]:
         product = EngineeringProductRepository(session).get(product_id)
         if product is None:
             raise product_not_found()
-        return sorted(
-            {item.product_version for item in product.process_flows}
-            | {item.product_version for item in product.bom_items},
-            reverse=True,
-        )
+        return sorted((item.version for item in product.versions), reverse=True)

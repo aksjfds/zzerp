@@ -32,7 +32,7 @@ const emit = defineEmits<{
       class="palette-item process"
       type="button"
       @mousedown="emit('dragProcedure', procedure)"
-    >＋ {{ procedure.procedure_name }}</button>
+    >＋ {{ procedure.procedure_name }}{{ procedure.procedure_type === 'purchase_receipt' ? '（外购）' : '' }}</button>
     <p v-if="!procedures.length" class="empty">暂无可用工艺</p>
     <h3>流程节点</h3>
     <button class="palette-item assembly" type="button" @mousedown="emit('dragAssembly')">装配</button>

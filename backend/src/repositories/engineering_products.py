@@ -54,6 +54,7 @@ class EngineeringProductRepository:
             .options(
                 selectinload(Product.bom_items),
                 selectinload(Product.process_flows),
+                selectinload(Product.versions),
             )
             .where(Product.id == product_id)
         )

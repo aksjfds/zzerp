@@ -15,40 +15,69 @@ export function useWorkOrderList(
   const loading = ref(false)
   const page = ref(1)
   const total = ref(0)
+  let loadSequence = 0
 
   async function load() {
+    const sequence = ++loadSequence
+    const requestedProductionItemId = productionItemId.value
+    const requestedPage = page.value
     items.value = []
     total.value = 0
-    if (!productionItemId.value) return
+    if (!requestedProductionItemId) {
+      loading.value = false
+      return
+    }
     loading.value = true
     try {
       const result = await queryDepartmentWorkOrders(
-        departmentCode, page.value, pageSize, productionItemId.value,
+        departmentCode, requestedPage, pageSize, requestedProductionItemId,
       )
+      if (
+        sequence !== loadSequence
+        || productionItemId.value !== requestedProductionItemId
+        || page.value !== requestedPage
+      ) return
       items.value = result.items
       total.value = result.total
-    } catch { ElMessage.warning('关联生产记录加载失败') }
-    finally { loading.value = false }
+    } catch {
+      if (sequence === loadSequence) ElMessage.warning('关联生产记录加载失败')
+    } finally {
+      if (sequence === loadSequence) loading.value = false
+    }
   }
 
-  function reset() { page.value = 1 }
+  function reset() {
+    loadSequence += 1
+    page.value = 1
+    items.value = []
+    total.value = 0
+    loading.value = false
+  }
   return { items, load, loading, page, reset, total }
 }
 
-export function useWorkOrderActions(onChanged: () => Promise<void>) {
+export function useWorkOrderActions(
+  onChanged: () => Promise<void>,
+  mode: 'production' | 'purchase' = 'production',
+) {
   async function submit(item: WorkOrder) {
     try {
-      const { value } = await ElMessageBox.prompt('请输入本次完成或送检数量', '工艺完成', {
+      const { value } = await ElMessageBox.prompt(
+        mode === 'purchase' ? '请输入本次实际到货数量' : '请输入本次完成或送检数量',
+        mode === 'purchase' ? '登记到货' : '工艺完成', {
         inputValue: String(item.quantity - item.submitted_quantity),
         inputPattern: /^[1-9]\d*$/,
         inputErrorMessage: '请输入正整数',
       })
       await submitWorkOrder(item.id, Number(value))
       await onChanged()
-      ElMessage.success('工艺结果已提交')
+      ElMessage.success(mode === 'purchase' ? '到货数量已登记' : '工艺结果已提交')
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
-        ElMessage.error(getApiErrorDetail(error)?.message || '工艺提交失败')
+        ElMessage.error(
+          getApiErrorDetail(error)?.message
+          || (mode === 'purchase' ? '到货登记失败' : '工艺提交失败'),
+        )
       }
     }
   }

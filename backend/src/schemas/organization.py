@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -21,3 +23,4 @@ class ProcedureResponse(OrganizationModel):
     id: int
     workshop_id: int
     procedure_name: str
+    procedure_type: Literal["standard", "purchase_receipt"]

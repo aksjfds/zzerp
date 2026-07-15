@@ -23,6 +23,8 @@ export type RepositoryItem = {
   quantity: number
   available_quantity: number
   assembly_unit_quantity: number
+  assembly_required_source_ids: string[]
+  assembly_group_complete: boolean
   delivery_date: string
   arrived_at: string | null
   work_status: 'unprocessed' | 'processing' | 'completed'
@@ -45,6 +47,7 @@ export type WorkOrderBatch = {
   rework_quantity: number | null
   scrap_quantity: number | null
   lost_quantity: number | null
+  qc_worker_id: number | null
   qc_worker_name: string | null
   defect_reason: string | null
   recorded_at: string | null

@@ -2,6 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from config import get_settings
 from domain.errors import DomainViolation
@@ -30,6 +31,19 @@ async def handle_domain_violation(_request: Request, exc: DomainViolation):
     if exc.element_id:
         detail["element_id"] = exc.element_id
     return JSONResponse(status_code=exc.status_code, content={"detail": detail})
+
+
+@app.exception_handler(IntegrityError)
+async def handle_integrity_error(_request: Request, _exc: IntegrityError):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": {
+                "code": "data_conflict",
+                "message": "数据已发生变化或违反关联约束，请刷新后重试",
+            }
+        },
+    )
 
 
 @app.exception_handler(RequestValidationError)

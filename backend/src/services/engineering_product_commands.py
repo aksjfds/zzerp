@@ -1,11 +1,11 @@
-from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
 from database import SessionLocal
 from domain.engineering_products import validate_bom_identity, validate_expected_revision
-from models.engineering import Product
+from domain.time import utc_now
+from models.engineering import Product, ProductVersion
 from models.organization import Procedure
 from repositories.engineering_products import EngineeringProductRepository
 from schemas.engineering import (
@@ -58,6 +58,7 @@ def create_product(payload: CreateProductPayload) -> dict:
                 factory_code=payload.factory_code,
                 customer_code=payload.customer_code,
             )
+            product.versions.append(ProductVersion(version=1))
             repository.add(product)
             repository.flush()
             repository.replace_bom(product, product.version, items)
@@ -89,7 +90,7 @@ def update_product_info(product_id: int, payload: UpdateProductPayload) -> dict:
             product.product_name = payload.product_name
             product.factory_code = payload.factory_code
             product.customer_code = payload.customer_code
-            product.updated_at = datetime.now()
+            product.updated_at = utc_now()
             product.revision += 1
             return command_result(repository, product)
     except IntegrityError as exc:
@@ -147,7 +148,7 @@ def replace_product_bom(
                     product_version,
                     synchronized.model_dump(exclude_none=True),
                 )
-            product.updated_at = datetime.now()
+            product.updated_at = utc_now()
             product.revision += 1
             return command_result(repository, product, product_version)
     except IntegrityError as exc:
@@ -193,7 +194,7 @@ def update_product_process_flow(
                     },
                 ),
             )
-            product.updated_at = datetime.now()
+            product.updated_at = utc_now()
             product.revision += 1
             return command_result(repository, product, product_version)
     except IntegrityError as exc:

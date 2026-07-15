@@ -2,12 +2,13 @@
 import { reactive, watch } from 'vue'
 import type { RepositoryItem, WorkerItem } from '../domain/types'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   modelValue: boolean
   item?: RepositoryItem
   workers: WorkerItem[]
   submitting: boolean
-}>()
+  mode?: 'production' | 'purchase'
+}>(), { mode: 'production' })
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   submit: [payload: { quantity: number; workerId: number | null }]
@@ -25,16 +26,16 @@ watch(() => props.modelValue, (visible) => {
 <template>
   <ElDialog
     :model-value="modelValue"
-    title="开工艺工单"
+    :title="props.mode === 'purchase' ? '创建外购入库单' : '开工艺工单'"
     width="460px"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <p class="target">{{ item?.part_no }} - {{ item?.part_name }} · {{ item?.procedure_name }}</p>
     <ElForm label-width="80px">
-      <ElFormItem label="工单数量">
+      <ElFormItem :label="props.mode === 'purchase' ? '外购数量' : '工单数量'">
         <ElInputNumber v-model="form.quantity" :min="1" :max="item?.available_quantity || 1" />
       </ElFormItem>
-      <ElFormItem label="执行工人">
+      <ElFormItem :label="props.mode === 'purchase' ? '经办人' : '执行工人'">
         <ElSelect v-model="form.workerId" clearable placeholder="暂不分配工人">
           <ElOption
             v-for="worker in workers"
@@ -51,7 +52,7 @@ watch(() => props.modelValue, (visible) => {
         type="primary"
         :loading="submitting"
         @click="emit('submit', { quantity: form.quantity, workerId: form.workerId })"
-      >创建工单</ElButton>
+      >{{ props.mode === 'purchase' ? '创建外购单' : '创建工单' }}</ElButton>
     </template>
   </ElDialog>
 </template>

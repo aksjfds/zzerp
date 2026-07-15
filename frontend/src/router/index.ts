@@ -38,6 +38,11 @@ const router = createRouter({
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
+      path: '/warehouse', name: 'warehouse-department',
+      component: () => import('@/features/production/views/WarehouseDepartmentView.vue'),
+      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
+    },
+    {
       path: '/admin',
       name: 'admin-dashboard',
       component: () => import('@/features/admin/views/AdminDashboardView.vue'),

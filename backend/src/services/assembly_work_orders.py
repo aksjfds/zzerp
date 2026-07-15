@@ -1,8 +1,7 @@
-from datetime import datetime
-
 from sqlalchemy import func, select
 
 from database import SessionLocal
+from domain.time import business_now, utc_now
 from domain.assembly import matches_assembly_sources, required_material_quantity
 from models.engineering import ProductBom
 from models.organization import Department, Worker
@@ -82,6 +81,7 @@ def create_assembly_work_order(
             repository_id=None,
             production_item_id=input_items[0].id,
             procedure_id=None,
+            procedure_type="assembly",
             procedure_name=(
                 assembly_node.get("label")
                 or assembly_node.get("output_name")
@@ -94,7 +94,7 @@ def create_assembly_work_order(
         session.add(order)
         session.flush()
         mark_order_planned(session, input_items[0])
-        order.work_order_no = f"WO-{datetime.now():%Y%m%d}-{order.id:06d}"
+        order.work_order_no = f"WO-{business_now():%Y%m%d}-{order.id:06d}"
         for repository in repositories:
             material_quantity = material_quantities.get(repository.id)
             if material_quantity:
@@ -195,16 +195,22 @@ def submit_assembly_work_order(
         )
         if repository.quantity == material.quantity:
             material.repository_id = None
+            # Release the composite repository reference before deleting an
+            # exhausted repository row.
+            session.flush()
         consume_repository(session, repository, material.quantity)
 
     output_item = ProductionItem(
         customer_order_item_id=context.order_item.id,
+        product_id=context.order_item.product_id,
+        product_version=context.order_item.product_version,
         product_bom_id=None,
         origin_flow_node_id=assembly_node["id"],
     )
     session.add(output_item)
     session.flush()
     order.production_item_id = output_item.id
+    session.flush()
     target = context.normal_target(assembly_node["id"])
     output_quantity = quantity * int(assembly_node.get("output_pcs", 1))
     batch = None
@@ -231,9 +237,11 @@ def submit_assembly_work_order(
         work_order_id=order.id,
         work_order_batch_id=batch.id if batch else None,
     )
+    # Persist the output while the assembly order is still open.
+    session.flush()
     order.completed_quantity += quantity
     order.status = "closed"
-    order.closed_at = datetime.now()
+    order.closed_at = utc_now()
     session.flush()
     refresh_order_closed(session, output_item)
     return serialize_work_order(session, order)

@@ -19,6 +19,9 @@ During the current development phase, database schema changes use a destructive 
 Existing database data is not migrated or preserved. Rebuilding a database is an explicit manual operation and is
 not performed by application startup or check commands.
 
+The rebuild script uses PostgreSQL `pg_trgm` indexes for product search. The database role executing the script
+must be allowed to create the `pg_trgm` extension.
+
 ## Deferred tooling
 
 Automated tests, lint configuration, migrations, and isolated PostgreSQL validation are intentionally deferred.

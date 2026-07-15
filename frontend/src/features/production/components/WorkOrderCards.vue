@@ -1,14 +1,18 @@
 <script setup lang="ts">
 import type { WorkOrder } from '../domain/types'
 
-defineProps<{ items: WorkOrder[]; loading: boolean }>()
+const props = withDefaults(defineProps<{
+  items: WorkOrder[]
+  loading: boolean
+  mode?: 'production' | 'purchase'
+}>(), { mode: 'production' })
 const emit = defineEmits<{ submit: [item: WorkOrder]; cancel: [item: WorkOrder] }>()
 
 function statusText(item: WorkOrder) {
   if (item.status === 'cancelled') return '已取消'
   if (item.pending_qc_quantity) return `${item.procedure_name}质检中`
-  if (item.status === 'closed') return '已结单'
-  return `${item.procedure_name}加工中`
+  if (item.status === 'closed') return props.mode === 'purchase' ? '已全部到货' : '已结单'
+  return props.mode === 'purchase' ? '采购 / 到货中' : `${item.procedure_name}加工中`
 }
 
 function statusType(item: WorkOrder) {
@@ -30,7 +34,12 @@ function statusType(item: WorkOrder) {
         <span>执行工人：{{ item.worker_name || '未分配' }}</span>
         <span>创建：{{ item.created_at }}</span>
       </div>
-      <dl class="metrics">
+      <dl v-if="props.mode === 'purchase'" class="metrics purchase-metrics">
+        <div><dt>外购数量</dt><dd>{{ item.quantity }}</dd></div>
+        <div><dt>已到货</dt><dd>{{ item.submitted_quantity }}</dd></div>
+        <div><dt>待到货</dt><dd>{{ item.processing_quantity }}</dd></div>
+      </dl>
+      <dl v-else class="metrics">
         <div><dt>领料数</dt><dd>{{ item.quantity }}</dd></div>
         <div><dt>加工中</dt><dd>{{ item.processing_quantity }}</dd></div>
         <div><dt>质检中</dt><dd>{{ item.pending_qc_quantity }}</dd></div>
@@ -39,7 +48,7 @@ function statusType(item: WorkOrder) {
         <div><dt>报废 / 遗失</dt><dd>{{ item.scrap_quantity }} / {{ item.lost_quantity }}</dd></div>
       </dl>
       <div v-if="item.batches.length" class="batches">
-        <h4>送检与 QC 记录</h4>
+        <h4>{{ props.mode === 'purchase' ? '到货与 QC 记录' : '送检与 QC 记录' }}</h4>
         <div v-for="batch in item.batches" :key="batch.id" class="batch-row">
           <div class="batch-heading">
             <strong>第 {{ batch.id }} 批 · 送检 {{ batch.submitted_quantity }}</strong>
@@ -58,7 +67,7 @@ function statusType(item: WorkOrder) {
         type="primary"
         size="small"
         @click="emit('submit', item)"
-      >完成工艺 / 送检</ElButton>
+      >{{ props.mode === 'purchase' ? '登记到货' : '完成工艺 / 送检' }}</ElButton>
       <ElButton
         v-if="item.status === 'open' && item.submitted_quantity === 0"
         size="small"
@@ -80,6 +89,7 @@ function statusType(item: WorkOrder) {
 .metrics div { padding: 10px; border-radius: 6px; background: #fff; }
 .metrics dt { color: var(--el-text-color-secondary); font-size: 12px; }
 .metrics dd { margin: 5px 0 0; font-size: 17px; font-weight: 700; }
+.purchase-metrics { grid-template-columns: repeat(3, minmax(100px, 1fr)); }
 .batches { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--erp-border); }
 .batches h4 { margin: 0 0 8px; font-size: 13px; }
 .batch-row { padding: 9px 10px; border-radius: 6px; background: #fff; font-size: 12px; }

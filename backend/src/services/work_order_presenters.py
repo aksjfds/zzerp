@@ -1,5 +1,6 @@
 from sqlalchemy import select
 
+from domain.time import business_iso
 from models.organization import Department, Worker
 from models.production import ProductionItem, Repository, WorkOrder, WorkOrderBatch, WorkOrderMaterial
 from models.sales import CustomerOrder
@@ -123,9 +124,10 @@ def serialize_batch(batch: WorkOrderBatch) -> dict:
         "rework_quantity": batch.rework_quantity,
         "scrap_quantity": batch.scrap_quantity,
         "lost_quantity": batch.lost_quantity,
+        "qc_worker_id": batch.qc_worker_id,
         "qc_worker_name": batch.qc_worker_name,
         "defect_reason": batch.defect_reason,
-        "recorded_at": batch.recorded_at.isoformat(timespec="minutes") if batch.recorded_at else None,
+        "recorded_at": business_iso(batch.recorded_at),
     }
 
 
@@ -164,8 +166,8 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         "scrap_quantity": sum(item.scrap_quantity or 0 for item in completed_batches),
         "lost_quantity": sum(item.lost_quantity or 0 for item in completed_batches),
         "status": order.status,
-        "created_at": order.created_at.isoformat(timespec="minutes"),
-        "closed_at": order.closed_at.isoformat(timespec="minutes") if order.closed_at else None,
+        "created_at": business_iso(order.created_at),
+        "closed_at": business_iso(order.closed_at),
         "batches": [serialize_batch(item) for item in batches],
         "input_production_item_ids": (
             session.info["work_order_material_cache"].get(order.id, [])

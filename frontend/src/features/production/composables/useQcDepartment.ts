@@ -19,24 +19,36 @@ export function useQcDepartment() {
   const historyTotal = ref(0)
   const dialogVisible = ref(false)
   const submitting = ref(false)
+  let detailSequence = 0
 
   async function loadDetails() {
+    const sequence = ++detailSequence
+    const requestedProductionItemId = workspace.selectedProductionItemId.value
+    const requestedPage = historyPage.value
     batches.value = []
     historyTotal.value = 0
-    if (!workspace.selectedProductionItemId.value) return
+    if (!requestedProductionItemId) {
+      detailLoading.value = false
+      return
+    }
     detailLoading.value = true
     try {
       const result = await queryPendingQcBatches(
-        historyPage.value,
+        requestedPage,
         workspace.pageSize,
-        workspace.selectedProductionItemId.value,
+        requestedProductionItemId,
       )
+      if (
+        sequence !== detailSequence
+        || workspace.selectedProductionItemId.value !== requestedProductionItemId
+        || historyPage.value !== requestedPage
+      ) return
       batches.value = result.items
       historyTotal.value = result.total
     } catch {
-      ElMessage.warning('关联质检记录加载失败')
+      if (sequence === detailSequence) ElMessage.warning('关联质检记录加载失败')
     } finally {
-      detailLoading.value = false
+      if (sequence === detailSequence) detailLoading.value = false
     }
   }
 
@@ -73,14 +85,23 @@ export function useQcDepartment() {
 
   async function refresh() {
     historyPage.value = 1
-    await workspace.refresh()
+    const refreshRequest = workspace.refresh()
     await loadDetails()
+    await refreshRequest
+  }
+
+  async function changeRepositoryPage(page: number) {
+    historyPage.value = 1
+    const pageRequest = workspace.changePage(page)
+    await loadDetails()
+    await pageRequest
   }
 
   async function applyFilters(filters: RepositoryFilters) {
     historyPage.value = 1
-    workspace.search(filters)
+    const searchRequest = workspace.search(filters)
     await loadDetails()
+    await searchRequest
   }
 
   async function load() {
@@ -92,6 +113,7 @@ export function useQcDepartment() {
     activeBatch,
     applyFilters,
     batches,
+    changeRepositoryPage,
     detailLoading,
     dialogVisible,
     historyPage,
