@@ -1,13 +1,13 @@
-export type ProcedureSubstep = {
+export type ProcedureTag = {
   id: number
   procedure_id: number
-  substep_name: string
+  tag_name: string
 }
 
 export type RepositoryItem = {
   card_key: string
   repository_id: number | null
-  stage_stock_id: number | null
+  tag_stock_id: number | null
   production_item_id: number
   customer_order_item_id: number
   customer_order_no: string
@@ -24,9 +24,8 @@ export type RepositoryItem = {
   source_node_label: string
   procedure_id: number | null
   procedure_name: string
-  completed_substep_id: number | null
-  current_stage_name: string | null
-  available_substeps: ProcedureSubstep[]
+  current_tag_set_name: string | null
+  available_tags: ProcedureTag[]
   workshop_name: string
   department_id: number
   department_name: string
@@ -43,32 +42,22 @@ export type RepositoryItem = {
   can_dispatch: boolean
 }
 
-export type SubstepOpenWorkOrder = {
-  id: number
-  work_order_no: string
-  worker_id: number | null
-  processing_quantity: number
-  worker_name: string | null
-  quantity: number
-}
-
-export type SubstepCard = {
+export type TagCard = {
   card_key: string
   production_item_id: number
   flow_node_id: string
   source_flow_node_id: string
   procedure_id: number
-  substep_id: number | null
-  substep_name: string
+  tag_set_id: number | null
+  tag_ids: number[]
+  tag_names: string[]
+  tag_set_name: string
   repository_id: number | null
-  stage_stock_id: number | null
+  tag_stock_id: number | null
   available_quantity: number
   processing_quantity: number
   pending_qc_quantity: number
   completed_quantity: number
-  open_work_orders: SubstepOpenWorkOrder[]
-  can_create_work_order: boolean
-  can_submit_qc: boolean
 }
 
 export type RepositoryFilters = {
@@ -83,7 +72,8 @@ export type WorkOrderBatch = {
   work_order_id: number
   submitted_quantity: number
   source_flow_node_id: string
-  source_substep_id: number | null
+  rework_source_batch_id: number | null
+  rework_pending_quantity: number
   qualified_quantity: number | null
   rework_quantity: number | null
   scrap_quantity: number | null
@@ -98,12 +88,15 @@ export type WorkOrder = {
   id: number
   work_order_no: string
   repository_id: number | null
-  procedure_stage_stock_id: number | null
+  procedure_tag_stock_id: number | null
   production_item_id: number
+  procedure_id: number | null
   flow_node_id: string
   source_flow_node_id: string | null
-  substep_id: number | null
-  work_order_type: 'substep' | 'assembly'
+  applied_tag_set_id: number | null
+  source_tag_set_id: number | null
+  target_tag_set_id: number | null
+  work_order_type: 'tag' | 'purchase_receipt' | 'assembly'
   input_production_item_ids: number[]
   customer_order_no: string
   part_no: string
@@ -141,7 +134,7 @@ export type CompletionAction = 'direct' | 'qc'
 export type WorkOrderQueryScope = {
   flowNodeId: string
   sourceFlowNodeId: string
-  substepId: number
+  targetTagSetId: number
 }
 
 export type WorkerItem = {

@@ -8,7 +8,7 @@ export async function queryDepartmentWorkOrders(
   productionItemId?: number | null,
   flowNodeId?: string | null,
   sourceFlowNodeId?: string | null,
-  substepId?: number | null,
+  targetTagSetId?: number | null,
 ) {
   const response = await service.get<{ data: WorkOrder[]; total: number }>(
     `/departments/${departmentCode}/work-orders`,
@@ -19,7 +19,7 @@ export async function queryDepartmentWorkOrders(
         production_item_id: productionItemId || undefined,
         flow_node_id: flowNodeId || undefined,
         source_flow_node_id: sourceFlowNodeId || undefined,
-        substep_id: substepId || undefined,
+        target_tag_set_id: targetTagSetId || undefined,
       },
     },
   )
@@ -28,20 +28,20 @@ export async function queryDepartmentWorkOrders(
 
 export async function createWorkOrder(
   repositoryId: number | null,
-  procedureStageStockId: number | null,
-  substepName: string,
+  procedureTagStockId: number | null,
+  tagNames: string[],
   quantity: number,
   workerId: number | null,
 ) {
-  if ((repositoryId === null) === (procedureStageStockId === null)) {
+  if ((repositoryId === null) === (procedureTagStockId === null)) {
     throw new Error('工单来源必须且只能选择一种库存')
   }
-  const source = procedureStageStockId === null
+  const source = procedureTagStockId === null
     ? { repository_id: repositoryId }
-    : { procedure_stage_stock_id: procedureStageStockId }
+    : { procedure_tag_stock_id: procedureTagStockId }
   const response = await service.post<{ data: WorkOrder }>('/work-orders', {
     ...source,
-    substep_name: substepName,
+    tag_names: tagNames,
     quantity,
     worker_id: workerId,
   })
@@ -72,6 +72,21 @@ export async function submitWorkOrder(
       quantity,
       completion_action: completionAction,
     },
+  )
+  return response.data.data
+}
+
+export async function completeWorkOrder(workOrderId: number) {
+  const response = await service.post<{ data: WorkOrder }>(
+    `/work-orders/${workOrderId}/complete`,
+  )
+  return response.data.data
+}
+
+export async function resubmitReworkBatch(batchId: number, quantity: number) {
+  const response = await service.post<{ data: WorkOrder['batches'][number] }>(
+    `/work-order-batches/${batchId}/rework-submissions`,
+    { quantity },
   )
   return response.data.data
 }

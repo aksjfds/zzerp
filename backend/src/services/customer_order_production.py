@@ -6,7 +6,7 @@ from database import SessionLocal
 from services.production_flow import load_product_flow
 from models.engineering import Product, ProductBom
 from models.production import (
-    ProcedureStageStock,
+    ProcedureTagStock,
     ProductionItem,
     ProductionMovement,
     Repository,
@@ -58,10 +58,10 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         if production_item_ids
         else []
     )
-    stage_stocks = (
+    tag_stocks = (
         session.scalars(
-            select(ProcedureStageStock).where(
-                ProcedureStageStock.production_item_id.in_(production_item_ids)
+            select(ProcedureTagStock).where(
+                ProcedureTagStock.production_item_id.in_(production_item_ids)
             )
         ).all()
         if production_item_ids
@@ -104,7 +104,7 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             else "未知来源"
         )
         current_inputs[repository.flow_node_id][source_name] += repository.quantity
-    for stock in stage_stocks:
+    for stock in tag_stocks:
         current_by_node[stock.flow_node_id] += stock.quantity
         production_item = session.get(ProductionItem, stock.production_item_id)
         source_name = (

@@ -77,9 +77,12 @@ def create_assembly_work_order(
         )
         order = WorkOrder(
             repository_id=None,
-            procedure_stage_stock_id=None,
+            procedure_tag_stock_id=None,
             production_item_id=input_items[0].id,
-            substep_id=None,
+            procedure_id=None,
+            applied_tag_set_id=None,
+            source_tag_set_id=None,
+            target_tag_set_id=None,
             work_order_type="assembly",
             work_order_name=(
                 assembly_node.get("label")

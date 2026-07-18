@@ -51,32 +51,28 @@ function isDispatchOnly(item: RepositoryItem) {
         <div><dt>产品</dt><dd>{{ item.factory_code }} · {{ item.product_name }}</dd></div>
         <div><dt>订单编号</dt><dd>{{ item.customer_order_no }}</dd></div>
         <div><dt>当前工艺</dt><dd>{{ item.procedure_name }}</dd></div>
-        <div v-if="props.mode === 'purchase'"><dt>当前细分</dt><dd>{{ item.current_stage_name || '-' }}</dd></div>
+        <div v-if="props.mode === 'production'"><dt>标记状态</dt><dd>{{ item.current_tag_set_name || '未打标记' }}</dd></div>
         <div><dt>来源节点</dt><dd>{{ item.source_node_label }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求数量' : '当前数量' }}</dt><dd>{{ item.quantity }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求时间' : '到达时间' }}</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
       </dl>
-      <div v-if="allowDispatch && props.mode === 'production'" class="card-actions">
+      <div v-if="allowDispatch || allowWorkOrder" class="card-actions">
         <ElButton
+          v-if="allowDispatch && props.mode === 'production'"
           type="primary"
           plain
           size="small"
           :disabled="!item.can_dispatch || item.available_quantity < 1"
           @click.stop="emit('dispatch', item)"
         >出货</ElButton>
-      </div>
-      <div
-        v-else-if="allowWorkOrder && (item.repository_id !== null || item.stage_stock_id !== null)"
-        class="card-actions"
-      >
         <ElButton
-          v-if="item.can_create_work_order
-            && item.available_quantity > 0"
+          v-if="allowWorkOrder"
           type="primary"
           plain
           size="small"
+          :disabled="!item.can_create_work_order"
           @click.stop="emit('createWorkOrder', item)"
-        >{{ props.mode === 'purchase' ? '建外购单' : '开工单' }}</ElButton>
+        >{{ props.mode === 'purchase' ? '建外购单' : '开工单（添加标记）' }}</ElButton>
       </div>
     </article>
     <ElEmpty v-if="!loading && !items.length" description="当前部门暂无配件或装配体" :image-size="72" />

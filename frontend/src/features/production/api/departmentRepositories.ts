@@ -2,7 +2,7 @@ import { service } from '@/api/request'
 import type {
   RepositoryFilters,
   RepositoryItem,
-  SubstepCard,
+  TagCard,
   WorkerItem,
 } from '../domain/types'
 
@@ -30,14 +30,14 @@ export async function queryDepartmentWorkers(departmentCode: string) {
   return response.data.data
 }
 
-export async function queryProductionSubstepCards(
+export async function queryProductionTagCards(
   departmentCode: string,
   productionItemId: number,
   flowNodeId: string,
   sourceFlowNodeId: string,
 ) {
-  const response = await service.get<{ data: SubstepCard[] }>(
-    `/departments/${departmentCode}/production-items/${productionItemId}/substep-cards`,
+  const response = await service.get<{ data: TagCard[] }>(
+    `/departments/${departmentCode}/production-items/${productionItemId}/tag-cards`,
     {
       params: {
         flow_node_id: flowNodeId,
@@ -48,12 +48,12 @@ export async function queryProductionSubstepCards(
   return response.data.data
 }
 
-export async function dispatchProcedureStageStock(
-  procedureStageStockId: number,
+export async function dispatchProcedureTagStock(
+  procedureTagStockId: number,
   quantity: number,
 ) {
   await service.post(
-    `/procedure-stage-stocks/${procedureStageStockId}/dispatches`,
+    `/procedure-tag-stocks/${procedureTagStockId}/dispatches`,
     { quantity },
   )
 }

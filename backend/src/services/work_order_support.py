@@ -5,7 +5,7 @@ from domain.time import utc_now
 from models.organization import Department, Procedure, Workshop
 from models.production import (
     ProductionItem,
-    ProcedureStageStock,
+    ProcedureTagStock,
     Repository,
     WorkOrder,
     WorkOrderBatch,
@@ -150,11 +150,11 @@ def refresh_order_closed(session, production_item: ProductionItem) -> None:
         .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
         .where(CustomerOrderItem.customer_order_id == customer_order.id)
     )
-    stage_stock_count = session.scalar(
-        select(func.count(ProcedureStageStock.id))
+    tag_stock_count = session.scalar(
+        select(func.count(ProcedureTagStock.id))
         .join(
             ProductionItem,
-            ProductionItem.id == ProcedureStageStock.production_item_id,
+            ProductionItem.id == ProcedureTagStock.production_item_id,
         )
         .join(
             CustomerOrderItem,
@@ -183,7 +183,7 @@ def refresh_order_closed(session, production_item: ProductionItem) -> None:
     )
     if (
         not repository_count
-        and not stage_stock_count
+        and not tag_stock_count
         and not open_order_count
         and not pending_qc_count
     ):

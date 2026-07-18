@@ -26,7 +26,7 @@ class ProcedureResponse(OrganizationModel):
     procedure_type: Literal["standard", "purchase_receipt"]
 
 
-class ProcedureSubstepResponse(OrganizationModel):
+class ProcedureTagResponse(OrganizationModel):
     id: int
     procedure_id: int
-    substep_name: str
+    tag_name: str

@@ -2,17 +2,18 @@ from sqlalchemy import select
 
 from database import SessionLocal
 from domain.time import utc_now
-from models.organization import Department, Procedure, ProcedureSubstep, Worker
+from models.organization import Department, Procedure, ProcedureTagSet, Worker
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch
 from schemas.production import QcInspection
 from services.errors import DomainError
-from services.procedure_stages import (
-    restore_substep_source,
-    route_substep_output,
+from services.procedure_tags import (
+    procedure_department_id,
+    restore_tag_source,
+    route_tag_output,
 )
 from services.production_movements import record_movement
 from services.work_order_presenters import serialize_batch
-from services.work_order_support import node_context, refresh_order_closed
+from services.work_order_support import move_to_node, node_context, refresh_order_closed
 
 
 def inspect_batch(
@@ -43,8 +44,10 @@ def inspect_batch(
             raise DomainError("qc_batch_not_found", "送检批次所属工单不存在", status_code=404)
         if batch.recorded_at is not None:
             raise DomainError("qc_batch_completed", "该批次已经完成质检")
-        if order.work_order_type != "substep":
-            raise DomainError("qc_work_order_type_invalid", "当前仅细分工序工单支持送 QC")
+        if order.work_order_type not in {"tag", "purchase_receipt"}:
+            raise DomainError("qc_work_order_type_invalid", "当前工单不支持送 QC")
+        if order.work_order_type == "tag" and order.status != "open":
+            raise DomainError("work_order_closed", "生产工单已经结单")
 
         total = _inspection_total(payload)
         if total != batch.submitted_quantity:
@@ -57,22 +60,52 @@ def inspect_batch(
             order.production_item_id,
             with_for_update=True,
         )
-        substep = session.get(ProcedureSubstep, order.substep_id)
-        procedure = session.get(Procedure, substep.procedure_id) if substep else None
-        if production_item is None or substep is None or procedure is None:
+        if production_item is None:
             raise DomainError("production_context_missing", "送检工单的生产资料不完整")
         context, node = node_context(session, production_item, order.flow_node_id)
+        procedure = session.get(Procedure, node.get("procedure_id"))
+        if procedure is None or order.procedure_id != procedure.id:
+            raise DomainError("production_context_missing", "送检工单的工艺资料不完整")
+        if order.work_order_type == "tag":
+            source_set = (
+                session.get(ProcedureTagSet, order.source_tag_set_id)
+                if order.source_tag_set_id is not None else None
+            )
+            target_set = session.get(ProcedureTagSet, order.target_tag_set_id)
+            if (
+                procedure.procedure_type != "standard"
+                or target_set is None
+                or target_set.procedure_id != procedure.id
+                or (order.source_tag_set_id is not None and source_set is None)
+                or (source_set is not None and source_set.procedure_id != procedure.id)
+            ):
+                raise DomainError("procedure_tag_context_invalid", "送检工单标记组合无效")
+        elif procedure.procedure_type != "purchase_receipt":
+            raise DomainError("work_order_type_invalid", "外购入库工单所属工艺无效")
 
         if payload.qualified_quantity:
-            target_node_id, target_department_id, _ = route_substep_output(
-                session,
-                production_item=production_item,
-                flow_context=context,
-                flow_node_id=node["id"],
-                source_flow_node_id=batch.source_flow_node_id,
-                substep=substep,
-                quantity=payload.qualified_quantity,
-            )
+            if order.work_order_type == "tag":
+                route_tag_output(
+                    session,
+                    production_item=production_item,
+                    flow_node_id=node["id"],
+                    source_flow_node_id=batch.source_flow_node_id,
+                    procedure=procedure,
+                    target_tag_set_id=order.target_tag_set_id,
+                    quantity=payload.qualified_quantity,
+                )
+                target_node_id = node["id"]
+                target_department_id = procedure_department_id(session, procedure)
+            else:
+                target = context.normal_target(node["id"])
+                target_department_id = move_to_node(
+                    session,
+                    production_item,
+                    target,
+                    payload.qualified_quantity,
+                    node["id"],
+                )
+                target_node_id = target.get("id") if target else None
             record_movement(
                 session,
                 production_item=production_item,
@@ -80,6 +113,8 @@ def inspect_batch(
                 movement_type="qc_qualified",
                 source_flow_node_id=node["id"],
                 target_flow_node_id=target_node_id,
+                source_tag_set_id=order.target_tag_set_id,
+                target_tag_set_id=order.target_tag_set_id,
                 source_department_id=qc_department.id,
                 target_department_id=target_department_id,
                 work_order_id=order.id,
@@ -87,15 +122,18 @@ def inspect_batch(
             )
 
         if payload.rework_quantity:
-            target_department_id = restore_substep_source(
-                session,
-                production_item=production_item,
-                flow_node_id=node["id"],
-                source_flow_node_id=batch.source_flow_node_id,
-                procedure=procedure,
-                source_substep_id=batch.source_substep_id,
-                quantity=payload.rework_quantity,
-            )
+            if order.work_order_type == "tag":
+                target_department_id = procedure_department_id(session, procedure)
+            else:
+                target_department_id = restore_tag_source(
+                    session,
+                    production_item=production_item,
+                    flow_node_id=node["id"],
+                    source_flow_node_id=batch.source_flow_node_id,
+                    procedure=procedure,
+                    source_tag_set_id=order.source_tag_set_id,
+                    quantity=payload.rework_quantity,
+                )
             record_movement(
                 session,
                 production_item=production_item,
@@ -103,6 +141,8 @@ def inspect_batch(
                 movement_type="qc_rework",
                 source_flow_node_id=node["id"],
                 target_flow_node_id=node["id"],
+                source_tag_set_id=order.target_tag_set_id,
+                target_tag_set_id=order.source_tag_set_id,
                 source_department_id=qc_department.id,
                 target_department_id=target_department_id,
                 work_order_id=order.id,
@@ -118,6 +158,7 @@ def inspect_batch(
             payload.scrap_quantity,
             "scrap",
             qc_department.id,
+            order.target_tag_set_id,
         )
         _record_loss(
             session,
@@ -128,12 +169,13 @@ def inspect_batch(
             payload.lost_quantity,
             "lost",
             qc_department.id,
+            order.target_tag_set_id,
         )
         session.flush()
         _complete_batch(batch, payload, qc_worker)
         session.flush()
         refresh_order_closed(session, production_item)
-        return serialize_batch(batch)
+        return serialize_batch(batch, track_rework=order.work_order_type == "tag")
 
 
 def _inspection_total(payload: QcInspection) -> int:
@@ -156,6 +198,7 @@ def _record_loss(
     quantity,
     movement_type,
     qc_department_id,
+    source_tag_set_id,
 ) -> None:
     record_movement(
         session,
@@ -164,6 +207,7 @@ def _record_loss(
         movement_type=movement_type,
         source_flow_node_id=flow_node_id,
         target_flow_node_id=None,
+        source_tag_set_id=source_tag_set_id,
         source_department_id=qc_department_id,
         work_order_id=order.id,
         work_order_batch_id=batch.id,

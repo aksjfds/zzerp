@@ -154,6 +154,21 @@ def _serialize_history_item(
         completed_at = order.closed_at or order.created_at
     lost_quantity = sum(item.lost_quantity or 0 for item in worker_batches or batches)
     scrap_quantity = sum(item.scrap_quantity or 0 for item in worker_batches or batches)
+    rework_resubmitted: dict[int, int] = defaultdict(int)
+    for batch in batches:
+        if batch.rework_source_batch_id is not None:
+            rework_resubmitted[batch.rework_source_batch_id] += batch.submitted_quantity
+    rework_pending = (
+        sum(
+            max(
+                (batch.rework_quantity or 0) - rework_resubmitted.get(batch.id, 0),
+                0,
+            )
+            for batch in batches
+            if batch.recorded_at is not None
+        )
+        if order.work_order_type == "tag" and order.worker_id == worker.id else 0
+    )
     return {
         "work_order_id": order.id,
         "work_order_no": order.work_order_no,
@@ -161,7 +176,9 @@ def _serialize_history_item(
         "procedure_name": procedure_name,
         "planned_quantity": planned_quantity,
         "completed_quantity": completed_quantity,
-        "processing_quantity": max(planned_quantity - completed_quantity, 0),
+        "processing_quantity": (
+            max(planned_quantity - completed_quantity, 0) + rework_pending
+        ),
         "completion_rate": round(completed_quantity / planned_quantity, 4)
         if planned_quantity else 0,
         "lost_quantity": lost_quantity,

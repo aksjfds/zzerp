@@ -1,7 +1,7 @@
 from sqlalchemy import exists, func, or_, select
 
 from database import SessionLocal
-from models.organization import Department, Procedure, ProcedureSubstep, Worker, Workshop
+from models.organization import Department, Procedure, Worker, Workshop
 from models.production import WorkOrder, WorkOrderBatch, WorkOrderMaterial
 from services.errors import DomainError
 from services.work_order_presenters import (
@@ -18,15 +18,14 @@ def list_department_work_orders(
     page_size: int,
     production_item_id: int | None = None,
     flow_node_id: str | None = None,
-    substep_id: int | None = None,
+    target_tag_set_id: int | None = None,
     source_flow_node_id: str | None = None,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         department = _department(session, department_code)
         statement = (
             select(WorkOrder)
-            .outerjoin(ProcedureSubstep, ProcedureSubstep.id == WorkOrder.substep_id)
-            .outerjoin(Procedure, Procedure.id == ProcedureSubstep.procedure_id)
+            .outerjoin(Procedure, Procedure.id == WorkOrder.procedure_id)
             .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
             .order_by(WorkOrder.id.desc())
         )
@@ -34,7 +33,7 @@ def list_department_work_orders(
             WorkOrder.work_order_type == "assembly"
             if department_code == "assembly"
             else (
-                (WorkOrder.work_order_type == "substep")
+                (WorkOrder.work_order_type.in_(("tag", "purchase_receipt")))
                 & (Workshop.department_id == department.id)
             )
         )
@@ -46,8 +45,8 @@ def list_department_work_orders(
             condition = condition & (
                 WorkOrder.source_flow_node_id == source_flow_node_id
             )
-        if substep_id is not None:
-            condition = condition & (WorkOrder.substep_id == substep_id)
+        if target_tag_set_id is not None:
+            condition = condition & (WorkOrder.target_tag_set_id == target_tag_set_id)
         filtered = statement.where(condition)
         total = session.scalar(
             select(func.count()).select_from(filtered.order_by(None).subquery())
@@ -150,7 +149,7 @@ def _serialize_pending_batch(session, batch: WorkOrderBatch) -> dict:
     data = serialize_batch(batch)
     data.update(
         {
-            "repository_id": None,
+            "repository_id": order.repository_id,
             "production_item_id": order.production_item_id,
             "work_order_no": order.work_order_no,
             "customer_order_no": customer_order.customer_order_no,

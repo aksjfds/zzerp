@@ -5,9 +5,9 @@ from sqlalchemy import and_, case, func, or_, select, tuple_
 from database import SessionLocal
 from domain.time import BUSINESS_TIMEZONE, business_iso
 from models.engineering import Product, ProductBom
-from models.organization import Department, Procedure, ProcedureSubstep, Workshop
+from models.organization import Department, Procedure, ProcedureTagSet, Workshop
 from models.production import (
-    ProcedureStageStock,
+    ProcedureTagStock,
     ProductionItem,
     ProductionMovement,
     Repository,
@@ -24,14 +24,14 @@ from services.production_card_filters import (
 from services.production_card_status import (
     position_statuses,
     reserved_quantities,
-    reserved_stage_quantities,
-    stage_stock_statuses,
+    reserved_tag_quantities,
+    tag_stock_statuses,
 )
 from services.production_flow import load_production_flow
-from services.procedure_stages import (
-    current_stage_name,
-    serialize_substep,
-    substep_suggestions,
+from services.procedure_tags import (
+    serialize_tag,
+    serialize_tag_set,
+    tag_suggestions,
 )
 from services.work_order_presenters import production_item_name
 
@@ -63,7 +63,7 @@ def list_production_cards(
             )
             if department_code != "assembly":
                 active_cards.extend(
-                    _stage_cards(
+                    _tag_stock_cards(
                         session, department, None, None, None
                     )
                 )
@@ -93,11 +93,11 @@ def list_production_cards(
                 current_positions.update(
                     session.execute(
                         select(
-                            ProcedureStageStock.production_item_id,
-                            ProcedureStageStock.flow_node_id,
-                            ProcedureStageStock.source_flow_node_id,
+                            ProcedureTagStock.production_item_id,
+                            ProcedureTagStock.flow_node_id,
+                            ProcedureTagStock.source_flow_node_id,
                         )
-                        .where(ProcedureStageStock.department_id == department.id)
+                        .where(ProcedureTagStock.department_id == department.id)
                         .distinct()
                     ).all()
                 )
@@ -112,14 +112,7 @@ def list_production_cards(
                             WorkOrderBatch,
                             WorkOrderBatch.work_order_id == WorkOrder.id,
                         )
-                        .outerjoin(
-                            ProcedureSubstep,
-                            ProcedureSubstep.id == WorkOrder.substep_id,
-                        )
-                        .outerjoin(
-                            Procedure,
-                            Procedure.id == ProcedureSubstep.procedure_id,
-                        )
+                        .outerjoin(Procedure, Procedure.id == WorkOrder.procedure_id)
                         .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
                         .where(
                             Workshop.department_id == department.id,
@@ -178,7 +171,7 @@ def _aggregate_standard_parent_cards(session, cards: list[dict]) -> list[dict]:
         dispatchable_quantity = sum(
             item["available_quantity"]
             for item in group
-            if item.get("stage_stock_id") is not None
+            if item.get("tag_stock_id") is not None
         )
         status = (
             "processing"
@@ -204,15 +197,16 @@ def _aggregate_standard_parent_cards(session, cards: list[dict]) -> list[dict]:
                     f"{source_flow_node_id}"
                 ),
                 "repository_id": None,
-                "stage_stock_id": None,
-                "completed_substep_id": None,
-                "current_stage_name": "细分工序",
+                "tag_stock_id": None,
+                "current_tag_set_name": "标记组合",
                 "quantity": sum(item["quantity"] for item in group)
                 + pending_qc_quantity,
                 "available_quantity": dispatchable_quantity,
                 "arrived_at": arrived_at,
                 "work_status": status,
-                "can_create_work_order": False,
+                "can_create_work_order": any(
+                    item.get("can_create_work_order", False) for item in group
+                ),
                 "can_dispatch": dispatchable_quantity > 0,
             }
         )
@@ -241,8 +235,7 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
         .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
         .join(Product, Product.id == CustomerOrderItem.product_id)
         .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
-        .join(ProcedureSubstep, ProcedureSubstep.id == WorkOrder.substep_id)
-        .join(Procedure, Procedure.id == ProcedureSubstep.procedure_id)
+        .join(Procedure, Procedure.id == WorkOrder.procedure_id)
         .join(Workshop, Workshop.id == Procedure.workshop_id)
         .where(
             WorkOrderBatch.recorded_at.is_(None),
@@ -273,7 +266,7 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
             {
                 "card_key": f"pending-qc:{row.WorkOrderBatch.id}",
                 "repository_id": None,
-                "stage_stock_id": None,
+                "tag_stock_id": None,
                 "production_item_id": production_item.id,
                 "customer_order_item_id": row.CustomerOrderItem.id,
                 "customer_order_no": row.CustomerOrder.customer_order_no,
@@ -290,11 +283,10 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
                 "source_node_label": source.get("label", "未知来源"),
                 "procedure_id": row.Procedure.id,
                 "procedure_name": row.Procedure.procedure_name,
-                "completed_substep_id": None,
-                "current_stage_name": "质检中",
-                "available_substeps": [
-                    serialize_substep(item)
-                    for item in substep_suggestions(session, row.Procedure.id)
+                "current_tag_set_name": "质检中",
+                "available_tags": [
+                    serialize_tag(item)
+                    for item in tag_suggestions(session, row.Procedure.id)
                 ],
                 "workshop_name": row.Workshop.workshop_name,
                 "department_id": department.id,
@@ -452,26 +444,26 @@ def _current_cards(
     ]
 
 
-def _stage_cards(
+def _tag_stock_cards(
     session,
     department: Department,
     keyword: str | None,
     arrived_from: date | None,
     arrived_to: date | None,
 ) -> list[dict]:
-    arrival_substep_id = case(
+    arrival_tag_set_id = case(
         (
             ProductionMovement.movement_type == "qc_rework",
-            WorkOrderBatch.source_substep_id,
+            WorkOrder.source_tag_set_id,
         ),
-        else_=WorkOrder.substep_id,
+        else_=WorkOrder.target_tag_set_id,
     )
     latest_arrivals = (
         select(
             ProductionMovement.production_item_id.label("production_item_id"),
             ProductionMovement.target_flow_node_id.label("flow_node_id"),
             WorkOrder.source_flow_node_id.label("source_flow_node_id"),
-            arrival_substep_id.label("completed_substep_id"),
+            arrival_tag_set_id.label("tag_set_id"),
             func.max(ProductionMovement.created_at).label("arrived_at"),
         )
         .join(WorkOrder, WorkOrder.id == ProductionMovement.work_order_id)
@@ -490,13 +482,13 @@ def _stage_cards(
             ProductionMovement.production_item_id,
             ProductionMovement.target_flow_node_id,
             WorkOrder.source_flow_node_id,
-            arrival_substep_id,
+            arrival_tag_set_id,
         )
         .subquery()
     )
     statement = (
         select(
-            ProcedureStageStock,
+            ProcedureTagStock,
             ProductionItem,
             CustomerOrderItem,
             CustomerOrder,
@@ -506,7 +498,7 @@ def _stage_cards(
         )
         .join(
             ProductionItem,
-            ProductionItem.id == ProcedureStageStock.production_item_id,
+            ProductionItem.id == ProcedureTagStock.production_item_id,
         )
         .join(
             CustomerOrderItem,
@@ -519,15 +511,14 @@ def _stage_cards(
             latest_arrivals,
             and_(
                 latest_arrivals.c.production_item_id
-                == ProcedureStageStock.production_item_id,
-                latest_arrivals.c.flow_node_id == ProcedureStageStock.flow_node_id,
+                == ProcedureTagStock.production_item_id,
+                latest_arrivals.c.flow_node_id == ProcedureTagStock.flow_node_id,
                 latest_arrivals.c.source_flow_node_id
-                == ProcedureStageStock.source_flow_node_id,
-                latest_arrivals.c.completed_substep_id
-                == ProcedureStageStock.completed_substep_id,
+                == ProcedureTagStock.source_flow_node_id,
+                latest_arrivals.c.tag_set_id == ProcedureTagStock.tag_set_id,
             ),
         )
-        .where(ProcedureStageStock.department_id == department.id)
+        .where(ProcedureTagStock.department_id == department.id)
     )
     statement = _apply_current_source_filters(
         statement,
@@ -537,28 +528,28 @@ def _stage_cards(
         arrived_to,
     )
     rows = session.execute(statement).all()
-    stock_ids = [row.ProcedureStageStock.id for row in rows]
-    reserved_by_id = reserved_stage_quantities(session, stock_ids)
-    status_by_id = stage_stock_statuses(session, stock_ids)
+    stock_ids = [row.ProcedureTagStock.id for row in rows]
+    reserved_by_id = reserved_tag_quantities(session, stock_ids)
+    status_by_id = tag_stock_statuses(session, stock_ids)
     return [
-        _stage_card(
+        _tag_stock_card(
             session,
-            row.ProcedureStageStock,
+            row.ProcedureTagStock,
             row.ProductionItem,
             row.CustomerOrderItem,
             row.CustomerOrder,
             row.Product,
             row.ProductBom,
             department,
-            reserved_by_id.get(row.ProcedureStageStock.id, 0),
+            reserved_by_id.get(row.ProcedureTagStock.id, 0),
             row.arrived_at,
-            status_by_id[row.ProcedureStageStock.id],
+            status_by_id[row.ProcedureTagStock.id],
         )
         for row in rows
     ]
 
 
-def _stage_card(
+def _tag_stock_card(
     session,
     stock,
     production_item,
@@ -574,22 +565,18 @@ def _stage_card(
     context = load_production_flow(session, production_item)
     node = context.nodes.get(stock.flow_node_id, {})
     source = context.nodes.get(stock.source_flow_node_id, {})
-    completed_substep = session.get(ProcedureSubstep, stock.completed_substep_id)
-    procedure = (
-        session.get(Procedure, completed_substep.procedure_id)
-        if completed_substep
-        else None
-    )
+    tag_set = session.get(ProcedureTagSet, stock.tag_set_id)
+    procedure = session.get(Procedure, tag_set.procedure_id) if tag_set else None
     workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
-    suggestions = substep_suggestions(session, procedure.id) if procedure else []
+    suggestions = tag_suggestions(session, procedure.id) if procedure else []
     part_no, part_name = context.item_name(production_item)
     if context.bom_item is None:
         part_name = production_item_name(session, production_item, set())
         part_no = part_name
     return {
-        "card_key": f"stage:{stock.id}",
+        "card_key": f"tag-stock:{stock.id}",
         "repository_id": None,
-        "stage_stock_id": stock.id,
+        "tag_stock_id": stock.id,
         "production_item_id": production_item.id,
         "customer_order_item_id": order_item.id,
         "customer_order_no": order.customer_order_no,
@@ -606,13 +593,8 @@ def _stage_card(
         "source_node_label": source.get("label", "未知来源"),
         "procedure_id": procedure.id if procedure else None,
         "procedure_name": procedure.procedure_name if procedure else node.get("label", ""),
-        "completed_substep_id": stock.completed_substep_id,
-        "current_stage_name": (
-            current_stage_name(session, procedure, stock.completed_substep_id)
-            if procedure
-            else node.get("label", "")
-        ),
-        "available_substeps": [serialize_substep(item) for item in suggestions],
+        "current_tag_set_name": serialize_tag_set(session, stock.tag_set_id)["tag_set_name"],
+        "available_tags": [serialize_tag(item) for item in suggestions],
         "workshop_name": workshop.workshop_name if workshop else "",
         "department_id": department.id,
         "department_name": department.department_name,
@@ -701,7 +683,7 @@ def _current_card(
     source = context.nodes.get(repository.source_flow_node_id, {})
     procedure = session.get(Procedure, node.get("procedure_id")) if node.get("procedure_id") else None
     workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
-    suggestions = substep_suggestions(session, procedure.id) if procedure else []
+    suggestions = tag_suggestions(session, procedure.id) if procedure else []
     part_no, part_name = context.item_name(production_item)
     if context.bom_item is None:
         part_name = production_item_name(session, production_item, set())
@@ -709,7 +691,7 @@ def _current_card(
     card = {
         "card_key": f"repository:{repository.id}",
         "repository_id": repository.id,
-        "stage_stock_id": None,
+        "tag_stock_id": None,
         "production_item_id": production_item.id,
         "customer_order_item_id": order_item.id,
         "customer_order_no": order.customer_order_no,
@@ -726,13 +708,12 @@ def _current_card(
         "source_node_label": source.get("label", "未知来源"),
         "procedure_id": procedure.id if procedure else None,
         "procedure_name": procedure.procedure_name if procedure else node.get("label", ""),
-        "completed_substep_id": None,
-        "current_stage_name": (
-            current_stage_name(session, procedure, None)
-            if procedure
+        "current_tag_set_name": (
+            "未打标记"
+            if procedure and procedure.procedure_type == "standard"
             else node.get("label", "")
         ),
-        "available_substeps": [serialize_substep(item) for item in suggestions],
+        "available_tags": [serialize_tag(item) for item in suggestions],
         "workshop_name": workshop.workshop_name if workshop else "",
         "department_id": department.id,
         "department_name": department.department_name,
@@ -791,8 +772,7 @@ def _historical_cards(
                 WorkOrder.flow_node_id,
                 WorkOrder.source_flow_node_id,
             )
-            .join(ProcedureSubstep, ProcedureSubstep.id == WorkOrder.substep_id)
-            .join(Procedure, Procedure.id == ProcedureSubstep.procedure_id)
+            .join(Procedure, Procedure.id == WorkOrder.procedure_id)
             .join(Workshop, Workshop.id == Procedure.workshop_id)
             .where(
                 Workshop.department_id == department.id,
@@ -974,7 +954,7 @@ def _historical_card(session, production_item_id, node_id, department, movement)
     card = {
         "card_key": f"history:{production_item_id}:{node_id}:{movement.id}",
         "repository_id": None,
-        "stage_stock_id": None,
+        "tag_stock_id": None,
         "production_item_id": production_item_id,
         "customer_order_item_id": order_item.id,
         "customer_order_no": order.customer_order_no,
@@ -991,9 +971,8 @@ def _historical_card(session, production_item_id, node_id, department, movement)
         "source_node_label": source.get("label", "未知来源"),
         "procedure_id": procedure.id if procedure else None,
         "procedure_name": procedure.procedure_name if procedure else node.get("label", ""),
-        "completed_substep_id": None,
-        "current_stage_name": "已完成",
-        "available_substeps": [],
+        "current_tag_set_name": "已完成",
+        "available_tags": [],
         "workshop_name": workshop.workshop_name if workshop else "",
         "department_id": department.id,
         "department_name": department.department_name,

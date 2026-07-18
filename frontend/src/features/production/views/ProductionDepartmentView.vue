@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { computed, onMounted } from 'vue'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
-import SubstepCards from '../components/SubstepCards.vue'
+import TagCombinationCards from '../components/TagCombinationCards.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
-import DispatchStageStockDialog from '../components/DispatchStageStockDialog.vue'
+import DispatchTagStockDialog from '../components/DispatchTagStockDialog.vue'
 import { useProductionDepartment } from '../composables/useProductionDepartment'
 import '../styles/workspace.css'
 
@@ -25,12 +25,14 @@ const {
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
 const {
   activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails,
-  activeSubstepSource, dispatchDialogVisible, dispatchSubmitting,
-  openDispatch, openSubstepWorkOrder, openWorkOrder,
-  refresh, saveDispatch, saveWorkOrder,
-  selectRepository, selectedSubstep, selectedSubstepKey, selectSubstep,
-  substepItems, substepLoading, submitting,
+  dispatchDialogVisible, dispatchSubmitting, openDispatch, openTagWorkOrder, openWorkOrder,
+  refresh, saveDispatch, saveWorkOrder, selectRepository,
+  selectedTag, selectedTagKey, selectTag, tagItems, tagLoading, submitting,
 } = controller
+const showSelectedWorkOrders = computed(() => (
+  props.mode !== 'production'
+  || (selectedTag.value?.tag_set_id !== null && selectedTag.value?.tag_set_id !== undefined)
+))
 onMounted(load)
 </script>
 
@@ -45,7 +47,7 @@ onMounted(load)
           :loading="loading"
           :selected-key="selectedCardKey"
           :mode="mode"
-          :allow-work-order="mode === 'purchase'"
+          :allow-work-order="mode !== 'production'"
           :allow-dispatch="mode === 'production'"
           @select="selectRepository"
           @create-work-order="openWorkOrder"
@@ -54,19 +56,18 @@ onMounted(load)
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total" :page-size="pageSize" :total="repositoryTotal" @current-change="changeRepositoryPage" />
       </div>
       <div class="production-execution">
-        <div v-if="mode === 'production'" class="production-card production-substeps">
+        <div v-if="mode === 'production'" class="production-card production-tags">
           <div v-if="selectedRepository" class="production-selection">
-            <strong>细分状态</strong>
+            <strong>标记组合</strong>
             <span>{{ selectedRepository.procedure_name }}</span>
           </div>
-          <SubstepCards
+          <TagCombinationCards
             v-if="selectedRepository"
-            :items="substepItems"
-            :loading="substepLoading"
-            :procedure-name="selectedRepository?.procedure_name"
-            :selected-key="selectedSubstepKey"
-            @select="selectSubstep"
-            @create-work-order="openSubstepWorkOrder"
+            :items="tagItems"
+            :loading="tagLoading"
+            :selected-key="selectedTagKey"
+            @select="selectTag"
+            @create-work-order="openTagWorkOrder"
           />
           <ElEmpty v-else description="请先选择配件" :image-size="64" />
         </div>
@@ -75,26 +76,27 @@ onMounted(load)
             <strong>{{ selectedRepository.part_no === selectedRepository.part_name ? selectedRepository.part_name : `${selectedRepository.part_no} - ${selectedRepository.part_name}` }}</strong>
             <span>
               {{ selectedRepository.customer_order_no }} · {{ selectedRepository.procedure_name }}
-              <template v-if="mode === 'production'"> · {{ selectedSubstep?.substep_name || (selectedSubstep ? `未${selectedRepository.procedure_name}` : '请选择细分') }}</template>
-              <template v-else> · {{ selectedRepository.current_stage_name || '待加工' }}</template>
+              <template v-if="mode === 'production'"> · {{ selectedTag?.tag_set_name || '请选择标记组合' }}</template>
+              <template v-else> · 待到货</template>
             </span>
           </div>
           <WorkOrderCards
-            v-if="mode !== 'production' || (selectedSubstep && selectedSubstep.substep_id !== null)"
+            v-if="showSelectedWorkOrders"
             :items="workOrders"
             :loading="detailLoading"
             :mode="mode"
             @submit="workOrderActions.submit"
             @submit-qc="workOrderActions.submitQc"
+            @resubmit-qc="workOrderActions.resubmitQc"
             @cancel="workOrderActions.cancel"
           />
           <ElEmpty
             v-else
-            :description="selectedRepository ? '请选择具体细分查看工单' : '请先选择配件'"
+            :description="selectedRepository ? (selectedTag ? '未打标记是开单来源，没有对应目标工单' : '请选择标记组合查看工单') : '请先选择配件'"
             :image-size="64"
           />
           <ElPagination
-            v-if="mode !== 'production' || (selectedSubstep && selectedSubstep.substep_id !== null)"
+            v-if="showSelectedWorkOrders"
             v-model:current-page="historyPage"
             class="production-pagination"
             layout="prev, pager, next, total"
@@ -108,17 +110,18 @@ onMounted(load)
     <CreateWorkOrderDialog
       v-model="dialogVisible"
       :item="activeRepository"
-      :source="activeSubstepSource"
+      :sources="tagItems"
+      :preferred-source-key="selectedTagKey"
       :workers="workers"
       :submitting="submitting"
       :mode="mode"
       @submit="saveWorkOrder"
     />
-    <DispatchStageStockDialog
+    <DispatchTagStockDialog
       v-if="mode === 'production'"
       v-model="dispatchDialogVisible"
       :item="activeRepository"
-      :substeps="substepItems"
+      :tag-cards="tagItems"
       :submitting="dispatchSubmitting"
       @submit="saveDispatch"
     />

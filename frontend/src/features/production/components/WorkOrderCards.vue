@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { WorkOrder } from '../domain/types'
+import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 
 const props = withDefaults(defineProps<{
   items: WorkOrder[]
@@ -9,8 +9,40 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   submit: [item: WorkOrder]
   submitQc: [item: WorkOrder]
+  resubmitQc: [item: WorkOrder, batch: WorkOrderBatch]
   cancel: [item: WorkOrder]
 }>()
+
+function initialProcessingQuantity(item: WorkOrder) {
+  return Math.max(item.quantity - item.submitted_quantity, 0)
+}
+
+function reworkPendingQuantity(item: WorkOrder) {
+  return item.batches.reduce(
+    (total, batch) => total + batch.rework_pending_quantity,
+    0,
+  )
+}
+
+function canComplete(item: WorkOrder) {
+  return item.pending_qc_quantity === 0 && reworkPendingQuantity(item) === 0
+}
+
+function qcResultText(batch: WorkOrderBatch) {
+  const hasRework = Boolean(batch.rework_quantity)
+  const hasLoss = Boolean(batch.scrap_quantity || batch.lost_quantity)
+  if (hasRework && hasLoss) return '混合异常'
+  if (hasLoss) return '含报废/遗失'
+  if (hasRework) return '含返工'
+  if (batch.qualified_quantity === batch.submitted_quantity) return '全部合格'
+  return '已检验'
+}
+
+function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | 'danger' {
+  if (batch.scrap_quantity || batch.lost_quantity) return 'danger'
+  if (batch.rework_quantity) return 'warning'
+  return batch.qualified_quantity === batch.submitted_quantity ? 'success' : 'info'
+}
 
 function statusText(item: WorkOrder) {
   if (item.status === 'cancelled') return '已取消'
@@ -64,26 +96,47 @@ function statusType(item: WorkOrder): 'primary' | 'success' | 'info' | 'warning'
         <h4>{{ props.mode === 'purchase' ? '到货与 QC 记录' : '送检与 QC 记录' }}</h4>
         <div v-for="batch in item.batches" :key="batch.id" class="batch-row">
           <div class="batch-heading">
-            <strong>第 {{ batch.id }} 批 · 送检 {{ batch.submitted_quantity }}</strong>
+            <strong>
+              第 {{ batch.id }} 批 ·
+              {{ batch.rework_source_batch_id ? `批次 ${batch.rework_source_batch_id} 返工复检` : '首次送检' }}
+              {{ batch.submitted_quantity }}
+            </strong>
             <ElTag v-if="!batch.recorded_at" type="warning" size="small">等待 QC</ElTag>
-            <span v-else>{{ batch.recorded_at }} · {{ batch.qc_worker_name }}</span>
+            <div v-else class="batch-result">
+              <ElTag :type="qcResultType(batch)" size="small">{{ qcResultText(batch) }}</ElTag>
+              <span>{{ batch.recorded_at }} · {{ batch.qc_worker_name }}</span>
+            </div>
           </div>
           <p v-if="batch.recorded_at">
             合格 {{ batch.qualified_quantity || 0 }} · 返工 {{ batch.rework_quantity || 0 }} ·
             报废 {{ batch.scrap_quantity || 0 }} · 遗失 {{ batch.lost_quantity || 0 }}
           </p>
           <p v-if="batch.defect_reason">不良原因：{{ batch.defect_reason }}</p>
+          <div v-if="props.mode === 'production' && batch.recorded_at && batch.rework_pending_quantity" class="batch-rework">
+            <span>返工待加工 {{ batch.rework_pending_quantity }}</span>
+            <ElButton
+              type="warning"
+              plain
+              size="small"
+              :disabled="item.status !== 'open'"
+              @click="emit('resubmitQc', item, batch)"
+            >返工送检</ElButton>
+          </div>
+          <p v-else-if="props.mode === 'production' && batch.recorded_at && batch.rework_quantity">
+            返工已全部重新送检
+          </p>
         </div>
       </div>
       <div class="work-order-actions">
         <ElButton
-          v-if="item.status === 'open' && item.processing_quantity > 0"
+          v-if="item.status === 'open' && (props.mode === 'production' || item.processing_quantity > 0)"
           type="primary"
           size="small"
+          :disabled="props.mode === 'production' && !canComplete(item)"
           @click="emit('submit', item)"
-        >{{ props.mode === 'purchase' ? '登记到货 / 送检' : props.mode === 'assembly' ? '完成装配' : '完成细分' }}</ElButton>
+        >{{ props.mode === 'purchase' ? '登记到货 / 送检' : props.mode === 'assembly' ? '完成装配' : '完成' }}</ElButton>
         <ElButton
-          v-if="props.mode === 'production' && item.status === 'open' && item.processing_quantity > 0"
+          v-if="props.mode === 'production' && item.status === 'open' && initialProcessingQuantity(item) > 0"
           type="warning"
           plain
           size="small"
@@ -119,7 +172,9 @@ function statusType(item: WorkOrder): 'primary' | 'success' | 'info' | 'warning'
 .batch-row + .batch-row { margin-top: 7px; }
 .batch-heading { display: flex; justify-content: space-between; gap: 10px; color: var(--el-text-color-secondary); }
 .batch-heading strong { color: var(--erp-text); }
+.batch-result { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
 .batch-row p { margin: 6px 0 0; color: var(--el-text-color-secondary); }
+.batch-rework { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--el-color-warning); }
 .work-order-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .work-order-actions :deep(.el-button) { margin: 0; }
 @media (max-width: 1150px) { .metrics { grid-template-columns: repeat(3, 1fr); } }

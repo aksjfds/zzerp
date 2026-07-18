@@ -1,42 +1,42 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { RepositoryItem, SubstepCard } from '../domain/types'
+import type { RepositoryItem, TagCard } from '../domain/types'
 
 const props = defineProps<{
   modelValue: boolean
   item?: RepositoryItem
-  substeps: SubstepCard[]
+  tagCards: TagCard[]
   submitting?: boolean
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
-  submit: [payload: { stageStockId: number; quantity: number }]
+  submit: [payload: { tagStockId: number; quantity: number }]
 }>()
-const form = reactive({ stageStockId: null as number | null, quantity: 1 })
-const dispatchableSubsteps = computed(() => props.substeps.filter(
-  item => item.stage_stock_id !== null && item.available_quantity > 0,
+const form = reactive({ tagStockId: null as number | null, quantity: 1 })
+const dispatchableSources = computed(() => props.tagCards.filter(
+  item => item.tag_stock_id !== null && item.available_quantity > 0,
 ))
-const selectedSource = computed(() => dispatchableSubsteps.value.find(
-  item => item.stage_stock_id === form.stageStockId,
+const selectedSource = computed(() => dispatchableSources.value.find(
+  item => item.tag_stock_id === form.tagStockId,
 ))
 
-watch(() => [props.modelValue, props.substeps] as const, ([visible]) => {
+watch(() => [props.modelValue, props.tagCards] as const, ([visible]) => {
   if (!visible) return
-  const onlySource = dispatchableSubsteps.value.length === 1
-    ? dispatchableSubsteps.value[0]
+  const source = dispatchableSources.value.length === 1
+    ? dispatchableSources.value[0]
     : undefined
-  form.stageStockId = onlySource?.stage_stock_id || null
-  form.quantity = onlySource?.available_quantity || 1
+  form.tagStockId = source?.tag_stock_id || null
+  form.quantity = source?.available_quantity || 1
 })
 
-watch(() => form.stageStockId, () => {
+watch(() => form.tagStockId, () => {
   if (selectedSource.value) form.quantity = selectedSource.value.available_quantity
 })
 
 function submit() {
-  if (!selectedSource.value?.stage_stock_id) {
-    ElMessage.warning('请选择要出货的已完细分')
+  if (!selectedSource.value?.tag_stock_id) {
+    ElMessage.warning('请选择要出货的标记组合')
     return
   }
   if (form.quantity < 1 || form.quantity > selectedSource.value.available_quantity) {
@@ -44,7 +44,7 @@ function submit() {
     return
   }
   emit('submit', {
-    stageStockId: selectedSource.value.stage_stock_id,
+    tagStockId: selectedSource.value.tag_stock_id,
     quantity: form.quantity,
   })
 }
@@ -58,14 +58,14 @@ function submit() {
     @update:model-value="emit('update:modelValue', $event)"
   >
     <p class="target">{{ item?.part_no }} - {{ item?.part_name }} · {{ item?.procedure_name }}</p>
-    <ElForm v-if="dispatchableSubsteps.length" label-width="86px">
-      <ElFormItem label="已完细分" required>
-        <ElSelect v-model="form.stageStockId" placeholder="请选择出货来源" style="width: 100%">
+    <ElForm v-if="dispatchableSources.length" label-width="96px">
+      <ElFormItem label="标记组合" required>
+        <ElSelect v-model="form.tagStockId" placeholder="请选择出货来源" style="width: 100%">
           <ElOption
-            v-for="substep in dispatchableSubsteps"
-            :key="substep.card_key"
-            :value="substep.stage_stock_id"
-            :label="`${substep.substep_name}完 · 已完 ${substep.completed_quantity} · 可出货 ${substep.available_quantity}`"
+            v-for="source in dispatchableSources"
+            :key="source.card_key"
+            :value="source.tag_stock_id"
+            :label="`${source.tag_set_name} · 可出货 ${source.available_quantity}`"
           />
         </ElSelect>
       </ElFormItem>
@@ -77,12 +77,12 @@ function submit() {
         />
       </ElFormItem>
     </ElForm>
-    <ElEmpty v-else description="暂无可出货的已完细分" :image-size="64" />
+    <ElEmpty v-else description="暂无可出货的已完成标记组合" :image-size="64" />
     <template #footer>
       <ElButton @click="emit('update:modelValue', false)">取消</ElButton>
       <ElButton
         type="primary"
-        :disabled="!dispatchableSubsteps.length"
+        :disabled="!dispatchableSources.length"
         :loading="submitting"
         @click="submit"
       >确认出货</ElButton>

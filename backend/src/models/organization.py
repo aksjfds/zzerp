@@ -54,16 +54,17 @@ class Procedure(Base):
     procedure_type: Mapped[str] = mapped_column(Text, nullable=False, default="standard")
 
 
-class ProcedureSubstep(Base):
-    __tablename__ = "procedure_substep"
+class ProcedureTag(Base):
+    __tablename__ = "procedure_tag"
     __table_args__ = (
         CheckConstraint(
-            "substep_name = btrim(substep_name) AND substep_name <> ''",
+            "tag_name = btrim(tag_name) AND tag_name <> ''",
         ),
+        UniqueConstraint("id", "procedure_id"),
         UniqueConstraint(
             "procedure_id",
-            "substep_name",
-            name="uq_procedure_substep_name",
+            "tag_name",
+            name="uq_procedure_tag_name",
         ),
     )
 
@@ -71,7 +72,42 @@ class ProcedureSubstep(Base):
     procedure_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("procedure.id"), nullable=False
     )
-    substep_name: Mapped[str] = mapped_column(Text, nullable=False)
+    tag_name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ProcedureTagSet(Base):
+    __tablename__ = "procedure_tag_set"
+    __table_args__ = (
+        CheckConstraint("tag_key = btrim(tag_key) AND tag_key <> ''"),
+        UniqueConstraint("id", "procedure_id"),
+        UniqueConstraint(
+            "procedure_id",
+            "tag_key",
+            name="uq_procedure_tag_set_key",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    procedure_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure.id"), nullable=False
+    )
+    tag_key: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ProcedureTagSetMember(Base):
+    __tablename__ = "procedure_tag_set_member"
+    __table_args__ = (
+        UniqueConstraint("tag_set_id", "tag_id"),
+        Index("idx_procedure_tag_set_member_tag", "tag_id", "tag_set_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tag_set_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag_set.id", ondelete="CASCADE"), nullable=False
+    )
+    tag_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag.id"), nullable=False
+    )
 
 
 class Worker(Base):

@@ -5,7 +5,7 @@
 .production-details { min-height: 260px; }
 .production-selection { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding-bottom: 14px; border-bottom: 1px solid var(--erp-border); }
 .production-selection span { color: var(--el-text-color-secondary); font-size: 13px; }
-.production-substeps .production-selection { margin-bottom: 14px; }
+.production-tags .production-selection { margin-bottom: 14px; }
 .production-pagination { justify-content: flex-end; margin-top: 14px; }
 @media (max-width: 900px) {
   .production-workspace { grid-template-columns: 1fr; }

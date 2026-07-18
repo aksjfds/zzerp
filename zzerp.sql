@@ -124,13 +124,30 @@ CREATE TABLE procedure (
     UNIQUE (workshop_id, procedure_name)
 );
 
--- 只保存开工单时复用的名称；行之间没有固定顺序或路线含义。
-CREATE TABLE procedure_substep (
+-- 标记只属于工艺，不定义固定路线或先后顺序。
+CREATE TABLE procedure_tag (
     id BIGSERIAL PRIMARY KEY,
     procedure_id BIGINT NOT NULL REFERENCES procedure(id),
-    substep_name TEXT NOT NULL
-        CHECK (substep_name = btrim(substep_name) AND substep_name <> ''),
-    CONSTRAINT uq_procedure_substep_name UNIQUE (procedure_id, substep_name)
+    tag_name TEXT NOT NULL
+        CHECK (tag_name = btrim(tag_name) AND tag_name <> ''),
+    UNIQUE (id, procedure_id),
+    CONSTRAINT uq_procedure_tag_name UNIQUE (procedure_id, tag_name)
+);
+
+-- tag_key 是排序后的 tag_id 逗号串，使相同集合只有一条记录。
+CREATE TABLE procedure_tag_set (
+    id BIGSERIAL PRIMARY KEY,
+    procedure_id BIGINT NOT NULL REFERENCES procedure(id),
+    tag_key TEXT NOT NULL CHECK (tag_key = btrim(tag_key) AND tag_key <> ''),
+    UNIQUE (id, procedure_id),
+    CONSTRAINT uq_procedure_tag_set_key UNIQUE (procedure_id, tag_key)
+);
+
+CREATE TABLE procedure_tag_set_member (
+    id BIGSERIAL PRIMARY KEY,
+    tag_set_id BIGINT NOT NULL REFERENCES procedure_tag_set(id) ON DELETE CASCADE,
+    tag_id BIGINT NOT NULL REFERENCES procedure_tag(id),
+    UNIQUE (tag_set_id, tag_id)
 );
 
 CREATE TABLE worker (
@@ -195,24 +212,24 @@ CREATE TABLE repository (
     UNIQUE (production_item_id, flow_node_id, source_flow_node_id, department_id)
 );
 
--- 表名保留 stage 仅为兼容现有领域命名；completed_substep_id 表示已完成的自定义子步骤，不是数字阶段。
-CREATE TABLE procedure_stage_stock (
+-- 未打标记数量保留在 repository；非空标记组合数量保存在这里。
+CREATE TABLE procedure_tag_stock (
     id BIGSERIAL PRIMARY KEY,
     production_item_id BIGINT NOT NULL
         REFERENCES production_item(id) ON DELETE CASCADE,
     flow_node_id TEXT NOT NULL,
     source_flow_node_id TEXT NOT NULL,
     department_id BIGINT NOT NULL REFERENCES department(id),
-    completed_substep_id BIGINT NOT NULL REFERENCES procedure_substep(id),
+    tag_set_id BIGINT NOT NULL REFERENCES procedure_tag_set(id),
     quantity INT NOT NULL CHECK (quantity > 0),
-    CONSTRAINT uq_procedure_stage_stock_id_production_item
+    CONSTRAINT uq_procedure_tag_stock_id_production_item
         UNIQUE (id, production_item_id),
-    CONSTRAINT uq_procedure_stage_stock_position UNIQUE (
+    CONSTRAINT uq_procedure_tag_stock_position UNIQUE (
         production_item_id,
         flow_node_id,
         source_flow_node_id,
         department_id,
-        completed_substep_id
+        tag_set_id
     )
 );
 
@@ -220,13 +237,16 @@ CREATE TABLE work_order (
     id BIGSERIAL PRIMARY KEY,
     work_order_no TEXT UNIQUE,
     repository_id BIGINT,
-    procedure_stage_stock_id BIGINT,
+    procedure_tag_stock_id BIGINT,
     production_item_id BIGINT NOT NULL REFERENCES production_item(id),
-    substep_id BIGINT REFERENCES procedure_substep(id),
+    procedure_id BIGINT REFERENCES procedure(id),
+    applied_tag_set_id BIGINT REFERENCES procedure_tag_set(id),
+    source_tag_set_id BIGINT REFERENCES procedure_tag_set(id),
+    target_tag_set_id BIGINT REFERENCES procedure_tag_set(id),
     work_order_type TEXT NOT NULL
-        CHECK (work_order_type IN ('substep', 'assembly')),
+        CHECK (work_order_type IN ('tag', 'purchase_receipt', 'assembly')),
     flow_node_id TEXT NOT NULL,
-    -- 子步骤工单创建时记录其库存到达来源；来源库存行耗尽并删除后仍保留该执行位置。
+    -- 工单创建时记录来源和标记集合快照；来源库存行耗尽后仍保留执行历史。
     -- 装配工单没有单一来源位置，因此保持 NULL。
     source_flow_node_id TEXT,
     work_order_name TEXT NOT NULL,
@@ -246,24 +266,38 @@ CREATE TABLE work_order (
     CHECK (status <> 'cancelled' OR completed_quantity = 0),
     CHECK (
         (work_order_type = 'assembly'
-            AND substep_id IS NULL
+            AND procedure_id IS NULL
+            AND applied_tag_set_id IS NULL
+            AND source_tag_set_id IS NULL
+            AND target_tag_set_id IS NULL
             AND source_flow_node_id IS NULL
             AND repository_id IS NULL
-            AND procedure_stage_stock_id IS NULL)
-        OR (work_order_type = 'substep'
-            AND substep_id IS NOT NULL
+            AND procedure_tag_stock_id IS NULL)
+        OR (work_order_type = 'tag'
+            AND procedure_id IS NOT NULL
+            AND applied_tag_set_id IS NOT NULL
+            AND target_tag_set_id IS NOT NULL
             AND source_flow_node_id IS NOT NULL
-            AND (repository_id IS NULL OR procedure_stage_stock_id IS NULL)
+            AND (repository_id IS NULL OR procedure_tag_stock_id IS NULL)
             AND (status <> 'open'
+                OR completed_quantity = quantity
                 OR repository_id IS NOT NULL
-                OR procedure_stage_stock_id IS NOT NULL))
+                OR procedure_tag_stock_id IS NOT NULL))
+        OR (work_order_type = 'purchase_receipt'
+            AND procedure_id IS NOT NULL
+            AND applied_tag_set_id IS NULL
+            AND source_tag_set_id IS NULL
+            AND target_tag_set_id IS NULL
+            AND source_flow_node_id IS NOT NULL
+            AND procedure_tag_stock_id IS NULL
+            AND (status <> 'open' OR repository_id IS NOT NULL))
     ),
     CONSTRAINT fk_work_order_repository_item
         FOREIGN KEY (repository_id, production_item_id)
         REFERENCES repository(id, production_item_id),
-    CONSTRAINT fk_work_order_stage_stock_item
-        FOREIGN KEY (procedure_stage_stock_id, production_item_id)
-        REFERENCES procedure_stage_stock(id, production_item_id)
+    CONSTRAINT fk_work_order_tag_stock_item
+        FOREIGN KEY (procedure_tag_stock_id, production_item_id)
+        REFERENCES procedure_tag_stock(id, production_item_id)
 );
 
 CREATE TABLE work_order_material (
@@ -284,8 +318,8 @@ CREATE TABLE work_order_batch (
     submitted_quantity INT NOT NULL CHECK (submitted_quantity > 0),
     -- 提交时复制 work_order.source_flow_node_id，避免来源库存行删除后丢失到达来源。
     source_flow_node_id TEXT NOT NULL,
-    -- 仓库来源为 NULL；内部子步骤库存来源由触发器校验为其 completed_substep_id。
-    source_substep_id BIGINT REFERENCES procedure_substep(id),
+    -- 返工复检批次指向产生返工数量的上一批 QC；首次送检保持 NULL。
+    rework_source_batch_id BIGINT,
     qualified_quantity INT CHECK (qualified_quantity >= 0),
     rework_quantity INT CHECK (rework_quantity >= 0),
     scrap_quantity INT CHECK (scrap_quantity >= 0),
@@ -295,6 +329,9 @@ CREATE TABLE work_order_batch (
     defect_reason TEXT,
     recorded_at TIMESTAMPTZ,
     UNIQUE (id, work_order_id),
+    CONSTRAINT fk_work_order_batch_rework_source
+        FOREIGN KEY (rework_source_batch_id, work_order_id)
+        REFERENCES work_order_batch(id, work_order_id),
     CHECK (
         (recorded_at IS NULL AND qualified_quantity IS NULL
             AND rework_quantity IS NULL AND scrap_quantity IS NULL
@@ -315,6 +352,8 @@ CREATE TABLE production_movement (
         REFERENCES production_item(id) ON DELETE CASCADE,
     source_flow_node_id TEXT,
     target_flow_node_id TEXT,
+    source_tag_set_id BIGINT REFERENCES procedure_tag_set(id),
+    target_tag_set_id BIGINT REFERENCES procedure_tag_set(id),
     source_department_id BIGINT REFERENCES department(id),
     target_department_id BIGINT REFERENCES department(id),
     quantity INT NOT NULL CHECK (quantity > 0),
@@ -386,6 +425,177 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE FUNCTION validate_tag_set_integrity() RETURNS TRIGGER AS $$
+DECLARE
+    checked_tag_set_id BIGINT;
+    set_procedure_id BIGINT;
+    set_tag_key TEXT;
+    actual_tag_key TEXT;
+    procedures_match BOOLEAN;
+BEGIN
+    IF TG_TABLE_NAME = 'procedure_tag_set_member' THEN
+        IF TG_OP = 'UPDATE' THEN
+            IF (NEW.tag_set_id, NEW.tag_id)
+                IS DISTINCT FROM (OLD.tag_set_id, OLD.tag_id) THEN
+                RAISE EXCEPTION 'tag set membership identity is immutable'
+                    USING ERRCODE = '23514';
+            END IF;
+        END IF;
+    END IF;
+    IF TG_TABLE_NAME = 'procedure_tag_set' THEN
+        checked_tag_set_id := NEW.id;
+    ELSIF TG_OP = 'DELETE' THEN
+        checked_tag_set_id := OLD.tag_set_id;
+    ELSE
+        checked_tag_set_id := NEW.tag_set_id;
+    END IF;
+    SELECT procedure_id, tag_key
+    INTO set_procedure_id, set_tag_key
+    FROM procedure_tag_set
+    WHERE id = checked_tag_set_id;
+    IF NOT FOUND THEN
+        IF TG_OP = 'DELETE' THEN
+            RETURN OLD;
+        END IF;
+        RETURN NEW;
+    END IF;
+    SELECT
+        string_agg(member.tag_id::TEXT, ',' ORDER BY member.tag_id),
+        bool_and(tag.procedure_id = set_procedure_id)
+    INTO actual_tag_key, procedures_match
+    FROM procedure_tag_set_member AS member
+    JOIN procedure_tag AS tag ON tag.id = member.tag_id
+    WHERE member.tag_set_id = checked_tag_set_id;
+    IF actual_tag_key IS NULL
+        OR actual_tag_key IS DISTINCT FROM set_tag_key
+        OR procedures_match IS NOT TRUE THEN
+        RAISE EXCEPTION 'tag set must contain the canonical tags of one procedure'
+            USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION validate_work_order_tag_context() RETURNS TRIGGER AS $$
+DECLARE
+    order_procedure_type TEXT;
+    applied_set_procedure_id BIGINT;
+    source_set_procedure_id BIGINT;
+    target_set_procedure_id BIGINT;
+    source_stock_tag_set_id BIGINT;
+    source_tags BIGINT[];
+    applied_tags BIGINT[];
+    target_tags BIGINT[];
+    expected_tags BIGINT[];
+BEGIN
+    IF NEW.work_order_type = 'assembly' THEN
+        RETURN NEW;
+    END IF;
+    SELECT procedure_type INTO order_procedure_type
+    FROM procedure WHERE id = NEW.procedure_id;
+    IF NEW.work_order_type = 'purchase_receipt' THEN
+        IF order_procedure_type IS DISTINCT FROM 'purchase_receipt' THEN
+            RAISE EXCEPTION 'purchase work order must use a purchase procedure'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF order_procedure_type IS DISTINCT FROM 'standard' THEN
+        RAISE EXCEPTION 'tag work order must use a standard procedure'
+            USING ERRCODE = '23514';
+    END IF;
+    SELECT procedure_id INTO applied_set_procedure_id
+    FROM procedure_tag_set WHERE id = NEW.applied_tag_set_id;
+    SELECT procedure_id INTO target_set_procedure_id
+    FROM procedure_tag_set WHERE id = NEW.target_tag_set_id;
+    IF NEW.source_tag_set_id IS NOT NULL THEN
+        SELECT procedure_id INTO source_set_procedure_id
+        FROM procedure_tag_set WHERE id = NEW.source_tag_set_id;
+    END IF;
+    IF applied_set_procedure_id IS DISTINCT FROM NEW.procedure_id
+        OR target_set_procedure_id IS DISTINCT FROM NEW.procedure_id
+        OR (NEW.source_tag_set_id IS NOT NULL
+            AND source_set_procedure_id IS DISTINCT FROM NEW.procedure_id) THEN
+        RAISE EXCEPTION 'work order tags must belong to its procedure'
+            USING ERRCODE = '23514';
+    END IF;
+    IF NEW.repository_id IS NOT NULL AND NEW.source_tag_set_id IS NOT NULL THEN
+        RAISE EXCEPTION 'untagged repository source cannot have a source tag set'
+            USING ERRCODE = '23514';
+    END IF;
+    IF NEW.procedure_tag_stock_id IS NOT NULL THEN
+        SELECT tag_set_id INTO source_stock_tag_set_id
+        FROM procedure_tag_stock WHERE id = NEW.procedure_tag_stock_id;
+        IF source_stock_tag_set_id IS DISTINCT FROM NEW.source_tag_set_id THEN
+            RAISE EXCEPTION 'tag stock source must match the work order source tag set'
+                USING ERRCODE = '23514';
+        END IF;
+    ELSIF NEW.repository_id IS NULL
+        AND NEW.status = 'open'
+        AND NEW.completed_quantity < NEW.quantity THEN
+        RAISE EXCEPTION 'open tag work order with unsubmitted quantity must retain one inventory source'
+            USING ERRCODE = '23514';
+    END IF;
+    SELECT COALESCE(array_agg(tag_id ORDER BY tag_id), ARRAY[]::BIGINT[])
+    INTO source_tags
+    FROM procedure_tag_set_member
+    WHERE tag_set_id = NEW.source_tag_set_id;
+    SELECT COALESCE(array_agg(tag_id ORDER BY tag_id), ARRAY[]::BIGINT[])
+    INTO applied_tags
+    FROM procedure_tag_set_member
+    WHERE tag_set_id = NEW.applied_tag_set_id;
+    IF cardinality(applied_tags) = 0 THEN
+        RAISE EXCEPTION 'applied tag set must contain at least one tag'
+            USING ERRCODE = '23514';
+    END IF;
+    IF source_tags && applied_tags THEN
+        RAISE EXCEPTION 'source tag set already contains an applied tag'
+            USING ERRCODE = '23514';
+    END IF;
+    SELECT ARRAY(
+        SELECT DISTINCT tag_id
+        FROM unnest(source_tags || applied_tags) AS member_tag(tag_id)
+        ORDER BY tag_id
+    ) INTO expected_tags;
+    SELECT COALESCE(array_agg(tag_id ORDER BY tag_id), ARRAY[]::BIGINT[])
+    INTO target_tags
+    FROM procedure_tag_set_member
+    WHERE tag_set_id = NEW.target_tag_set_id;
+    IF target_tags IS DISTINCT FROM expected_tags THEN
+        RAISE EXCEPTION 'target tag set must equal source tags plus the applied tags'
+            USING ERRCODE = '23514';
+    END IF;
+    IF NEW.status = 'closed' AND EXISTS (
+        SELECT 1
+        FROM work_order_batch
+        WHERE work_order_id = NEW.id
+          AND recorded_at IS NULL
+    ) THEN
+        RAISE EXCEPTION 'tag work order with pending QC batches cannot be closed'
+            USING ERRCODE = '23514';
+    END IF;
+    IF NEW.status = 'closed' AND EXISTS (
+        SELECT 1
+        FROM work_order_batch AS source_batch
+        WHERE source_batch.work_order_id = NEW.id
+          AND source_batch.recorded_at IS NOT NULL
+          AND source_batch.rework_quantity > COALESCE((
+              SELECT SUM(child_batch.submitted_quantity)
+              FROM work_order_batch AS child_batch
+              WHERE child_batch.work_order_id = NEW.id
+                AND child_batch.rework_source_batch_id = source_batch.id
+          ), 0)
+    ) THEN
+        RAISE EXCEPTION 'tag work order with pending rework cannot be closed'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE FUNCTION validate_production_movement_context() RETURNS TRIGGER AS $$
 DECLARE
     order_item_id BIGINT;
@@ -393,12 +603,14 @@ DECLARE
     order_procedure_type TEXT;
     order_flow_node_id TEXT;
     order_status TEXT;
+    order_source_tag_set_id BIGINT;
+    order_target_tag_set_id BIGINT;
     material_quantity INT;
     batch_source_flow_node_id TEXT;
     batch_submitted_quantity INT;
     batch_recorded_at TIMESTAMPTZ;
 BEGIN
-    -- A procedure dispatch consumes selected completed-substep stock and is
+    -- A procedure dispatch consumes selected completed-tag-combination stock and is
     -- deliberately not attributed to a work order or QC batch. The service
     -- owns validation of that stock and of the macro flow's normal target.
     IF NEW.movement_type = 'procedure_dispatch' THEN
@@ -406,11 +618,17 @@ BEGIN
             OR NEW.source_department_id IS NULL
             OR (NEW.target_flow_node_id IS NULL)
                 <> (NEW.target_department_id IS NULL)
+            OR NEW.source_tag_set_id IS NULL
+            OR NEW.target_tag_set_id IS NOT NULL
             OR NEW.work_order_id IS NOT NULL
             OR NEW.work_order_batch_id IS NOT NULL THEN
             RAISE EXCEPTION 'procedure dispatch requires a standalone macro-process movement'
                 USING ERRCODE = '23514';
         END IF;
+    ELSIF NEW.work_order_id IS NULL
+        AND (NEW.source_tag_set_id IS NOT NULL OR NEW.target_tag_set_id IS NOT NULL) THEN
+        RAISE EXCEPTION 'standalone movement cannot contain tag sets'
+            USING ERRCODE = '23514';
     END IF;
 
     IF NEW.work_order_id IS NOT NULL THEN
@@ -419,18 +637,20 @@ BEGIN
             work_order.work_order_type,
             procedure.procedure_type,
             work_order.flow_node_id,
-            work_order.status
+            work_order.status,
+            work_order.source_tag_set_id,
+            work_order.target_tag_set_id
         INTO
             order_item_id,
             order_type,
             order_procedure_type,
             order_flow_node_id,
-            order_status
+            order_status,
+            order_source_tag_set_id,
+            order_target_tag_set_id
         FROM work_order
-        LEFT JOIN procedure_substep
-            ON procedure_substep.id = work_order.substep_id
         LEFT JOIN procedure
-            ON procedure.id = procedure_substep.procedure_id
+            ON procedure.id = work_order.procedure_id
         WHERE work_order.id = NEW.work_order_id
         FOR UPDATE OF work_order;
 
@@ -466,11 +686,11 @@ BEGIN
             ELSE
                 IF (NEW.movement_type = 'assembly_output' AND order_type <> 'assembly')
                     OR (NEW.movement_type = 'process'
-                        AND (order_type <> 'substep' OR order_procedure_type <> 'standard'))
+                        AND (order_type <> 'tag' OR order_procedure_type <> 'standard'))
                     OR (NEW.movement_type = 'purchase_receipt'
-                        AND (order_type <> 'substep'
+                        AND (order_type <> 'purchase_receipt'
                             OR order_procedure_type <> 'purchase_receipt')) THEN
-                    RAISE EXCEPTION 'movement type must match the work order type and substep'
+                    RAISE EXCEPTION 'movement type must match the work order type'
                         USING ERRCODE = '23514';
                 END IF;
                 IF order_item_id <> NEW.production_item_id THEN
@@ -483,6 +703,26 @@ BEGIN
                 'qc_qualified', 'qc_rework', 'scrap', 'lost'
             ) AND NEW.source_flow_node_id IS DISTINCT FROM order_flow_node_id THEN
                 RAISE EXCEPTION 'work order movement source node must match the work order'
+                    USING ERRCODE = '23514';
+            END IF;
+            IF order_type = 'tag' THEN
+                IF (NEW.movement_type = 'process' AND (
+                        NEW.source_tag_set_id IS DISTINCT FROM order_source_tag_set_id
+                        OR NEW.target_tag_set_id IS DISTINCT FROM order_target_tag_set_id))
+                    OR (NEW.movement_type = 'qc_qualified' AND (
+                        NEW.source_tag_set_id IS DISTINCT FROM order_target_tag_set_id
+                        OR NEW.target_tag_set_id IS DISTINCT FROM order_target_tag_set_id))
+                    OR (NEW.movement_type = 'qc_rework' AND (
+                        NEW.source_tag_set_id IS DISTINCT FROM order_target_tag_set_id
+                        OR NEW.target_tag_set_id IS DISTINCT FROM order_source_tag_set_id))
+                    OR (NEW.movement_type IN ('scrap', 'lost') AND (
+                        NEW.source_tag_set_id IS DISTINCT FROM order_target_tag_set_id
+                        OR NEW.target_tag_set_id IS NOT NULL)) THEN
+                    RAISE EXCEPTION 'movement tag sets must match the work order snapshot'
+                        USING ERRCODE = '23514';
+                END IF;
+            ELSIF NEW.source_tag_set_id IS NOT NULL OR NEW.target_tag_set_id IS NOT NULL THEN
+                RAISE EXCEPTION 'non-tag work order movement cannot contain tag sets'
                     USING ERRCODE = '23514';
             END IF;
         END IF;
@@ -547,13 +787,19 @@ $$ LANGUAGE plpgsql;
 CREATE FUNCTION validate_work_order_movement_items() RETURNS TRIGGER AS $$
 BEGIN
     IF (
-        NEW.substep_id,
+        NEW.procedure_id,
+        NEW.applied_tag_set_id,
+        NEW.source_tag_set_id,
+        NEW.target_tag_set_id,
         NEW.work_order_type,
         NEW.work_order_name,
         NEW.flow_node_id,
         NEW.source_flow_node_id
     ) IS DISTINCT FROM (
-        OLD.substep_id,
+        OLD.procedure_id,
+        OLD.applied_tag_set_id,
+        OLD.source_tag_set_id,
+        OLD.target_tag_set_id,
         OLD.work_order_type,
         OLD.work_order_name,
         OLD.flow_node_id,
@@ -586,7 +832,6 @@ DECLARE
     order_type TEXT;
     order_status TEXT;
     order_source_flow_node_id TEXT;
-    order_source_substep_id BIGINT;
     order_remaining_quantity INT;
     submission_count INT;
     submission_quantity BIGINT;
@@ -594,23 +839,22 @@ DECLARE
     moved_rework BIGINT;
     moved_scrap BIGINT;
     moved_lost BIGINT;
+    source_batch_rework_quantity INT;
+    source_batch_recorded_at TIMESTAMPTZ;
+    source_batch_resubmitted BIGINT;
 BEGIN
     IF TG_OP = 'INSERT' THEN
         SELECT
             work_order.work_order_type,
             work_order.status,
             work_order.source_flow_node_id,
-            procedure_stage_stock.completed_substep_id,
             work_order.quantity - work_order.completed_quantity
         INTO
             order_type,
             order_status,
             order_source_flow_node_id,
-            order_source_substep_id,
             order_remaining_quantity
         FROM work_order
-        LEFT JOIN procedure_stage_stock
-            ON procedure_stage_stock.id = work_order.procedure_stage_stock_id
         WHERE work_order.id = NEW.work_order_id
         FOR UPDATE OF work_order;
 
@@ -618,8 +862,8 @@ BEGIN
             RAISE EXCEPTION 'QC batch must reference an existing work order'
                 USING ERRCODE = '23503';
         END IF;
-        IF order_type <> 'substep' OR order_status <> 'open' THEN
-            RAISE EXCEPTION 'QC batch requires an open substep work order'
+        IF order_type NOT IN ('tag', 'purchase_receipt') OR order_status <> 'open' THEN
+            RAISE EXCEPTION 'QC batch requires an open production work order'
                 USING ERRCODE = '23514';
         END IF;
         IF order_source_flow_node_id IS NULL
@@ -627,17 +871,40 @@ BEGIN
             RAISE EXCEPTION 'QC batch source must match the work order source position'
                 USING ERRCODE = '23514';
         END IF;
-        IF NEW.source_substep_id IS DISTINCT FROM order_source_substep_id THEN
-            RAISE EXCEPTION 'QC batch source substep must match the work order source position'
-                USING ERRCODE = '23514';
-        END IF;
-        IF NEW.submitted_quantity > order_remaining_quantity THEN
-            RAISE EXCEPTION 'QC batch quantity exceeds the work order remaining quantity'
-                USING ERRCODE = '23514';
-        END IF;
         IF NEW.recorded_at IS NOT NULL THEN
             RAISE EXCEPTION 'new QC batch must begin in pending state'
                 USING ERRCODE = '23514';
+        END IF;
+        IF NEW.rework_source_batch_id IS NULL THEN
+            IF NEW.submitted_quantity > order_remaining_quantity THEN
+                RAISE EXCEPTION 'QC batch quantity exceeds the work order remaining quantity'
+                    USING ERRCODE = '23514';
+            END IF;
+        ELSE
+            IF order_type <> 'tag' THEN
+                RAISE EXCEPTION 'only tag work orders can resubmit rework batches'
+                    USING ERRCODE = '23514';
+            END IF;
+            SELECT rework_quantity, recorded_at
+            INTO source_batch_rework_quantity, source_batch_recorded_at
+            FROM work_order_batch
+            WHERE id = NEW.rework_source_batch_id
+              AND work_order_id = NEW.work_order_id
+            FOR UPDATE;
+            IF NOT FOUND OR source_batch_recorded_at IS NULL THEN
+                RAISE EXCEPTION 'rework source batch must have a completed QC result'
+                    USING ERRCODE = '23514';
+            END IF;
+            SELECT COALESCE(SUM(submitted_quantity), 0)
+            INTO source_batch_resubmitted
+            FROM work_order_batch
+            WHERE rework_source_batch_id = NEW.rework_source_batch_id
+              AND work_order_id = NEW.work_order_id;
+            IF NEW.submitted_quantity
+                > source_batch_rework_quantity - source_batch_resubmitted THEN
+                RAISE EXCEPTION 'rework submission exceeds the source batch remainder'
+                    USING ERRCODE = '23514';
+            END IF;
         END IF;
         RETURN NEW;
     END IF;
@@ -648,14 +915,14 @@ BEGIN
     END IF;
     IF (
         NEW.work_order_id,
+        NEW.rework_source_batch_id,
         NEW.source_flow_node_id,
-        NEW.source_substep_id,
         NEW.submitted_quantity
     )
         IS DISTINCT FROM (
             OLD.work_order_id,
+            OLD.rework_source_batch_id,
             OLD.source_flow_node_id,
-            OLD.source_substep_id,
             OLD.submitted_quantity
         )
         AND EXISTS (
@@ -739,8 +1006,24 @@ BEFORE INSERT
 ON production_movement
 FOR EACH ROW EXECUTE FUNCTION validate_production_movement_context();
 
+CREATE CONSTRAINT TRIGGER trg_procedure_tag_set_integrity
+AFTER INSERT OR UPDATE ON procedure_tag_set
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION validate_tag_set_integrity();
+
+CREATE CONSTRAINT TRIGGER trg_procedure_tag_set_member_integrity
+AFTER INSERT OR UPDATE OR DELETE ON procedure_tag_set_member
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION validate_tag_set_integrity();
+
+CREATE TRIGGER trg_work_order_tag_context
+BEFORE INSERT OR UPDATE OF repository_id, procedure_tag_stock_id, procedure_id,
+    applied_tag_set_id, source_tag_set_id, target_tag_set_id, work_order_type, status
+ON work_order
+FOR EACH ROW EXECUTE FUNCTION validate_work_order_tag_context();
+
 CREATE TRIGGER trg_work_order_movement_items
-BEFORE UPDATE OF production_item_id, substep_id, work_order_type, work_order_name, flow_node_id, source_flow_node_id
+BEFORE UPDATE OF production_item_id, procedure_id, applied_tag_set_id, source_tag_set_id, target_tag_set_id, work_order_type, work_order_name, flow_node_id, source_flow_node_id
 ON work_order
 FOR EACH ROW EXECUTE FUNCTION validate_work_order_movement_items();
 
@@ -812,31 +1095,36 @@ CREATE UNIQUE INDEX uq_production_movement_assembly_input
     ON production_movement(work_order_id, production_item_id)
     WHERE movement_type = 'assembly_input';
 CREATE INDEX idx_repository_department ON repository(department_id);
-CREATE INDEX idx_procedure_stage_stock_department
-    ON procedure_stage_stock(department_id, completed_substep_id);
+CREATE INDEX idx_procedure_tag_set_member_tag
+    ON procedure_tag_set_member(tag_id, tag_set_id);
+CREATE INDEX idx_procedure_tag_stock_department
+    ON procedure_tag_stock(department_id, tag_set_id);
 CREATE INDEX idx_production_item_order_item ON production_item(customer_order_item_id);
 CREATE INDEX idx_production_item_bom ON production_item(product_bom_id);
 CREATE INDEX idx_work_order_repository ON work_order(repository_id);
 CREATE INDEX idx_work_order_production_item ON work_order(production_item_id);
 CREATE INDEX idx_work_order_worker_activity
     ON work_order(worker_id, COALESCE(closed_at, created_at) DESC, id DESC);
-CREATE INDEX idx_work_order_substep ON work_order(substep_id, id DESC);
-CREATE INDEX idx_work_order_stage_stock ON work_order(procedure_stage_stock_id);
+CREATE INDEX idx_work_order_applied_tag_set
+    ON work_order(applied_tag_set_id, id DESC);
+CREATE INDEX idx_work_order_tag_stock ON work_order(procedure_tag_stock_id);
 CREATE INDEX idx_work_order_repository_open ON work_order(repository_id)
     WHERE status = 'open';
-CREATE INDEX idx_work_order_stage_stock_open ON work_order(procedure_stage_stock_id)
+CREATE INDEX idx_work_order_tag_stock_open ON work_order(procedure_tag_stock_id)
     WHERE status = 'open';
 CREATE INDEX idx_work_order_item_node_status
     ON work_order(production_item_id, flow_node_id, status);
-CREATE INDEX idx_work_order_substep_position
+CREATE INDEX idx_work_order_tag_position
     ON work_order(
         production_item_id,
         flow_node_id,
         source_flow_node_id,
-        substep_id,
+        target_tag_set_id,
         id DESC
-    ) WHERE work_order_type = 'substep';
+    ) WHERE work_order_type = 'tag';
 CREATE INDEX idx_work_order_batch_order ON work_order_batch(work_order_id);
+CREATE INDEX idx_work_order_batch_rework_source
+    ON work_order_batch(rework_source_batch_id);
 CREATE INDEX idx_work_order_material_repository ON work_order_material(repository_id);
 CREATE INDEX idx_work_order_material_production_item ON work_order_material(production_item_id);
 CREATE INDEX idx_work_order_batch_pending ON work_order_batch(id DESC, work_order_id)
@@ -857,6 +1145,8 @@ CREATE INDEX idx_production_movement_position_latest
         production_item_id,
         target_flow_node_id,
         source_flow_node_id,
+        source_tag_set_id,
+        target_tag_set_id,
         created_at DESC,
         id DESC
     ) WHERE target_department_id IS NOT NULL;
@@ -927,36 +1217,30 @@ INSERT INTO procedure (workshop_id, procedure_name, procedure_type)
 SELECT id, '外购入库', 'purchase_receipt'
 FROM workshop WHERE workshop_name = '外购件管理';
 
--- 子步骤只作为开工单时的名称建议，不定义固定路线或先后阶段。
-INSERT INTO procedure_substep (
+-- 标记只作为开工单时的名称建议，不定义固定路线或先后顺序。
+INSERT INTO procedure_tag (
     procedure_id,
-    substep_name
+    tag_name
 )
 SELECT id, '全工序'
 FROM procedure
-WHERE procedure_name IN ('激光开料', '外购入库');
+WHERE procedure_name = '激光开料';
 
-INSERT INTO procedure_substep (
+INSERT INTO procedure_tag (
     procedure_id,
-    substep_name
+    tag_name
 )
 SELECT
     procedure.id,
-    substep.substep_name
+    tag.tag_name
 FROM procedure
 CROSS JOIN (
     VALUES
         ('粗1'),
         ('粗2'),
         ('粗3'),
-        ('粗4'),
-        ('粗12'),
-        ('粗23'),
-        ('粗34'),
-        ('粗123'),
-        ('粗234'),
-        ('粗1234')
-) AS substep(substep_name)
+        ('粗4')
+) AS tag(tag_name)
 WHERE procedure.procedure_name = '粗光';
 
 -- 示例产品：只包含基础信息与 BOM，故意不配置 product_process_flow。

@@ -1,139 +1,23 @@
-# Database design notes
+# 生产标记数据设计
 
-## Process and execution hierarchy
+标准工艺不再配置子步骤或固定顺序。`procedure_tag` 保存工艺下可复用的标记名称；操作员也可以在开工单时输入新名称。`procedure_tag_set` 与 `procedure_tag_set_member` 保存无序标记集合，排序后的标记 ID 组成 `tag_key`，因此 `粗1 + 粗2` 与 `粗2 + 粗1` 是同一个组合。
 
-- `procedure` remains the macro process definition referenced by `flow_json` process nodes. It answers which
-  department owns a process, but it is no longer the unit used to open a work order.
-- `procedure_substep` is a small reusable name dictionary under a procedure. It has no code, active flag, stage
-  interval, or configured successor. When opening a work order, the operator may enter any non-empty substep name;
-  the service reuses the same-procedure name when it exists and creates it when it does not.
-- `procedure_stage_stock` stores quantities that completed one custom substep but have not left the macro process.
-  It keeps the production item, macro flow position, source-flow provenance, department, `completed_substep_id`, and
-  quantity. The completed substep identifies the current display position and the source that may be used to open a
-  later substep work order or dispatch from the macro process. Its procedure is obtained through
-  `procedure_substep` rather than copied into the stock row.
-- `repository` continues to represent quantities at macro flow nodes. Internal-substep quantities are kept in
-  `procedure_stage_stock`, so `repository` and `production_movement` need no additional substep columns.
+未打标记数量仍在 `repository`。完成至少一个标记的数量进入 `procedure_tag_stock`，按生产项、流程节点、来源节点、部门和标记组合合并。组合不为空时才允许从标准工艺出货。
 
-## Work-order ownership and completion
+标准工单使用 `work_order_type = tag`，并记录：
 
-- `work_order` is substep-centric. The former procedure columns are reused as `substep_id`, `work_order_type`, and
-  `work_order_name`. A normal work order consumes exactly one source while open: either a repository row or a
-  procedure-stage stock row. `source_flow_node_id` is an immutable provenance snapshot copied from that source when
-  the work order is opened. Once the order is no longer open, its repository/stage-stock reference may be cleared so
-  an exhausted positive-quantity source row can be removed, while the snapshot continues to identify the exact
-  `(production_item_id, flow_node_id, source_flow_node_id)` execution position. Assembly orders keep both substep and
-  source-flow snapshots null because they combine multiple material positions.
-- `work_order_name` snapshots a display name such as `粗光-粗1`. Historical work orders therefore remain readable
-  after procedure or substep names change.
-- `work_order_batch.source_flow_node_id` copies the work order's source-flow snapshot when quantity is submitted.
-  `work_order_batch.source_substep_id` is null for repository input and snapshots the completed substep for internal
-  stock input. Together they retain enough provenance to restore QC rework after the consumed source row is removed.
-- `flow_json` schema version 2 contains only `part`, `process`, and `assembly` nodes. A process node references the
-  macro `procedure`; QC nodes, QC edges, and outcome routes are not stored in the graph.
-- For a standard procedure, direct completion always adds the completed quantity to
-  `procedure_stage_stock` under the work order's own `substep_id`. It neither leaves the macro process nor opens
-  another work order. A later substep is opened manually from that completed-stock position, with a new custom
-  substep name, quantity, and worker selection.
-- QC submission creates a pending inspection batch without any qualified-destination setting. For a standard
-  procedure, qualified quantity always joins the same current-substep completed stock as direct completion. Rework
-  returns to the repository input or exact prior `source_substep_id` recorded by the batch; scrap and loss leave
-  production. Purchase-receipt routing remains fixed to its normal macro target, and assembly work orders remain
-  direct-only.
-- Leaving a standard macro procedure is a separate `procedure_dispatch` action. It consumes an explicitly selected
-  `procedure_stage_stock` row and sends that quantity to the process node's normal target. The movement has no work
-  order or QC batch because dispatch consumes completed stock rather than executing a substep. Its source stage-stock
-  ID is command context and is not copied into `production_movement`.
+- `procedure_id`：所属宏观工艺；
+- `applied_tag_set_id`：本张工单一次新增的标记集合，至少包含一个标记；
+- `source_tag_set_id`：开单来源组合，未打标记时为空；
+- `target_tag_set_id`：来源组合与本次新增集合合并后的目标组合；
+- `repository_id` 或 `procedure_tag_stock_id`：创建时必须且只能保留一个库存来源。
 
-## Production-card projection
+外购入库继续使用 `purchase_receipt` 工单，装配继续使用 `assembly` 工单，两者不使用标记集合。
 
-- The first production column has one parent card per production item and exact macro position
-  `(flow_node_id, source_flow_node_id, department_id)`. Repository input and all completed-substep stock at that
-  position are not rendered as duplicate parent cards.
-- Selecting a parent card loads a second column of substep cards. `未{工艺名}` is the unreserved repository input.
-  Every substep actually used by that production item and flow node has one card that keeps its processing and
-  completed quantities together. A separate pending-QC quantity remains visible because it is neither processing
-  stock nor qualified completed stock.
-- Quantities are non-overlapping: unprocessed is repository quantity minus open-work-order reservations; a substep's
-  processing quantity is the remaining quantity of its open work orders; pending QC is the submitted quantity of its
-  unrecorded batches; completed is its stage-stock quantity minus reservations held by later open work orders. A
-  reservation removed from one card's completed count appears in the target substep's processing count.
-- Substep cards are derived from current repository/stage stock, pending QC, and every non-cancelled substep work order whose
-  immutable source snapshot matches the selected production position. They are not expanded from every reusable name
-  under the procedure. `未{工艺名}` is always first. Every substep actually used at that exact position remains as a
-  zero-quantity card after its stock, open order, and pending batch are exhausted, and used substeps are ordered by
-  their first work-order ID (then substep ID for a stock-only fallback).
-- `开工单` belongs to the substep column: the unprocessed card supplies a repository source and a completed-substep
-  card supplies a stage-stock source. `送检` belongs to each open work-order card so the submitted order is
-  unambiguous. The parent card's `出货` action selects completed stage stock and quantity, then performs
-  `procedure_dispatch`.
+本次新增集合不能为空，也不能与来源集合重叠，目标集合必须严格等于两者的并集。一张工单可以一次增加多个标记，但仍只产生一张工单。
 
-## Integrity boundaries
+标准生产工单只有所属生产部门点击“完成”才结单。送检只创建待检批次，不改变工单状态；QC 合格进入目标组合，返工留在原工单继续加工，报废和遗失离开生产数量。`production_movement` 同时保存来源和目标标记集合快照。
 
-- `product_version` is the registry for every product business version.
-- BOM, process-flow, and customer-order references use composite product-version foreign keys.
-- BOM sort positions are unique per product version and checked at transaction commit.
-- Work orders snapshot `work_order_name`, `work_order_type`, and—only for substep orders—`source_flow_node_id` for
-  historical stability and exact production-position filtering.
-- Composite foreign keys require a work order or assembly material to reference a repository owned by the same
-  production item. The work-order service validates that a selected substep belongs to the macro procedure being
-  executed; assembly orders remain valid with a null substep ID.
-- When a repository position is exhausted, all work-order and material-allocation references to that row are
-  released before deletion. Immutable production movements remain the historical source-of-truth.
-- QC batches reference the inspecting worker by ID and retain the worker name as a display snapshot.
-- Production items store their locked product ID/version. Composite foreign keys require both the order item and
-  optional BOM row to match that same version, without cross-table validation triggers or concurrency windows.
-- QC-batch movements use `(batch_id, work_order_id)` as a composite reference. Submission quantity must match the
-  batch, and QC result totals must match immutable movement history. The service owns the exact qualified/rework
-  destination rule; the client does not configure a qualified destination.
-- Submission movements require an open work order, and completed QC batches reject any later movement. Each
-  assembly material has exactly one input movement whose quantity matches its allocation.
-- Production movement fields follow an exact matrix for initial, submission, assembly-input, QC-output,
-  procedure-dispatch, scrap, and loss records. Standard direct and qualified results always remain as current-substep
-  stock; rework returns to its recorded source; only `procedure_dispatch` advances completed stock through the normal
-  macro edge. A dispatch requires source node/department, requires target node/department to be both present or both
-  absent, and forbids work-order and batch references. Execution movements cannot be updated or deleted; initial rows
-  may be cascade-deleted only together with their production item so an unstarted customer order can still be
-  cancelled.
-- Once movements exist, work-order substep/source snapshots, batch source node/substep fields, completed QC results,
-  and assembly material identity/quantity are frozen. A QC batch's source node is validated against the work-order
-  snapshot rather than a source row that may already have been deleted; its nullable source substep is still validated
-  against the referenced stage stock. Trigger reads lock work order, then batch/material rows in that order; composite
-  foreign keys cover repository/stage-stock and batch ownership. The work-order service resolves or creates the custom
-  substep under the macro procedure before creation, avoiding a separate procedure snapshot field.
+`work_order_batch.rework_source_batch_id` 表示返工复检批次的来源 QC 批次。首次送检为空；返工再次送检时创建同一工单的新批次并指向来源批次。一个批次的待返工数量等于其返工数量减去全部子批次送检数量。
 
-## Time
-
-Persisted timestamps use `TIMESTAMPTZ`. Services write UTC values and API presenters convert them to
-`Asia/Shanghai`. Database triggers use the actual wall-clock time to maintain `updated_at` for products, BOM rows,
-process flows, and customer orders, including changes made outside SQLAlchemy.
-
-## Search and operational indexes
-
-Product and BOM-part substring search uses PostgreSQL `pg_trgm` GIN indexes. Operational indexes cover product-version
-references, reusable procedure-substep names, non-empty internal-substep stock, open work orders, worker activity time,
-pending QC batches, exact work-order production positions with their first-used substeps, and latest movement at a
-production position. The pending-QC index starts with descending batch ID to match global pagination. Work-order and batch
-movement indexes exclude null references, and a partial unique index permits only one submission movement per QC
-batch. Another partial unique index permits one assembly-input movement per work order and production item. Unique
-BOM sort-order enforcement also serves version-and-order lookups, so it is not duplicated by a second index.
-The same operational and search indexes are declared in both `zzerp.sql` and SQLAlchemy metadata.
-
-Production-card source queries push arrival-date and product/part keyword filters into PostgreSQL. Parent positions
-distinguish production item, target node, and source node, so normal and rework arrivals cannot overwrite one another.
-Repository, stage-stock, open-work-order, and pending-batch quantities are projected into non-overlapping substep-card
-counts as described above. Work-order snapshots keep parent cards, work-order lists, and substep history isolated by
-that same exact source position even after an exhausted source row is removed. Stage-stock arrival timestamps use the
-work-order source snapshot (or the QC batch snapshot for rework), so equal item/node/substep combinations arriving
-from different sources do not share an arrival time. Historical latest-movement ranking is restricted to candidate
-production positions, including source-flow provenance, before card hydration. Completed substep stock waiting for
-dispatch remains an active `processing` position for status filtering. Assembly filters run only after complete material groups are formed;
-incomplete source sets cannot open an assembly order, and the frontend sends filters and page state to the API instead
-of loading a fixed 10,000-row snapshot. Final status filtering and assembly grouping remain in the service because
-they depend on live work orders and process-flow structure. Status queries skip historical hydration for active-state
-filters and skip ordinary current inventory for completed-only filters.
-
-## Rebuild policy
-
-The current project policy remains a destructive rebuild from `zzerp.sql`. The script runs schema and seed changes
-inside one transaction. Existing data must be exported separately if it needs to be retained.
+标记组合横栏按当前库存、开放工单、待检批次和非取消工单历史派生，展示组合名称、加工中、质检中和已完成。工单历史保留实际开单顺序，但标记组合本身没有顺序。

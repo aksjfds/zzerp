@@ -8,12 +8,12 @@ from schemas.production import (
     ProcedureDispatchCreate,
     ProcedureDispatchEnvelope,
     RepositoryListEnvelope,
-    SubstepCardListEnvelope,
+    TagCardListEnvelope,
     WorkerListEnvelope,
 )
-from services.procedure_dispatches import dispatch_stage_stock
+from services.procedure_dispatches import dispatch_tag_stock
 from services.production_cards import list_production_cards
-from services.production_substep_cards import list_substep_cards
+from services.production_tag_cards import list_tag_cards
 from services.work_order_queries import list_department_workers
 
 
@@ -58,10 +58,10 @@ def department_workers(
 
 
 @router.get(
-    "/departments/{department_code}/production-items/{production_item_id}/substep-cards",
-    response_model=SubstepCardListEnvelope,
+    "/departments/{department_code}/production-items/{production_item_id}/tag-cards",
+    response_model=TagCardListEnvelope,
 )
-def production_item_substep_cards(
+def production_item_tag_cards(
     department_code: str,
     production_item_id: int,
     flow_node_id: str = Query(min_length=1, max_length=200),
@@ -71,7 +71,7 @@ def production_item_substep_cards(
     if user["department"] not in {"sys", department_code}:
         raise HTTPException(status_code=403, detail="无权访问该部门")
     return {
-        "data": list_substep_cards(
+        "data": list_tag_cards(
             department_code,
             production_item_id,
             flow_node_id,
@@ -81,17 +81,17 @@ def production_item_substep_cards(
 
 
 @router.post(
-    "/procedure-stage-stocks/{stage_stock_id}/dispatches",
+    "/procedure-tag-stocks/{tag_stock_id}/dispatches",
     response_model=ProcedureDispatchEnvelope,
 )
-def procedure_stage_stock_dispatch(
-    stage_stock_id: int,
+def procedure_tag_stock_dispatch(
+    tag_stock_id: int,
     payload: ProcedureDispatchCreate,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     return {
-        "data": dispatch_stage_stock(
-            stage_stock_id,
+        "data": dispatch_tag_stock(
+            tag_stock_id,
             payload.quantity,
             user["department"],
         )

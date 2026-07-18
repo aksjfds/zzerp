@@ -2,9 +2,15 @@ import { ref, type Ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import {
-  cancelWorkOrder, queryDepartmentWorkOrders, submitWorkOrder,
+  cancelWorkOrder, completeWorkOrder, queryDepartmentWorkOrders,
+  resubmitReworkBatch, submitWorkOrder,
 } from '../api/workOrders'
-import type { CompletionAction, WorkOrder, WorkOrderQueryScope } from '../domain/types'
+import type {
+  CompletionAction,
+  WorkOrder,
+  WorkOrderBatch,
+  WorkOrderQueryScope,
+} from '../domain/types'
 
 export function useWorkOrderList(
   departmentCode: string,
@@ -38,7 +44,7 @@ export function useWorkOrderList(
         requestedProductionItemId,
         requestedScope?.flowNodeId,
         requestedScope?.sourceFlowNodeId,
-        requestedScope?.substepId,
+        requestedScope?.targetTagSetId,
       )
       const currentScope = scope?.value
       if (
@@ -49,7 +55,7 @@ export function useWorkOrderList(
           !currentScope
           || currentScope.flowNodeId !== requestedScope?.flowNodeId
           || currentScope.sourceFlowNodeId !== requestedScope?.sourceFlowNodeId
-          || currentScope.substepId !== requestedScope?.substepId
+          || currentScope.targetTagSetId !== requestedScope?.targetTagSetId
         ))
       ) return
       items.value = result.items
@@ -98,6 +104,20 @@ export function useWorkOrderActions(
 
   async function submit(item: WorkOrder) {
     try {
+      if (mode === 'production') {
+        const initialRemaining = Math.max(item.quantity - item.submitted_quantity, 0)
+        await ElMessageBox.confirm(
+          initialRemaining
+            ? `确认将剩余 ${initialRemaining} 件按无需 QC 完成，并结单？`
+            : '确认该工单的送检和返工已经处理完毕，并结单？',
+          '完成工单',
+          { type: 'warning' },
+        )
+        await completeWorkOrder(item.id)
+        await onChanged()
+        ElMessage.success('工单已完成并结单')
+        return
+      }
       const completionAction = await chooseCompletionAction()
       if (!completionAction) return
       let quantity = item.processing_quantity
@@ -116,7 +136,7 @@ export function useWorkOrderActions(
           mode === 'assembly'
             ? `确认完成剩余 ${item.processing_quantity} 件并结单？`
             : `确认完成剩余 ${item.processing_quantity} 件？`,
-          mode === 'assembly' ? '装配完成' : '完成细分',
+          mode === 'assembly' ? '装配完成' : '完成工单',
           { type: 'warning' },
         )
       }
@@ -131,7 +151,7 @@ export function useWorkOrderActions(
           ? '已送 QC 检验'
           : mode === 'purchase' ? '到货数量已入库'
             : mode === 'assembly' ? '装配结果已结单'
-              : '细分已完成',
+              : '工单已完成',
       )
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
@@ -146,17 +166,18 @@ export function useWorkOrderActions(
   async function submitQc(item: WorkOrder) {
     if (mode !== 'production') return
     try {
+      const initialRemaining = Math.max(item.quantity - item.submitted_quantity, 0)
       const { value } = await ElMessageBox.prompt(
         '请输入本次送检数量',
         `工单 ${item.work_order_no} 送检`,
         {
-          inputValue: String(item.processing_quantity),
+          inputValue: String(initialRemaining),
           inputPattern: /^[1-9]\d*$/,
           inputErrorMessage: '请输入正整数',
         },
       )
       const quantity = Number(value)
-      if (!Number.isInteger(quantity) || quantity < 1 || quantity > item.processing_quantity) {
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > initialRemaining) {
         ElMessage.warning('送检数量不能超过工单加工中数量')
         return
       }
@@ -166,6 +187,37 @@ export function useWorkOrderActions(
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
         ElMessage.error(getApiErrorDetail(error)?.message || '送检失败')
+      }
+    }
+  }
+
+  async function resubmitQc(item: WorkOrder, batch: WorkOrderBatch) {
+    if (mode !== 'production' || batch.rework_pending_quantity < 1) return
+    try {
+      const { value } = await ElMessageBox.prompt(
+        '请输入本次返工送检数量',
+        `工单 ${item.work_order_no} · 批次 ${batch.id}`,
+        {
+          inputValue: String(batch.rework_pending_quantity),
+          inputPattern: /^[1-9]\d*$/,
+          inputErrorMessage: '请输入正整数',
+        },
+      )
+      const quantity = Number(value)
+      if (
+        !Number.isInteger(quantity)
+        || quantity < 1
+        || quantity > batch.rework_pending_quantity
+      ) {
+        ElMessage.warning('送检数量不能超过该批次待返工数量')
+        return
+      }
+      await resubmitReworkBatch(batch.id, quantity)
+      await onChanged()
+      ElMessage.success('返工件已重新送 QC')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(getApiErrorDetail(error)?.message || '返工送检失败')
       }
     }
   }
@@ -182,5 +234,5 @@ export function useWorkOrderActions(
       }
     }
   }
-  return { cancel, submit, submitQc }
+  return { cancel, resubmitQc, submit, submitQc }
 }

@@ -2,14 +2,14 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import {
-  dispatchProcedureStageStock,
-  queryProductionSubstepCards,
+  dispatchProcedureTagStock,
+  queryProductionTagCards,
 } from '../api/departmentRepositories'
 import { createWorkOrder } from '../api/workOrders'
 import type {
   RepositoryFilters,
   RepositoryItem,
-  SubstepCard,
+  TagCard,
   WorkOrderQueryScope,
 } from '../domain/types'
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
@@ -28,81 +28,79 @@ export function useProductionDepartment(
     mode === 'production' ? workOrderScope : undefined,
   )
   const activeRepository = ref<RepositoryItem>()
-  const activeSubstepSource = ref<SubstepCard>()
   const dialogVisible = ref(false)
   const dispatchDialogVisible = ref(false)
   const submitting = ref(false)
   const dispatchSubmitting = ref(false)
-  const substepItems = ref<SubstepCard[]>([])
-  const substepLoading = ref(false)
-  const selectedSubstepKey = ref<string | null>(null)
-  const selectedSubstep = computed(() => substepItems.value.find(
-    item => item.card_key === selectedSubstepKey.value,
+  const tagItems = ref<TagCard[]>([])
+  const tagLoading = ref(false)
+  const selectedTagKey = ref<string | null>(null)
+  const selectedTag = computed(() => tagItems.value.find(
+    item => item.card_key === selectedTagKey.value,
   ))
-  let substepSequence = 0
+  let tagSequence = 0
 
   async function loadDetails() {
     await workOrderList.load()
   }
 
-  function clearSubstepState() {
-    substepSequence += 1
-    substepItems.value = []
-    selectedSubstepKey.value = null
+  function clearTagState() {
+    tagSequence += 1
+    tagItems.value = []
+    selectedTagKey.value = null
     workOrderScope.value = null
-    activeSubstepSource.value = undefined
-    substepLoading.value = false
+    tagLoading.value = false
   }
 
-  function applySubstepSelection(item: SubstepCard) {
+  function applyTagSelection(item: TagCard) {
     const repository = workspace.selectedRepository.value
-    selectedSubstepKey.value = item.card_key
-    workOrderScope.value = item.substep_id === null || !repository
+    selectedTagKey.value = item.card_key
+    workOrderScope.value = item.tag_set_id === null || !repository
       ? null
       : {
           flowNodeId: repository.flow_node_id,
           sourceFlowNodeId: repository.source_flow_node_id,
-          substepId: item.substep_id,
+          targetTagSetId: item.tag_set_id,
         }
   }
 
-  async function loadSubsteps(item = workspace.selectedRepository.value) {
-    const sequence = ++substepSequence
-    substepItems.value = []
+  async function loadTags(item = workspace.selectedRepository.value) {
+    const sequence = ++tagSequence
+    tagItems.value = []
     if (mode !== 'production' || !item) {
-      substepLoading.value = false
+      tagLoading.value = false
       return
     }
-    substepLoading.value = true
+    tagLoading.value = true
     try {
-      const result = await queryProductionSubstepCards(
+      const result = await queryProductionTagCards(
         departmentCode,
         item.production_item_id,
         item.flow_node_id,
         item.source_flow_node_id,
       )
       if (
-        sequence !== substepSequence
+        sequence !== tagSequence
         || workspace.selectedCardKey.value !== item.card_key
       ) return
-      substepItems.value = result
-      const current = result.find(card => card.card_key === selectedSubstepKey.value)
+      tagItems.value = result
+      const current = result.find(card => card.card_key === selectedTagKey.value)
       if (current) {
-        applySubstepSelection(current)
+        applyTagSelection(current)
       } else {
-        selectedSubstepKey.value = null
+        selectedTagKey.value = null
         workOrderScope.value = null
         workOrderList.reset()
       }
     } catch {
-      if (sequence === substepSequence) {
-        selectedSubstepKey.value = null
+      if (sequence === tagSequence) {
+        selectedTagKey.value = null
         workOrderScope.value = null
         workOrderList.reset()
-        ElMessage.warning('细分状态加载失败')
+        ElMessage.warning('标记组合加载失败')
       }
     } finally {
-      if (sequence === substepSequence) substepLoading.value = false
+      if (sequence === tagSequence) tagLoading.value = false
     }
   }
 
@@ -110,88 +108,101 @@ export function useProductionDepartment(
     await workspace.loadRepositories()
     if (mode === 'production') {
       if (!workspace.selectedRepository.value) {
-        clearSubstepState()
+        clearTagState()
         workOrderList.reset()
         return
       }
-      await loadSubsteps()
+      await loadTags()
     }
     await loadDetails()
   }
 
   function selectRepository(item: RepositoryItem) {
     workspace.selectRepository(item)
-    clearSubstepState()
+    clearTagState()
     workOrderList.reset()
-    if (mode === 'production') void loadSubsteps(item)
+    if (mode === 'production') void loadTags(item)
     else void loadDetails()
   }
 
-  function selectSubstep(item: SubstepCard) {
-    applySubstepSelection(item)
+  function selectTag(item: TagCard) {
+    applyTagSelection(item)
     workOrderList.reset()
     void loadDetails()
   }
 
-  function openWorkOrder(item: RepositoryItem) {
-    selectRepository(item)
-    activeRepository.value = item
-    activeSubstepSource.value = undefined
+  function openTagWorkOrder(item: TagCard) {
+    const repository = workspace.selectedRepository.value
+    if (!repository) return
+    if (
+      item.available_quantity < 1
+      || ((item.repository_id === null) === (item.tag_stock_id === null))
+    ) {
+      ElMessage.warning('当前标记组合没有可用的开单数量')
+      return
+    }
+    activeRepository.value = repository
+    applyTagSelection(item)
+    workOrderList.reset()
+    void loadDetails()
     dialogVisible.value = true
   }
 
-  function openSubstepWorkOrder(item: SubstepCard) {
-    const repository = workspace.selectedRepository.value
-    if (!repository) return
-    if ((item.repository_id === null) === (item.stage_stock_id === null)) {
-      ElMessage.warning('当前细分没有可用的开单来源')
-      return
-    }
-    applySubstepSelection(item)
+  async function openWorkOrder(item: RepositoryItem) {
+    const preferredSourceKey = workspace.selectedCardKey.value === item.card_key
+      ? selectedTagKey.value
+      : null
+    workspace.selectRepository(item)
+    clearTagState()
+    selectedTagKey.value = preferredSourceKey
     workOrderList.reset()
-    void loadDetails()
-    activeRepository.value = repository
-    activeSubstepSource.value = item
+    activeRepository.value = item
+    if (mode === 'production') {
+      await loadTags(item)
+      if (workspace.selectedCardKey.value !== item.card_key) return
+      if (!tagItems.value.some(source => (
+        source.available_quantity > 0
+        && ((source.repository_id === null) !== (source.tag_stock_id === null))
+      ))) {
+        ElMessage.warning('当前配件没有可用的开单来源')
+        return
+      }
+    }
     dialogVisible.value = true
   }
 
   async function saveWorkOrder(payload: {
+    repositoryId: number | null
+    tagStockId: number | null
     quantity: number
     workerId: number | null
-    substepName: string | null
+    tagNames: string[]
   }) {
-    const repository = activeRepository.value
-    const substepSource = activeSubstepSource.value
-    if (!repository || payload.substepName === null) return
-    const repositoryId = mode === 'production'
-      ? substepSource?.repository_id ?? null
-      : repository.repository_id
-    const stageStockId = mode === 'production'
-      ? substepSource?.stage_stock_id ?? null
-      : repository.stage_stock_id
-    if ((repositoryId === null) === (stageStockId === null)) return
+    if (!activeRepository.value) return
+    if ((payload.repositoryId === null) === (payload.tagStockId === null)) return
+    if (mode === 'production' && payload.tagNames.length === 0) return
     submitting.value = true
     try {
       const created = await createWorkOrder(
-        repositoryId,
-        stageStockId,
-        payload.substepName,
+        payload.repositoryId,
+        payload.tagStockId,
+        payload.tagNames,
         payload.quantity,
         payload.workerId,
       )
       dialogVisible.value = false
       await reloadWorkspace()
-      if (mode === 'production' && created.substep_id !== null) {
-        const createdSubstep = substepItems.value.find(
-          item => item.substep_id === created.substep_id,
+      if (mode === 'production' && created.target_tag_set_id !== null) {
+        const target = tagItems.value.find(
+          item => item.tag_set_id === created.target_tag_set_id,
         )
-        if (createdSubstep) {
-          applySubstepSelection(createdSubstep)
+        if (target) {
+          applyTagSelection(target)
           workOrderList.reset()
           await loadDetails()
         }
       }
-      ElMessage.success(mode === 'purchase' ? '外购入库单已创建' : '工单已创建')
+      ElMessage.success(mode === 'purchase' ? '外购入库单已创建' : '标记工单已创建')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
     } finally {
@@ -201,25 +212,24 @@ export function useProductionDepartment(
 
   async function openDispatch(item: RepositoryItem) {
     workspace.selectRepository(item)
-    clearSubstepState()
+    clearTagState()
     workOrderList.reset()
     activeRepository.value = item
-    await loadSubsteps(item)
+    await loadTags(item)
     if (workspace.selectedCardKey.value !== item.card_key) return
-    const hasDispatchableStock = substepItems.value.some(
-      substep => substep.stage_stock_id !== null && substep.available_quantity > 0,
-    )
-    if (!hasDispatchableStock) {
-      ElMessage.warning('当前配件暂无可出货的已完细分')
+    if (!tagItems.value.some(
+      source => source.tag_stock_id !== null && source.available_quantity > 0,
+    )) {
+      ElMessage.warning('当前配件暂无可出货的已完成标记组合')
       return
     }
     dispatchDialogVisible.value = true
   }
 
-  async function saveDispatch(payload: { stageStockId: number; quantity: number }) {
+  async function saveDispatch(payload: { tagStockId: number; quantity: number }) {
     dispatchSubmitting.value = true
     try {
-      await dispatchProcedureStageStock(payload.stageStockId, payload.quantity)
+      await dispatchProcedureTagStock(payload.tagStockId, payload.quantity)
       dispatchDialogVisible.value = false
       await reloadWorkspace()
       ElMessage.success('出货完成')
@@ -231,19 +241,19 @@ export function useProductionDepartment(
   }
 
   async function refresh() {
-    clearSubstepState()
+    clearTagState()
     workOrderList.reset()
     await workspace.refresh()
   }
 
   async function changeRepositoryPage(page: number) {
-    clearSubstepState()
+    clearTagState()
     workOrderList.reset()
     await workspace.changePage(page)
   }
 
   async function applyFilters(filters: RepositoryFilters) {
-    clearSubstepState()
+    clearTagState()
     workOrderList.reset()
     await workspace.search(filters)
   }
@@ -254,7 +264,6 @@ export function useProductionDepartment(
 
   return {
     activeRepository,
-    activeSubstepSource,
     applyFilters,
     changeRepositoryPage,
     dialogVisible,
@@ -263,17 +272,17 @@ export function useProductionDepartment(
     load,
     loadDetails,
     openDispatch,
-    openSubstepWorkOrder,
+    openTagWorkOrder,
     openWorkOrder,
     refresh,
     saveDispatch,
     saveWorkOrder,
     selectRepository,
-    selectedSubstep,
-    selectedSubstepKey,
-    selectSubstep,
-    substepItems,
-    substepLoading,
+    selectedTag,
+    selectedTagKey,
+    selectTag,
+    tagItems,
+    tagLoading,
     submitting,
     workOrderActions: useWorkOrderActions(reloadWorkspace, mode),
     workOrderList,

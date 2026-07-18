@@ -89,30 +89,30 @@ class Repository(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
-class ProcedureStageStock(Base):
-    __tablename__ = "procedure_stage_stock"
+class ProcedureTagStock(Base):
+    __tablename__ = "procedure_tag_stock"
     __table_args__ = (
         CheckConstraint(
             "quantity > 0",
-            name="ck_procedure_stage_stock_quantity_positive",
+            name="ck_procedure_tag_stock_quantity_positive",
         ),
         UniqueConstraint(
             "production_item_id",
             "flow_node_id",
             "source_flow_node_id",
             "department_id",
-            "completed_substep_id",
-            name="uq_procedure_stage_stock_position",
+            "tag_set_id",
+            name="uq_procedure_tag_stock_position",
         ),
         UniqueConstraint(
             "id",
             "production_item_id",
-            name="uq_procedure_stage_stock_id_production_item",
+            name="uq_procedure_tag_stock_id_production_item",
         ),
         Index(
-            "idx_procedure_stage_stock_department",
+            "idx_procedure_tag_stock_department",
             "department_id",
-            "completed_substep_id",
+            "tag_set_id",
         ),
     )
 
@@ -124,8 +124,8 @@ class ProcedureStageStock(Base):
     )
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    completed_substep_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("procedure_substep.id"), nullable=False
+    tag_set_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag_set.id"), nullable=False
     )
     department_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("department.id"), nullable=False
@@ -138,7 +138,7 @@ class WorkOrder(Base):
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_work_order_quantity_positive"),
         CheckConstraint(
-            "work_order_type IN ('substep', 'assembly')",
+            "work_order_type IN ('tag', 'purchase_receipt', 'assembly')",
             name="ck_work_order_type",
         ),
         CheckConstraint(
@@ -163,14 +163,25 @@ class WorkOrder(Base):
             name="ck_work_order_cancelled_quantity",
         ),
         CheckConstraint(
-            "(work_order_type = 'assembly' AND substep_id IS NULL "
+            "(work_order_type = 'assembly' AND procedure_id IS NULL "
+            "AND applied_tag_set_id IS NULL "
+            "AND source_tag_set_id IS NULL AND target_tag_set_id IS NULL "
             "AND source_flow_node_id IS NULL "
-            "AND repository_id IS NULL AND procedure_stage_stock_id IS NULL) OR "
-            "(work_order_type = 'substep' AND substep_id IS NOT NULL "
+            "AND repository_id IS NULL AND procedure_tag_stock_id IS NULL) OR "
+            "(work_order_type = 'tag' AND procedure_id IS NOT NULL "
+            "AND applied_tag_set_id IS NOT NULL "
+            "AND target_tag_set_id IS NOT NULL "
             "AND source_flow_node_id IS NOT NULL "
-            "AND (repository_id IS NULL OR procedure_stage_stock_id IS NULL) "
-            "AND (status <> 'open' OR repository_id IS NOT NULL "
-            "OR procedure_stage_stock_id IS NOT NULL))",
+            "AND (repository_id IS NULL OR procedure_tag_stock_id IS NULL) "
+            "AND (status <> 'open' OR completed_quantity = quantity "
+            "OR repository_id IS NOT NULL "
+            "OR procedure_tag_stock_id IS NOT NULL)) OR "
+            "(work_order_type = 'purchase_receipt' AND procedure_id IS NOT NULL "
+            "AND applied_tag_set_id IS NULL "
+            "AND source_tag_set_id IS NULL AND target_tag_set_id IS NULL "
+            "AND source_flow_node_id IS NOT NULL "
+            "AND procedure_tag_stock_id IS NULL "
+            "AND (status <> 'open' OR repository_id IS NOT NULL))",
             name="ck_work_order_type_source",
         ),
         ForeignKeyConstraint(
@@ -179,9 +190,9 @@ class WorkOrder(Base):
             name="fk_work_order_repository_item",
         ),
         ForeignKeyConstraint(
-            ["procedure_stage_stock_id", "production_item_id"],
-            ["procedure_stage_stock.id", "procedure_stage_stock.production_item_id"],
-            name="fk_work_order_stage_stock_item",
+            ["procedure_tag_stock_id", "production_item_id"],
+            ["procedure_tag_stock.id", "procedure_tag_stock.production_item_id"],
+            name="fk_work_order_tag_stock_item",
         ),
         Index(
             "idx_work_order_worker_activity",
@@ -189,9 +200,9 @@ class WorkOrder(Base):
             text("COALESCE(closed_at, created_at) DESC"),
             text("id DESC"),
         ),
-        Index("idx_work_order_substep", "substep_id", text("id DESC")),
+        Index("idx_work_order_applied_tag_set", "applied_tag_set_id", text("id DESC")),
         Index("idx_work_order_repository", "repository_id"),
-        Index("idx_work_order_stage_stock", "procedure_stage_stock_id"),
+        Index("idx_work_order_tag_stock", "procedure_tag_stock_id"),
         Index("idx_work_order_production_item", "production_item_id"),
         Index(
             "idx_work_order_repository_open",
@@ -199,8 +210,8 @@ class WorkOrder(Base):
             postgresql_where=text("status = 'open'"),
         ),
         Index(
-            "idx_work_order_stage_stock_open",
-            "procedure_stage_stock_id",
+            "idx_work_order_tag_stock_open",
+            "procedure_tag_stock_id",
             postgresql_where=text("status = 'open'"),
         ),
         Index(
@@ -210,27 +221,36 @@ class WorkOrder(Base):
             "status",
         ),
         Index(
-            "idx_work_order_substep_position",
+            "idx_work_order_tag_position",
             "production_item_id",
             "flow_node_id",
             "source_flow_node_id",
-            "substep_id",
+            "target_tag_set_id",
             text("id DESC"),
-            postgresql_where=text("work_order_type = 'substep'"),
+            postgresql_where=text("work_order_type = 'tag'"),
         ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     work_order_no: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     repository_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    procedure_stage_stock_id: Mapped[int | None] = mapped_column(
+    procedure_tag_stock_id: Mapped[int | None] = mapped_column(
         BigInteger, nullable=True
     )
     production_item_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("production_item.id"), nullable=False
     )
-    substep_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("procedure_substep.id"), nullable=True
+    procedure_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure.id"), nullable=True
+    )
+    applied_tag_set_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag_set.id"), nullable=True
+    )
+    source_tag_set_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag_set.id"), nullable=True
+    )
+    target_tag_set_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag_set.id"), nullable=True
     )
     work_order_type: Mapped[str] = mapped_column(Text, nullable=False)
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -286,7 +306,13 @@ class WorkOrderBatch(Base):
             "work_order_id",
             name="uq_work_order_batch_id_order",
         ),
+        ForeignKeyConstraint(
+            ["rework_source_batch_id", "work_order_id"],
+            ["work_order_batch.id", "work_order_batch.work_order_id"],
+            name="fk_work_order_batch_rework_source",
+        ),
         Index("idx_work_order_batch_order", "work_order_id"),
+        Index("idx_work_order_batch_rework_source", "rework_source_batch_id"),
         Index(
             "idx_work_order_batch_pending",
             text("id DESC"),
@@ -306,8 +332,8 @@ class WorkOrderBatch(Base):
     )
     submitted_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    source_substep_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("procedure_substep.id"), nullable=True
+    rework_source_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
     )
     qualified_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rework_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -449,6 +475,8 @@ class ProductionMovement(Base):
             "production_item_id",
             "target_flow_node_id",
             "source_flow_node_id",
+            "source_tag_set_id",
+            "target_tag_set_id",
             text("created_at DESC"),
             text("id DESC"),
             postgresql_where=text("target_department_id IS NOT NULL"),
@@ -461,6 +489,12 @@ class ProductionMovement(Base):
     )
     source_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_tag_set_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag_set.id"), nullable=True
+    )
+    target_tag_set_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag_set.id"), nullable=True
+    )
     source_department_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("department.id"), nullable=True
     )

@@ -1,7 +1,7 @@
 from sqlalchemy import func, select, tuple_
 
 from models.production import (
-    ProcedureStageStock,
+    ProcedureTagStock,
     Repository,
     WorkOrder,
     WorkOrderMaterial,
@@ -37,47 +37,47 @@ def reserved_quantities(session, repository_ids: list[int]) -> dict[int, int]:
     return result
 
 
-def reserved_stage_quantities(session, stage_stock_ids: list[int]) -> dict[int, int]:
-    if not stage_stock_ids:
+def reserved_tag_quantities(session, tag_stock_ids: list[int]) -> dict[int, int]:
+    if not tag_stock_ids:
         return {}
     return {
         stock_id: quantity
         for stock_id, quantity in session.execute(
             select(
-                WorkOrder.procedure_stage_stock_id,
+                WorkOrder.procedure_tag_stock_id,
                 func.sum(WorkOrder.quantity - WorkOrder.completed_quantity),
             )
             .where(
-                WorkOrder.procedure_stage_stock_id.in_(stage_stock_ids),
+                WorkOrder.procedure_tag_stock_id.in_(tag_stock_ids),
                 WorkOrder.status == "open",
             )
-            .group_by(WorkOrder.procedure_stage_stock_id)
+            .group_by(WorkOrder.procedure_tag_stock_id)
         )
     }
 
 
-def stage_stock_statuses(
+def tag_stock_statuses(
     session,
-    stage_stock_ids: list[int],
+    tag_stock_ids: list[int],
 ) -> dict[int, str]:
-    if not stage_stock_ids:
+    if not tag_stock_ids:
         return {}
     processing_ids = set(
         session.scalars(
-            select(ProcedureStageStock.id)
+            select(ProcedureTagStock.id)
             .join(
                 WorkOrder,
-                WorkOrder.procedure_stage_stock_id == ProcedureStageStock.id,
+                WorkOrder.procedure_tag_stock_id == ProcedureTagStock.id,
             )
             .where(
-                ProcedureStageStock.id.in_(stage_stock_ids),
+                ProcedureTagStock.id.in_(tag_stock_ids),
                 WorkOrder.status == "open",
             )
         )
     )
     return {
         stock_id: "processing" if stock_id in processing_ids else "unprocessed"
-        for stock_id in stage_stock_ids
+        for stock_id in tag_stock_ids
     }
 
 
