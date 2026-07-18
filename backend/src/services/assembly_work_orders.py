@@ -9,7 +9,6 @@ from models.production import (
     ProductionItem,
     Repository,
     WorkOrder,
-    WorkOrderBatch,
     WorkOrderMaterial,
 )
 from services.errors import DomainError
@@ -59,7 +58,6 @@ def create_assembly_work_order(
             edge.get("source_node_id")
             for edge in context.flow.get("edges", [])
             if edge.get("target_node_id") == assembly_node["id"]
-            and edge.get("route_type", "normal") == "normal"
         ]
         selected_sources = [repository.source_flow_node_id for repository in repositories]
         if not matches_assembly_sources(expected_sources, selected_sources):
@@ -79,15 +77,17 @@ def create_assembly_work_order(
         )
         order = WorkOrder(
             repository_id=None,
+            procedure_stage_stock_id=None,
             production_item_id=input_items[0].id,
-            procedure_id=None,
-            procedure_type="assembly",
-            procedure_name=(
+            substep_id=None,
+            work_order_type="assembly",
+            work_order_name=(
                 assembly_node.get("label")
                 or assembly_node.get("output_name")
                 or "装配"
             ),
             flow_node_id=assembly_node["id"],
+            source_flow_node_id=None,
             worker_id=worker_id,
             quantity=quantity,
         )
@@ -161,10 +161,13 @@ def submit_assembly_work_order(
     session,
     order: WorkOrder,
     quantity: int,
+    completion_action: str,
     user_department: str,
 ) -> dict:
     if user_department not in {"sys", "assembly"}:
         raise DomainError("department_access_denied", "只有装配部门可以操作装配工单", status_code=403)
+    if completion_action != "direct":
+        raise DomainError("assembly_qc_not_supported", "装配工单当前仅支持直接结单")
     remaining = order.quantity - order.completed_quantity
     if quantity != remaining:
         raise DomainError("partial_completion_not_allowed", "装配工单必须一次完成剩余数量")
@@ -213,15 +216,6 @@ def submit_assembly_work_order(
     session.flush()
     target = context.normal_target(assembly_node["id"])
     output_quantity = quantity * int(assembly_node.get("output_pcs", 1))
-    batch = None
-    if target is not None and target.get("type") == "qc":
-        batch = WorkOrderBatch(
-            work_order_id=order.id,
-            submitted_quantity=output_quantity,
-            flow_node_id=target["id"],
-        )
-        session.add(batch)
-        session.flush()
     target_department = move_to_node(
         session, output_item, target, output_quantity, assembly_node["id"]
     )
@@ -235,7 +229,6 @@ def submit_assembly_work_order(
         source_department_id=target_department_id(session, assembly_node),
         target_department_id=target_department,
         work_order_id=order.id,
-        work_order_batch_id=batch.id if batch else None,
     )
     # Persist the output while the assembly order is still open.
     session.flush()

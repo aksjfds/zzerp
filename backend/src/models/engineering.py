@@ -198,7 +198,8 @@ class ProductProcessFlow(Base):
     flow_json: Mapped[dict[str, Any]] = mapped_column(
         JSON_TYPE,
         nullable=False,
-        default=lambda: {"schema_version": 1, "nodes": [], "edges": []},
+        default=lambda: {"schema_version": 2, "nodes": [], "edges": []},
+        server_default=text("'{\"schema_version\": 2, \"nodes\": [], \"edges\": []}'"),
     )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")

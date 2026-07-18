@@ -3,12 +3,17 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from authorization import require_any_permission
-from domain.permissions import PRODUCTION_VIEW
+from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
 from schemas.production import (
+    ProcedureDispatchCreate,
+    ProcedureDispatchEnvelope,
     RepositoryListEnvelope,
+    SubstepCardListEnvelope,
     WorkerListEnvelope,
 )
+from services.procedure_dispatches import dispatch_stage_stock
 from services.production_cards import list_production_cards
+from services.production_substep_cards import list_substep_cards
 from services.work_order_queries import list_department_workers
 
 
@@ -50,3 +55,44 @@ def department_workers(
     if user["department"] not in {"sys", department_code}:
         raise HTTPException(status_code=403, detail="无权访问该部门")
     return {"data": list_department_workers(department_code)}
+
+
+@router.get(
+    "/departments/{department_code}/production-items/{production_item_id}/substep-cards",
+    response_model=SubstepCardListEnvelope,
+)
+def production_item_substep_cards(
+    department_code: str,
+    production_item_id: int,
+    flow_node_id: str = Query(min_length=1, max_length=200),
+    source_flow_node_id: str = Query(min_length=1, max_length=200),
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    if user["department"] not in {"sys", department_code}:
+        raise HTTPException(status_code=403, detail="无权访问该部门")
+    return {
+        "data": list_substep_cards(
+            department_code,
+            production_item_id,
+            flow_node_id,
+            source_flow_node_id,
+        )
+    }
+
+
+@router.post(
+    "/procedure-stage-stocks/{stage_stock_id}/dispatches",
+    response_model=ProcedureDispatchEnvelope,
+)
+def procedure_stage_stock_dispatch(
+    stage_stock_id: int,
+    payload: ProcedureDispatchCreate,
+    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
+):
+    return {
+        "data": dispatch_stage_stock(
+            stage_stock_id,
+            payload.quantity,
+            user["department"],
+        )
+    }

@@ -1,14 +1,12 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { BomItem, FlowEdge, FlowNode, ProcessFlow, RouteType } from '../domain/types'
+import type { BomItem, FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 import { useLogicFlowInstance } from '../composables/useLogicFlowInstance'
 import {
-  setQcEdgeRoute,
   startPartDrag,
   startAssemblyDrag,
   startProcessDrag,
-  startQcDrag,
   updateNodeDefinition,
 } from '../logicflow/commands'
 
@@ -19,13 +17,16 @@ const emit = defineEmits<{
   selectNode: [node: FlowNode | null]
 }>()
 const containerRef = ref<HTMLDivElement>()
-const { currentFlow, emitChange, instance, renderFlow } = useLogicFlowInstance(containerRef, {
+const { currentFlow, emitChange, instance, renderFlow, setReadonly } = useLogicFlowInstance(containerRef, {
   initialFlow: () => props.modelValue,
+  readonly: () => Boolean(props.readonly),
   onChange: (flow) => emit('update:modelValue', flow),
   onConnectionError: (message) => ElMessage.error(message),
   onSelectEdge: (edge) => emit('selectEdge', edge),
   onSelectNode: (node) => emit('selectNode', node),
 })
+
+watch(() => props.readonly, value => setReadonly(Boolean(value)))
 
 function withInstance(action: (lf: NonNullable<typeof instance.value>) => void) {
   if (instance.value) action(instance.value)
@@ -50,23 +51,9 @@ function dragAssembly() {
   withInstance(startAssemblyDrag)
 }
 
-function dragQc() {
-  if (props.readonly) return
-  withInstance(startQcDrag)
-}
-
 function updateNode(nodeId: string, label: string, property: Parameters<typeof updateNodeDefinition>[3]) {
   if (props.readonly) return
   withInstance((lf) => { updateNodeDefinition(lf, nodeId, label, property); emitChange() })
-}
-
-function updateRoute(edgeId: string, routeType: RouteType) {
-  if (props.readonly) return
-  try {
-    withInstance((lf) => { setQcEdgeRoute(lf, edgeId, routeType); emitChange() })
-  } catch (error) {
-    ElMessage.warning(error instanceof Error ? error.message : '无法修改连线')
-  }
 }
 
 function focusElement(elementId?: string) {
@@ -79,12 +66,10 @@ defineExpose({
   dragPart,
   dragAssembly,
   dragProcess,
-  dragQc,
   focusElement,
   getGraphData: currentFlow,
   renderFlow,
   updateNode,
-  updateRoute,
 })
 </script>
 
@@ -92,5 +77,5 @@ defineExpose({
 
 <style scoped>
 .flow-canvas { min-width: 0; height: 560px; background: #fff; }
-.flow-canvas.is-readonly { cursor: default; pointer-events: none; }
+.flow-canvas.is-readonly { cursor: default; }
 </style>

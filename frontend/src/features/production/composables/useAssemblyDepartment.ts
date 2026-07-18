@@ -123,7 +123,7 @@ export function useAssemblyDepartment() {
     selectedGroup,
     selectedGroupKey,
     submitting,
-    workOrderActions: useWorkOrderActions(reloadWorkspace),
+    workOrderActions: useWorkOrderActions(reloadWorkspace, 'assembly'),
     workOrderList,
     workspace,
   }

@@ -6,7 +6,6 @@ defineProps<{ bomItems: BomItem[]; procedures: ProcedureOption[] }>()
 const emit = defineEmits<{
   dragAssembly: []
   dragProcedure: [procedure: ProcedureOption]
-  dragQc: []
   dragPart: [item: BomItem]
 }>()
 </script>
@@ -36,7 +35,6 @@ const emit = defineEmits<{
     <p v-if="!procedures.length" class="empty">暂无可用工艺</p>
     <h3>流程节点</h3>
     <button class="palette-item assembly" type="button" @mousedown="emit('dragAssembly')">装配</button>
-    <button class="palette-item qc" type="button" @mousedown="emit('dragQc')">QC</button>
   </aside>
 </template>
 
@@ -49,7 +47,6 @@ h3 { margin: 0 0 10px; font-size: 14px; }
 .palette-item.part { border-color: #409eff; }
 .palette-item.process { border-color: #67c23a; }
 .palette-item.assembly { border-color: #e6a23c; }
-.palette-item.qc { border-color: #f56c6c; }
 .palette-item:disabled { cursor: not-allowed; opacity: .45; }
 .empty { margin: 0; color: var(--el-text-color-secondary); font-size: 12px; }
 </style>

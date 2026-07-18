@@ -90,7 +90,6 @@ onMounted(loadOrders)
       <div><span>业务部</span><h1>客户订单</h1></div>
       <div>
         <ElButton @click="logout">退出登录</ElButton>
-        <!-- <ElButton v-permission="PRODUCT_PERMISSIONS.view" @click="router.push('/products')">产品资料</ElButton> -->
         <ElButton v-permission="ORDER_PERMISSIONS.add" type="primary" @click="router.push('/business/orders/new')">创建客户订单</ElButton>
       </div>
     </header>

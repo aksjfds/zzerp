@@ -54,7 +54,6 @@ def normal_target(flow: dict, nodes: dict[str, dict], node_id: str) -> dict | No
         nodes.get(edge.get("target_node_id"))
         for edge in flow.get("edges", [])
         if edge.get("source_node_id") == node_id
-        and edge.get("route_type", "normal") == "normal"
     ]
     targets = [item for item in targets if item is not None]
     if len(targets) > 1:

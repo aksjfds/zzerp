@@ -1,3 +1,9 @@
+DROP SCHEMA public CASCADE;
+CREATE SCHEMA public;
+
+GRANT ALL ON SCHEMA public TO zzerp;
+GRANT ALL ON SCHEMA public TO public;
+
 -- ============================================================
 -- ZZ ERP 工程产品、BOM 与工艺路线
 -- ============================================================
@@ -77,11 +83,11 @@ CREATE TABLE product_process_flow (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
     product_version INT NOT NULL CHECK (product_version > 0),
-    flow_json JSONB NOT NULL DEFAULT '{"schema_version": 1, "nodes": [], "edges": []}'::jsonb,
+    flow_json JSONB NOT NULL DEFAULT '{"schema_version": 2, "nodes": [], "edges": []}'::jsonb,
     CHECK (jsonb_typeof(flow_json) = 'object'),
     CHECK (flow_json ? 'schema_version'),
     CHECK (jsonb_typeof(flow_json->'schema_version') = 'number'),
-    CHECK (flow_json->>'schema_version' = '1'),
+    CHECK (flow_json->>'schema_version' = '2'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CHECK (flow_json ? 'nodes'),
@@ -116,6 +122,15 @@ CREATE TABLE procedure (
         CHECK (procedure_type IN ('standard', 'purchase_receipt')),
     UNIQUE (id, procedure_type),
     UNIQUE (workshop_id, procedure_name)
+);
+
+-- 只保存开工单时复用的名称；行之间没有固定顺序或路线含义。
+CREATE TABLE procedure_substep (
+    id BIGSERIAL PRIMARY KEY,
+    procedure_id BIGINT NOT NULL REFERENCES procedure(id),
+    substep_name TEXT NOT NULL
+        CHECK (substep_name = btrim(substep_name) AND substep_name <> ''),
+    CONSTRAINT uq_procedure_substep_name UNIQUE (procedure_id, substep_name)
 );
 
 CREATE TABLE worker (
@@ -180,16 +195,41 @@ CREATE TABLE repository (
     UNIQUE (production_item_id, flow_node_id, source_flow_node_id, department_id)
 );
 
+-- 表名保留 stage 仅为兼容现有领域命名；completed_substep_id 表示已完成的自定义子步骤，不是数字阶段。
+CREATE TABLE procedure_stage_stock (
+    id BIGSERIAL PRIMARY KEY,
+    production_item_id BIGINT NOT NULL
+        REFERENCES production_item(id) ON DELETE CASCADE,
+    flow_node_id TEXT NOT NULL,
+    source_flow_node_id TEXT NOT NULL,
+    department_id BIGINT NOT NULL REFERENCES department(id),
+    completed_substep_id BIGINT NOT NULL REFERENCES procedure_substep(id),
+    quantity INT NOT NULL CHECK (quantity > 0),
+    CONSTRAINT uq_procedure_stage_stock_id_production_item
+        UNIQUE (id, production_item_id),
+    CONSTRAINT uq_procedure_stage_stock_position UNIQUE (
+        production_item_id,
+        flow_node_id,
+        source_flow_node_id,
+        department_id,
+        completed_substep_id
+    )
+);
+
 CREATE TABLE work_order (
     id BIGSERIAL PRIMARY KEY,
     work_order_no TEXT UNIQUE,
     repository_id BIGINT,
+    procedure_stage_stock_id BIGINT,
     production_item_id BIGINT NOT NULL REFERENCES production_item(id),
-    procedure_id BIGINT,
-    procedure_type TEXT NOT NULL
-        CHECK (procedure_type IN ('standard', 'purchase_receipt', 'assembly')),
+    substep_id BIGINT REFERENCES procedure_substep(id),
+    work_order_type TEXT NOT NULL
+        CHECK (work_order_type IN ('substep', 'assembly')),
     flow_node_id TEXT NOT NULL,
-    procedure_name TEXT NOT NULL,
+    -- 子步骤工单创建时记录其库存到达来源；来源库存行耗尽并删除后仍保留该执行位置。
+    -- 装配工单没有单一来源位置，因此保持 NULL。
+    source_flow_node_id TEXT,
+    work_order_name TEXT NOT NULL,
     worker_id BIGINT REFERENCES worker(id),
     quantity INT NOT NULL CHECK (quantity > 0),
     completed_quantity INT NOT NULL DEFAULT 0
@@ -205,15 +245,25 @@ CREATE TABLE work_order (
     CHECK (status <> 'closed' OR completed_quantity = quantity),
     CHECK (status <> 'cancelled' OR completed_quantity = 0),
     CHECK (
-        (procedure_id IS NULL AND procedure_type = 'assembly')
-        OR (procedure_id IS NOT NULL AND procedure_type IN ('standard', 'purchase_receipt'))
+        (work_order_type = 'assembly'
+            AND substep_id IS NULL
+            AND source_flow_node_id IS NULL
+            AND repository_id IS NULL
+            AND procedure_stage_stock_id IS NULL)
+        OR (work_order_type = 'substep'
+            AND substep_id IS NOT NULL
+            AND source_flow_node_id IS NOT NULL
+            AND (repository_id IS NULL OR procedure_stage_stock_id IS NULL)
+            AND (status <> 'open'
+                OR repository_id IS NOT NULL
+                OR procedure_stage_stock_id IS NOT NULL))
     ),
     CONSTRAINT fk_work_order_repository_item
         FOREIGN KEY (repository_id, production_item_id)
         REFERENCES repository(id, production_item_id),
-    CONSTRAINT fk_work_order_procedure_type
-        FOREIGN KEY (procedure_id, procedure_type)
-        REFERENCES procedure(id, procedure_type)
+    CONSTRAINT fk_work_order_stage_stock_item
+        FOREIGN KEY (procedure_stage_stock_id, production_item_id)
+        REFERENCES procedure_stage_stock(id, production_item_id)
 );
 
 CREATE TABLE work_order_material (
@@ -232,7 +282,10 @@ CREATE TABLE work_order_batch (
     id BIGSERIAL PRIMARY KEY,
     work_order_id BIGINT NOT NULL REFERENCES work_order(id) ON DELETE CASCADE,
     submitted_quantity INT NOT NULL CHECK (submitted_quantity > 0),
-    flow_node_id TEXT NOT NULL,
+    -- 提交时复制 work_order.source_flow_node_id，避免来源库存行删除后丢失到达来源。
+    source_flow_node_id TEXT NOT NULL,
+    -- 仓库来源为 NULL；内部子步骤库存来源由触发器校验为其 completed_substep_id。
+    source_substep_id BIGINT REFERENCES procedure_substep(id),
     qualified_quantity INT CHECK (qualified_quantity >= 0),
     rework_quantity INT CHECK (rework_quantity >= 0),
     scrap_quantity INT CHECK (scrap_quantity >= 0),
@@ -268,7 +321,7 @@ CREATE TABLE production_movement (
     movement_type TEXT NOT NULL CHECK (
         movement_type IN (
             'initial', 'process', 'purchase_receipt', 'assembly_input', 'assembly_output',
-            'qc_qualified', 'qc_rework', 'scrap', 'lost'
+            'qc_qualified', 'qc_rework', 'procedure_dispatch', 'scrap', 'lost'
         )
     ),
     work_order_id BIGINT REFERENCES work_order(id),
@@ -310,6 +363,12 @@ CREATE TABLE production_movement (
             AND target_department_id IS NOT NULL
             AND work_order_id IS NOT NULL
             AND work_order_batch_id IS NOT NULL)
+        OR (movement_type = 'procedure_dispatch'
+            AND source_flow_node_id IS NOT NULL
+            AND source_department_id IS NOT NULL
+            AND (target_flow_node_id IS NULL) = (target_department_id IS NULL)
+            AND work_order_id IS NULL
+            AND work_order_batch_id IS NULL)
         OR (movement_type IN ('scrap', 'lost')
             AND source_flow_node_id IS NOT NULL
             AND target_flow_node_id IS NULL
@@ -331,21 +390,54 @@ CREATE FUNCTION validate_production_movement_context() RETURNS TRIGGER AS $$
 DECLARE
     order_item_id BIGINT;
     order_type TEXT;
+    order_procedure_type TEXT;
     order_flow_node_id TEXT;
     order_status TEXT;
     material_quantity INT;
-    batch_flow_node_id TEXT;
+    batch_source_flow_node_id TEXT;
     batch_submitted_quantity INT;
     batch_recorded_at TIMESTAMPTZ;
 BEGIN
-    IF NEW.work_order_id IS NOT NULL THEN
-        SELECT production_item_id, procedure_type, flow_node_id, status
-        INTO order_item_id, order_type, order_flow_node_id, order_status
-        FROM work_order
-        WHERE id = NEW.work_order_id
-        FOR UPDATE;
+    -- A procedure dispatch consumes selected completed-substep stock and is
+    -- deliberately not attributed to a work order or QC batch. The service
+    -- owns validation of that stock and of the macro flow's normal target.
+    IF NEW.movement_type = 'procedure_dispatch' THEN
+        IF NEW.source_flow_node_id IS NULL
+            OR NEW.source_department_id IS NULL
+            OR (NEW.target_flow_node_id IS NULL)
+                <> (NEW.target_department_id IS NULL)
+            OR NEW.work_order_id IS NOT NULL
+            OR NEW.work_order_batch_id IS NOT NULL THEN
+            RAISE EXCEPTION 'procedure dispatch requires a standalone macro-process movement'
+                USING ERRCODE = '23514';
+        END IF;
+    END IF;
 
-        IF order_item_id IS NOT NULL THEN
+    IF NEW.work_order_id IS NOT NULL THEN
+        SELECT
+            work_order.production_item_id,
+            work_order.work_order_type,
+            procedure.procedure_type,
+            work_order.flow_node_id,
+            work_order.status
+        INTO
+            order_item_id,
+            order_type,
+            order_procedure_type,
+            order_flow_node_id,
+            order_status
+        FROM work_order
+        LEFT JOIN procedure_substep
+            ON procedure_substep.id = work_order.substep_id
+        LEFT JOIN procedure
+            ON procedure.id = procedure_substep.procedure_id
+        WHERE work_order.id = NEW.work_order_id
+        FOR UPDATE OF work_order;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'movement must reference an existing work order'
+                USING ERRCODE = '23503';
+        ELSE
             IF NEW.movement_type IN (
                 'process', 'purchase_receipt', 'assembly_input', 'assembly_output'
             ) AND order_status <> 'open' THEN
@@ -373,10 +465,12 @@ BEGIN
                 END IF;
             ELSE
                 IF (NEW.movement_type = 'assembly_output' AND order_type <> 'assembly')
-                    OR (NEW.movement_type = 'process' AND order_type <> 'standard')
+                    OR (NEW.movement_type = 'process'
+                        AND (order_type <> 'substep' OR order_procedure_type <> 'standard'))
                     OR (NEW.movement_type = 'purchase_receipt'
-                        AND order_type <> 'purchase_receipt') THEN
-                    RAISE EXCEPTION 'movement type must match the work order procedure type'
+                        AND (order_type <> 'substep'
+                            OR order_procedure_type <> 'purchase_receipt')) THEN
+                    RAISE EXCEPTION 'movement type must match the work order type and substep'
                         USING ERRCODE = '23514';
                 END IF;
                 IF order_item_id <> NEW.production_item_id THEN
@@ -385,9 +479,10 @@ BEGIN
                 END IF;
             END IF;
             IF NEW.movement_type IN (
-                'process', 'purchase_receipt', 'assembly_input', 'assembly_output'
+                'process', 'purchase_receipt', 'assembly_input', 'assembly_output',
+                'qc_qualified', 'qc_rework', 'scrap', 'lost'
             ) AND NEW.source_flow_node_id IS DISTINCT FROM order_flow_node_id THEN
-                RAISE EXCEPTION 'submission movement source node must match the work order'
+                RAISE EXCEPTION 'work order movement source node must match the work order'
                     USING ERRCODE = '23514';
             END IF;
         END IF;
@@ -398,13 +493,13 @@ BEGIN
             RAISE EXCEPTION 'batch movement must retain its work order'
                 USING ERRCODE = '23514';
         END IF;
-        SELECT flow_node_id, submitted_quantity, recorded_at
-        INTO batch_flow_node_id, batch_submitted_quantity, batch_recorded_at
+        SELECT source_flow_node_id, submitted_quantity, recorded_at
+        INTO batch_source_flow_node_id, batch_submitted_quantity, batch_recorded_at
         FROM work_order_batch
         WHERE id = NEW.work_order_batch_id
           AND work_order_id = NEW.work_order_id
         FOR UPDATE;
-        IF batch_flow_node_id IS NULL THEN
+        IF batch_source_flow_node_id IS NULL THEN
             RAISE EXCEPTION 'movement batch must belong to the referenced work order'
                 USING ERRCODE = '23514';
         END IF;
@@ -413,15 +508,10 @@ BEGIN
                 USING ERRCODE = '23514';
         END IF;
         IF NEW.movement_type IN ('process', 'purchase_receipt', 'assembly_output') THEN
-            IF NEW.target_flow_node_id IS DISTINCT FROM batch_flow_node_id
-                OR NEW.quantity <> batch_submitted_quantity THEN
-                RAISE EXCEPTION 'submission movement must match its QC batch node and quantity'
+            IF NEW.quantity <> batch_submitted_quantity THEN
+                RAISE EXCEPTION 'submission movement must match its QC batch quantity'
                     USING ERRCODE = '23514';
             END IF;
-        ELSIF NEW.movement_type IN ('qc_qualified', 'qc_rework', 'scrap', 'lost')
-            AND NEW.source_flow_node_id IS DISTINCT FROM batch_flow_node_id THEN
-            RAISE EXCEPTION 'QC movement source node must match its batch'
-                USING ERRCODE = '23514';
         END IF;
     END IF;
     RETURN NEW;
@@ -457,21 +547,23 @@ $$ LANGUAGE plpgsql;
 CREATE FUNCTION validate_work_order_movement_items() RETURNS TRIGGER AS $$
 BEGIN
     IF (
-        NEW.procedure_id,
-        NEW.procedure_type,
-        NEW.procedure_name,
-        NEW.flow_node_id
+        NEW.substep_id,
+        NEW.work_order_type,
+        NEW.work_order_name,
+        NEW.flow_node_id,
+        NEW.source_flow_node_id
     ) IS DISTINCT FROM (
-        OLD.procedure_id,
-        OLD.procedure_type,
-        OLD.procedure_name,
-        OLD.flow_node_id
+        OLD.substep_id,
+        OLD.work_order_type,
+        OLD.work_order_name,
+        OLD.flow_node_id,
+        OLD.source_flow_node_id
     ) AND EXISTS (
         SELECT 1
         FROM production_movement
         WHERE work_order_id = NEW.id
     ) THEN
-        RAISE EXCEPTION 'work order procedure snapshot is retained by movement history'
+        RAISE EXCEPTION 'work order execution snapshot is retained by movement history'
             USING ERRCODE = '23514';
     END IF;
     IF NEW.production_item_id IS DISTINCT FROM OLD.production_item_id
@@ -491,6 +583,11 @@ $$ LANGUAGE plpgsql;
 
 CREATE FUNCTION validate_batch_movement_context() RETURNS TRIGGER AS $$
 DECLARE
+    order_type TEXT;
+    order_status TEXT;
+    order_source_flow_node_id TEXT;
+    order_source_substep_id BIGINT;
+    order_remaining_quantity INT;
     submission_count INT;
     submission_quantity BIGINT;
     moved_qualified BIGINT;
@@ -498,18 +595,75 @@ DECLARE
     moved_scrap BIGINT;
     moved_lost BIGINT;
 BEGIN
+    IF TG_OP = 'INSERT' THEN
+        SELECT
+            work_order.work_order_type,
+            work_order.status,
+            work_order.source_flow_node_id,
+            procedure_stage_stock.completed_substep_id,
+            work_order.quantity - work_order.completed_quantity
+        INTO
+            order_type,
+            order_status,
+            order_source_flow_node_id,
+            order_source_substep_id,
+            order_remaining_quantity
+        FROM work_order
+        LEFT JOIN procedure_stage_stock
+            ON procedure_stage_stock.id = work_order.procedure_stage_stock_id
+        WHERE work_order.id = NEW.work_order_id
+        FOR UPDATE OF work_order;
+
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'QC batch must reference an existing work order'
+                USING ERRCODE = '23503';
+        END IF;
+        IF order_type <> 'substep' OR order_status <> 'open' THEN
+            RAISE EXCEPTION 'QC batch requires an open substep work order'
+                USING ERRCODE = '23514';
+        END IF;
+        IF order_source_flow_node_id IS NULL
+            OR NEW.source_flow_node_id IS DISTINCT FROM order_source_flow_node_id THEN
+            RAISE EXCEPTION 'QC batch source must match the work order source position'
+                USING ERRCODE = '23514';
+        END IF;
+        IF NEW.source_substep_id IS DISTINCT FROM order_source_substep_id THEN
+            RAISE EXCEPTION 'QC batch source substep must match the work order source position'
+                USING ERRCODE = '23514';
+        END IF;
+        IF NEW.submitted_quantity > order_remaining_quantity THEN
+            RAISE EXCEPTION 'QC batch quantity exceeds the work order remaining quantity'
+                USING ERRCODE = '23514';
+        END IF;
+        IF NEW.recorded_at IS NOT NULL THEN
+            RAISE EXCEPTION 'new QC batch must begin in pending state'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NEW;
+    END IF;
+
     IF OLD.recorded_at IS NOT NULL AND NEW IS DISTINCT FROM OLD THEN
         RAISE EXCEPTION 'completed QC batch history is immutable'
             USING ERRCODE = '23514';
     END IF;
-    IF (NEW.work_order_id, NEW.flow_node_id, NEW.submitted_quantity)
-        IS DISTINCT FROM (OLD.work_order_id, OLD.flow_node_id, OLD.submitted_quantity)
+    IF (
+        NEW.work_order_id,
+        NEW.source_flow_node_id,
+        NEW.source_substep_id,
+        NEW.submitted_quantity
+    )
+        IS DISTINCT FROM (
+            OLD.work_order_id,
+            OLD.source_flow_node_id,
+            OLD.source_substep_id,
+            OLD.submitted_quantity
+        )
         AND EXISTS (
             SELECT 1
             FROM production_movement
             WHERE work_order_batch_id = NEW.id
         ) THEN
-        RAISE EXCEPTION 'batch work order, node and submitted quantity are retained by movement history'
+        RAISE EXCEPTION 'batch work order, source and submitted quantity are retained by movement history'
             USING ERRCODE = '23514';
     END IF;
 
@@ -567,7 +721,7 @@ BEGIN
     IF OLD.movement_type <> 'initial'
         OR OLD.work_order_id IS NOT NULL
         OR OLD.work_order_batch_id IS NOT NULL THEN
-        RAISE EXCEPTION 'work order and QC movement history cannot be deleted'
+        RAISE EXCEPTION 'production execution movement history cannot be deleted'
             USING ERRCODE = '23514';
     END IF;
     IF EXISTS (
@@ -586,12 +740,12 @@ ON production_movement
 FOR EACH ROW EXECUTE FUNCTION validate_production_movement_context();
 
 CREATE TRIGGER trg_work_order_movement_items
-BEFORE UPDATE OF production_item_id, procedure_id, procedure_type, procedure_name, flow_node_id
+BEFORE UPDATE OF production_item_id, substep_id, work_order_type, work_order_name, flow_node_id, source_flow_node_id
 ON work_order
 FOR EACH ROW EXECUTE FUNCTION validate_work_order_movement_items();
 
 CREATE TRIGGER trg_batch_movement_context
-BEFORE UPDATE ON work_order_batch
+BEFORE INSERT OR UPDATE ON work_order_batch
 FOR EACH ROW EXECUTE FUNCTION validate_batch_movement_context();
 
 CREATE TRIGGER trg_assembly_material_movement_update
@@ -658,17 +812,30 @@ CREATE UNIQUE INDEX uq_production_movement_assembly_input
     ON production_movement(work_order_id, production_item_id)
     WHERE movement_type = 'assembly_input';
 CREATE INDEX idx_repository_department ON repository(department_id);
+CREATE INDEX idx_procedure_stage_stock_department
+    ON procedure_stage_stock(department_id, completed_substep_id);
 CREATE INDEX idx_production_item_order_item ON production_item(customer_order_item_id);
 CREATE INDEX idx_production_item_bom ON production_item(product_bom_id);
 CREATE INDEX idx_work_order_repository ON work_order(repository_id);
 CREATE INDEX idx_work_order_production_item ON work_order(production_item_id);
 CREATE INDEX idx_work_order_worker_activity
     ON work_order(worker_id, COALESCE(closed_at, created_at) DESC, id DESC);
-CREATE INDEX idx_work_order_procedure ON work_order(procedure_id, id DESC);
+CREATE INDEX idx_work_order_substep ON work_order(substep_id, id DESC);
+CREATE INDEX idx_work_order_stage_stock ON work_order(procedure_stage_stock_id);
 CREATE INDEX idx_work_order_repository_open ON work_order(repository_id)
+    WHERE status = 'open';
+CREATE INDEX idx_work_order_stage_stock_open ON work_order(procedure_stage_stock_id)
     WHERE status = 'open';
 CREATE INDEX idx_work_order_item_node_status
     ON work_order(production_item_id, flow_node_id, status);
+CREATE INDEX idx_work_order_substep_position
+    ON work_order(
+        production_item_id,
+        flow_node_id,
+        source_flow_node_id,
+        substep_id,
+        id DESC
+    ) WHERE work_order_type = 'substep';
 CREATE INDEX idx_work_order_batch_order ON work_order_batch(work_order_id);
 CREATE INDEX idx_work_order_material_repository ON work_order_material(repository_id);
 CREATE INDEX idx_work_order_material_production_item ON work_order_material(production_item_id);
@@ -760,6 +927,38 @@ INSERT INTO procedure (workshop_id, procedure_name, procedure_type)
 SELECT id, '外购入库', 'purchase_receipt'
 FROM workshop WHERE workshop_name = '外购件管理';
 
+-- 子步骤只作为开工单时的名称建议，不定义固定路线或先后阶段。
+INSERT INTO procedure_substep (
+    procedure_id,
+    substep_name
+)
+SELECT id, '全工序'
+FROM procedure
+WHERE procedure_name IN ('激光开料', '外购入库');
+
+INSERT INTO procedure_substep (
+    procedure_id,
+    substep_name
+)
+SELECT
+    procedure.id,
+    substep.substep_name
+FROM procedure
+CROSS JOIN (
+    VALUES
+        ('粗1'),
+        ('粗2'),
+        ('粗3'),
+        ('粗4'),
+        ('粗12'),
+        ('粗23'),
+        ('粗34'),
+        ('粗123'),
+        ('粗234'),
+        ('粗1234')
+) AS substep(substep_name)
+WHERE procedure.procedure_name = '粗光';
+
 -- 示例产品：只包含基础信息与 BOM，故意不配置 product_process_flow。
 INSERT INTO product (
     customer_name,
@@ -802,37 +1001,6 @@ INSERT INTO product_bom (
 SELECT id, 1, '弹簧', 'DEMO-001-02', 1, '外购', 2
 FROM product WHERE factory_code = 'DEMO-001';
 
--- 示例订单保持草稿状态；未配置流程的产品不能确认订单。
-INSERT INTO customer_order (
-    customer_order_no,
-    customer_name,
-    status,
-    remark
-) VALUES (
-    'DEMO-ORDER-001',
-    '示例客户',
-    'draft',
-    '示例草稿订单'
-);
-
-INSERT INTO customer_order_item (
-    customer_order_id,
-    product_id,
-    product_version,
-    quantity,
-    delivery_date,
-    remark
-)
-SELECT
-    customer_order.id,
-    product.id,
-    1,
-    100,
-    CURRENT_DATE + 30,
-    '示例订单明细'
-FROM customer_order
-JOIN product ON product.factory_code = 'DEMO-001'
-WHERE customer_order.customer_order_no = 'DEMO-ORDER-001';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT '工程示例员工', id, NULL FROM department WHERE department_code = 'engineering';

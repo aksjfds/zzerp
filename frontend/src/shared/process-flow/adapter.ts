@@ -8,12 +8,11 @@ import {
   type ProcessFlow,
 } from './types'
 
-const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'assembly', 'qc'])
+const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'assembly'])
 const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }> = {
   part: { halfWidth: 75, halfHeight: 28 },
   process: { halfWidth: 75, halfHeight: 28 },
   assembly: { halfWidth: 88, halfHeight: 54 },
-  qc: { halfWidth: 68, halfHeight: 48 },
 }
 
 export function toLogicFlowData(flow: ProcessFlow): LogicFlow.GraphConfigData {
@@ -47,7 +46,6 @@ export function toLogicFlowData(flow: ProcessFlow): LogicFlow.GraphConfigData {
           : edge.label
         : undefined,
       zIndex: edge.z_index,
-      properties: { routeType: edge.route_type, outcome: edge.outcome },
     })),
   }
 }
@@ -94,19 +92,15 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
       procedure_id: requiredNumber(properties.procedureId, 'procedureId'),
     }
   }
-  if (type === 'assembly') {
-    return {
-      ...base,
-      type,
-      output_name: stringValue(properties.outputName),
-      output_pcs: requiredNumber(properties.outputPcs ?? 1, 'outputPcs'),
-    }
+  return {
+    ...base,
+    type: 'assembly',
+    output_name: stringValue(properties.outputName),
+    output_pcs: requiredNumber(properties.outputPcs ?? 1, 'outputPcs'),
   }
-  return { ...base, type: 'qc' }
 }
 
 function toBusinessEdge(edge: LogicFlow.EdgeData, nodes: FlowNode[]): FlowEdge {
-  const properties = edge.properties ?? {}
   return normalizeEdgeAnchor({
     id: edge.id,
     edge_type: edge.type,
@@ -120,10 +114,6 @@ function toBusinessEdge(edge: LogicFlow.EdgeData, nodes: FlowNode[]): FlowEdge {
     label: textValue(edge.text) || undefined,
     label_position: textPosition(edge.text),
     z_index: edge.zIndex,
-    route_type: properties.routeType === 'rework' ? 'rework' : 'normal',
-    outcome: properties.outcome === 'approved' || properties.outcome === 'rejected'
-      ? properties.outcome
-      : undefined,
   }, nodes)
 }
 

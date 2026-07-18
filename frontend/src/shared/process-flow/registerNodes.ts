@@ -70,26 +70,10 @@ class AssemblyNodeModel extends DiamondNodeModel {
   }
 }
 
-class QcNodeModel extends DiamondNodeModel {
-  setAttributes() {
-    this.rx = 68
-    this.ry = 48
-  }
-
-  getNodeStyle() {
-    return { ...super.getNodeStyle(), fill: '#fef0f0', stroke: '#f56c6c', strokeWidth: 2 }
-  }
-
-  getDefaultAnchor() {
-    return fourMidpointAnchors(this)
-  }
-}
-
 export function registerProcessNodes(lf: LogicFlow) {
   lf.batchRegister([
     { type: 'part', view: RectNode, model: PartNodeModel },
     { type: 'process', view: RectNode, model: ProcessNodeModel },
     { type: 'assembly', view: DiamondNode, model: AssemblyNodeModel },
-    { type: 'qc', view: DiamondNode, model: QcNodeModel },
   ])
 }

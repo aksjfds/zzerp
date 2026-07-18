@@ -89,10 +89,58 @@ class Repository(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
+class ProcedureStageStock(Base):
+    __tablename__ = "procedure_stage_stock"
+    __table_args__ = (
+        CheckConstraint(
+            "quantity > 0",
+            name="ck_procedure_stage_stock_quantity_positive",
+        ),
+        UniqueConstraint(
+            "production_item_id",
+            "flow_node_id",
+            "source_flow_node_id",
+            "department_id",
+            "completed_substep_id",
+            name="uq_procedure_stage_stock_position",
+        ),
+        UniqueConstraint(
+            "id",
+            "production_item_id",
+            name="uq_procedure_stage_stock_id_production_item",
+        ),
+        Index(
+            "idx_procedure_stage_stock_department",
+            "department_id",
+            "completed_substep_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    production_item_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("production_item.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    completed_substep_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure_substep.id"), nullable=False
+    )
+    department_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("department.id"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class WorkOrder(Base):
     __tablename__ = "work_order"
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_work_order_quantity_positive"),
+        CheckConstraint(
+            "work_order_type IN ('substep', 'assembly')",
+            name="ck_work_order_type",
+        ),
         CheckConstraint(
             "completed_quantity >= 0 AND completed_quantity <= quantity",
             name="ck_work_order_completed_quantity",
@@ -115,9 +163,15 @@ class WorkOrder(Base):
             name="ck_work_order_cancelled_quantity",
         ),
         CheckConstraint(
-            "(procedure_id IS NULL AND procedure_type = 'assembly') OR "
-            "(procedure_id IS NOT NULL AND procedure_type IN ('standard', 'purchase_receipt'))",
-            name="ck_work_order_procedure_type",
+            "(work_order_type = 'assembly' AND substep_id IS NULL "
+            "AND source_flow_node_id IS NULL "
+            "AND repository_id IS NULL AND procedure_stage_stock_id IS NULL) OR "
+            "(work_order_type = 'substep' AND substep_id IS NOT NULL "
+            "AND source_flow_node_id IS NOT NULL "
+            "AND (repository_id IS NULL OR procedure_stage_stock_id IS NULL) "
+            "AND (status <> 'open' OR repository_id IS NOT NULL "
+            "OR procedure_stage_stock_id IS NOT NULL))",
+            name="ck_work_order_type_source",
         ),
         ForeignKeyConstraint(
             ["repository_id", "production_item_id"],
@@ -125,9 +179,9 @@ class WorkOrder(Base):
             name="fk_work_order_repository_item",
         ),
         ForeignKeyConstraint(
-            ["procedure_id", "procedure_type"],
-            ["procedure.id", "procedure.procedure_type"],
-            name="fk_work_order_procedure_type",
+            ["procedure_stage_stock_id", "production_item_id"],
+            ["procedure_stage_stock.id", "procedure_stage_stock.production_item_id"],
+            name="fk_work_order_stage_stock_item",
         ),
         Index(
             "idx_work_order_worker_activity",
@@ -135,12 +189,18 @@ class WorkOrder(Base):
             text("COALESCE(closed_at, created_at) DESC"),
             text("id DESC"),
         ),
-        Index("idx_work_order_procedure", "procedure_id", text("id DESC")),
+        Index("idx_work_order_substep", "substep_id", text("id DESC")),
         Index("idx_work_order_repository", "repository_id"),
+        Index("idx_work_order_stage_stock", "procedure_stage_stock_id"),
         Index("idx_work_order_production_item", "production_item_id"),
         Index(
             "idx_work_order_repository_open",
             "repository_id",
+            postgresql_where=text("status = 'open'"),
+        ),
+        Index(
+            "idx_work_order_stage_stock_open",
+            "procedure_stage_stock_id",
             postgresql_where=text("status = 'open'"),
         ),
         Index(
@@ -149,18 +209,33 @@ class WorkOrder(Base):
             "flow_node_id",
             "status",
         ),
+        Index(
+            "idx_work_order_substep_position",
+            "production_item_id",
+            "flow_node_id",
+            "source_flow_node_id",
+            "substep_id",
+            text("id DESC"),
+            postgresql_where=text("work_order_type = 'substep'"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     work_order_no: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
     repository_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    procedure_stage_stock_id: Mapped[int | None] = mapped_column(
+        BigInteger, nullable=True
+    )
     production_item_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("production_item.id"), nullable=False
     )
-    procedure_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    procedure_type: Mapped[str] = mapped_column(Text, nullable=False)
+    substep_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure_substep.id"), nullable=True
+    )
+    work_order_type: Mapped[str] = mapped_column(Text, nullable=False)
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    procedure_name: Mapped[str] = mapped_column(Text, nullable=False)
+    source_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    work_order_name: Mapped[str] = mapped_column(Text, nullable=False)
     worker_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("worker.id"), nullable=True
     )
@@ -230,7 +305,10 @@ class WorkOrderBatch(Base):
         BigInteger, ForeignKey("work_order.id", ondelete="CASCADE"), nullable=False
     )
     submitted_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_substep_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure_substep.id"), nullable=True
+    )
     qualified_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     rework_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
     scrap_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -282,7 +360,7 @@ class ProductionMovement(Base):
         CheckConstraint(
             "movement_type IN ('initial', 'process', 'assembly_input', "
             "'assembly_output', 'purchase_receipt', 'qc_qualified', 'qc_rework', "
-            "'scrap', 'lost')",
+            "'procedure_dispatch', 'scrap', 'lost')",
             name="ck_production_movement_type",
         ),
         CheckConstraint(
@@ -290,6 +368,11 @@ class ProductionMovement(Base):
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NULL "
             "AND target_department_id IS NOT NULL AND work_order_id IS NULL "
             "AND work_order_batch_id IS NULL) OR "
+            "(movement_type = 'procedure_dispatch' "
+            "AND source_flow_node_id IS NOT NULL "
+            "AND source_department_id IS NOT NULL "
+            "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "
+            "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
             "(movement_type IN ('process', 'purchase_receipt', 'assembly_output') "
             "AND source_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "

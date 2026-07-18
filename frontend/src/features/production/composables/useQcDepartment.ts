@@ -1,66 +1,56 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import { queryDepartmentWorkers } from '../api/departmentRepositories'
 import { inspectQcBatch, queryPendingQcBatches } from '../api/qc'
 import type {
   PendingQcBatch,
   QcInspectionPayload,
-  RepositoryFilters,
-  RepositoryItem,
+  WorkerItem,
 } from '../domain/types'
-import { useDepartmentWorkspace } from './useDepartmentWorkspace'
 
 export function useQcDepartment() {
-  const workspace = useDepartmentWorkspace('qc', true)
   const batches = ref<PendingQcBatch[]>([])
+  const workers = ref<WorkerItem[]>([])
   const activeBatch = ref<PendingQcBatch>()
-  const detailLoading = ref(false)
-  const historyPage = ref(1)
-  const historyTotal = ref(0)
+  const loading = ref(false)
+  const page = ref(1)
+  const total = ref(0)
+  const pageSize = 50
   const dialogVisible = ref(false)
   const submitting = ref(false)
-  let detailSequence = 0
+  let loadSequence = 0
 
-  async function loadDetails() {
-    const sequence = ++detailSequence
-    const requestedProductionItemId = workspace.selectedProductionItemId.value
-    const requestedPage = historyPage.value
+  async function loadBatches() {
+    const sequence = ++loadSequence
+    const requestedPage = page.value
     batches.value = []
-    historyTotal.value = 0
-    if (!requestedProductionItemId) {
-      detailLoading.value = false
-      return
-    }
-    detailLoading.value = true
+    total.value = 0
+    loading.value = true
     try {
-      const result = await queryPendingQcBatches(
-        requestedPage,
-        workspace.pageSize,
-        requestedProductionItemId,
-      )
-      if (
-        sequence !== detailSequence
-        || workspace.selectedProductionItemId.value !== requestedProductionItemId
-        || historyPage.value !== requestedPage
-      ) return
+      let result = await queryPendingQcBatches(requestedPage, pageSize)
+      if (sequence !== loadSequence) return
+      const lastPage = Math.max(1, Math.ceil(result.total / pageSize))
+      if (requestedPage > lastPage) {
+        page.value = lastPage
+        result = await queryPendingQcBatches(lastPage, pageSize)
+        if (sequence !== loadSequence) return
+      }
       batches.value = result.items
-      historyTotal.value = result.total
+      total.value = result.total
     } catch {
-      if (sequence === detailSequence) ElMessage.warning('关联质检记录加载失败')
+      if (sequence === loadSequence) ElMessage.warning('待检批次加载失败')
     } finally {
-      if (sequence === detailSequence) detailLoading.value = false
+      if (sequence === loadSequence) loading.value = false
     }
   }
 
-  async function reloadWorkspace() {
-    await workspace.loadRepositories()
-    await loadDetails()
-  }
-
-  function selectRepository(item: RepositoryItem) {
-    workspace.selectRepository(item)
-    historyPage.value = 1
-    void loadDetails()
+  async function loadWorkers() {
+    try {
+      workers.value = await queryDepartmentWorkers('qc')
+    } catch {
+      ElMessage.warning('QC 工人列表加载失败')
+    }
   }
 
   function openInspection(batch: PendingQcBatch) {
@@ -74,7 +64,8 @@ export function useQcDepartment() {
     try {
       await inspectQcBatch(activeBatch.value.id, payload)
       dialogVisible.value = false
-      await reloadWorkspace()
+      activeBatch.value = undefined
+      await loadBatches()
       ElMessage.success('QC 结果已录入')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || 'QC 结果录入失败')
@@ -84,47 +75,34 @@ export function useQcDepartment() {
   }
 
   async function refresh() {
-    historyPage.value = 1
-    const refreshRequest = workspace.refresh()
-    await loadDetails()
-    await refreshRequest
+    page.value = 1
+    await Promise.all([loadBatches(), loadWorkers()])
   }
 
-  async function changeRepositoryPage(page: number) {
-    historyPage.value = 1
-    const pageRequest = workspace.changePage(page)
-    await loadDetails()
-    await pageRequest
-  }
-
-  async function applyFilters(filters: RepositoryFilters) {
-    historyPage.value = 1
-    const searchRequest = workspace.search(filters)
-    await loadDetails()
-    await searchRequest
+  async function changePage(nextPage: number) {
+    page.value = nextPage
+    await loadBatches()
   }
 
   async function load() {
-    await workspace.load()
-    await loadDetails()
+    await Promise.all([loadBatches(), loadWorkers()])
   }
 
   return {
     activeBatch,
-    applyFilters,
     batches,
-    changeRepositoryPage,
-    detailLoading,
+    changePage,
     dialogVisible,
-    historyPage,
-    historyTotal,
     load,
-    loadDetails,
+    loadBatches,
+    loading,
     openInspection,
+    page,
+    pageSize,
     refresh,
     saveInspection,
-    selectRepository,
     submitting,
-    workspace,
+    total,
+    workers,
   }
 }

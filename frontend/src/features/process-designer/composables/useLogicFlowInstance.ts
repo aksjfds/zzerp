@@ -7,6 +7,7 @@ import type { FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 
 type Callbacks = {
   initialFlow: () => ProcessFlow
+  readonly?: () => boolean
   onChange: (flow: ProcessFlow) => void
   onConnectionError: (message: string) => void
   onSelectEdge: (edge: FlowEdge | null) => void
@@ -15,6 +16,38 @@ type Callbacks = {
 
 export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>, callbacks: Callbacks) {
   const instance = shallowRef<LogicFlow | null>(null)
+
+  function setReadonly(readonly: boolean) {
+    const lf = instance.value
+    if (!lf) return
+    lf.updateEditConfig({
+      adjustEdge: !readonly,
+      adjustEdgeEnd: !readonly,
+      adjustEdgeMiddle: !readonly,
+      adjustEdgeStart: !readonly,
+      adjustEdgeStartAndEnd: !readonly,
+      adjustNodePosition: !readonly,
+      allowResize: !readonly,
+      allowRotate: !readonly,
+      edgeTextDraggable: !readonly,
+      edgeTextEdit: !readonly,
+      hideAnchors: readonly,
+      nodeTextDraggable: !readonly,
+      nodeTextEdit: !readonly,
+      textDraggable: !readonly,
+      textEdit: !readonly,
+    })
+    const menu = lf.extension.menu as Menu
+    menu.setMenuConfig({
+      nodeMenu: readonly
+        ? []
+        : [{ text: '删除节点', callback: (node: { id: string }) => lf.deleteNode(node.id) }],
+      edgeMenu: readonly
+        ? []
+        : [{ text: '删除连线', callback: (edge: { id: string }) => lf.deleteEdge(edge.id) }],
+      graphMenu: [],
+    })
+  }
 
   function currentFlow() {
     if (!instance.value) return callbacks.initialFlow()
@@ -37,22 +70,16 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       grid: { size: 20, visible: true },
       edgeType: 'polyline',
       keyboard: { enabled: true },
+      guards: {
+        beforeClone: () => !(callbacks.readonly?.() ?? false),
+        beforeDelete: () => !(callbacks.readonly?.() ?? false),
+      },
       plugins: [Control, Menu],
     })
     instance.value = lf
     registerProcessNodes(lf)
-    const menu = lf.extension.menu as Menu
-    menu.setMenuConfig({
-      nodeMenu: [{ text: '删除节点', callback: (node: { id: string }) => lf.deleteNode(node.id) }],
-      edgeMenu: [{ text: '删除连线', callback: (edge: { id: string }) => lf.deleteEdge(edge.id) }],
-      graphMenu: [],
-    })
-    lf.on('edge:add', ({ data }) => {
-      const source = lf.getNodeDataById(data.sourceNodeId)
-      lf.setProperties(data.id, source?.type === 'qc'
-        ? { routeType: 'normal', outcome: 'approved' }
-        : { routeType: 'normal' })
-      if (source?.type === 'qc') lf.updateText(data.id, '合格')
+    setReadonly(callbacks.readonly?.() ?? false)
+    lf.on('edge:add', () => {
       emitChange()
     })
     lf.on('node:click', ({ data }) => {
@@ -84,5 +111,5 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     instance.value = null
   })
 
-  return { currentFlow, emitChange, instance, renderFlow }
+  return { currentFlow, emitChange, instance, renderFlow, setReadonly }
 }

@@ -37,13 +37,13 @@ onMounted(load)
         <div v-if="selectedRepository" class="production-selection"><strong>{{ selectedRepository.part_no }} - {{
           selectedGroup?.name || selectedRepository.part_name }}</strong><span>{{ selectedRepository.customer_order_no }} · {{
               selectedRepository.procedure_name }}</span></div>
-        <WorkOrderCards :items="workOrders" :loading="detailLoading" @submit="workOrderActions.submit"
+        <WorkOrderCards :items="workOrders" :loading="detailLoading" mode="assembly" @submit="workOrderActions.submit"
           @cancel="workOrderActions.cancel" />
         <ElPagination v-model:current-page="historyPage" class="production-pagination" layout="prev, pager, next, total"
           :page-size="pageSize" :total="historyTotal" @current-change="loadDetails" />
       </div>
     </section>
-    <CreateWorkOrderDialog v-model="dialogVisible" :item="activeRepository" :workers="workers" :submitting="submitting"
+    <CreateWorkOrderDialog v-model="dialogVisible" :item="activeRepository" :workers="workers" :submitting="submitting" mode="assembly"
       @submit="saveWorkOrder" />
   </main>
 </template>

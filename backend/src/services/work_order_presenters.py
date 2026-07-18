@@ -1,24 +1,10 @@
 from sqlalchemy import select
 
 from domain.time import business_iso
-from models.organization import Department, Worker
-from models.production import ProductionItem, Repository, WorkOrder, WorkOrderBatch, WorkOrderMaterial
+from models.organization import Worker
+from models.production import ProductionItem, WorkOrder, WorkOrderBatch, WorkOrderMaterial
 from models.sales import CustomerOrder
 from services.production_flow import load_production_flow
-
-
-def qc_repository_id(session, order: WorkOrder, batch: WorkOrderBatch) -> int | None:
-    department_id = session.scalar(
-        select(Department.id).where(Department.department_code == "qc")
-    )
-    return session.scalar(
-        select(Repository.id).where(
-            Repository.production_item_id == order.production_item_id,
-            Repository.flow_node_id == batch.flow_node_id,
-            Repository.source_flow_node_id == order.flow_node_id,
-            Repository.department_id == department_id,
-        )
-    )
 
 
 def work_order_context(session, order: WorkOrder):
@@ -42,7 +28,7 @@ def production_item_name(session, production_item: ProductionItem, visited: set[
         select(WorkOrder)
         .where(
             WorkOrder.production_item_id == production_item.id,
-            WorkOrder.procedure_id.is_(None),
+            WorkOrder.work_order_type == "assembly",
         )
         .order_by(WorkOrder.id.desc())
         .limit(1)
@@ -64,7 +50,7 @@ def production_item_sort_order(
         select(WorkOrder)
         .where(
             WorkOrder.production_item_id == production_item.id,
-            WorkOrder.procedure_id.is_(None),
+            WorkOrder.work_order_type == "assembly",
         )
         .order_by(WorkOrder.id.desc())
         .limit(1)
@@ -119,7 +105,8 @@ def serialize_batch(batch: WorkOrderBatch) -> dict:
         "id": batch.id,
         "work_order_id": batch.work_order_id,
         "submitted_quantity": batch.submitted_quantity,
-        "flow_node_id": batch.flow_node_id,
+        "source_flow_node_id": batch.source_flow_node_id,
+        "source_substep_id": batch.source_substep_id,
         "qualified_quantity": batch.qualified_quantity,
         "rework_quantity": batch.rework_quantity,
         "scrap_quantity": batch.scrap_quantity,
@@ -134,7 +121,7 @@ def serialize_batch(batch: WorkOrderBatch) -> dict:
 def serialize_work_order(session, order: WorkOrder) -> dict:
     customer_order, _, production_item = work_order_context(session, order)
     part_no, part_name = item_display(session, production_item)
-    if order.procedure_id is None:
+    if order.work_order_type == "assembly":
         part_name = assembly_output_name(session, order)
         part_no = part_name
     worker = session.get(Worker, order.worker_id) if order.worker_id else None
@@ -146,22 +133,33 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
     ).all()
     completed_batches = [item for item in batches if item.recorded_at is not None]
     pending_batches = [item for item in batches if item.recorded_at is None]
+    direct_quantity = max(
+        order.completed_quantity - sum(item.submitted_quantity for item in batches),
+        0,
+    )
     return {
         "id": order.id,
         "work_order_no": order.work_order_no,
         "repository_id": order.repository_id,
+        "procedure_stage_stock_id": order.procedure_stage_stock_id,
         "production_item_id": order.production_item_id,
+        "flow_node_id": order.flow_node_id,
+        "source_flow_node_id": order.source_flow_node_id,
+        "substep_id": order.substep_id,
+        "work_order_type": order.work_order_type,
         "customer_order_no": customer_order.customer_order_no,
         "part_no": part_no,
         "part_name": part_name,
-        "procedure_name": order.procedure_name,
+        "work_order_name": order.work_order_name,
         "worker_id": order.worker_id,
         "worker_name": worker.worker_name if worker else None,
         "quantity": order.quantity,
         "submitted_quantity": order.completed_quantity,
         "processing_quantity": max(order.quantity - order.completed_quantity, 0),
         "pending_qc_quantity": sum(item.submitted_quantity for item in pending_batches),
-        "qualified_quantity": sum(item.qualified_quantity or 0 for item in completed_batches),
+        "qualified_quantity": direct_quantity + sum(
+            item.qualified_quantity or 0 for item in completed_batches
+        ),
         "rework_quantity": sum(item.rework_quantity or 0 for item in completed_batches),
         "scrap_quantity": sum(item.scrap_quantity or 0 for item in completed_batches),
         "lost_quantity": sum(item.lost_quantity or 0 for item in completed_batches),

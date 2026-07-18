@@ -10,7 +10,6 @@ import type {
   FlowEdge,
   FlowNode,
   ProcessFlow,
-  RouteType,
 } from '../domain/types'
 import { queryProcedures, type ProcedureOption } from '@/api/organization'
 
@@ -22,15 +21,17 @@ type CanvasApi = {
   dragPart: (item: BomItem) => void
   dragAssembly: () => void
   dragProcess: (procedureId: number, procedureName: string) => void
-  dragQc: () => void
   focusElement: (elementId?: string) => void
   getGraphData: () => ProcessFlow
   renderFlow: (flow: ProcessFlow) => void
   updateNode: (nodeId: string, label: string, property: NodeProperty) => void
-  updateRoute: (edgeId: string, routeType: RouteType) => void
 }
 
-const props = defineProps<{ modelValue: ProcessFlow; bomItems: BomItem[]; readonly?: boolean }>()
+const props = defineProps<{
+  modelValue: ProcessFlow
+  bomItems: BomItem[]
+  readonly?: boolean
+}>()
 const emit = defineEmits<{ 'update:modelValue': [value: ProcessFlow] }>()
 const canvas = ref<CanvasApi>()
 const selectedNode = ref<FlowNode | null>(null)
@@ -76,17 +77,6 @@ function updateAssembly(label: string, output_name: string, output_pcs: number) 
   selectedNode.value = { ...selectedNode.value, label, output_name, output_pcs }
 }
 
-function updateRoute(routeType: RouteType) {
-  if (props.readonly || !selectedEdge.value) return
-  canvas.value?.updateRoute(selectedEdge.value.id, routeType)
-  selectedEdge.value = {
-    ...selectedEdge.value,
-    route_type: routeType,
-    outcome: routeType === 'rework' ? 'rejected' : 'approved',
-    label: routeType === 'rework' ? '不合格返工' : '合格',
-  }
-}
-
 function graphData() {
   return canvas.value?.getGraphData() ?? props.modelValue
 }
@@ -111,10 +101,10 @@ onMounted(async () => { procedures.value = await queryProcedures() })
     <div class="section-heading">
       <div>
         <h2>工序流程配置</h2>
-        <p>拖入配件后连接工序和装配节点；选择节点或 QC 连线可编辑属性。</p>
+        <p>拖入配件后连接工序和装配节点；选择节点查看属性，编辑模式下可修改。</p>
       </div>
     </div>
-    <div class="designer-shell" :class="{ 'has-property': !readonly && (selectedNode || selectedEdge), 'is-readonly': readonly }">
+    <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge, 'is-readonly': readonly }">
       <ProcessNodePalette
         v-if="!readonly"
         :bom-items="bomItems"
@@ -122,7 +112,6 @@ onMounted(async () => { procedures.value = await queryProcedures() })
         @drag-part="canvas?.dragPart($event)"
         @drag-procedure="dragProcedure"
         @drag-assembly="canvas?.dragAssembly()"
-        @drag-qc="canvas?.dragQc()"
       />
       <ProcessFlowCanvas
         ref="canvas"
@@ -133,14 +122,14 @@ onMounted(async () => { procedures.value = await queryProcedures() })
         @select-edge="selectedEdge = $event"
       />
       <ProcessPropertyPanel
-        v-if="!readonly && (selectedNode || selectedEdge)"
+        v-if="selectedNode || selectedEdge"
         :node="selectedNode"
         :edge="selectedEdge"
         :procedures="procedures"
+        :readonly="readonly"
         @update-process="updateProcess"
         @update-procedure="updateProcedure"
         @update-assembly="updateAssembly"
-        @update-route="updateRoute"
       />
     </div>
   </section>
@@ -153,8 +142,10 @@ p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-heig
 .designer-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 560px; border: 1px solid var(--erp-border); border-radius: 8px; overflow: hidden; }
 .designer-shell.has-property { grid-template-columns: 190px minmax(0, 1fr) 220px; }
 .designer-shell.is-readonly { grid-template-columns: minmax(0, 1fr); }
+.designer-shell.is-readonly.has-property { grid-template-columns: minmax(0, 1fr) 220px; }
 @media (max-width: 900px) {
-  .designer-shell, .designer-shell.has-property { grid-template-columns: 150px minmax(600px, 1fr); overflow-x: auto; }
+  .designer-shell:not(.is-readonly), .designer-shell.has-property:not(.is-readonly) { grid-template-columns: 150px minmax(600px, 1fr); overflow-x: auto; }
+  .designer-shell.is-readonly, .designer-shell.is-readonly.has-property { grid-template-columns: minmax(600px, 1fr); overflow-x: auto; }
   .designer-shell :deep(.property-panel) { display: none; }
 }
 </style>

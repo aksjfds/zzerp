@@ -35,10 +35,7 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
                 "订单产品版本缺少 BOM 或流程图",
                 path="items",
             )
-        normal_edges = [
-            edge for edge in flow.get("edges", [])
-            if edge.get("route_type", "normal") == "normal"
-        ]
+        normal_edges = flow.get("edges", [])
         for node in nodes.values():
             if node.get("type") != "process":
                 continue

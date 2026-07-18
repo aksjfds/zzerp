@@ -1,11 +1,18 @@
 from collections import defaultdict
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from database import SessionLocal
 from services.production_flow import load_product_flow
 from models.engineering import Product, ProductBom
-from models.production import ProductionItem, ProductionMovement, Repository
+from models.production import (
+    ProcedureStageStock,
+    ProductionItem,
+    ProductionMovement,
+    Repository,
+    WorkOrder,
+    WorkOrderBatch,
+)
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
 from services.work_order_presenters import production_item_name
@@ -32,7 +39,7 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             session, order_item.product_id, order_item.product_version
         )
     except DomainError:
-        flow, nodes = {"schema_version": 1, "nodes": [], "edges": []}, {}
+        flow, nodes = {"schema_version": 2, "nodes": [], "edges": []}, {}
     bom_items = session.scalars(
         select(ProductBom).where(
             ProductBom.product_id == order_item.product_id,
@@ -51,11 +58,36 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         if production_item_ids
         else []
     )
+    stage_stocks = (
+        session.scalars(
+            select(ProcedureStageStock).where(
+                ProcedureStageStock.production_item_id.in_(production_item_ids)
+            )
+        ).all()
+        if production_item_ids
+        else []
+    )
     movements = (
         session.scalars(
             select(ProductionMovement).where(
                 ProductionMovement.production_item_id.in_(production_item_ids)
             )
+        ).all()
+        if production_item_ids
+        else []
+    )
+    pending_qc_by_node = (
+        session.execute(
+            select(
+                WorkOrder.flow_node_id,
+                func.sum(WorkOrderBatch.submitted_quantity),
+            )
+            .join(WorkOrderBatch, WorkOrderBatch.work_order_id == WorkOrder.id)
+            .where(
+                WorkOrder.production_item_id.in_(production_item_ids),
+                WorkOrderBatch.recorded_at.is_(None),
+            )
+            .group_by(WorkOrder.flow_node_id)
         ).all()
         if production_item_ids
         else []
@@ -72,6 +104,17 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             else "未知来源"
         )
         current_inputs[repository.flow_node_id][source_name] += repository.quantity
+    for stock in stage_stocks:
+        current_by_node[stock.flow_node_id] += stock.quantity
+        production_item = session.get(ProductionItem, stock.production_item_id)
+        source_name = (
+            production_item_name(session, production_item, set())
+            if production_item
+            else "未知来源"
+        )
+        current_inputs[stock.flow_node_id][source_name] += stock.quantity
+    for flow_node_id, quantity in pending_qc_by_node:
+        current_by_node[flow_node_id] += int(quantity or 0)
 
     material_inputs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     entered_by_node: dict[str, int] = defaultdict(int)
@@ -79,9 +122,24 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
     abnormal_by_node: dict[str, int] = defaultdict(int)
     assembly_output_by_node: dict[str, int] = defaultdict(int)
     for movement in movements:
-        if movement.target_flow_node_id:
+        if (
+            movement.target_flow_node_id
+            and movement.target_flow_node_id != movement.source_flow_node_id
+        ):
             entered_by_node[movement.target_flow_node_id] += movement.quantity
-        if movement.source_flow_node_id and movement.movement_type not in {"scrap", "lost"}:
+        leaves_source_node = (
+            movement.target_flow_node_id != movement.source_flow_node_id
+            and (
+                movement.target_flow_node_id is not None
+                or movement.work_order_batch_id is None
+                or movement.movement_type == "qc_qualified"
+            )
+        )
+        if (
+            movement.source_flow_node_id
+            and movement.movement_type not in {"scrap", "lost"}
+            and leaves_source_node
+        ):
             transferred_by_node[movement.source_flow_node_id] += movement.quantity
         if movement.source_flow_node_id and movement.movement_type in {"scrap", "lost"}:
             abnormal_by_node[movement.source_flow_node_id] += movement.quantity
@@ -108,8 +166,6 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             entered = order_item.quantity * bom_item.pcs if bom_item else 0
             transferred = transferred_by_node[node_id]
             current = max(entered - transferred, 0)
-        elif node_type == "qc":
-            current = max(entered - transferred - abnormal, 0)
         elif node_type == "assembly":
             input_details = dict(current_inputs[node_id])
             for name, quantity in material_inputs[node_id].items():

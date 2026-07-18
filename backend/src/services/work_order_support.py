@@ -5,6 +5,7 @@ from domain.time import utc_now
 from models.organization import Department, Procedure, Workshop
 from models.production import (
     ProductionItem,
+    ProcedureStageStock,
     Repository,
     WorkOrder,
     WorkOrderBatch,
@@ -48,9 +49,9 @@ def target_department_id(session, node: dict) -> int:
         if workshop is None:
             raise DomainError("procedure_department_missing", "目标工艺没有有效部门")
         return workshop.department_id
-    if node_type not in {"qc", "assembly"}:
+    if node_type != "assembly":
         raise DomainError("flow_target_invalid", "目标节点类型不支持生产流转")
-    department_code = "qc" if node_type == "qc" else "assembly"
+    department_code = "assembly"
     department_id = session.scalar(
         select(Department.id).where(Department.department_code == department_code)
     )
@@ -143,10 +144,22 @@ def refresh_order_closed(session, production_item: ProductionItem) -> None:
     if customer_order.status != "planned":
         return
 
-    position_count = session.scalar(
+    repository_count = session.scalar(
         select(func.count(Repository.id))
         .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
         .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
+        .where(CustomerOrderItem.customer_order_id == customer_order.id)
+    )
+    stage_stock_count = session.scalar(
+        select(func.count(ProcedureStageStock.id))
+        .join(
+            ProductionItem,
+            ProductionItem.id == ProcedureStageStock.production_item_id,
+        )
+        .join(
+            CustomerOrderItem,
+            CustomerOrderItem.id == ProductionItem.customer_order_item_id,
+        )
         .where(CustomerOrderItem.customer_order_id == customer_order.id)
     )
     open_order_count = session.scalar(
@@ -168,7 +181,12 @@ def refresh_order_closed(session, production_item: ProductionItem) -> None:
             WorkOrderBatch.recorded_at.is_(None),
         )
     )
-    if not position_count and not open_order_count and not pending_qc_count:
+    if (
+        not repository_count
+        and not stage_stock_count
+        and not open_order_count
+        and not pending_qc_count
+    ):
         customer_order.status = "closed"
         customer_order.revision += 1
         customer_order.updated_at = utc_now()

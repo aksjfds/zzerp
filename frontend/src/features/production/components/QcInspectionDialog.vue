@@ -46,13 +46,19 @@ function submit() {
     ElMessage.warning('质检结果合计必须等于送检数量')
     return
   }
+  const abnormalQuantity = inspection.rework_quantity
+    + inspection.scrap_quantity + inspection.lost_quantity
+  if (abnormalQuantity > 0 && !inspection.defect_reason.trim()) {
+    ElMessage.warning('存在返工、报废或遗失数量时必须填写不良原因')
+    return
+  }
   emit('submit', { ...inspection })
 }
 </script>
 
 <template>
   <ElDialog :model-value="modelValue" title="录入 QC 结果" width="520px" @update:model-value="emit('update:modelValue', $event)">
-    <p class="inspection-title">送检数量：{{ batch?.submitted_quantity }}</p>
+    <p class="inspection-title">{{ batch?.work_order_name }} · 送检数量：{{ batch?.submitted_quantity }}</p>
     <ElFormItem label="QC 工人" required>
       <ElSelect v-model="inspection.qc_worker_id" placeholder="请选择 QC 工人" style="width: 100%">
         <ElOption v-for="worker in workers" :key="worker.id" :label="worker.worker_name" :value="worker.id" />
@@ -64,7 +70,10 @@ function submit() {
       <ElFormItem label="报废"><ElInputNumber v-model="inspection.scrap_quantity" :min="0" /></ElFormItem>
       <ElFormItem label="遗失"><ElInputNumber v-model="inspection.lost_quantity" :min="0" /></ElFormItem>
     </div>
-    <ElFormItem label="不良原因"><ElInput v-model="inspection.defect_reason" type="textarea" /></ElFormItem>
+    <ElFormItem
+      label="不良原因"
+      :required="inspection.rework_quantity + inspection.scrap_quantity + inspection.lost_quantity > 0"
+    ><ElInput v-model="inspection.defect_reason" type="textarea" /></ElFormItem>
     <template #footer>
       <ElButton @click="emit('update:modelValue', false)">取消</ElButton>
       <ElButton type="primary" :loading="submitting" @click="submit">确认录入</ElButton>

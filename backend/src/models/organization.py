@@ -1,4 +1,13 @@
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Text, UniqueConstraint, text
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
@@ -43,6 +52,26 @@ class Procedure(Base):
     )
     procedure_name: Mapped[str] = mapped_column(Text, nullable=False)
     procedure_type: Mapped[str] = mapped_column(Text, nullable=False, default="standard")
+
+
+class ProcedureSubstep(Base):
+    __tablename__ = "procedure_substep"
+    __table_args__ = (
+        CheckConstraint(
+            "substep_name = btrim(substep_name) AND substep_name <> ''",
+        ),
+        UniqueConstraint(
+            "procedure_id",
+            "substep_name",
+            name="uq_procedure_substep_name",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    procedure_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure.id"), nullable=False
+    )
+    substep_name: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class Worker(Base):

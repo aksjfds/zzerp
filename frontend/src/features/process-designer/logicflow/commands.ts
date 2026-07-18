@@ -1,5 +1,5 @@
 import type LogicFlow from '@logicflow/core'
-import type { BomItem, RouteType } from '../domain/types'
+import type { BomItem } from '../domain/types'
 
 export function startPartDrag(lf: LogicFlow, item: BomItem) {
   if (!item.id) throw new Error('请先保存 BOM 行')
@@ -37,10 +37,6 @@ export function startAssemblyDrag(lf: LogicFlow) {
   })
 }
 
-export function startQcDrag(lf: LogicFlow) {
-  lf.dnd.startDrag({ type: 'qc', text: 'QC', properties: {} })
-}
-
 export function updateNodeDefinition(
   lf: LogicFlow,
   nodeId: string,
@@ -52,17 +48,4 @@ export function updateNodeDefinition(
 ) {
   lf.updateText(nodeId, label)
   if (property) lf.setProperties(nodeId, { [property.key]: property.value })
-}
-
-export function setQcEdgeRoute(lf: LogicFlow, edgeId: string, routeType: RouteType) {
-  const edge = lf.getEdgeDataById(edgeId)
-  if (!edge) throw new Error('连线不存在')
-  const source = lf.getNodeDataById(edge.sourceNodeId)
-  if (source?.type !== 'qc') throw new Error('只有从 QC 节点发出的连线可以设置合格或返工')
-  const isRework = routeType === 'rework'
-  lf.setProperties(edgeId, {
-    routeType,
-    outcome: isRework ? 'rejected' : 'approved',
-  })
-  lf.updateText(edgeId, isRework ? '不合格返工' : '合格')
 }

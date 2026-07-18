@@ -30,7 +30,7 @@ const router = createRouter({
     {
       path: '/qc', name: 'qc-department',
       component: () => import('@/features/production/views/QcDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
+      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.inspect] },
     },
     {
       path: '/assembly', name: 'assembly-department',

@@ -6,12 +6,20 @@ const props = withDefaults(defineProps<{
   loading: boolean
   selectedKey?: string | null
   allowWorkOrder?: boolean
+  allowDispatch?: boolean
   mode?: 'production' | 'purchase'
 }>(), { mode: 'production' })
 const emit = defineEmits<{
   select: [item: RepositoryItem]
   createWorkOrder: [item: RepositoryItem]
+  dispatch: [item: RepositoryItem]
 }>()
+
+function isDispatchOnly(item: RepositoryItem) {
+  return props.mode === 'production'
+    && item.can_dispatch
+    && item.quantity === item.available_quantity
+}
 </script>
 
 <template>
@@ -27,9 +35,13 @@ const emit = defineEmits<{
     >
       <div class="card-heading">
         <strong>{{ item.part_no === item.part_name ? item.part_name : `${item.part_no} - ${item.part_name}` }}</strong>
-        <ElTag :type="item.work_status === 'processing' ? 'warning' : item.work_status === 'completed' ? 'success' : 'info'" size="small">
-          {{ item.work_status === 'processing'
+        <ElTag :type="isDispatchOnly(item) || item.work_status === 'completed' ? 'success' : item.work_status === 'processing' ? 'warning' : 'info'" size="small">
+          {{ isDispatchOnly(item)
+            ? '待出货'
+            : item.work_status === 'processing'
             ? (props.mode === 'purchase' ? '采购中' : '加工中')
+            : props.mode === 'production' && item.can_dispatch
+              ? '待出货'
             : item.work_status === 'completed'
               ? (props.mode === 'purchase' ? '已入库' : '已完成')
               : (props.mode === 'purchase' ? '待采购' : '未加工') }}
@@ -39,18 +51,33 @@ const emit = defineEmits<{
         <div><dt>产品</dt><dd>{{ item.factory_code }} · {{ item.product_name }}</dd></div>
         <div><dt>订单编号</dt><dd>{{ item.customer_order_no }}</dd></div>
         <div><dt>当前工艺</dt><dd>{{ item.procedure_name }}</dd></div>
+        <div v-if="props.mode === 'purchase'"><dt>当前细分</dt><dd>{{ item.current_stage_name || '-' }}</dd></div>
         <div><dt>来源节点</dt><dd>{{ item.source_node_label }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求数量' : '当前数量' }}</dt><dd>{{ item.quantity }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求时间' : '到达时间' }}</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
       </dl>
-      <ElButton
-        v-if="allowWorkOrder && item.can_create_work_order && item.repository_id && item.available_quantity > 0"
-        type="primary"
-        plain
-        size="small"
-        class="create-button"
-        @click.stop="emit('createWorkOrder', item)"
-      >{{ props.mode === 'purchase' ? '建外购单' : '开工单' }}</ElButton>
+      <div v-if="allowDispatch && props.mode === 'production'" class="card-actions">
+        <ElButton
+          type="primary"
+          plain
+          size="small"
+          :disabled="!item.can_dispatch || item.available_quantity < 1"
+          @click.stop="emit('dispatch', item)"
+        >出货</ElButton>
+      </div>
+      <div
+        v-else-if="allowWorkOrder && (item.repository_id !== null || item.stage_stock_id !== null)"
+        class="card-actions"
+      >
+        <ElButton
+          v-if="item.can_create_work_order
+            && item.available_quantity > 0"
+          type="primary"
+          plain
+          size="small"
+          @click.stop="emit('createWorkOrder', item)"
+        >{{ props.mode === 'purchase' ? '建外购单' : '开工单' }}</ElButton>
+      </div>
     </article>
     <ElEmpty v-if="!loading && !items.length" description="当前部门暂无配件或装配体" :image-size="72" />
   </div>
@@ -68,5 +95,6 @@ dl div { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px; ma
 dt { color: var(--el-text-color-secondary); }
 dd { margin: 0; overflow-wrap: anywhere; }
 .repository-cards :deep(.el-empty) { grid-column: 1 / -1; }
-.create-button { width: 100%; margin-top: 12px; }
+.card-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 12px; }
+.card-actions :deep(.el-button) { width: 100%; margin: 0; }
 </style>

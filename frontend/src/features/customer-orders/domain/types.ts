@@ -1,4 +1,4 @@
-import type { ProcessFlow } from '@/shared/process-flow/types'
+import type { FlowNodeType, ProcessFlow } from '@/shared/process-flow/types'
 
 export type CustomerOrderStatus = 'draft' | 'confirmed' | 'planned' | 'cancelled' | 'closed'
 
@@ -35,7 +35,7 @@ export type CustomerOrderPayload = {
 
 export type ProductionNodeStat = {
   flow_node_id: string
-  node_type: string
+  node_type: FlowNodeType
   current_quantity: number
   entered_quantity: number
   transferred_quantity: number

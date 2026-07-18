@@ -17,8 +17,7 @@ def synchronize_assembly_names(flow: ProcessFlowPayload) -> None:
     nodes = {node.id: node for node in flow.nodes}
     incoming: dict[str, list[str]] = {}
     for edge in flow.edges:
-        if edge.route_type == "normal":
-            incoming.setdefault(edge.target_node_id, []).append(edge.source_node_id)
+        incoming.setdefault(edge.target_node_id, []).append(edge.source_node_id)
     cache: dict[str, list[str]] = {}
 
     def component_names(node_id: str, visiting: set[str]) -> list[str]:

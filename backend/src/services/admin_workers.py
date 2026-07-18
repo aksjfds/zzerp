@@ -149,7 +149,7 @@ def _serialize_history_item(
     else:
         completed_quantity = order.completed_quantity
         planned_quantity = order.quantity
-        procedure_name = order.procedure_name
+        procedure_name = order.work_order_name
         status = order.status
         completed_at = order.closed_at or order.created_at
     lost_quantity = sum(item.lost_quantity or 0 for item in worker_batches or batches)

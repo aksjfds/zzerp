@@ -4,10 +4,11 @@ from sqlalchemy import select
 from authorization import require_any_permission
 from database import SessionLocal
 from domain.permissions import PRODUCT_VIEW
-from models.organization import Department, Procedure, Workshop
+from models.organization import Department, Procedure, ProcedureSubstep, Workshop
 from schemas.organization import (
     DepartmentResponse,
     ProcedureResponse,
+    ProcedureSubstepResponse,
     WorkshopResponse,
 )
 
@@ -40,3 +41,19 @@ def workshops(
 def procedures(_: dict = Depends(require_any_permission(PRODUCT_VIEW))):
     with SessionLocal() as session:
         return session.scalars(select(Procedure).order_by(Procedure.id)).all()
+
+
+@router.get(
+    "/procedures/{procedure_id}/substeps",
+    response_model=list[ProcedureSubstepResponse],
+)
+def procedure_substeps(
+    procedure_id: int,
+    _: dict = Depends(require_any_permission(PRODUCT_VIEW, "production:view")),
+):
+    with SessionLocal() as session:
+        return session.scalars(
+            select(ProcedureSubstep)
+            .where(ProcedureSubstep.procedure_id == procedure_id)
+            .order_by(ProcedureSubstep.substep_name, ProcedureSubstep.id)
+        ).all()

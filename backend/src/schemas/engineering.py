@@ -40,12 +40,8 @@ class AssemblyNodePayload(FlowNodeBase):
     output_pcs: int = Field(default=1, gt=0)
 
 
-class QcNodePayload(FlowNodeBase):
-    type: Literal["qc"]
-
-
 FlowNodePayload = Annotated[
-    PartNodePayload | ProcessNodePayload | AssemblyNodePayload | QcNodePayload,
+    PartNodePayload | ProcessNodePayload | AssemblyNodePayload,
     Field(discriminator="type"),
 ]
 
@@ -63,12 +59,10 @@ class FlowEdgePayload(ContractModel):
     label: str | None = Field(default=None, max_length=200)
     label_position: PointPayload | None = None
     z_index: int | None = None
-    route_type: Literal["normal", "rework"] = "normal"
-    outcome: Literal["approved", "rejected"] | None = None
 
 
 class ProcessFlowPayload(ContractModel):
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     nodes: list[FlowNodePayload] = Field(default_factory=list, max_length=500)
     edges: list[FlowEdgePayload] = Field(default_factory=list, max_length=2000)
 

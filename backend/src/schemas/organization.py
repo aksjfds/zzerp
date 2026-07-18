@@ -24,3 +24,9 @@ class ProcedureResponse(OrganizationModel):
     workshop_id: int
     procedure_name: str
     procedure_type: Literal["standard", "purchase_receipt"]
+
+
+class ProcedureSubstepResponse(OrganizationModel):
+    id: int
+    procedure_id: int
+    substep_name: str

@@ -1,12 +1,11 @@
 from sqlalchemy import exists, func, or_, select
 
 from database import SessionLocal
-from models.organization import Department, Procedure, Worker, Workshop
+from models.organization import Department, Procedure, ProcedureSubstep, Worker, Workshop
 from models.production import WorkOrder, WorkOrderBatch, WorkOrderMaterial
 from services.errors import DomainError
 from services.work_order_presenters import (
     item_display,
-    qc_repository_id,
     serialize_batch,
     serialize_work_order,
     work_order_context,
@@ -18,22 +17,37 @@ def list_department_work_orders(
     page: int,
     page_size: int,
     production_item_id: int | None = None,
+    flow_node_id: str | None = None,
+    substep_id: int | None = None,
+    source_flow_node_id: str | None = None,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         department = _department(session, department_code)
         statement = (
             select(WorkOrder)
-            .outerjoin(Procedure, Procedure.id == WorkOrder.procedure_id)
+            .outerjoin(ProcedureSubstep, ProcedureSubstep.id == WorkOrder.substep_id)
+            .outerjoin(Procedure, Procedure.id == ProcedureSubstep.procedure_id)
             .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
             .order_by(WorkOrder.id.desc())
         )
         condition = (
-            WorkOrder.procedure_id.is_(None)
+            WorkOrder.work_order_type == "assembly"
             if department_code == "assembly"
-            else Workshop.department_id == department.id
+            else (
+                (WorkOrder.work_order_type == "substep")
+                & (Workshop.department_id == department.id)
+            )
         )
         if production_item_id is not None:
             condition = condition & _related_to_production_item(production_item_id)
+        if flow_node_id is not None:
+            condition = condition & (WorkOrder.flow_node_id == flow_node_id)
+        if source_flow_node_id is not None:
+            condition = condition & (
+                WorkOrder.source_flow_node_id == source_flow_node_id
+            )
+        if substep_id is not None:
+            condition = condition & (WorkOrder.substep_id == substep_id)
         filtered = statement.where(condition)
         total = session.scalar(
             select(func.count()).select_from(filtered.order_by(None).subquery())
@@ -136,13 +150,13 @@ def _serialize_pending_batch(session, batch: WorkOrderBatch) -> dict:
     data = serialize_batch(batch)
     data.update(
         {
-            "repository_id": qc_repository_id(session, order, batch),
+            "repository_id": None,
             "production_item_id": order.production_item_id,
             "work_order_no": order.work_order_no,
             "customer_order_no": customer_order.customer_order_no,
             "part_no": part_no,
             "part_name": part_name,
-            "procedure_name": order.procedure_name,
+            "work_order_name": order.work_order_name,
             "remaining_quantity": batch.submitted_quantity,
         }
     )

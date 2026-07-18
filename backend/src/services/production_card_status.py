@@ -1,9 +1,9 @@
 from sqlalchemy import func, select, tuple_
 
 from models.production import (
+    ProcedureStageStock,
     Repository,
     WorkOrder,
-    WorkOrderBatch,
     WorkOrderMaterial,
 )
 
@@ -37,6 +37,50 @@ def reserved_quantities(session, repository_ids: list[int]) -> dict[int, int]:
     return result
 
 
+def reserved_stage_quantities(session, stage_stock_ids: list[int]) -> dict[int, int]:
+    if not stage_stock_ids:
+        return {}
+    return {
+        stock_id: quantity
+        for stock_id, quantity in session.execute(
+            select(
+                WorkOrder.procedure_stage_stock_id,
+                func.sum(WorkOrder.quantity - WorkOrder.completed_quantity),
+            )
+            .where(
+                WorkOrder.procedure_stage_stock_id.in_(stage_stock_ids),
+                WorkOrder.status == "open",
+            )
+            .group_by(WorkOrder.procedure_stage_stock_id)
+        )
+    }
+
+
+def stage_stock_statuses(
+    session,
+    stage_stock_ids: list[int],
+) -> dict[int, str]:
+    if not stage_stock_ids:
+        return {}
+    processing_ids = set(
+        session.scalars(
+            select(ProcedureStageStock.id)
+            .join(
+                WorkOrder,
+                WorkOrder.procedure_stage_stock_id == ProcedureStageStock.id,
+            )
+            .where(
+                ProcedureStageStock.id.in_(stage_stock_ids),
+                WorkOrder.status == "open",
+            )
+        )
+    )
+    return {
+        stock_id: "processing" if stock_id in processing_ids else "unprocessed"
+        for stock_id in stage_stock_ids
+    }
+
+
 def position_statuses(
     session,
     department_id: int,
@@ -45,30 +89,6 @@ def position_statuses(
 ) -> dict[PositionKey, str]:
     if not positions:
         return {}
-    if department_code == "qc":
-        pending_positions = set(
-            session.execute(
-                select(
-                    WorkOrder.production_item_id,
-                    WorkOrderBatch.flow_node_id,
-                    WorkOrder.flow_node_id,
-                )
-                .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
-                .where(
-                    tuple_(
-                        WorkOrder.production_item_id,
-                        WorkOrderBatch.flow_node_id,
-                        WorkOrder.flow_node_id,
-                    ).in_(positions),
-                    WorkOrderBatch.recorded_at.is_(None),
-                )
-            ).all()
-        )
-        return {
-            position: "unprocessed" if position in pending_positions else "completed"
-            for position in positions
-        }
-
     if department_code == "assembly":
         processing_positions = set(
             session.execute(

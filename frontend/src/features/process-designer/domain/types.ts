@@ -1,8 +1,6 @@
-export const PROCESS_FLOW_SCHEMA_VERSION = 1 as const
+export const PROCESS_FLOW_SCHEMA_VERSION = 2 as const
 
-export type FlowNodeType = 'part' | 'process' | 'assembly' | 'qc'
-export type RouteType = 'normal' | 'rework'
-export type FlowOutcome = 'approved' | 'rejected'
+export type FlowNodeType = 'part' | 'process' | 'assembly'
 
 export type FlowPoint = { x: number; y: number }
 
@@ -32,8 +30,7 @@ export type AssemblyFlowNode = FlowNodeBase & {
   output_pcs: number
 }
 
-export type QcFlowNode = FlowNodeBase & { type: 'qc' }
-export type FlowNode = PartFlowNode | ProcessFlowNode | AssemblyFlowNode | QcFlowNode
+export type FlowNode = PartFlowNode | ProcessFlowNode | AssemblyFlowNode
 
 export type FlowEdge = {
   id: string
@@ -48,8 +45,6 @@ export type FlowEdge = {
   label?: string
   label_position?: FlowPoint
   z_index?: number
-  route_type: RouteType
-  outcome?: FlowOutcome
 }
 
 export type ProcessFlow = {
@@ -131,7 +126,7 @@ export function synchronizeAssemblyNames(flow: ProcessFlow): ProcessFlow {
   const nodes = flow.nodes.map(node => ({ ...node }))
   const byId = new Map(nodes.map(node => [node.id, node]))
   const incoming = new Map<string, string[]>()
-  flow.edges.filter(edge => edge.route_type === 'normal').forEach((edge) => {
+  flow.edges.forEach((edge) => {
     incoming.set(edge.target_node_id, [...(incoming.get(edge.target_node_id) || []), edge.source_node_id])
   })
   const cache = new Map<string, string[]>()

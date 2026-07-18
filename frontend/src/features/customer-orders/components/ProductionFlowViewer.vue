@@ -15,30 +15,20 @@ const props = defineProps<{
 }>()
 const container = ref<HTMLDivElement>()
 let instance: LogicFlow | null = null
-type ProductionEdgeState = 'pending' | 'active' | 'done' | 'rework'
+type ProductionEdgeState = 'pending' | 'active' | 'done'
 
 const EDGE_STYLE: Record<ProductionEdgeState, Record<string, unknown>> = {
   pending: { stroke: '#c0c4cc', strokeWidth: 2, strokeDasharray: '6 4' },
   active: { stroke: '#e6a23c', strokeWidth: 3, strokeDasharray: '10 5' },
   done: { stroke: '#67c23a', strokeWidth: 3 },
-  rework: { stroke: '#f56c6c', strokeWidth: 3, strokeDasharray: '8 4' },
 }
 
-const EDGE_ANIMATION_STYLE: Record<Extract<ProductionEdgeState, 'active' | 'rework'>, Record<string, unknown>> = {
-  active: {
-    stroke: '#e6a23c',
-    strokeDasharray: '14,6',
-    strokeDashoffset: '100%',
-    animationDuration: '12s',
-    animationDirection: 'normal',
-  },
-  rework: {
-    stroke: '#f56c6c',
-    strokeDasharray: '10,5',
-    strokeDashoffset: '100%',
-    animationDuration: '10s',
-    animationDirection: 'normal',
-  },
+const EDGE_ANIMATION_STYLE: Record<string, unknown> = {
+  stroke: '#e6a23c',
+  strokeDasharray: '14,6',
+  strokeDashoffset: '100%',
+  animationDuration: '12s',
+  animationDirection: 'normal',
 }
 
 class ProductionPolylineEdgeModel extends PolylineEdgeModel {
@@ -61,9 +51,6 @@ function nodeLabel(label: string, stat?: ProductionNodeStat): string {
   if (stat.node_type === 'part') {
     return `${label}\n投入${stat.entered_quantity} 转出${stat.transferred_quantity}`
   }
-  if (stat.node_type === 'qc') {
-    return `${label}\n入${stat.entered_quantity} 出${stat.transferred_quantity} 异常${stat.abnormal_quantity}`
-  }
   return `${label}\n入${stat.entered_quantity} 出${stat.transferred_quantity} 现${stat.current_quantity}`
 }
 
@@ -74,7 +61,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function edgeState(edge: FlowEdge, status: Map<string, ProductionNodeStat>): ProductionEdgeState {
   const sourceStat = status.get(edge.source_node_id)
   const targetStat = status.get(edge.target_node_id)
-  if (edge.route_type === 'rework' || edge.outcome === 'rejected') return 'rework'
   if (!targetStat) return 'pending'
   if (targetStat.current_quantity > 0) return 'active'
   if (targetStat.entered_quantity > 0 || (sourceStat?.transferred_quantity ?? 0) > 0) return 'done'
@@ -82,11 +68,7 @@ function edgeState(edge: FlowEdge, status: Map<string, ProductionNodeStat>): Pro
 }
 
 function shouldAnimateEdge(edge: FlowEdge, status: Map<string, ProductionNodeStat>): boolean {
-  const state = edgeState(edge, status)
-  if (state === 'active') return true
-  if (state !== 'rework') return false
-  const targetStat = status.get(edge.target_node_id)
-  return (targetStat?.current_quantity ?? 0) > 0
+  return edgeState(edge, status) === 'active'
 }
 
 function productionFlow(status: Map<string, ProductionNodeStat>): ProcessFlow {
@@ -96,14 +78,10 @@ function productionFlow(status: Map<string, ProductionNodeStat>): ProcessFlow {
       ...node,
       label: nodeLabel(node.label, status.get(node.id)),
     })),
-    edges: props.flow.edges.map(edge => {
-      return {
-        ...edge,
-        edge_type: 'production-polyline',
-        route_type: edge.route_type,
-        outcome: edge.outcome,
-      }
-    }),
+    edges: props.flow.edges.map(edge => ({
+      ...edge,
+      edge_type: 'production-polyline',
+    })),
   }
 }
 
@@ -121,9 +99,7 @@ function withProductionEdgeStyle(data: LogicFlow.GraphConfigData, status: Map<st
           ...edge.properties,
           productionState: state,
           style: EDGE_STYLE[state],
-          productionAnimationStyle: animated && (state === 'active' || state === 'rework')
-            ? EDGE_ANIMATION_STYLE[state]
-            : undefined,
+          productionAnimationStyle: animated ? EDGE_ANIMATION_STYLE : undefined,
         },
       }
     }),
@@ -184,7 +160,6 @@ onBeforeUnmount(() => {
       <span><i class="legend-line pending" />未开始</span>
       <span><i class="legend-line active" />进行中</span>
       <span><i class="legend-line done" />已流转</span>
-      <span><i class="legend-line rework" />返工/不合格</span>
     </div>
     <div ref="container" class="production-flow-viewer" />
   </div>
@@ -230,11 +205,6 @@ onBeforeUnmount(() => {
 
 .legend-line.done {
   border-color: #67c23a;
-}
-
-.legend-line.rework {
-  border-color: #f56c6c;
-  border-style: dashed;
 }
 
 .production-flow-viewer {

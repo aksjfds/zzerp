@@ -8,7 +8,8 @@ defineEmits<{ inspect: [batch: PendingQcBatch] }>()
     <article v-for="batch in items" :key="batch.id" class="qc-card">
       <strong>工单 {{ batch.work_order_no }}</strong>
       <p>{{ batch.part_no }} - {{ batch.part_name }}</p>
-      <p>工艺：{{ batch.procedure_name }} · </p>
+      <p>订单：{{ batch.customer_order_no }}</p>
+      <p>工单内容：{{ batch.work_order_name }}</p>
       <template v-if="batch.recorded_at">
         <p>送检：{{ batch.submitted_quantity }} · 合格 {{ batch.qualified_quantity || 0 }} · 返工 {{ batch.rework_quantity || 0
           }} · 报废 {{ batch.scrap_quantity || 0 }} · 遗失 {{ batch.lost_quantity || 0 }}</p>
@@ -18,7 +19,7 @@ defineEmits<{ inspect: [batch: PendingQcBatch] }>()
       </template>
       <ElButton v-else type="primary" size="small" @click="$emit('inspect', batch)">录入 QC 结果</ElButton>
     </article>
-    <ElEmpty v-if="!items.length" description="所选配件暂无 QC 记录" :image-size="64" />
+    <ElEmpty v-if="!loading && !items.length" description="暂无待检批次" :image-size="64" />
   </div>
 </template>
 <style scoped>
