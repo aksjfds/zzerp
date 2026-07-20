@@ -105,11 +105,11 @@ def validate_process_flow(
             if normal_incoming[node.id] != 0:
                 _fail("part_has_incoming_edge", "配件节点不能有普通输入连线", path, node.id)
             if normal_outgoing[node.id] != 1:
-                _fail("part_output_count", "配件节点必须且只能连接一道首工艺", path, node.id)
-            if node_map[normal_targets[node.id][0]].type != "process":
+                _fail("part_output_count", "配件节点必须且只能连接一个首节点", path, node.id)
+            if node_map[normal_targets[node.id][0]].type not in {"process", "assembly"}:
                 _fail(
-                    "part_first_node_must_be_process",
-                    "配件节点的第一个执行节点必须是工艺节点",
+                    "part_first_node_invalid",
+                    "配件节点的第一个执行节点必须是工艺或装配节点",
                     path,
                     node.id,
                 )

@@ -4,7 +4,7 @@ import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import AssemblyGroupCards from '../components/AssemblyGroupCards.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
-import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
+import AssemblyWorkOrderDialog from '../components/AssemblyWorkOrderDialog.vue'
 import { useAssemblyDepartment } from '../composables/useAssemblyDepartment'
 import '../styles/workspace.css'
 
@@ -43,7 +43,11 @@ onMounted(load)
           :page-size="pageSize" :total="historyTotal" @current-change="loadDetails" />
       </div>
     </section>
-    <CreateWorkOrderDialog v-model="dialogVisible" :item="activeRepository" :workers="workers" :submitting="submitting" mode="assembly"
+    <AssemblyWorkOrderDialog
+      v-model="dialogVisible"
+      :item="activeRepository"
+      :workers="workers"
+      :submitting="submitting"
       @submit="saveWorkOrder" />
   </main>
 </template>

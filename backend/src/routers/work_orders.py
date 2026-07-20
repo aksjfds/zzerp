@@ -14,10 +14,12 @@ from schemas.production import (
 from services.assembly_work_orders import create_assembly_work_order
 from services.process_work_orders import (
     cancel_work_order,
-    complete_work_order,
     create_work_order,
-    resubmit_rework_batch,
     submit_work_order,
+)
+from services.tag_work_orders import (
+    complete_tag_work_order,
+    resubmit_tag_rework_batch,
 )
 from services.work_order_queries import list_department_work_orders
 
@@ -40,7 +42,8 @@ def department_work_orders(
         min_length=1,
         max_length=200,
     ),
-    target_tag_set_id: int | None = Query(default=None, gt=0),
+    existing_tag_id: list[int] | None = Query(default=None),
+    applying_tag_id: list[int] | None = Query(default=None),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     if user["department"] not in {"sys", department_code}:
@@ -51,8 +54,9 @@ def department_work_orders(
         page_size=page_size,
         production_item_id=production_item_id,
         flow_node_id=flow_node_id,
-        target_tag_set_id=target_tag_set_id,
         source_flow_node_id=source_flow_node_id,
+        existing_tag_ids=existing_tag_id,
+        applying_tag_ids=applying_tag_id,
     )
     return {"data": data, "total": total}
 
@@ -110,7 +114,7 @@ def work_order_complete(
     work_order_id: int,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
-    return {"data": complete_work_order(work_order_id, user["department"])}
+    return {"data": complete_tag_work_order(work_order_id, user["department"])}
 
 
 @router.post(
@@ -123,7 +127,7 @@ def work_order_batch_rework_submit(
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     return {
-        "data": resubmit_rework_batch(
+        "data": resubmit_tag_rework_batch(
             batch_id,
             payload.quantity,
             user["department"],

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { RepositoryItem, TagCard, WorkerItem } from '../domain/types'
 
@@ -7,11 +7,9 @@ const props = withDefaults(defineProps<{
   modelValue: boolean
   item?: RepositoryItem
   sources?: TagCard[]
-  preferredSourceKey?: string | null
   workers: WorkerItem[]
   submitting: boolean
-  mode?: 'production' | 'purchase' | 'assembly'
-}>(), { mode: 'production', sources: () => [] })
+}>(), { sources: () => [] })
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
   submit: [payload: {
@@ -28,10 +26,6 @@ const form = reactive({
   workerId: null as number | null,
   tagNames: [] as string[],
 })
-const tagInputRef = ref<{ focus: () => void }>()
-const tagInputKey = ref(0)
-const tagInputFocused = ref(false)
-const tagQuery = ref('')
 const sourceOptions = computed(() => props.sources.filter(item => (
   item.available_quantity > 0
   && ((item.repository_id === null) !== (item.tag_stock_id === null))
@@ -39,32 +33,16 @@ const sourceOptions = computed(() => props.sources.filter(item => (
 const selectedSource = computed(() => sourceOptions.value.find(
   item => item.card_key === form.sourceKey,
 ))
-const maximumQuantity = computed(() => (
-  props.mode === 'production'
-    ? selectedSource.value?.available_quantity || 1
-    : props.item?.available_quantity || 1
-))
-const normalizedTagNames = computed(() => form.tagNames
+const maximumQuantity = computed(() => selectedSource.value?.available_quantity || 1)
+const normalizedTagNames = computed(() => (form.tagNames || [])
   .map(name => name.trim())
   .filter((name, index, names) => Boolean(name) && names.indexOf(name) === index))
-const tagSuggestions = computed(() => {
-  const keyword = tagQuery.value.trim().toLocaleLowerCase('zh-CN')
-  const excludedNames = new Set([
-    ...normalizedTagNames.value,
-    ...(selectedSource.value?.tag_names || []),
-  ])
-  return (props.item?.available_tags || [])
-    .filter(tag => !excludedNames.has(tag.tag_name))
-    .filter(tag => (
-      !keyword
-      || tag.tag_name.toLocaleLowerCase('zh-CN').includes(keyword)
-    ))
+const tagOptions = computed(() => {
+  const sourceNames = new Set(selectedSource.value?.tag_names || [])
+  return (props.item?.configured_tags || []).filter(
+    tag => !sourceNames.has(tag.tag_name),
+  )
 })
-const showTagSuggestions = computed(() => (
-  tagInputFocused.value
-  && normalizedTagNames.value.length < 20
-  && tagSuggestions.value.length > 0
-))
 const targetTagSetName = computed(() => {
   const names = normalizedTagNames.value
   if (!names.length) return '-'
@@ -74,7 +52,7 @@ const targetTagSetName = computed(() => {
     name: source?.tag_names[index] || '',
   }))
   const knownTags = new Map(
-    (props.item?.available_tags || []).map(tag => [tag.tag_name, tag.id]),
+    (props.item?.configured_tags || []).map(tag => [tag.tag_name, tag.id]),
   )
   const knownMembers = names
     .filter(name => knownTags.has(name))
@@ -88,20 +66,14 @@ const targetTagSetName = computed(() => {
 })
 
 watch(
-  () => [props.modelValue, props.sources, props.preferredSourceKey] as const,
+  () => [props.modelValue, props.sources] as const,
   ([visible]) => {
     if (!visible) return
-    const preferred = sourceOptions.value.find(
-      item => item.card_key === props.preferredSourceKey,
-    )
-    const source = preferred || sourceOptions.value[0]
+    const source = sourceOptions.value[0]
     form.sourceKey = source?.card_key || ''
     form.quantity = source?.available_quantity || props.item?.available_quantity || 1
     form.workerId = null
     form.tagNames = []
-    tagInputKey.value += 1
-    tagInputFocused.value = false
-    tagQuery.value = ''
   },
 )
 
@@ -109,21 +81,17 @@ watch(() => form.sourceKey, () => {
   if (selectedSource.value) form.quantity = selectedSource.value.available_quantity
 })
 
-function selectTagSuggestion(name: string) {
-  if (normalizedTagNames.value.length >= 20) return
-  form.tagNames = [...normalizedTagNames.value, name]
-  tagQuery.value = ''
-  tagInputKey.value += 1
-  void nextTick(() => tagInputRef.value?.focus())
+function updateTagNames(names?: string[]) {
+  form.tagNames = names || []
 }
 
 function submit() {
   const tagNames = normalizedTagNames.value
-  if (props.mode === 'production' && !selectedSource.value) {
+  if (!selectedSource.value) {
     ElMessage.warning('请选择有可用数量的来源标记组合')
     return
   }
-  if (props.mode === 'production' && tagNames.length === 0) {
+  if (tagNames.length === 0) {
     ElMessage.warning('请至少输入一个本次新增标记')
     return
   }
@@ -144,15 +112,11 @@ function submit() {
     return
   }
   emit('submit', {
-    repositoryId: props.mode === 'production'
-      ? selectedSource.value?.repository_id ?? null
-      : props.item?.repository_id ?? null,
-    tagStockId: props.mode === 'production'
-      ? selectedSource.value?.tag_stock_id ?? null
-      : null,
+    repositoryId: selectedSource.value?.repository_id ?? null,
+    tagStockId: selectedSource.value?.tag_stock_id ?? null,
     quantity: form.quantity,
     workerId: form.workerId,
-    tagNames: props.mode === 'production' ? tagNames : [],
+    tagNames,
   })
 }
 </script>
@@ -160,7 +124,7 @@ function submit() {
 <template>
   <ElDialog
     :model-value="modelValue"
-    :title="props.mode === 'purchase' ? '创建外购入库单' : props.mode === 'assembly' ? '开装配工单' : '开标记工单'"
+    title="开标记工单"
     width="500px"
     @update:model-value="emit('update:modelValue', $event)"
   >
@@ -168,7 +132,7 @@ function submit() {
       {{ item?.part_no }} - {{ item?.part_name }} · {{ item?.procedure_name }}
     </p>
     <ElForm label-width="96px">
-      <ElFormItem v-if="props.mode === 'production'" label="来源组合" required>
+      <ElFormItem label="来源组合" required>
         <ElSelect v-model="form.sourceKey" placeholder="请选择来源标记组合">
           <ElOption
             v-for="source in sourceOptions"
@@ -178,43 +142,35 @@ function submit() {
           />
         </ElSelect>
       </ElFormItem>
-      <ElFormItem v-if="props.mode === 'production'" label="新增标记" required>
-        <div class="tag-input-wrapper">
-          <ElInputTag
-            tag-type="danger"
-            tag-effect="dark"
-            :key="tagInputKey"
-            ref="tagInputRef"
-            v-model="form.tagNames"
-            :max="20"
-            :maxlength="200"
-            clearable
-            placeholder="输入或选择标记，可添加多个"
-            @input="tagQuery = $event"
-            @add-tag="tagQuery = ''"
-            @focus="tagInputFocused = true"
-            @blur="tagInputFocused = false"
+      <ElFormItem label="新增标记" required>
+        <ElSelect
+          :model-value="form.tagNames"
+          multiple
+          filterable
+          allow-create
+          default-first-option
+          clearable
+          :multiple-limit="20"
+          tag-type="danger"
+          tag-effect="dark"
+          placeholder="输入或选择标记，可添加多个"
+          @update:model-value="updateTagNames"
+        >
+          <ElOption
+            v-for="tag in tagOptions"
+            :key="tag.id"
+            :label="tag.tag_name"
+            :value="tag.tag_name"
           />
-          <div v-if="showTagSuggestions" class="tag-suggestions">
-            <button
-              v-for="tag in tagSuggestions"
-              :key="tag.id"
-              class="tag-suggestion"
-              type="button"
-              @mousedown.prevent="selectTagSuggestion(tag.tag_name)"
-            >
-              {{ tag.tag_name }}
-            </button>
-          </div>
-        </div>
+        </ElSelect>
       </ElFormItem>
-      <ElFormItem v-if="props.mode === 'production'" label="目标组合">
+      <ElFormItem label="目标组合">
         <span class="target-combination">{{ targetTagSetName }}</span>
       </ElFormItem>
-      <ElFormItem :label="props.mode === 'purchase' ? '外购数量' : '工单数量'">
+      <ElFormItem label="工单数量">
         <ElInputNumber v-model="form.quantity" :min="1" :max="maximumQuantity" />
       </ElFormItem>
-      <ElFormItem :label="props.mode === 'purchase' ? '经办人' : '执行工人'">
+      <ElFormItem label="执行工人">
         <ElSelect v-model="form.workerId" clearable placeholder="暂不分配工人">
           <ElOption
             v-for="worker in workers"
@@ -228,7 +184,7 @@ function submit() {
     <template #footer>
       <ElButton @click="emit('update:modelValue', false)">取消</ElButton>
       <ElButton type="primary" :loading="submitting" @click="submit">
-        {{ props.mode === 'purchase' ? '创建外购单' : '创建工单' }}
+        创建工单
       </ElButton>
     </template>
   </ElDialog>
@@ -237,31 +193,5 @@ function submit() {
 <style scoped>
 .target { margin: 0 0 18px; color: var(--el-text-color-secondary); }
 .target-combination { overflow-wrap: anywhere; }
-.el-select, .el-input-tag { width: 100%; }
-.tag-input-wrapper { position: relative; width: 100%; }
-.tag-suggestions {
-  position: absolute;
-  z-index: 20;
-  top: calc(100% + 6px);
-  right: 0;
-  left: 0;
-  max-height: 220px;
-  padding: 6px 0;
-  overflow-y: auto;
-  background: var(--el-bg-color-overlay);
-  border: 1px solid var(--el-border-color-light);
-  border-radius: var(--el-border-radius-base);
-  box-shadow: var(--el-box-shadow-light);
-}
-.tag-suggestion {
-  display: block;
-  width: 100%;
-  padding: 8px 12px;
-  color: var(--el-text-color-regular);
-  text-align: left;
-  cursor: pointer;
-  background: transparent;
-  border: 0;
-}
-.tag-suggestion:hover { background: var(--el-fill-color-light); }
+.el-select { width: 100%; }
 </style>

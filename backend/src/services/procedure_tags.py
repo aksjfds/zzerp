@@ -3,6 +3,7 @@ from sqlalchemy import select
 from models.organization import (
     Procedure,
     ProcedureTag,
+    ProcedureTagPrice,
     ProcedureTagSet,
     ProcedureTagSetMember,
     Workshop,
@@ -22,6 +23,54 @@ def tag_suggestions(session, procedure_id: int) -> list[ProcedureTag]:
             .where(ProcedureTag.procedure_id == procedure_id)
             .order_by(ProcedureTag.tag_name, ProcedureTag.id)
         ).all()
+    )
+
+
+def configured_tag_suggestions(
+    session,
+    product_bom_id: int | None,
+    procedure_id: int,
+) -> list[ProcedureTag]:
+    if product_bom_id is None:
+        return []
+    return list(session.scalars(
+        select(ProcedureTag)
+        .join(
+            ProcedureTagPrice,
+            ProcedureTagPrice.procedure_tag_id == ProcedureTag.id,
+        )
+        .where(
+            ProcedureTagPrice.product_bom_id == product_bom_id,
+            ProcedureTagPrice.procedure_id == procedure_id,
+        )
+        .order_by(ProcedureTag.tag_name, ProcedureTag.id)
+    ).all())
+
+
+def ensure_tag_price_configs(
+    session,
+    product_bom_id: int | None,
+    procedure: Procedure,
+    tags: list[ProcedureTag],
+) -> None:
+    if product_bom_id is None or not tags:
+        return
+    existing_ids = set(session.scalars(
+        select(ProcedureTagPrice.procedure_tag_id).where(
+            ProcedureTagPrice.product_bom_id == product_bom_id,
+            ProcedureTagPrice.procedure_id == procedure.id,
+            ProcedureTagPrice.procedure_tag_id.in_([tag.id for tag in tags]),
+        )
+    ).all())
+    session.add_all(
+        ProcedureTagPrice(
+            product_bom_id=product_bom_id,
+            procedure_id=procedure.id,
+            procedure_tag_id=tag.id,
+            unit_price=None,
+        )
+        for tag in tags
+        if tag.id not in existing_ids
     )
 
 

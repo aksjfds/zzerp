@@ -12,7 +12,7 @@ from schemas.production import (
     WorkerListEnvelope,
 )
 from services.procedure_dispatches import dispatch_tag_stock
-from services.production_cards import list_production_cards
+from services.production_card_listing import list_production_cards
 from services.production_tag_cards import list_tag_cards
 from services.work_order_queries import list_department_workers
 

@@ -4,7 +4,12 @@ export type FlowPoint = { x: number; y: number }
 type FlowNodeBase = FlowPoint & { id: string; label: string; label_position?: FlowPoint; z_index?: number; rotation?: number }
 export type FlowNode =
   | (FlowNodeBase & { type: 'part'; bom_item_id: number; part_no: string })
-  | (FlowNodeBase & { type: 'process'; process_code: string; procedure_id: number })
+  | (FlowNodeBase & {
+      type: 'process'
+      process_code: string
+      procedure_id: number
+      qc_required: boolean
+    })
   | (FlowNodeBase & { type: 'assembly'; output_name: string; output_pcs: number })
 export type FlowEdge = {
   id: string

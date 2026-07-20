@@ -25,6 +25,7 @@ export function startProcessDrag(
     properties: {
       processCode: `procedure_${procedureId}`,
       procedureId,
+      qcRequired: false,
     },
   })
 }
@@ -42,8 +43,8 @@ export function updateNodeDefinition(
   nodeId: string,
   label: string,
   property: {
-    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId'
-    value: string | number
+    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId' | 'qcRequired'
+    value: string | number | boolean
   } | null,
 ) {
   lf.updateText(nodeId, label)

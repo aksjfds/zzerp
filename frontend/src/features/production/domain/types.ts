@@ -26,6 +26,7 @@ export type RepositoryItem = {
   procedure_name: string
   current_tag_set_name: string | null
   available_tags: ProcedureTag[]
+  configured_tags: ProcedureTag[]
   workshop_name: string
   department_id: number
   department_name: string
@@ -97,6 +98,7 @@ export type WorkOrder = {
   source_tag_set_id: number | null
   target_tag_set_id: number | null
   work_order_type: 'tag' | 'purchase_receipt' | 'assembly'
+  qc_required: boolean
   input_production_item_ids: number[]
   customer_order_no: string
   part_no: string
@@ -134,7 +136,8 @@ export type CompletionAction = 'direct' | 'qc'
 export type WorkOrderQueryScope = {
   flowNodeId: string
   sourceFlowNodeId: string
-  targetTagSetId: number
+  existingTagIds: number[]
+  applyingTagIds: number[]
 }
 
 export type WorkerItem = {

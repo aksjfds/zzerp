@@ -12,6 +12,7 @@ const emit = defineEmits<{
   updateAssembly: [label: string, output_name: string, output_pcs: number]
   updateProcess: [label: string, process_code: string]
   updateProcedure: [procedure_id: number]
+  updateQcRequired: [qc_required: boolean]
 }>()
 </script>
 
@@ -37,6 +38,14 @@ const emit = defineEmits<{
           :value="item.id"
         />
       </ElSelect>
+      <label>质量检验</label>
+      <ElSwitch
+        :model-value="node.qc_required"
+        :disabled="readonly"
+        active-text="需要 QC"
+        inactive-text="无需 QC"
+        @update:model-value="emit('updateQcRequired', $event)"
+      />
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>

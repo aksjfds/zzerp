@@ -6,6 +6,7 @@ from models.production import (
     WorkOrder,
     WorkOrderMaterial,
 )
+from services.work_order_progress import order_remaining_expression
 
 
 PositionKey = tuple[int, str, str]
@@ -18,7 +19,7 @@ def reserved_quantities(session, repository_ids: list[int]) -> dict[int, int]:
     for repository_id, quantity in session.execute(
         select(
             WorkOrder.repository_id,
-            func.sum(WorkOrder.quantity - WorkOrder.completed_quantity),
+            func.sum(order_remaining_expression()),
         )
         .where(WorkOrder.repository_id.in_(repository_ids), WorkOrder.status == "open")
         .group_by(WorkOrder.repository_id)
@@ -45,7 +46,7 @@ def reserved_tag_quantities(session, tag_stock_ids: list[int]) -> dict[int, int]
         for stock_id, quantity in session.execute(
             select(
                 WorkOrder.procedure_tag_stock_id,
-                func.sum(WorkOrder.quantity - WorkOrder.completed_quantity),
+                func.sum(order_remaining_expression()),
             )
             .where(
                 WorkOrder.procedure_tag_stock_id.in_(tag_stock_ids),

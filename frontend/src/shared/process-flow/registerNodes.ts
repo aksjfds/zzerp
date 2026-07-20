@@ -47,7 +47,13 @@ class ProcessNodeModel extends RectNodeModel {
   }
 
   getNodeStyle() {
-    return { ...super.getNodeStyle(), fill: '#f0f9eb', stroke: '#67c23a', strokeWidth: 2 }
+    const qcRequired = Boolean(this.properties?.qcRequired)
+    return {
+      ...super.getNodeStyle(),
+      fill: qcRequired ? '#fef0f0' : '#f0f9eb',
+      stroke: qcRequired ? '#f56c6c' : '#67c23a',
+      strokeWidth: 2,
+    }
   }
 
   getDefaultAnchor() {

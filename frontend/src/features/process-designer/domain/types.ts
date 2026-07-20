@@ -22,6 +22,7 @@ export type ProcessFlowNode = FlowNodeBase & {
   type: 'process'
   process_code: string
   procedure_id: number
+  qc_required: boolean
 }
 
 export type AssemblyFlowNode = FlowNodeBase & {

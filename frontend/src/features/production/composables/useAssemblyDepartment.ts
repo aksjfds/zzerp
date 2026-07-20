@@ -5,7 +5,8 @@ import { createAssemblyWorkOrder } from '../api/workOrders'
 import type { RepositoryFilters, RepositoryItem } from '../domain/types'
 import { useAssemblyGroups, type AssemblyGroup } from './useAssemblyGroups'
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
-import { useWorkOrderActions, useWorkOrderList } from './useWorkOrders'
+import { useWorkOrderList } from './useWorkOrders'
+import { useAssemblyWorkOrderActions } from './useAssemblyWorkOrderActions'
 
 export function useAssemblyDepartment() {
   const workspace = useDepartmentWorkspace('assembly', true)
@@ -123,7 +124,7 @@ export function useAssemblyDepartment() {
     selectedGroup,
     selectedGroupKey,
     submitting,
-    workOrderActions: useWorkOrderActions(reloadWorkspace, 'assembly'),
+    workOrderActions: useAssemblyWorkOrderActions(reloadWorkspace),
     workOrderList,
     workspace,
   }

@@ -15,6 +15,10 @@ from services.errors import DomainError
 from services.procedure_tags import serialize_tag_set
 from services.production_card_status import reserved_quantities, reserved_tag_quantities
 from services.production_flow import load_production_flow
+from services.work_order_progress import (
+    order_remaining_quantity,
+    rework_pending_by_order,
+)
 
 
 def list_tag_cards(
@@ -92,25 +96,13 @@ def list_tag_cards(
         ) if all_orders else []
         orders_by_id = {order.id: order for order in all_orders}
         pending_by_target: dict[int, int] = defaultdict(int)
-        rework_resubmitted_by_batch: dict[int, int] = defaultdict(int)
         for batch in batches:
-            if batch.rework_source_batch_id is not None:
-                rework_resubmitted_by_batch[batch.rework_source_batch_id] += (
-                    batch.submitted_quantity
-                )
             order = orders_by_id[batch.work_order_id]
             if batch.recorded_at is not None:
                 continue
             if order.target_tag_set_id is not None:
                 pending_by_target[order.target_tag_set_id] += batch.submitted_quantity
-        rework_pending_by_order: dict[int, int] = defaultdict(int)
-        for batch in batches:
-            if batch.recorded_at is not None:
-                rework_pending_by_order[batch.work_order_id] += max(
-                    (batch.rework_quantity or 0)
-                    - rework_resubmitted_by_batch.get(batch.id, 0),
-                    0,
-                )
+        pending_rework_by_order = rework_pending_by_order(batches)
 
         evidenced_orders = [order for order in all_orders if order.status != "cancelled"]
         used_set_ids = set(stocks_by_set) | set(pending_by_target)
@@ -171,8 +163,8 @@ def list_tag_cards(
                 0,
             )
             processing = sum(
-                max(order.quantity - order.completed_quantity, 0)
-                + rework_pending_by_order.get(order.id, 0)
+                order_remaining_quantity(order)
+                + pending_rework_by_order.get(order.id, 0)
                 for order in open_by_target.get(tag_set_id, [])
             )
             cards.append({

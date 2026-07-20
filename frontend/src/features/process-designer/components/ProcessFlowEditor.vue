@@ -14,8 +14,8 @@ import type {
 import { queryProcedures, type ProcedureOption } from '@/api/organization'
 
 type NodeProperty = {
-  key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId'
-  value: string | number
+  key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId' | 'qcRequired'
+  value: string | number | boolean
 } | null
 type CanvasApi = {
   dragPart: (item: BomItem) => void
@@ -70,6 +70,16 @@ function updateProcedure(procedureId: number) {
   }
 }
 
+function updateQcRequired(qcRequired: boolean) {
+  if (props.readonly || selectedNode.value?.type !== 'process') return
+  canvas.value?.updateNode(
+    selectedNode.value.id,
+    selectedNode.value.label,
+    { key: 'qcRequired', value: qcRequired },
+  )
+  selectedNode.value = { ...selectedNode.value, qc_required: qcRequired }
+}
+
 function updateAssembly(label: string, output_name: string, output_pcs: number) {
   if (props.readonly || selectedNode.value?.type !== 'assembly') return
   canvas.value?.updateNode(selectedNode.value.id, label, { key: 'outputName', value: output_name })
@@ -101,7 +111,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
     <div class="section-heading">
       <div>
         <h2>工序流程配置</h2>
-        <p>拖入配件后连接工序和装配节点；选择节点查看属性，编辑模式下可修改。</p>
+        <p>配件可直接连接工艺或装配节点；选择工艺节点可配置 QC，红色工艺节点表示需要 QC。</p>
       </div>
     </div>
     <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge, 'is-readonly': readonly }">
@@ -129,6 +139,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
         :readonly="readonly"
         @update-process="updateProcess"
         @update-procedure="updateProcedure"
+        @update-qc-required="updateQcRequired"
         @update-assembly="updateAssembly"
       />
     </div>

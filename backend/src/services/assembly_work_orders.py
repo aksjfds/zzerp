@@ -14,6 +14,7 @@ from models.production import (
 from services.errors import DomainError
 from services.production_movements import record_movement
 from services.work_order_presenters import serialize_work_order
+from services.work_order_progress import order_remaining_quantity
 from services.work_order_support import (
     consume_repository,
     mark_order_planned,
@@ -171,7 +172,7 @@ def submit_assembly_work_order(
         raise DomainError("department_access_denied", "只有装配部门可以操作装配工单", status_code=403)
     if completion_action != "direct":
         raise DomainError("assembly_qc_not_supported", "装配工单当前仅支持直接结单")
-    remaining = order.quantity - order.completed_quantity
+    remaining = order_remaining_quantity(order)
     if quantity != remaining:
         raise DomainError("partial_completion_not_allowed", "装配工单必须一次完成剩余数量")
 

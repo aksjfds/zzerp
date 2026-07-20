@@ -5,13 +5,14 @@ from models.organization import Worker
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch, WorkOrderMaterial
 from models.sales import CustomerOrder
 from services.production_flow import load_production_flow
+from services.work_order_progress import calculate_work_order_progress
 
 
 def work_order_context(session, order: WorkOrder):
     production_item = session.get(ProductionItem, order.production_item_id)
     flow_context = load_production_flow(session, production_item)
     customer_order = session.get(CustomerOrder, flow_context.order_item.customer_order_id)
-    return customer_order, flow_context.bom_item, production_item
+    return customer_order, flow_context.bom_item, production_item, flow_context
 
 
 def item_display(session, production_item: ProductionItem) -> tuple[str, str]:
@@ -86,7 +87,12 @@ def assembly_output_name(
         for item_id in material_item_ids
         if (item := session.get(ProductionItem, item_id)) is not None
     ]
-    production_items.sort(key=lambda item: (production_item_sort_order(session, item, visited), item.id))
+    production_items.sort(
+        key=lambda item: (
+            production_item_sort_order(session, item, visited),
+            item.id,
+        )
+    )
     names: list[str] = []
     for production_item in production_items:
         name = production_item_name(session, production_item, visited)
@@ -95,14 +101,17 @@ def assembly_output_name(
             names.append(base_name)
     if names:
         return f"{'-'.join(names)}装配体"
-    flow_context = load_production_flow(session, session.get(ProductionItem, order.production_item_id))
+    flow_context = load_production_flow(
+        session,
+        session.get(ProductionItem, order.production_item_id),
+    )
     assembly_node = flow_context.nodes.get(order.flow_node_id, {})
     return assembly_node.get("output_name") or assembly_node.get("label") or "装配体"
 
 
 def serialize_batch(
     batch: WorkOrderBatch,
-    rework_resubmitted: int = 0,
+    rework_pending_quantity: int = 0,
     track_rework: bool = False,
 ) -> dict:
     return {
@@ -112,7 +121,7 @@ def serialize_batch(
         "source_flow_node_id": batch.source_flow_node_id,
         "rework_source_batch_id": batch.rework_source_batch_id,
         "rework_pending_quantity": (
-            max((batch.rework_quantity or 0) - rework_resubmitted, 0)
+            rework_pending_quantity
             if track_rework else 0
         ),
         "qualified_quantity": batch.qualified_quantity,
@@ -127,8 +136,8 @@ def serialize_batch(
 
 
 def serialize_work_order(session, order: WorkOrder) -> dict:
-    customer_order, _, production_item = work_order_context(session, order)
-    part_no, part_name = item_display(session, production_item)
+    customer_order, _, production_item, flow_context = work_order_context(session, order)
+    part_no, part_name = flow_context.item_name(production_item)
     if order.work_order_type == "assembly":
         part_name = assembly_output_name(session, order)
         part_no = part_name
@@ -139,31 +148,7 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         .where(WorkOrderBatch.work_order_id == order.id)
         .order_by(WorkOrderBatch.id)
     ).all()
-    completed_batches = [item for item in batches if item.recorded_at is not None]
-    pending_batches = [item for item in batches if item.recorded_at is None]
-    rework_resubmitted_by_batch: dict[int, int] = {}
-    for item in batches:
-        if item.rework_source_batch_id is not None:
-            rework_resubmitted_by_batch[item.rework_source_batch_id] = (
-                rework_resubmitted_by_batch.get(item.rework_source_batch_id, 0)
-                + item.submitted_quantity
-            )
-    rework_pending_quantity = (
-        sum(
-            max(
-                (item.rework_quantity or 0)
-                - rework_resubmitted_by_batch.get(item.id, 0),
-                0,
-            )
-            for item in completed_batches
-        )
-        if order.work_order_type == "tag" else 0
-    )
-    initial_batches = [item for item in batches if item.rework_source_batch_id is None]
-    direct_quantity = max(
-        order.completed_quantity - sum(item.submitted_quantity for item in initial_batches),
-        0,
-    )
+    progress = calculate_work_order_progress(order, batches)
     return {
         "id": order.id,
         "work_order_no": order.work_order_no,
@@ -177,6 +162,9 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         "source_tag_set_id": order.source_tag_set_id,
         "target_tag_set_id": order.target_tag_set_id,
         "work_order_type": order.work_order_type,
+        "qc_required": bool(
+            flow_context.nodes.get(order.flow_node_id, {}).get("qc_required", False)
+        ),
         "customer_order_no": customer_order.customer_order_no,
         "part_no": part_no,
         "part_name": part_name,
@@ -184,25 +172,23 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         "worker_id": order.worker_id,
         "worker_name": worker.worker_name if worker else None,
         "quantity": order.quantity,
-        "submitted_quantity": order.completed_quantity,
-        "processing_quantity": (
-            max(order.quantity - order.completed_quantity, 0)
-            + rework_pending_quantity
-        ),
-        "pending_qc_quantity": sum(item.submitted_quantity for item in pending_batches),
-        "qualified_quantity": direct_quantity + sum(
-            item.qualified_quantity or 0 for item in completed_batches
-        ),
-        "rework_quantity": sum(item.rework_quantity or 0 for item in completed_batches),
-        "scrap_quantity": sum(item.scrap_quantity or 0 for item in completed_batches),
-        "lost_quantity": sum(item.lost_quantity or 0 for item in completed_batches),
+        "submitted_quantity": progress.submitted_quantity,
+        "processing_quantity": progress.processing_quantity,
+        "pending_qc_quantity": progress.pending_qc_quantity,
+        "qualified_quantity": progress.qualified_quantity,
+        "rework_quantity": progress.rework_quantity,
+        "scrap_quantity": progress.scrap_quantity,
+        "lost_quantity": progress.lost_quantity,
         "status": order.status,
         "created_at": business_iso(order.created_at),
         "closed_at": business_iso(order.closed_at),
         "batches": [
             serialize_batch(
                 item,
-                rework_resubmitted_by_batch.get(item.id, 0),
+                rework_pending_quantity=progress.rework_pending_by_batch.get(
+                    item.id,
+                    0,
+                ),
                 track_rework=order.work_order_type == "tag",
             )
             for item in batches

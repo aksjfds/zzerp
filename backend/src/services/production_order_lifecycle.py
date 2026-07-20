@@ -4,6 +4,7 @@ from models.production import ProductionItem, WorkOrder, WorkOrderBatch
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
 from services.production_repositories import provision_order_repositories
+from services.work_order_progress import order_has_submissions
 
 
 def initialize_order_production(session, order: CustomerOrder) -> None:
@@ -17,7 +18,7 @@ def cancel_order_production(session, order: CustomerOrder) -> None:
         .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
         .where(CustomerOrderItem.customer_order_id == order.id)
     ).all()
-    if any(item.completed_quantity > 0 for item in work_orders):
+    if any(order_has_submissions(item) for item in work_orders):
         raise DomainError("customer_order_started", "订单已经产生生产完成数量，不能取消")
     if work_orders:
         batch_count = session.scalar(

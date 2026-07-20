@@ -7,6 +7,7 @@ from models.sales import CustomerOrder
 from services.errors import DomainError
 from services.production_flow import load_product_flow
 from services.production_movements import record_movement
+from services.work_order_support import target_department_id
 
 
 def provision_order_repositories(session, order: CustomerOrder) -> None:
@@ -55,21 +56,23 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
         for bom_item in bom_items:
             part_node = part_nodes.get(bom_item.id)
             if part_node is None:
-                _invalid_first_process(bom_item.part_name, "没有对应配件节点")
+                _invalid_first_node(bom_item.part_name, "没有对应配件节点")
             targets = [
                 nodes.get(edge.get("target_node_id"))
                 for edge in normal_edges
                 if edge.get("source_node_id") == part_node["id"]
             ]
-            if len(targets) != 1 or targets[0] is None or targets[0].get("type") != "process":
-                _invalid_first_process(bom_item.part_name, "必须直接连接且只连接一道首工艺")
-            process_node = targets[0]
-            procedure = session.get(Procedure, process_node.get("procedure_id"))
-            if procedure is None:
-                _invalid_first_process(bom_item.part_name, "首工艺未关联有效工艺")
-            workshop = session.get(Workshop, procedure.workshop_id)
-            if workshop is None:
-                _invalid_first_process(bom_item.part_name, "首工艺没有有效车间")
+            if (
+                len(targets) != 1
+                or targets[0] is None
+                or targets[0].get("type") not in {"process", "assembly"}
+            ):
+                _invalid_first_node(bom_item.part_name, "必须直接连接且只连接一个工艺或装配节点")
+            first_node = targets[0]
+            try:
+                department_id = target_department_id(session, first_node)
+            except DomainError:
+                _invalid_first_node(bom_item.part_name, "首节点没有有效生产部门")
             production_item = ProductionItem(
                 customer_order_item_id=order_item.id,
                 product_id=order_item.product_id,
@@ -82,9 +85,9 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
             quantity = order_item.quantity * bom_item.pcs
             session.add(Repository(
                 production_item_id=production_item.id,
-                flow_node_id=process_node["id"],
+                flow_node_id=first_node["id"],
                 source_flow_node_id=part_node["id"],
-                department_id=workshop.department_id,
+                department_id=department_id,
                 quantity=quantity,
             ))
             record_movement(
@@ -93,14 +96,14 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
                 quantity=quantity,
                 movement_type="initial",
                 source_flow_node_id=part_node["id"],
-                target_flow_node_id=process_node["id"],
-                target_department_id=workshop.department_id,
+                target_flow_node_id=first_node["id"],
+                target_department_id=department_id,
             )
 
 
-def _invalid_first_process(part_name: str, reason: str) -> None:
+def _invalid_first_node(part_name: str, reason: str) -> None:
     raise DomainError(
-        "first_process_invalid",
+        "first_flow_node_invalid",
         f"配件“{part_name}”{reason}",
         path="process_flow",
     )

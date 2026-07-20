@@ -32,6 +32,7 @@ class RepositoryResponse(ProductionModel):
     procedure_name: str
     current_tag_set_name: str | None = None
     available_tags: list[ProcedureTagResponse] = Field(default_factory=list)
+    configured_tags: list[ProcedureTagResponse] = Field(default_factory=list)
     workshop_name: str
     department_id: int
     department_name: str
@@ -132,6 +133,7 @@ class WorkOrderResponse(ProductionModel):
     source_tag_set_id: int | None
     target_tag_set_id: int | None
     work_order_type: Literal["tag", "purchase_receipt", "assembly"]
+    qc_required: bool
     input_production_item_ids: list[int]
     customer_order_no: str
     part_no: str

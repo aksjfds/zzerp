@@ -6,7 +6,17 @@ from sqlalchemy.exc import IntegrityError
 
 from config import get_settings
 from domain.errors import DomainViolation
-from routers import admin, auth, customer_orders, organization, production, products, qc, work_orders
+from routers import (
+    admin,
+    auth,
+    customer_orders,
+    organization,
+    procedure_tag_prices,
+    production,
+    products,
+    qc,
+    work_orders,
+)
 from services.errors import DomainError
 
 app = FastAPI(title="zzerp")
@@ -99,6 +109,7 @@ app.include_router(products.router)
 app.include_router(organization.router)
 app.include_router(customer_orders.router)
 app.include_router(production.router)
+app.include_router(procedure_tag_prices.router)
 app.include_router(work_orders.router)
 app.include_router(qc.router)
 

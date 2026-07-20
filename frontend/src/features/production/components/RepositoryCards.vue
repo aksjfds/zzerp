@@ -72,7 +72,7 @@ function isDispatchOnly(item: RepositoryItem) {
           size="small"
           :disabled="!item.can_create_work_order"
           @click.stop="emit('createWorkOrder', item)"
-        >{{ props.mode === 'purchase' ? '建外购单' : '开工单（添加标记）' }}</ElButton>
+        >{{ props.mode === 'purchase' ? '建外购单' : '开工单' }}</ElButton>
       </div>
     </article>
     <ElEmpty v-if="!loading && !items.length" description="当前部门暂无配件或装配体" :image-size="72" />

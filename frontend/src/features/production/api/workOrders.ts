@@ -8,20 +8,20 @@ export async function queryDepartmentWorkOrders(
   productionItemId?: number | null,
   flowNodeId?: string | null,
   sourceFlowNodeId?: string | null,
-  targetTagSetId?: number | null,
+  existingTagIds: number[] = [],
+  applyingTagIds: number[] = [],
 ) {
+  const params = new URLSearchParams()
+  params.set('page', String(page))
+  params.set('page_size', String(pageSize))
+  if (productionItemId) params.set('production_item_id', String(productionItemId))
+  if (flowNodeId) params.set('flow_node_id', flowNodeId)
+  if (sourceFlowNodeId) params.set('source_flow_node_id', sourceFlowNodeId)
+  existingTagIds.forEach(id => params.append('existing_tag_id', String(id)))
+  applyingTagIds.forEach(id => params.append('applying_tag_id', String(id)))
   const response = await service.get<{ data: WorkOrder[]; total: number }>(
     `/departments/${departmentCode}/work-orders`,
-    {
-      params: {
-        page,
-        page_size: pageSize,
-        production_item_id: productionItemId || undefined,
-        flow_node_id: flowNodeId || undefined,
-        source_flow_node_id: sourceFlowNodeId || undefined,
-        target_tag_set_id: targetTagSetId || undefined,
-      },
-    },
+    { params },
   )
   return { items: response.data.data, total: response.data.total }
 }

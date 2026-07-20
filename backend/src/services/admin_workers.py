@@ -10,6 +10,7 @@ from domain.time import BUSINESS_TIMEZONE, business_iso
 from models.organization import Department, Worker, Workshop
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch
 from services.work_order_presenters import item_display
+from services.work_order_progress import calculate_work_order_progress
 
 
 PRODUCTION_DEPARTMENT_CODES = ("stamp", "polish", "qc", "assembly", "warehouse")
@@ -140,6 +141,7 @@ def _serialize_history_item(
     worker_batches = [
         item for item in batches if item.qc_worker_id == worker.id
     ]
+    progress = calculate_work_order_progress(order, batches)
     if worker_batches and order.worker_id != worker.id:
         completed_quantity = sum(item.submitted_quantity for item in worker_batches)
         planned_quantity = completed_quantity
@@ -147,26 +149,15 @@ def _serialize_history_item(
         status = "closed"
         completed_at = _history_date_for_worker(worker, order, worker_batches)
     else:
-        completed_quantity = order.completed_quantity
+        completed_quantity = progress.submitted_quantity
         planned_quantity = order.quantity
         procedure_name = order.work_order_name
         status = order.status
         completed_at = order.closed_at or order.created_at
     lost_quantity = sum(item.lost_quantity or 0 for item in worker_batches or batches)
     scrap_quantity = sum(item.scrap_quantity or 0 for item in worker_batches or batches)
-    rework_resubmitted: dict[int, int] = defaultdict(int)
-    for batch in batches:
-        if batch.rework_source_batch_id is not None:
-            rework_resubmitted[batch.rework_source_batch_id] += batch.submitted_quantity
     rework_pending = (
-        sum(
-            max(
-                (batch.rework_quantity or 0) - rework_resubmitted.get(batch.id, 0),
-                0,
-            )
-            for batch in batches
-            if batch.recorded_at is not None
-        )
+        progress.rework_pending_quantity
         if order.work_order_type == "tag" and order.worker_id == worker.id else 0
     )
     return {
@@ -177,7 +168,9 @@ def _serialize_history_item(
         "planned_quantity": planned_quantity,
         "completed_quantity": completed_quantity,
         "processing_quantity": (
-            max(planned_quantity - completed_quantity, 0) + rework_pending
+            progress.initial_processing_quantity + rework_pending
+            if order.worker_id == worker.id
+            else max(planned_quantity - completed_quantity, 0)
         ),
         "completion_rate": round(completed_quantity / planned_quantity, 4)
         if planned_quantity else 0,

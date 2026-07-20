@@ -1,10 +1,15 @@
+from datetime import datetime
+from decimal import Decimal
+
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Numeric,
     Text,
+    TIMESTAMP,
     UniqueConstraint,
     text,
 )
@@ -73,6 +78,40 @@ class ProcedureTag(Base):
         BigInteger, ForeignKey("procedure.id"), nullable=False
     )
     tag_name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class ProcedureTagPrice(Base):
+    __tablename__ = "procedure_tag_price"
+    __table_args__ = (
+        CheckConstraint("unit_price >= 0", name="ck_procedure_tag_price_nonnegative"),
+        ForeignKeyConstraint(
+            ["procedure_tag_id", "procedure_id"],
+            ["procedure_tag.id", "procedure_tag.procedure_id"],
+            name="fk_procedure_tag_price_tag",
+        ),
+        UniqueConstraint(
+            "product_bom_id",
+            "procedure_tag_id",
+            name="uq_procedure_tag_price_part_tag",
+        ),
+        Index("idx_procedure_tag_price_procedure", "procedure_id", "product_bom_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    product_bom_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("product_bom.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    procedure_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    procedure_tag_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
 
 
 class ProcedureTagSet(Base):

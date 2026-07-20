@@ -5,13 +5,22 @@ GRANT ALL ON SCHEMA public TO zzerp;
 GRANT ALL ON SCHEMA public TO public;
 
 -- ============================================================
--- ZZ ERP 工程产品、BOM 与工艺路线
+-- ZZ ERP 数据库初始化
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 BEGIN;
 
+-- ============================================================
+-- 表结构
+-- ============================================================
+
+-- ------------------------------------------------------------
+-- 认证与会话
+-- ------------------------------------------------------------
+
+-- users：保存系统登录账号、所属部门、角色和权限集合。
 CREATE TABLE users (
     id BIGSERIAL PRIMARY KEY,
     username TEXT NOT NULL UNIQUE,
@@ -22,6 +31,7 @@ CREATE TABLE users (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- user_sessions：保存用户登录会话、CSRF 令牌和会话有效期。
 CREATE TABLE user_sessions (
     id BIGSERIAL PRIMARY KEY,
     user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -31,7 +41,11 @@ CREATE TABLE user_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- 工程确认后的可复用产品主数据，不代表订单或生产批次。
+-- ------------------------------------------------------------
+-- 工程产品、版本、BOM 与工艺路线
+-- ------------------------------------------------------------
+
+-- product：保存工程确认后的可复用产品主数据和当前版本，不代表具体订单或生产批次。
 CREATE TABLE product (
     id BIGSERIAL PRIMARY KEY,
     customer_name TEXT NOT NULL,
@@ -45,6 +59,7 @@ CREATE TABLE product (
     CONSTRAINT uq_product_factory_code UNIQUE (factory_code)
 );
 
+-- product_version：保存产品的版本清单，供 BOM、流程图和订单锁定具体版本。
 CREATE TABLE product_version (
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
     version INT NOT NULL CHECK (version > 0),
@@ -52,12 +67,7 @@ CREATE TABLE product_version (
     PRIMARY KEY (product_id, version)
 );
 
-ALTER TABLE product
-ADD CONSTRAINT fk_product_current_version
-FOREIGN KEY (id, version)
-REFERENCES product_version(product_id, version)
-DEFERRABLE INITIALLY DEFERRED;
-
+-- product_bom：保存产品各版本的配件明细、用量、编号及显示顺序。
 CREATE TABLE product_bom (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
@@ -79,6 +89,7 @@ CREATE TABLE product_bom (
         UNIQUE (product_id, product_version, sort_order) DEFERRABLE INITIALLY DEFERRED
 );
 
+-- product_process_flow：保存产品各版本的流程图 JSON 配置。
 CREATE TABLE product_process_flow (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
@@ -100,12 +111,18 @@ CREATE TABLE product_process_flow (
     CONSTRAINT uq_product_process_flow_version UNIQUE (product_id, product_version)
 );
 
+-- ------------------------------------------------------------
+-- 部门、车间、工艺、标记与人员
+-- ------------------------------------------------------------
+
+-- department：保存系统中的工程、业务、生产、QC、装配和仓库等部门。
 CREATE TABLE department (
     id BIGSERIAL PRIMARY KEY,
     department_name TEXT NOT NULL UNIQUE,
     department_code TEXT NOT NULL UNIQUE
 );
 
+-- workshop：保存部门下属车间，作为工艺和工人的组织范围。
 CREATE TABLE workshop (
     id BIGSERIAL PRIMARY KEY,
     department_id BIGINT NOT NULL REFERENCES department(id),
@@ -114,6 +131,7 @@ CREATE TABLE workshop (
     UNIQUE (department_id, workshop_name)
 );
 
+-- procedure：保存车间可执行的标准生产工艺或外购入库工艺。
 CREATE TABLE procedure (
     id BIGSERIAL PRIMARY KEY,
     workshop_id BIGINT NOT NULL REFERENCES workshop(id),
@@ -124,7 +142,7 @@ CREATE TABLE procedure (
     UNIQUE (workshop_id, procedure_name)
 );
 
--- 标记只属于工艺，不定义固定路线或先后顺序。
+-- procedure_tag：保存工艺下可复用的生产标记名称，不定义固定路线或先后顺序。
 CREATE TABLE procedure_tag (
     id BIGSERIAL PRIMARY KEY,
     procedure_id BIGINT NOT NULL REFERENCES procedure(id),
@@ -134,7 +152,25 @@ CREATE TABLE procedure_tag (
     CONSTRAINT uq_procedure_tag_name UNIQUE (procedure_id, tag_name)
 );
 
--- tag_key 是排序后的 tag_id 逗号串，使相同集合只有一条记录。
+-- procedure_tag_price：配置具体 BOM 配件在某工艺下可用的标记及其计件单价。
+CREATE TABLE procedure_tag_price (
+    id BIGSERIAL PRIMARY KEY,
+    product_bom_id BIGINT NOT NULL REFERENCES product_bom(id) ON DELETE CASCADE,
+    procedure_id BIGINT NOT NULL,
+    procedure_tag_id BIGINT NOT NULL,
+    unit_price NUMERIC(12, 2),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_procedure_tag_price_tag
+        FOREIGN KEY (procedure_tag_id, procedure_id)
+        REFERENCES procedure_tag(id, procedure_id),
+    CONSTRAINT ck_procedure_tag_price_nonnegative
+        CHECK (unit_price >= 0),
+    CONSTRAINT uq_procedure_tag_price_part_tag
+        UNIQUE (product_bom_id, procedure_tag_id)
+);
+
+-- procedure_tag_set：保存同一工艺下的无序标记组合；tag_key 确保相同集合只有一条记录。
 CREATE TABLE procedure_tag_set (
     id BIGSERIAL PRIMARY KEY,
     procedure_id BIGINT NOT NULL REFERENCES procedure(id),
@@ -143,6 +179,7 @@ CREATE TABLE procedure_tag_set (
     CONSTRAINT uq_procedure_tag_set_key UNIQUE (procedure_id, tag_key)
 );
 
+-- procedure_tag_set_member：保存标记组合与具体标记之间的成员关系。
 CREATE TABLE procedure_tag_set_member (
     id BIGSERIAL PRIMARY KEY,
     tag_set_id BIGINT NOT NULL REFERENCES procedure_tag_set(id) ON DELETE CASCADE,
@@ -150,6 +187,7 @@ CREATE TABLE procedure_tag_set_member (
     UNIQUE (tag_set_id, tag_id)
 );
 
+-- worker：保存部门或车间下可分配到工单、QC 批次的工作人员。
 CREATE TABLE worker (
     id BIGSERIAL PRIMARY KEY,
     worker_name TEXT NOT NULL,
@@ -158,6 +196,11 @@ CREATE TABLE worker (
     FOREIGN KEY (workshop_id, department_id) REFERENCES workshop(id, department_id)
 );
 
+-- ------------------------------------------------------------
+-- 客户订单
+-- ------------------------------------------------------------
+
+-- customer_order：保存客户订单主信息、业务状态和并发修订版本。
 CREATE TABLE customer_order (
     id BIGSERIAL PRIMARY KEY,
     customer_order_no TEXT NOT NULL UNIQUE,
@@ -170,6 +213,7 @@ CREATE TABLE customer_order (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
+-- customer_order_item：保存客户订单中的产品、锁定版本、订购数量和交期。
 CREATE TABLE customer_order_item (
     id BIGSERIAL PRIMARY KEY,
     customer_order_id BIGINT NOT NULL REFERENCES customer_order(id) ON DELETE CASCADE,
@@ -185,6 +229,11 @@ CREATE TABLE customer_order_item (
         UNIQUE (id, product_id, product_version)
 );
 
+-- ------------------------------------------------------------
+-- 生产库存、工单、QC 批次与流动记录
+-- ------------------------------------------------------------
+
+-- production_item：保存订单确认后生成的具体生产对象，包括 BOM 配件或装配产出。
 CREATE TABLE production_item (
     id BIGSERIAL PRIMARY KEY,
     customer_order_item_id BIGINT NOT NULL,
@@ -200,6 +249,7 @@ CREATE TABLE production_item (
         REFERENCES product_bom(id, product_id, product_version)
 );
 
+-- repository：保存生产对象在流程节点中的未打标记可用数量。
 CREATE TABLE repository (
     id BIGSERIAL PRIMARY KEY,
     production_item_id BIGINT NOT NULL
@@ -212,7 +262,7 @@ CREATE TABLE repository (
     UNIQUE (production_item_id, flow_node_id, source_flow_node_id, department_id)
 );
 
--- 未打标记数量保留在 repository；非空标记组合数量保存在这里。
+-- procedure_tag_stock：保存生产对象在流程节点中已完成非空标记组合的可用数量。
 CREATE TABLE procedure_tag_stock (
     id BIGSERIAL PRIMARY KEY,
     production_item_id BIGINT NOT NULL
@@ -233,6 +283,7 @@ CREATE TABLE procedure_tag_stock (
     )
 );
 
+-- work_order：保存标记加工、外购入库和装配工单及其执行快照和进度。
 CREATE TABLE work_order (
     id BIGSERIAL PRIMARY KEY,
     work_order_no TEXT UNIQUE,
@@ -300,6 +351,7 @@ CREATE TABLE work_order (
         REFERENCES procedure_tag_stock(id, production_item_id)
 );
 
+-- work_order_material：保存装配工单占用的来源库存、生产对象和物料数量。
 CREATE TABLE work_order_material (
     id BIGSERIAL PRIMARY KEY,
     work_order_id BIGINT NOT NULL REFERENCES work_order(id) ON DELETE CASCADE,
@@ -312,6 +364,7 @@ CREATE TABLE work_order_material (
     UNIQUE (work_order_id, production_item_id)
 );
 
+-- work_order_batch：保存工单送检批次、QC 结果及返工复检的父子关系。
 CREATE TABLE work_order_batch (
     id BIGSERIAL PRIMARY KEY,
     work_order_id BIGINT NOT NULL REFERENCES work_order(id) ON DELETE CASCADE,
@@ -346,6 +399,7 @@ CREATE TABLE work_order_batch (
     )
 );
 
+-- production_movement：保存数量在流程节点、部门、标记组合和 QC 结果之间的不可变流动历史。
 CREATE TABLE production_movement (
     id BIGSERIAL PRIMARY KEY,
     production_item_id BIGINT NOT NULL
@@ -417,6 +471,20 @@ CREATE TABLE production_movement (
             AND work_order_batch_id IS NOT NULL)
     )
 );
+
+-- ============================================================
+-- 表约束补充
+-- ============================================================
+
+ALTER TABLE product
+ADD CONSTRAINT fk_product_current_version
+FOREIGN KEY (id, version)
+REFERENCES product_version(product_id, version)
+DEFERRABLE INITIALLY DEFERRED;
+
+-- ============================================================
+-- 数据完整性函数
+-- ============================================================
 
 CREATE FUNCTION set_updated_at() RETURNS TRIGGER AS $$
 BEGIN
@@ -1001,6 +1069,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- ============================================================
+-- 触发器
+-- ============================================================
+
 CREATE TRIGGER trg_production_movement_context
 BEFORE INSERT
 ON production_movement
@@ -1055,9 +1127,17 @@ CREATE TRIGGER trg_product_process_flow_updated_at
 BEFORE UPDATE ON product_process_flow
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER trg_procedure_tag_price_updated_at
+BEFORE UPDATE ON procedure_tag_price
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
 CREATE TRIGGER trg_customer_order_updated_at
 BEFORE UPDATE ON customer_order
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+-- ============================================================
+-- 索引
+-- ============================================================
 
 CREATE INDEX idx_product_customer_name_trgm
     ON product USING GIN (customer_name gin_trgm_ops);
@@ -1097,6 +1177,8 @@ CREATE UNIQUE INDEX uq_production_movement_assembly_input
 CREATE INDEX idx_repository_department ON repository(department_id);
 CREATE INDEX idx_procedure_tag_set_member_tag
     ON procedure_tag_set_member(tag_id, tag_set_id);
+CREATE INDEX idx_procedure_tag_price_procedure
+    ON procedure_tag_price(procedure_id, product_bom_id);
 CREATE INDEX idx_procedure_tag_stock_department
     ON procedure_tag_stock(department_id, tag_set_id);
 CREATE INDEX idx_production_item_order_item ON production_item(customer_order_item_id);
@@ -1150,6 +1232,11 @@ CREATE INDEX idx_production_movement_position_latest
         created_at DESC,
         id DESC
     ) WHERE target_department_id IS NOT NULL;
+
+-- ============================================================
+-- 初始化数据
+-- 所有 INSERT 统一放在文件末尾。
+-- ============================================================
 
 INSERT INTO users (username, password, department, role, permissions) VALUES
 (

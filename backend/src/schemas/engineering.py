@@ -32,6 +32,7 @@ class ProcessNodePayload(FlowNodeBase):
     type: Literal["process"]
     process_code: str = Field(min_length=1, max_length=100)
     procedure_id: int = Field(gt=0)
+    qc_required: bool = False
 
 
 class AssemblyNodePayload(FlowNodeBase):

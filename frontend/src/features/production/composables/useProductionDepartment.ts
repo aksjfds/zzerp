@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import {
@@ -13,7 +13,9 @@ import type {
   WorkOrderQueryScope,
 } from '../domain/types'
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
-import { useWorkOrderActions, useWorkOrderList } from './useWorkOrders'
+import { useWorkOrderList } from './useWorkOrders'
+import { useProductionWorkOrderActions } from './useProductionWorkOrderActions'
+import { usePurchaseWorkOrderActions } from './usePurchaseWorkOrderActions'
 
 export function useProductionDepartment(
   departmentCode: string,
@@ -34,10 +36,8 @@ export function useProductionDepartment(
   const dispatchSubmitting = ref(false)
   const tagItems = ref<TagCard[]>([])
   const tagLoading = ref(false)
-  const selectedTagKey = ref<string | null>(null)
-  const selectedTag = computed(() => tagItems.value.find(
-    item => item.card_key === selectedTagKey.value,
-  ))
+  const existingTagIds = ref<number[]>([])
+  const applyingTagIds = ref<number[]>([])
   let tagSequence = 0
 
   async function loadDetails() {
@@ -47,21 +47,22 @@ export function useProductionDepartment(
   function clearTagState() {
     tagSequence += 1
     tagItems.value = []
-    selectedTagKey.value = null
+    existingTagIds.value = []
+    applyingTagIds.value = []
     workOrderScope.value = null
     tagLoading.value = false
   }
 
-  function applyTagSelection(item: TagCard) {
+  function syncWorkOrderScope() {
     const repository = workspace.selectedRepository.value
-    selectedTagKey.value = item.card_key
-    workOrderScope.value = item.tag_set_id === null || !repository
-      ? null
-      : {
+    workOrderScope.value = repository
+      ? {
           flowNodeId: repository.flow_node_id,
           sourceFlowNodeId: repository.source_flow_node_id,
-          targetTagSetId: item.tag_set_id,
+          existingTagIds: [...existingTagIds.value],
+          applyingTagIds: [...applyingTagIds.value],
         }
+      : null
   }
 
   async function loadTags(item = workspace.selectedRepository.value) {
@@ -84,17 +85,9 @@ export function useProductionDepartment(
         || workspace.selectedCardKey.value !== item.card_key
       ) return
       tagItems.value = result
-      const current = result.find(card => card.card_key === selectedTagKey.value)
-      if (current) {
-        applyTagSelection(current)
-      } else {
-        selectedTagKey.value = null
-        workOrderScope.value = null
-        workOrderList.reset()
-      }
+      syncWorkOrderScope()
     } catch {
       if (sequence === tagSequence) {
-        selectedTagKey.value = null
         workOrderScope.value = null
         workOrderList.reset()
         ElMessage.warning('标记组合加载失败')
@@ -121,41 +114,33 @@ export function useProductionDepartment(
     workspace.selectRepository(item)
     clearTagState()
     workOrderList.reset()
-    if (mode === 'production') void loadTags(item)
+    if (mode === 'production') {
+      void loadTags(item).then(loadDetails)
+    }
     else void loadDetails()
   }
 
-  function selectTag(item: TagCard) {
-    applyTagSelection(item)
+  function setExistingTagFilter(tagIds: number[]) {
+    existingTagIds.value = tagIds
+    syncWorkOrderScope()
     workOrderList.reset()
     void loadDetails()
   }
 
-  function openTagWorkOrder(item: TagCard) {
-    const repository = workspace.selectedRepository.value
-    if (!repository) return
-    if (
-      item.available_quantity < 1
-      || ((item.repository_id === null) === (item.tag_stock_id === null))
-    ) {
-      ElMessage.warning('当前标记组合没有可用的开单数量')
-      return
-    }
-    activeRepository.value = repository
-    applyTagSelection(item)
+  function setApplyingTagFilter(tagIds: number[]) {
+    applyingTagIds.value = tagIds
+    syncWorkOrderScope()
     workOrderList.reset()
     void loadDetails()
-    dialogVisible.value = true
   }
 
   async function openWorkOrder(item: RepositoryItem) {
-    const preferredSourceKey = workspace.selectedCardKey.value === item.card_key
-      ? selectedTagKey.value
-      : null
+    const sameRepository = workspace.selectedCardKey.value === item.card_key
     workspace.selectRepository(item)
-    clearTagState()
-    selectedTagKey.value = preferredSourceKey
-    workOrderList.reset()
+    if (!sameRepository) {
+      clearTagState()
+      workOrderList.reset()
+    }
     activeRepository.value = item
     if (mode === 'production') {
       await loadTags(item)
@@ -168,6 +153,7 @@ export function useProductionDepartment(
         return
       }
     }
+    await loadDetails()
     dialogVisible.value = true
   }
 
@@ -183,7 +169,7 @@ export function useProductionDepartment(
     if (mode === 'production' && payload.tagNames.length === 0) return
     submitting.value = true
     try {
-      const created = await createWorkOrder(
+      await createWorkOrder(
         payload.repositoryId,
         payload.tagStockId,
         payload.tagNames,
@@ -192,16 +178,6 @@ export function useProductionDepartment(
       )
       dialogVisible.value = false
       await reloadWorkspace()
-      if (mode === 'production' && created.target_tag_set_id !== null) {
-        const target = tagItems.value.find(
-          item => item.tag_set_id === created.target_tag_set_id,
-        )
-        if (target) {
-          applyTagSelection(target)
-          workOrderList.reset()
-          await loadDetails()
-        }
-      }
       ElMessage.success(mode === 'purchase' ? '外购入库单已创建' : '标记工单已创建')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
@@ -217,6 +193,7 @@ export function useProductionDepartment(
     activeRepository.value = item
     await loadTags(item)
     if (workspace.selectedCardKey.value !== item.card_key) return
+    await loadDetails()
     if (!tagItems.value.some(
       source => source.tag_stock_id !== null && source.available_quantity > 0,
     )) {
@@ -272,19 +249,21 @@ export function useProductionDepartment(
     load,
     loadDetails,
     openDispatch,
-    openTagWorkOrder,
     openWorkOrder,
     refresh,
     saveDispatch,
     saveWorkOrder,
     selectRepository,
-    selectedTag,
-    selectedTagKey,
-    selectTag,
+    existingTagIds,
+    applyingTagIds,
+    setExistingTagFilter,
+    setApplyingTagFilter,
     tagItems,
     tagLoading,
     submitting,
-    workOrderActions: useWorkOrderActions(reloadWorkspace, mode),
+    workOrderActions: mode === 'production'
+      ? useProductionWorkOrderActions(reloadWorkspace)
+      : usePurchaseWorkOrderActions(reloadWorkspace),
     workOrderList,
     workspace,
   }

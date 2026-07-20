@@ -43,6 +43,12 @@ const router = createRouter({
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
+      path: '/production/:departmentCode/tag-prices',
+      name: 'procedure-tag-prices',
+      component: () => import('@/features/production/views/ProcedureTagPriceView.vue'),
+      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
+    },
+    {
       path: '/admin',
       name: 'admin-dashboard',
       component: () => import('@/features/admin/views/AdminDashboardView.vue'),

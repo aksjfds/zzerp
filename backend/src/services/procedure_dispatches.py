@@ -7,6 +7,7 @@ from services.errors import DomainError
 from services.procedure_tags import consume_tag_stock
 from services.production_movements import record_movement
 from services.work_order_support import move_to_node, node_context, refresh_order_closed
+from services.work_order_progress import order_remaining_expression
 
 
 def dispatch_tag_stock(
@@ -63,7 +64,7 @@ def dispatch_tag_stock(
             raise DomainError("procedure_tag_mismatch", "标记组合数量不属于当前流程工艺")
 
         reserved = session.scalar(
-            select(func.coalesce(func.sum(WorkOrder.quantity - WorkOrder.completed_quantity), 0))
+            select(func.coalesce(func.sum(order_remaining_expression()), 0))
             .where(
                 WorkOrder.procedure_tag_stock_id == stock.id,
                 WorkOrder.status == "open",

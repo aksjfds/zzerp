@@ -90,6 +90,7 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
       type,
       process_code: stringValue(properties.processCode),
       procedure_id: requiredNumber(properties.procedureId, 'procedureId'),
+      qc_required: Boolean(properties.qcRequired),
     }
   }
   return {
@@ -120,7 +121,11 @@ function toBusinessEdge(edge: LogicFlow.EdgeData, nodes: FlowNode[]): FlowEdge {
 function nodeProperties(node: FlowNode): Record<string, unknown> {
   if (node.type === 'part') return { bomItemId: node.bom_item_id, partNo: node.part_no }
   if (node.type === 'process') {
-    return { processCode: node.process_code, procedureId: node.procedure_id }
+    return {
+      processCode: node.process_code,
+      procedureId: node.procedure_id,
+      qcRequired: node.qc_required,
+    }
   }
   if (node.type === 'assembly') {
     return { outputName: node.output_name, outputPcs: node.output_pcs }
