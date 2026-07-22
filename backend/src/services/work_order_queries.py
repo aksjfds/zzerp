@@ -1,6 +1,12 @@
 from sqlalchemy import exists, func, or_, select
 
 from database import SessionLocal
+from domain.production_types import (
+    MOVEMENT_QC_DISPATCH,
+    WORK_ORDER_ASSEMBLY,
+    WORK_ORDER_PURCHASE_RECEIPT,
+    WORK_ORDER_TAG,
+)
 from models.organization import (
     Department,
     Procedure,
@@ -8,7 +14,13 @@ from models.organization import (
     Worker,
     Workshop,
 )
-from models.production import WorkOrder, WorkOrderBatch, WorkOrderMaterial
+from models.production import (
+    ProductionMovement,
+    ProductionOperationUndo,
+    WorkOrder,
+    WorkOrderBatch,
+    WorkOrderMaterial,
+)
 from services.errors import DomainError
 from services.work_order_presenters import (
     item_display,
@@ -16,6 +28,7 @@ from services.work_order_presenters import (
     serialize_work_order,
     work_order_context,
 )
+from services.qc_dispatches import qc_release_context
 
 
 def list_department_work_orders(
@@ -37,10 +50,13 @@ def list_department_work_orders(
             .order_by(WorkOrder.id.desc())
         )
         condition = (
-            WorkOrder.work_order_type == "assembly"
+            WorkOrder.work_order_type == WORK_ORDER_ASSEMBLY
             if department_code == "assembly"
             else (
-                (WorkOrder.work_order_type.in_(("tag", "purchase_receipt")))
+                (WorkOrder.work_order_type.in_((
+                    WORK_ORDER_TAG,
+                    WORK_ORDER_PURCHASE_RECEIPT,
+                )))
                 & (Workshop.department_id == department.id)
             )
         )
@@ -100,23 +116,85 @@ def list_qc_batches(
     page: int,
     page_size: int,
     production_item_id: int | None = None,
+    history: bool = False,
+    keyword: str | None = None,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         statement = select(WorkOrderBatch).join(
             WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id
-        ).where(WorkOrderBatch.recorded_at.is_(None))
+        )
+        if history:
+            statement = statement.where(WorkOrderBatch.recorded_at.is_not(None))
+        else:
+            statement = statement.where(
+                or_(
+                    WorkOrderBatch.recorded_at.is_(None),
+                    WorkOrderBatch.qualified_quantity > 0,
+                )
+            )
         if production_item_id is not None:
             statement = statement.where(_related_to_production_item(production_item_id))
-        total = session.scalar(
-            select(func.count()).select_from(statement.subquery())
-        ) or 0
-        batches = session.scalars(
-            statement
-            .order_by(WorkOrderBatch.id.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-        ).all()
-        return [_serialize_pending_batch(session, batch) for batch in batches], total
+        batches = list(session.scalars(statement.order_by(WorkOrderBatch.id.desc())))
+        batch_ids = [batch.id for batch in batches]
+        order_ids = {batch.work_order_id for batch in batches}
+        orders = {
+            order.id: order
+            for order in session.scalars(
+                select(WorkOrder).where(WorkOrder.id.in_(order_ids))
+            )
+        } if order_ids else {}
+        dispatched_by_batch = {
+            batch_id: int(quantity or 0)
+            for batch_id, quantity in session.execute(
+                select(
+                    ProductionMovement.work_order_batch_id,
+                    func.sum(ProductionMovement.quantity),
+                )
+                .where(
+                    ProductionMovement.work_order_batch_id.in_(batch_ids),
+                    ProductionMovement.movement_type == MOVEMENT_QC_DISPATCH,
+                )
+                .group_by(ProductionMovement.work_order_batch_id)
+            )
+        } if batch_ids else {}
+        visible: list[dict] = []
+        normalized_keyword = (keyword or "").strip().lower()
+        for batch in batches:
+            order = orders.get(batch.work_order_id)
+            if order is None:
+                continue
+            release = qc_release_context(
+                session,
+                batch,
+                order,
+                dispatched_by_batch.get(batch.id, 0),
+            )
+            is_active = batch.recorded_at is None or (
+                release is not None and release["dispatchable_quantity"] > 0
+            )
+            if (history and not is_active) or (not history and is_active):
+                item = _serialize_pending_batch(session, batch, release)
+                if not normalized_keyword or _matches_qc_keyword(
+                    item,
+                    normalized_keyword,
+                ):
+                    visible.append(item)
+        total = len(visible)
+        return visible[(page - 1) * page_size:page * page_size], total
+
+
+def _matches_qc_keyword(item: dict, keyword: str) -> bool:
+    searchable = " ".join(
+        str(item.get(field) or "")
+        for field in (
+            "work_order_no",
+            "customer_order_no",
+            "part_no",
+            "part_name",
+            "work_order_name",
+        )
+    ).lower()
+    return all(token in searchable for token in keyword.split())
 
 
 def _department(session, department_code: str) -> Department:
@@ -143,6 +221,7 @@ def _related_to_production_item(production_item_id: int):
 def _cache_order_relations(session, order_ids: list[int]) -> None:
     batch_cache: dict[int, list[WorkOrderBatch]] = {}
     material_cache: dict[int, list[int]] = {}
+    undo_cache: dict[int, ProductionOperationUndo] = {}
     if order_ids:
         for batch in session.scalars(
             select(WorkOrderBatch)
@@ -157,11 +236,24 @@ def _cache_order_relations(session, order_ids: list[int]) -> None:
             ).where(WorkOrderMaterial.work_order_id.in_(order_ids))
         ):
             material_cache.setdefault(work_order_id, []).append(production_item_id)
+        for operation in session.scalars(
+            select(ProductionOperationUndo)
+            .where(
+                ProductionOperationUndo.work_order_id.in_(order_ids),
+                ProductionOperationUndo.status == "applied",
+            )
+            .order_by(
+                ProductionOperationUndo.work_order_id,
+                ProductionOperationUndo.id.desc(),
+            )
+        ):
+            undo_cache.setdefault(operation.work_order_id, operation)
     session.info["work_order_batch_cache"] = batch_cache
     session.info["work_order_material_cache"] = material_cache
+    session.info["work_order_undo_cache"] = undo_cache
 
 
-def _serialize_pending_batch(session, batch: WorkOrderBatch) -> dict:
+def _serialize_pending_batch(session, batch: WorkOrderBatch, release=None) -> dict:
     order = session.get(WorkOrder, batch.work_order_id)
     customer_order, _, production_item, _ = work_order_context(session, order)
     part_no, part_name = item_display(session, production_item)
@@ -175,7 +267,14 @@ def _serialize_pending_batch(session, batch: WorkOrderBatch) -> dict:
             "part_no": part_no,
             "part_name": part_name,
             "work_order_name": order.work_order_name,
-            "remaining_quantity": batch.submitted_quantity,
+            "dispatchable_quantity": (
+                release["dispatchable_quantity"] if release is not None else 0
+            ),
+            "target_node_label": (
+                release["target"].get("label", "")
+                if release is not None and release["target"] is not None
+                else None
+            ),
         }
     )
     return data

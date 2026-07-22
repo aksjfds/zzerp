@@ -2,7 +2,6 @@ import type { WorkOrderCardPolicy } from './workOrderCardPolicy'
 import {
   commonStatusType,
   initialProcessingQuantity,
-  reworkPendingQuantity,
 } from './workOrderCardPolicy'
 
 export const productionWorkOrderCardPolicy: WorkOrderCardPolicy = {
@@ -25,15 +24,10 @@ export const productionWorkOrderCardPolicy: WorkOrderCardPolicy = {
     return `${item.work_order_name}加工中`
   },
   statusType: commonStatusType,
-  showComplete: item => item.status === 'open',
-  disableComplete: item => (
-    item.pending_qc_quantity !== 0
-    || reworkPendingQuantity(item) !== 0
-    || (item.qc_required && initialProcessingQuantity(item) > 0)
-  ),
+  showComplete: () => false,
+  disableComplete: () => false,
   showInitialQc: item => (
-    item.qc_required
-    && item.status === 'open'
+    item.status === 'open'
     && initialProcessingQuantity(item) > 0
   ),
   showReworkQc: (item, batch) => (

@@ -1,5 +1,7 @@
+from sqlalchemy import select
+
 from domain.time import utc_now
-from models.organization import Procedure
+from models.organization import Department, Procedure
 from models.production import ProductionItem, Repository, WorkOrder, WorkOrderBatch
 from services.errors import DomainError
 from services.production_movements import record_movement
@@ -11,6 +13,7 @@ from services.work_order_command_support import (
 from services.work_order_presenters import serialize_work_order
 from services.work_order_progress import order_remaining_quantity
 from services.work_order_support import move_to_node, refresh_order_closed
+from services.production_flow import process_qc_node
 
 
 def create_purchase_order(
@@ -60,6 +63,12 @@ def submit_purchase_order(
     target_flow_node_id = None
     target_department_id = None
     if completion_action == "qc":
+        qc_node = process_qc_node(context.flow, context.nodes, node["id"])
+        qc_department_id = session.scalar(
+            select(Department.id).where(Department.department_code == "qc")
+        )
+        if qc_node is None or qc_department_id is None:
+            raise DomainError("work_order_qc_not_configured", "当前工艺后未配置有效QC节点")
         batch = WorkOrderBatch(
             work_order_id=order.id,
             submitted_quantity=quantity,
@@ -67,6 +76,8 @@ def submit_purchase_order(
         )
         session.add(batch)
         session.flush()
+        target_flow_node_id = qc_node["id"]
+        target_department_id = qc_department_id
     else:
         target = context.normal_target(node["id"])
         target_department_id = move_to_node(

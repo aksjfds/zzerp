@@ -25,9 +25,16 @@ export function startProcessDrag(
     properties: {
       processCode: `procedure_${procedureId}`,
       procedureId,
-      qcRequired: false,
     },
   })
+}
+
+export function startQcDrag(lf: LogicFlow) {
+  lf.dnd.startDrag({ type: 'qc', text: 'QC' })
+}
+
+export function startShippingDrag(lf: LogicFlow) {
+  lf.dnd.startDrag({ type: 'shipping', text: '发货' })
 }
 
 export function startAssemblyDrag(lf: LogicFlow) {
@@ -43,7 +50,7 @@ export function updateNodeDefinition(
   nodeId: string,
   label: string,
   property: {
-    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId' | 'qcRequired'
+    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId'
     value: string | number | boolean
   } | null,
 ) {

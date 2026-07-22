@@ -28,50 +28,60 @@ def tag_suggestions(session, procedure_id: int) -> list[ProcedureTag]:
 
 def configured_tag_suggestions(
     session,
-    product_bom_id: int | None,
+    production_item: ProductionItem,
     procedure_id: int,
 ) -> list[ProcedureTag]:
-    if product_bom_id is None:
-        return []
-    return list(session.scalars(
-        select(ProcedureTag)
-        .join(
-            ProcedureTagPrice,
-            ProcedureTagPrice.procedure_tag_id == ProcedureTag.id,
-        )
-        .where(
-            ProcedureTagPrice.product_bom_id == product_bom_id,
-            ProcedureTagPrice.procedure_id == procedure_id,
-        )
-        .order_by(ProcedureTag.tag_name, ProcedureTag.id)
-    ).all())
-
-
-def ensure_tag_price_configs(
-    session,
-    product_bom_id: int | None,
-    procedure: Procedure,
-    tags: list[ProcedureTag],
-) -> None:
-    if product_bom_id is None or not tags:
-        return
-    existing_ids = set(session.scalars(
-        select(ProcedureTagPrice.procedure_tag_id).where(
-            ProcedureTagPrice.product_bom_id == product_bom_id,
-            ProcedureTagPrice.procedure_id == procedure.id,
-            ProcedureTagPrice.procedure_tag_id.in_([tag.id for tag in tags]),
-        )
-    ).all())
-    session.add_all(
-        ProcedureTagPrice(
-            product_bom_id=product_bom_id,
-            procedure_id=procedure.id,
-            procedure_tag_id=tag.id,
-            unit_price=None,
-        )
-        for tag in tags
-        if tag.id not in existing_ids
+    key = (
+        production_item.product_id,
+        production_item.product_version,
+        production_item.origin_flow_node_id,
+        procedure_id,
     )
+    cache = session.info.setdefault("configured_procedure_tags_cache", {})
+    if key not in cache:
+        cache[key] = list(session.scalars(
+            select(ProcedureTag)
+            .join(
+                ProcedureTagPrice,
+                ProcedureTagPrice.procedure_tag_id == ProcedureTag.id,
+            )
+            .where(
+                ProcedureTagPrice.product_id == production_item.product_id,
+                ProcedureTagPrice.product_version == production_item.product_version,
+                ProcedureTagPrice.origin_flow_node_id
+                == production_item.origin_flow_node_id,
+                ProcedureTagPrice.procedure_id == procedure_id,
+            )
+            .order_by(ProcedureTag.tag_name, ProcedureTag.id)
+        ).all())
+    return cache[key]
+
+
+def required_tag_ids(
+    session,
+    production_item: ProductionItem,
+    procedure_id: int,
+) -> set[int]:
+    return {
+        tag.id
+        for tag in configured_tag_suggestions(
+            session,
+            production_item,
+            procedure_id,
+        )
+    }
+
+
+def is_final_tag_set(
+    session,
+    production_item: ProductionItem,
+    procedure_id: int,
+    tag_set_id: int | None,
+) -> bool:
+    required_ids = required_tag_ids(session, production_item, procedure_id)
+    if not required_ids or tag_set_id is None:
+        return False
+    return {tag.id for tag in tag_set_tags(session, tag_set_id)} == required_ids
 
 
 def get_or_create_tag(session, procedure: Procedure, tag_name: str) -> ProcedureTag:
@@ -99,14 +109,20 @@ def get_or_create_tag(session, procedure: Procedure, tag_name: str) -> Procedure
 def tag_set_tags(session, tag_set_id: int | None) -> list[ProcedureTag]:
     if tag_set_id is None:
         return []
-    return list(
-        session.scalars(
-            select(ProcedureTag)
-            .join(ProcedureTagSetMember, ProcedureTagSetMember.tag_id == ProcedureTag.id)
-            .where(ProcedureTagSetMember.tag_set_id == tag_set_id)
-            .order_by(ProcedureTag.id)
-        ).all()
-    )
+    cache = session.info.setdefault("procedure_tag_set_tags_cache", {})
+    if tag_set_id not in cache:
+        cache[tag_set_id] = list(
+            session.scalars(
+                select(ProcedureTag)
+                .join(
+                    ProcedureTagSetMember,
+                    ProcedureTagSetMember.tag_id == ProcedureTag.id,
+                )
+                .where(ProcedureTagSetMember.tag_set_id == tag_set_id)
+                .order_by(ProcedureTag.id)
+            ).all()
+        )
+    return cache[tag_set_id]
 
 
 def serialize_tag_set(session, tag_set_id: int | None) -> dict:

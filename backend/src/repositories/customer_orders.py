@@ -12,7 +12,10 @@ class CustomerOrderRepository:
         return list(
             self.session.scalars(
                 select(CustomerOrder)
-                .options(selectinload(CustomerOrder.items))
+                .options(
+                    selectinload(CustomerOrder.items),
+                    selectinload(CustomerOrder.customer),
+                )
                 .order_by(CustomerOrder.updated_at.desc(), CustomerOrder.id.desc())
                 .offset(offset)
                 .limit(limit)
@@ -25,14 +28,20 @@ class CustomerOrderRepository:
     def get(self, order_id: int) -> CustomerOrder | None:
         return self.session.scalar(
             select(CustomerOrder)
-            .options(selectinload(CustomerOrder.items))
+            .options(
+                selectinload(CustomerOrder.items),
+                selectinload(CustomerOrder.customer),
+            )
             .where(CustomerOrder.id == order_id)
         )
 
     def get_for_update(self, order_id: int) -> CustomerOrder | None:
         return self.session.scalar(
             select(CustomerOrder)
-            .options(selectinload(CustomerOrder.items))
+            .options(
+                selectinload(CustomerOrder.items),
+                selectinload(CustomerOrder.customer),
+            )
             .where(CustomerOrder.id == order_id)
             .with_for_update()
         )

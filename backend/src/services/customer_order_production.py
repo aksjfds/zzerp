@@ -3,7 +3,6 @@ from collections import defaultdict
 from sqlalchemy import func, select
 
 from database import SessionLocal
-from services.production_flow import load_product_flow
 from models.engineering import Product, ProductBom
 from models.production import (
     ProcedureTagStock,
@@ -15,7 +14,9 @@ from models.production import (
 )
 from models.sales import CustomerOrder, CustomerOrderItem
 from services.errors import DomainError
+from services.production_flow import load_product_flow
 from services.work_order_presenters import production_item_name
+from services.work_order_progress import rework_pending_by_order
 
 
 def get_customer_order_production(order_id: int) -> dict:
@@ -39,7 +40,7 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             session, order_item.product_id, order_item.product_version
         )
     except DomainError:
-        flow, nodes = {"schema_version": 2, "nodes": [], "edges": []}, {}
+        flow, nodes = {"schema_version": 3, "nodes": [], "edges": []}, {}
     bom_items = session.scalars(
         select(ProductBom).where(
             ProductBom.product_id == order_item.product_id,
@@ -76,18 +77,45 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         if production_item_ids
         else []
     )
+    work_orders = (
+        list(session.scalars(
+            select(WorkOrder).where(
+                WorkOrder.production_item_id.in_(production_item_ids),
+                WorkOrder.work_order_type.in_(("tag", "assembly")),
+            )
+        ).all())
+        if production_item_ids
+        else []
+    )
+    work_order_ids = [item.id for item in work_orders]
+    work_order_batches = (
+        list(session.scalars(
+            select(WorkOrderBatch).where(
+                WorkOrderBatch.work_order_id.in_(work_order_ids)
+            )
+        ).all())
+        if work_order_ids
+        else []
+    )
     pending_qc_by_node = (
         session.execute(
             select(
-                WorkOrder.flow_node_id,
+                ProductionMovement.target_flow_node_id,
                 func.sum(WorkOrderBatch.submitted_quantity),
             )
-            .join(WorkOrderBatch, WorkOrderBatch.work_order_id == WorkOrder.id)
+            .join(
+                ProductionMovement,
+                ProductionMovement.work_order_batch_id == WorkOrderBatch.id,
+            )
+            .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
             .where(
                 WorkOrder.production_item_id.in_(production_item_ids),
                 WorkOrderBatch.recorded_at.is_(None),
+                ProductionMovement.movement_type.in_(
+                    ("process", "purchase_receipt", "assembly_output")
+                ),
             )
-            .group_by(WorkOrder.flow_node_id)
+            .group_by(ProductionMovement.target_flow_node_id)
         ).all()
         if production_item_ids
         else []
@@ -114,7 +142,35 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         )
         current_inputs[stock.flow_node_id][source_name] += stock.quantity
     for flow_node_id, quantity in pending_qc_by_node:
-        current_by_node[flow_node_id] += int(quantity or 0)
+        if flow_node_id:
+            current_by_node[flow_node_id] += int(quantity or 0)
+    held_qc_by_node: dict[str, int] = defaultdict(int)
+    batch_ids = {
+        movement.work_order_batch_id
+        for movement in movements
+        if movement.work_order_batch_id is not None
+    }
+    batches_by_id = {
+        batch.id: batch
+        for batch in session.scalars(
+            select(WorkOrderBatch).where(WorkOrderBatch.id.in_(batch_ids))
+        )
+    } if batch_ids else {}
+    for movement in movements:
+        if (
+            movement.movement_type == "qc_qualified"
+            and movement.source_flow_node_id == movement.target_flow_node_id
+            and movement.source_department_id == movement.target_department_id
+            and movement.target_flow_node_id
+        ):
+            held_qc_by_node[movement.target_flow_node_id] += movement.quantity
+        elif movement.movement_type == "qc_dispatch" and movement.source_flow_node_id:
+            held_qc_by_node[movement.source_flow_node_id] -= movement.quantity
+    for flow_node_id, quantity in held_qc_by_node.items():
+        current_by_node[flow_node_id] += max(quantity, 0)
+    pending_rework = rework_pending_by_order(work_order_batches)
+    for work_order in work_orders:
+        current_by_node[work_order.flow_node_id] += pending_rework.get(work_order.id, 0)
 
     material_inputs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     entered_by_node: dict[str, int] = defaultdict(int)
@@ -143,7 +199,15 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             transferred_by_node[movement.source_flow_node_id] += movement.quantity
         if movement.source_flow_node_id and movement.movement_type in {"scrap", "lost"}:
             abnormal_by_node[movement.source_flow_node_id] += movement.quantity
-        if movement.movement_type == "assembly_output" and movement.source_flow_node_id:
+        movement_batch = batches_by_id.get(movement.work_order_batch_id)
+        if (
+            movement.movement_type == "assembly_output"
+            and movement.source_flow_node_id
+            and (
+                movement_batch is None
+                or movement_batch.rework_source_batch_id is None
+            )
+        ):
             assembly_output_by_node[movement.source_flow_node_id] += movement.quantity
         if movement.movement_type != "assembly_input" or not movement.source_flow_node_id:
             continue
@@ -174,6 +238,10 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             output_pcs = int(node.get("output_pcs", 1))
             transferred = output_quantity // output_pcs if output_pcs else 0
             entered = 0
+            current = 0
+        elif node_type == "shipping":
+            output_quantity = entered
+            transferred = entered
             current = 0
         stats.append(
             {

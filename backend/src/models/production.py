@@ -15,6 +15,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import JSONB
 
 from database import Base
 
@@ -166,7 +167,7 @@ class WorkOrder(Base):
             "(work_order_type = 'assembly' AND procedure_id IS NULL "
             "AND applied_tag_set_id IS NULL "
             "AND source_tag_set_id IS NULL AND target_tag_set_id IS NULL "
-            "AND source_flow_node_id IS NULL "
+            "AND source_flow_node_id IS NOT NULL "
             "AND repository_id IS NULL AND procedure_tag_stock_id IS NULL) OR "
             "(work_order_type = 'tag' AND procedure_id IS NOT NULL "
             "AND applied_tag_set_id IS NOT NULL "
@@ -386,7 +387,7 @@ class ProductionMovement(Base):
         CheckConstraint(
             "movement_type IN ('initial', 'process', 'assembly_input', "
             "'assembly_output', 'purchase_receipt', 'qc_qualified', 'qc_rework', "
-            "'procedure_dispatch', 'scrap', 'lost')",
+            "'qc_dispatch', 'scrap', 'lost')",
             name="ck_production_movement_type",
         ),
         CheckConstraint(
@@ -394,11 +395,6 @@ class ProductionMovement(Base):
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NULL "
             "AND target_department_id IS NOT NULL AND work_order_id IS NULL "
             "AND work_order_batch_id IS NULL) OR "
-            "(movement_type = 'procedure_dispatch' "
-            "AND source_flow_node_id IS NOT NULL "
-            "AND source_department_id IS NOT NULL "
-            "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "
-            "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
             "(movement_type IN ('process', 'purchase_receipt', 'assembly_output') "
             "AND source_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "
@@ -408,9 +404,13 @@ class ProductionMovement(Base):
             "AND target_department_id IS NULL AND work_order_id IS NOT NULL "
             "AND work_order_batch_id IS NULL) OR "
             "(movement_type = 'qc_qualified' AND source_flow_node_id IS NOT NULL "
-            "AND source_department_id IS NOT NULL "
-            "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "
+            "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
+            "AND target_department_id IS NOT NULL "
             "AND work_order_id IS NOT NULL AND work_order_batch_id IS NOT NULL) OR "
+            "(movement_type = 'qc_dispatch' AND source_flow_node_id IS NOT NULL "
+            "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
+            "AND target_department_id IS NOT NULL AND work_order_id IS NOT NULL "
+            "AND work_order_batch_id IS NOT NULL) OR "
             "(movement_type = 'qc_rework' AND source_flow_node_id IS NOT NULL "
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND target_department_id IS NOT NULL "
@@ -510,3 +510,50 @@ class ProductionMovement(Base):
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
+
+
+class ProductionOperationUndo(Base):
+    __tablename__ = "production_operation_undo"
+    __table_args__ = (
+        CheckConstraint(
+            "operation_type IN ('submission', 'rework_submission')",
+            name="ck_production_operation_undo_type",
+        ),
+        CheckConstraint(
+            "status IN ('applied', 'reversed')",
+            name="ck_production_operation_undo_status",
+        ),
+        CheckConstraint(
+            "(status = 'applied' AND reversed_at IS NULL AND reversed_by IS NULL) OR "
+            "(status = 'reversed' AND reversed_at IS NOT NULL AND reversed_by IS NOT NULL)",
+            name="ck_production_operation_undo_reversed",
+        ),
+        Index(
+            "idx_production_operation_undo_order",
+            "work_order_id",
+            text("id DESC"),
+        ),
+        Index(
+            "idx_production_operation_undo_active",
+            "work_order_id",
+            text("id DESC"),
+            postgresql_where=text("status = 'applied'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("work_order.id", ondelete="CASCADE"), nullable=False
+    )
+    work_order_batch_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    operation_type: Mapped[str] = mapped_column(Text, nullable=False)
+    operation_label: Mapped[str] = mapped_column(Text, nullable=False)
+    department_code: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_username: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="applied")
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    reversed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    reversed_by: Mapped[str | None] = mapped_column(Text, nullable=True)

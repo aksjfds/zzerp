@@ -2,19 +2,25 @@ from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from authorization import require_any_permission
-from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
+from authorization import ensure_department_access, require_any_permission
+from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from schemas.production import (
-    ProcedureDispatchCreate,
-    ProcedureDispatchEnvelope,
+    DepartmentWorkerCreate,
+    DepartmentWorkerEnvelope,
+    DepartmentWorkerHistoryEnvelope,
+    DepartmentWorkerOverviewEnvelope,
     RepositoryListEnvelope,
     TagCardListEnvelope,
     WorkerListEnvelope,
 )
-from services.procedure_dispatches import dispatch_tag_stock
 from services.production_card_listing import list_production_cards
 from services.production_tag_cards import list_tag_cards
 from services.work_order_queries import list_department_workers
+from services.admin_workers import (
+    create_department_worker,
+    department_worker_overview,
+    worker_history,
+)
 
 
 router = APIRouter(tags=["production"])
@@ -58,6 +64,57 @@ def department_workers(
 
 
 @router.get(
+    "/departments/{department_code}/worker-overview",
+    response_model=DepartmentWorkerOverviewEnvelope,
+)
+def department_worker_overview_get(
+    department_code: str,
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, department_code)
+    return {"data": department_worker_overview(department_code)}
+
+
+@router.get(
+    "/departments/{department_code}/workers/{worker_id}/work-history",
+    response_model=DepartmentWorkerHistoryEnvelope,
+)
+def department_worker_history_get(
+    department_code: str,
+    worker_id: int,
+    month: str = Query(pattern=r"^\d{4}-\d{2}$"),
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, department_code)
+    try:
+        data = worker_history(worker_id, month, department_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": data}
+
+
+@router.post(
+    "/departments/{department_code}/workers",
+    response_model=DepartmentWorkerEnvelope,
+)
+def department_worker_create(
+    department_code: str,
+    payload: DepartmentWorkerCreate,
+    user: dict = Depends(
+        require_any_permission(PRODUCTION_MANAGE, QC_INSPECT, csrf=True)
+    ),
+):
+    ensure_department_access(user, department_code)
+    return {
+        "data": create_department_worker(
+            department_code,
+            payload.worker_name,
+            payload.workshop_id,
+        )
+    }
+
+
+@router.get(
     "/departments/{department_code}/production-items/{production_item_id}/tag-cards",
     response_model=TagCardListEnvelope,
 )
@@ -76,23 +133,5 @@ def production_item_tag_cards(
             production_item_id,
             flow_node_id,
             source_flow_node_id,
-        )
-    }
-
-
-@router.post(
-    "/procedure-tag-stocks/{tag_stock_id}/dispatches",
-    response_model=ProcedureDispatchEnvelope,
-)
-def procedure_tag_stock_dispatch(
-    tag_stock_id: int,
-    payload: ProcedureDispatchCreate,
-    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
-):
-    return {
-        "data": dispatch_tag_stock(
-            tag_stock_id,
-            payload.quantity,
-            user["department"],
         )
     }

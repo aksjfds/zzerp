@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+from models.customer import Customer
 
 
 JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
@@ -27,12 +28,7 @@ class Product(Base):
             initially="DEFERRED",
             use_alter=True,
         ),
-        Index(
-            "idx_product_customer_name_trgm",
-            "customer_name",
-            postgresql_using="gin",
-            postgresql_ops={"customer_name": "gin_trgm_ops"},
-        ),
+        Index("idx_product_customer", "customer_id"),
         Index(
             "idx_product_product_name_trgm",
             "product_name",
@@ -55,7 +51,9 @@ class Product(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customer.id"), nullable=False
+    )
     product_name: Mapped[str] = mapped_column(Text, nullable=False)
     factory_code: Mapped[str] = mapped_column(Text, nullable=False)
     customer_code: Mapped[str] = mapped_column(Text, nullable=False)
@@ -86,6 +84,7 @@ class Product(Base):
         primaryjoin="Product.id == ProductVersion.product_id",
         order_by="ProductVersion.version",
     )
+    customer: Mapped[Customer] = relationship()
 
 
 class ProductVersion(Base):
@@ -198,8 +197,8 @@ class ProductProcessFlow(Base):
     flow_json: Mapped[dict[str, Any]] = mapped_column(
         JSON_TYPE,
         nullable=False,
-        default=lambda: {"schema_version": 2, "nodes": [], "edges": []},
-        server_default=text("'{\"schema_version\": 2, \"nodes\": [], \"edges\": []}'"),
+        default=lambda: {"schema_version": 3, "nodes": [], "edges": []},
+        server_default=text("'{\"schema_version\": 3, \"nodes\": [], \"edges\": []}'"),
     )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")

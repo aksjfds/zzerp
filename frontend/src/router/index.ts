@@ -49,9 +49,22 @@ const router = createRouter({
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
+      path: '/production/:departmentCode/workers',
+      name: 'department-workers',
+      component: () => import('@/features/production/views/DepartmentWorkersView.vue'),
+      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
+    },
+    {
       path: '/admin',
       name: 'admin-dashboard',
       component: () => import('@/features/admin/views/AdminDashboardView.vue'),
+      meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view, PRODUCTION_PERMISSIONS.view] },
+    },
+    {
+      path: '/pmc',
+      name: 'pmc-dashboard',
+      component: () => import('@/features/admin/views/AdminDashboardView.vue'),
+      props: { mode: 'pmc' },
       meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view, PRODUCTION_PERMISSIONS.view] },
     },
     {

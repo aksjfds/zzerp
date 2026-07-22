@@ -42,11 +42,11 @@ class RepositoryResponse(ProductionModel):
     assembly_unit_quantity: int
     assembly_required_source_ids: list[str]
     assembly_group_complete: bool
+    assembly_output_name: str | None = None
     delivery_date: date
     arrived_at: str | None
     work_status: Literal["unprocessed", "processing", "completed"]
     can_create_work_order: bool
-    can_dispatch: bool = False
 
 
 class RepositoryListEnvelope(ProductionModel):
@@ -63,6 +63,58 @@ class WorkerResponse(ProductionModel):
 
 class WorkerListEnvelope(ProductionModel):
     data: list[WorkerResponse]
+
+
+class DepartmentWorkerResponse(WorkerResponse):
+    department_name: str
+    department_code: str
+    workshop_name: str | None
+
+
+class DepartmentWorkerWorkshopResponse(ProductionModel):
+    id: int
+    department_id: int
+    workshop_name: str
+
+
+class DepartmentWorkerOverviewResponse(ProductionModel):
+    department_id: int
+    department_name: str
+    department_code: str
+    workshops: list[DepartmentWorkerWorkshopResponse]
+    workers: list[DepartmentWorkerResponse]
+
+
+class DepartmentWorkerOverviewEnvelope(ProductionModel):
+    data: DepartmentWorkerOverviewResponse
+
+
+class DepartmentWorkerCreate(ProductionModel):
+    worker_name: str = Field(min_length=1, max_length=100)
+    workshop_id: int | None = Field(default=None, gt=0)
+
+
+class DepartmentWorkerEnvelope(ProductionModel):
+    data: DepartmentWorkerResponse
+
+
+class DepartmentWorkerHistoryItem(ProductionModel):
+    work_order_id: int
+    work_order_no: str | None
+    item_name: str
+    procedure_name: str
+    planned_quantity: int
+    completed_quantity: int
+    processing_quantity: int
+    completion_rate: float
+    lost_quantity: int
+    scrap_quantity: int
+    status: str
+    completed_at: str | None
+
+
+class DepartmentWorkerHistoryEnvelope(ProductionModel):
+    data: list[DepartmentWorkerHistoryItem]
 
 
 class WorkOrderCreate(ProductionModel):
@@ -120,6 +172,15 @@ class WorkOrderBatchResponse(ProductionModel):
     recorded_at: str | None
 
 
+class ProductionUndoOperationResponse(ProductionModel):
+    id: int
+    work_order_batch_id: int | None
+    operation_type: Literal["submission", "rework_submission"]
+    operation_label: str
+    actor_username: str
+    created_at: str
+
+
 class WorkOrderResponse(ProductionModel):
     id: int
     work_order_no: str
@@ -153,6 +214,7 @@ class WorkOrderResponse(ProductionModel):
     created_at: str
     closed_at: str | None
     batches: list[WorkOrderBatchResponse]
+    undo_operation: ProductionUndoOperationResponse | None = None
 
 
 class WorkOrderEnvelope(ProductionModel):
@@ -176,12 +238,35 @@ class PendingQcResponse(WorkOrderBatchResponse):
     part_no: str
     part_name: str
     work_order_name: str
-    remaining_quantity: int
+    dispatchable_quantity: int = 0
+    target_node_label: str | None = None
 
 
 class PendingQcListEnvelope(ProductionModel):
     data: list[PendingQcResponse]
     total: int
+
+
+class QcDispatchCreate(ProductionModel):
+    quantity: int = Field(gt=0)
+
+
+class QcDispatchResponse(ProductionModel):
+    batch_id: int
+    quantity: int
+    remaining_quantity: int
+    target_flow_node_id: str
+    target_department_id: int
+
+
+class QcDispatchEnvelope(ProductionModel):
+    data: QcDispatchResponse
+
+
+class TagProcessingDetail(ProductionModel):
+    tag_names: list[str]
+    tag_set_name: str
+    quantity: int
 
 
 class TagCardResponse(ProductionModel):
@@ -200,24 +285,9 @@ class TagCardResponse(ProductionModel):
     processing_quantity: int
     pending_qc_quantity: int
     completed_quantity: int
+    processing_details: list[TagProcessingDetail]
+    can_create_work_order: bool = False
 
 
 class TagCardListEnvelope(ProductionModel):
     data: list[TagCardResponse]
-
-
-class ProcedureDispatchCreate(ProductionModel):
-    quantity: int = Field(gt=0)
-
-
-class ProcedureDispatchResponse(ProductionModel):
-    tag_stock_id: int
-    production_item_id: int
-    tag_set_id: int
-    quantity: int
-    target_flow_node_id: str | None
-    target_department_id: int | None
-
-
-class ProcedureDispatchEnvelope(ProductionModel):
-    data: ProcedureDispatchResponse

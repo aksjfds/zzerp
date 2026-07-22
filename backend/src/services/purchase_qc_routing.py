@@ -1,8 +1,10 @@
-from models.organization import Procedure
+from sqlalchemy import select
+
+from models.organization import Department, Procedure
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch
 from services.errors import DomainError
 from services.procedure_tags import restore_tag_source
-from services.work_order_support import move_to_node
+from services.production_flow import process_qc_node
 
 
 def validate_context(session, order: WorkOrder, procedure: Procedure) -> None:
@@ -20,16 +22,14 @@ def route_qualified(
     context,
     node: dict,
     quantity: int,
-) -> tuple[str | None, int | None]:
-    target = context.normal_target(node["id"])
-    target_department_id = move_to_node(
-        session,
-        production_item,
-        target,
-        quantity,
-        node["id"],
+) -> tuple[str, int]:
+    qc_node = process_qc_node(context.flow, context.nodes, node["id"])
+    qc_department_id = session.scalar(
+        select(Department.id).where(Department.department_code == "qc")
     )
-    return target.get("id") if target else None, target_department_id
+    if qc_node is None or qc_department_id is None:
+        raise DomainError("work_order_qc_not_configured", "当前工艺后未配置有效QC节点")
+    return qc_node["id"], qc_department_id
 
 
 def route_rework(

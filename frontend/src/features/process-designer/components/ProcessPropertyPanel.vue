@@ -12,7 +12,6 @@ const emit = defineEmits<{
   updateAssembly: [label: string, output_name: string, output_pcs: number]
   updateProcess: [label: string, process_code: string]
   updateProcedure: [procedure_id: number]
-  updateQcRequired: [qc_required: boolean]
 }>()
 </script>
 
@@ -27,6 +26,8 @@ const emit = defineEmits<{
       <label>关联工艺</label>
       <ElSelect
         :model-value="node.procedure_id"
+        placement="top-start"
+        :fallback-placements="['top-start', 'top-end']"
         :disabled="readonly"
         placeholder="选择工艺"
         @update:model-value="emit('updateProcedure', $event)"
@@ -38,14 +39,14 @@ const emit = defineEmits<{
           :value="item.id"
         />
       </ElSelect>
-      <label>质量检验</label>
-      <ElSwitch
-        :model-value="node.qc_required"
-        :disabled="readonly"
-        active-text="需要 QC"
-        inactive-text="无需 QC"
-        @update:model-value="emit('updateQcRequired', $event)"
-      />
+    </template>
+    <template v-else-if="node?.type === 'qc'">
+      <h3>QC节点</h3>
+      <p>合格数量由QC决定何时放行到下一流程节点；返工数量返回原工单。</p>
+    </template>
+    <template v-else-if="node?.type === 'shipping'">
+      <h3>发货节点</h3>
+      <p>流程终点。产品经QC出货后离开生产系统。</p>
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>

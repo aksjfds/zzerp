@@ -16,18 +16,33 @@ export type CustomerOrderItem = {
 export type CustomerOrder = {
   id: number
   customer_order_no: string
+  customer_id: number
   customer_name: string
   status: CustomerOrderStatus
   revision: number
   remark: string
   items: CustomerOrderItem[]
+  product_progress: CustomerOrderProductProgress[]
   created_at: string
   updated_at: string
 }
 
+export type CustomerOrderProductProgress = {
+  customer_order_item_id: number
+  product_id: number
+  product_name: string
+  factory_code: string
+  total_quantity: number
+  completed_quantity: number
+  scrap_quantity: number
+  lost_quantity: number
+  unfinished_quantity: number
+  po_shortage_quantity: number
+}
+
 export type CustomerOrderPayload = {
   customer_order_no: string
-  customer_name: string
+  customer_id: number
   remark: string
   items: Array<Pick<CustomerOrderItem, 'product_id' | 'quantity' | 'delivery_date' | 'remark'>>
   expected_revision?: number

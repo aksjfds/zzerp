@@ -1,8 +1,13 @@
+from sqlalchemy import select
+
 from database import SessionLocal
 from domain.time import business_now, utc_now
 from models.organization import Department, Procedure
-from models.production import WorkOrder
-from services.assembly_work_orders import submit_assembly_work_order
+from models.production import WorkOrder, WorkOrderBatch
+from services.assembly_work_orders import (
+    resubmit_assembly_rework_batch,
+    submit_assembly_work_order,
+)
 from services.errors import DomainError
 from services.procedure_tags import procedure_department_id
 from services.purchase_work_orders import (
@@ -11,6 +16,7 @@ from services.purchase_work_orders import (
 )
 from services.tag_work_orders import (
     create_tag_order,
+    resubmit_tag_rework_batch,
     submit_tag_order,
 )
 from services.work_order_command_support import (
@@ -21,6 +27,11 @@ from services.work_order_command_support import (
 )
 from services.work_order_presenters import serialize_work_order
 from services.work_order_support import mark_order_planned, node_context
+from services.production_flow import process_qc_node
+from services.production_operation_undo import (
+    capture_operation_state,
+    record_undoable_operation,
+)
 
 
 def create_work_order(
@@ -86,6 +97,7 @@ def submit_work_order(
     quantity: int,
     completion_action: str,
     user_department: str,
+    actor_username: str,
 ) -> dict:
     if completion_action not in {"direct", "qc"}:
         raise DomainError("completion_action_invalid", "请选择直接完成或送 QC")
@@ -95,14 +107,25 @@ def submit_work_order(
             raise DomainError("work_order_not_found", "工单不存在", status_code=404)
         if order.status != "open":
             raise DomainError("work_order_closed", "工单已经结单")
+        before = capture_operation_state(session, order)
         if order.work_order_type == "assembly":
-            return submit_assembly_work_order(
+            submit_assembly_work_order(
                 session,
                 order,
                 quantity,
                 completion_action,
                 user_department,
             )
+            record_undoable_operation(
+                session,
+                order,
+                before,
+                operation_type="submission",
+                operation_label="撤回装配送检" if completion_action == "qc" else "撤回装配完成",
+                department_code="assembly",
+                actor_username=actor_username,
+            )
+            return serialize_work_order(session, order)
         if order.work_order_type not in {"tag", "purchase_receipt"}:
             raise DomainError("work_order_type_invalid", "工单类型无效")
 
@@ -126,11 +149,16 @@ def submit_work_order(
         procedure = session.get(Procedure, node.get("procedure_id"))
         if procedure is None or order.procedure_id != procedure.id:
             raise DomainError("procedure_not_found", "工单所属工艺不存在")
-        qc_required = bool(node.get("qc_required", False))
-        if completion_action == "qc" and not qc_required:
-            raise DomainError("work_order_qc_not_configured", "当前工艺未配置 QC")
-        if completion_action == "direct" and qc_required:
-            raise DomainError("work_order_qc_required", "当前工艺必须送 QC")
+        if order.work_order_type == "purchase_receipt":
+            qc_required = process_qc_node(
+                context.flow,
+                context.nodes,
+                node["id"],
+            ) is not None
+            if completion_action == "qc" and not qc_required:
+                raise DomainError("work_order_qc_not_configured", "当前外购工艺未配置 QC")
+            if completion_action == "direct" and qc_required:
+                raise DomainError("work_order_qc_required", "当前外购工艺必须送 QC")
 
         common = {
             "session": session,
@@ -143,8 +171,44 @@ def submit_work_order(
             "completion_action": completion_action,
         }
         if order.work_order_type == "tag":
-            return submit_tag_order(**common)
-        return submit_purchase_order(context=context, **common)
+            submit_tag_order(**common)
+        else:
+            submit_purchase_order(context=context, **common)
+        record_undoable_operation(
+            session,
+            order,
+            before,
+            operation_type="submission",
+            operation_label=(
+                "撤回送检"
+                if completion_action == "qc"
+                else "撤回直接完成"
+            ),
+            department_code=department.department_code,
+            actor_username=actor_username,
+        )
+        return serialize_work_order(session, order)
+
+
+def resubmit_work_order_rework_batch(
+    batch_id: int,
+    quantity: int,
+    user_department: str,
+    actor_username: str,
+) -> dict:
+    with SessionLocal() as session:
+        work_order_type = session.scalar(
+            select(WorkOrder.work_order_type)
+            .join(WorkOrderBatch, WorkOrderBatch.work_order_id == WorkOrder.id)
+            .where(WorkOrderBatch.id == batch_id)
+        )
+    if work_order_type == "assembly":
+        return resubmit_assembly_rework_batch(
+            batch_id, quantity, user_department, actor_username
+        )
+    return resubmit_tag_rework_batch(
+        batch_id, quantity, user_department, actor_username
+    )
 
 
 def cancel_work_order(work_order_id: int, user_department: str) -> dict:

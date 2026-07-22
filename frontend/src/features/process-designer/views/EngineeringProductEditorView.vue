@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import BomEditor from '../components/BomEditor.vue'
@@ -13,6 +13,7 @@ import { useProductSaveActions, type FlowEditorApi } from '../composables/usePro
 import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
 import { useProductVersionLoader } from '../composables/useProductVersionLoader'
 import { useProductVersionActions } from '../composables/useProductVersionActions'
+import { queryCustomers, type Customer } from '@/features/customers/api/customers'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +22,8 @@ const authStore = useAuthStore()
 const baseFormRef = ref<FormInstance>()
 const flowEditor = ref<FlowEditorApi>()
 const editorReady = ref(false)
+const customers = ref<Customer[]>([])
+const customerLoading = ref(false)
 const {
   applyProduct,
   bomDirty,
@@ -50,6 +53,28 @@ const baseRules: FormRules<ProductFields> = {
   customer_code: [{ required: true, whitespace: true, message: '请输入客户型号', trigger: 'blur' }],
 }
 
+const customerSelection = computed(() => form.customer_id ?? form.customer_name)
+
+function selectCustomer(value: number | string) {
+  if (typeof value === 'number') {
+    const customer = customers.value.find(item => item.id === value)
+    form.customer_id = value
+    form.customer_name = customer?.customer_name || ''
+  } else {
+    form.customer_id = null
+    form.customer_name = value.trim()
+  }
+}
+
+async function loadCustomers() {
+  customerLoading.value = true
+  try {
+    customers.value = await queryCustomers()
+  } finally {
+    customerLoading.value = false
+  }
+}
+
 async function validateBase() {
   try {
     await baseFormRef.value?.validate()
@@ -59,7 +84,7 @@ async function validateBase() {
   }
 }
 
-const { createProduct, saveBom, saveFlow } = useProductSaveActions({
+const { clearFlowSaveError, createProduct, flowSaveError, saveBom, saveFlow } = useProductSaveActions({
   applyProduct,
   bomSnapshot,
   editorReady,
@@ -75,6 +100,7 @@ const { createProduct, saveBom, saveFlow } = useProductSaveActions({
   validateBase,
   validateBom,
 })
+watch(() => form.version, clearFlowSaveError)
 
 const {
   baseInfoEditable,
@@ -133,6 +159,7 @@ const { createVersion, deleteSelectedVersion, enterEditMode, returnViewMode } = 
 })
 
 onMounted(async () => {
+  await loadCustomers()
   if (!productId.value) {
     markSaved(['base', 'bom', 'flow'])
     return
@@ -161,6 +188,8 @@ onMounted(async () => {
         <ElSelect
           v-if="productId"
           :model-value="form.version"
+          placement="top-start"
+          :fallback-placements="['top-start', 'top-end']"
           style="width: 110px"
           @change="switchVersion"
         >
@@ -219,7 +248,27 @@ onMounted(async () => {
         <div class="form-grid">
           <ElFormItem prop="factory_code" label="厂编"><ElInput v-model="form.factory_code" /></ElFormItem>
           <ElFormItem prop="product_name" label="产品名称"><ElInput v-model="form.product_name" /></ElFormItem>
-          <ElFormItem prop="customer_name" label="客户名称"><ElInput v-model="form.customer_name" /></ElFormItem>
+          <ElFormItem prop="customer_name" label="客户名称">
+            <ElSelect
+              :model-value="customerSelection"
+              placement="top-start"
+              :fallback-placements="['top-start', 'top-end']"
+              filterable
+              allow-create
+              default-first-option
+              :loading="customerLoading"
+              placeholder="选择已有客户或输入新客户"
+              style="width: 100%"
+              @change="selectCustomer"
+            >
+              <ElOption
+                v-for="customer in customers"
+                :key="customer.id"
+                :label="customer.customer_name"
+                :value="customer.id"
+              />
+            </ElSelect>
+          </ElFormItem>
           <ElFormItem prop="customer_code" label="客编"><ElInput v-model="form.customer_code" /></ElFormItem>
         </div>
       </ElForm>
@@ -255,6 +304,7 @@ onMounted(async () => {
           v-model="form.process_flow"
           :bom-items="form.bom_items"
           :readonly="versionReadOnly"
+          @update:model-value="clearFlowSaveError"
         />
       </template>
       <div v-else v-loading="true" class="flow-loading">正在加载流程图</div>
@@ -276,6 +326,7 @@ onMounted(async () => {
 .section-heading h2 { margin: 0; font-size: 18px; }
 .section-heading span { color: var(--el-text-color-secondary); font-size: 12px; }
 .section-action { display: flex; justify-content: flex-end; margin-bottom: 12px; }
+.flow-error { margin-bottom: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
 .basic-section :deep(.el-form-item) { margin-bottom: 12px; }
 .flow-loading { display: grid; min-height: 260px; place-items: center; color: var(--el-text-color-secondary); }

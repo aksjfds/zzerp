@@ -1,7 +1,8 @@
-import type { Ref } from 'vue'
+import { ref, type Ref } from 'vue'
 import type { Router } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import type { ApiErrorDetail } from '@/api/types'
 import type { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import {
   synchronizeFlowPartMetadata,
@@ -45,6 +46,7 @@ export function useProductSaveActions(options: Options) {
     markSaved, normalizedBom, normalizedFields, productId, router, store,
     validateBase, validateBom,
   } = options
+  const flowSaveError = ref<ApiErrorDetail | null>(null)
 
   async function createProduct() {
     if (!await validateBase()) return
@@ -90,6 +92,7 @@ export function useProductSaveActions(options: Options) {
 
   async function saveFlow() {
     if (!productId.value || form.revision === null || form.version === null || !flowEditor.value) return
+    flowSaveError.value = null
     form.process_flow = synchronizeAssemblyNames(flowEditor.value.getGraphData())
     try {
       const product = await store.saveProcessFlow(
@@ -105,12 +108,18 @@ export function useProductSaveActions(options: Options) {
       markSaved(['flow'])
       ElMessage.success('工序流程已保存')
     } catch (error) {
-      showSaveError(error, '流程保存失败')
+      showSaveError(error, '流程保存失败', true)
     }
   }
 
-  function showSaveError(error: unknown, fallback: string) {
+  function showSaveError(error: unknown, fallback: string, isFlowError = false) {
     const detail = getApiErrorDetail(error)
+    if (isFlowError) {
+      flowSaveError.value = detail || {
+        code: 'flow_save_failed',
+        message: fallback,
+      }
+    }
     flowEditor.value?.focusElement(detail?.element_id)
     ElMessage.error(
       detail?.code === 'product_version_conflict'
@@ -119,5 +128,9 @@ export function useProductSaveActions(options: Options) {
     )
   }
 
-  return { createProduct, saveBom, saveFlow }
+  function clearFlowSaveError() {
+    flowSaveError.value = null
+  }
+
+  return { clearFlowSaveError, createProduct, flowSaveError, saveBom, saveFlow }
 }

@@ -7,26 +7,39 @@ import ProductionFlowViewer from '../components/ProductionFlowViewer.vue'
 import { queryOrderProduct, queryOrderProducts, type OrderProduct } from '../api/orderProducts'
 import { createCustomerOrder, queryCustomerOrder, queryCustomerOrderProduction, updateCustomerOrder } from '../api/customerOrders'
 import type { CustomerOrderItem, CustomerOrderPayload, CustomerOrderProduction } from '../domain/types'
+import { queryCustomers, type Customer } from '@/features/customers/api/customers'
+import { useAuthStore } from '@/stores/auth'
+import { ORDER_PERMISSIONS } from '@/permission/constants'
 
 const route = useRoute()
 const router = useRouter()
+const authStore = useAuthStore()
 const props = withDefaults(defineProps<{ orderId?: number; embedded?: boolean }>(), {
   orderId: undefined,
   embedded: false,
 })
 const products = ref<OrderProduct[]>([])
+const customers = ref<Customer[]>([])
+const customerLoading = ref(false)
 const productLoading = ref(false)
 let productSearchSequence = 0
 const status = ref('draft')
 const revision = ref<number | null>(null)
 const production = ref<CustomerOrderProduction>()
 const form = reactive({
-  customer_order_no: '', customer_name: '', remark: '', items: [] as CustomerOrderItem[],
+  customer_order_no: '', customer_id: null as number | null, remark: '', items: [] as CustomerOrderItem[],
 })
 const effectiveOrderId = computed(() => props.orderId ?? (Number(route.params.orderId) || null))
-const readOnly = computed(() => props.embedded || status.value !== 'draft')
+const canEdit = computed(() => effectiveOrderId.value
+  ? authStore.hasPermission(ORDER_PERMISSIONS.edit)
+  : authStore.hasPermission(ORDER_PERMISSIONS.add))
+const readOnly = computed(() => props.embedded || status.value !== 'draft' || !canEdit.value)
 
 function addItem() {
+  if (!form.customer_id) {
+    ElMessage.warning('请先选择客户')
+    return
+  }
   form.items.push({ product_id: 0, quantity: 1, delivery_date: '', remark: '' })
 }
 
@@ -35,10 +48,14 @@ function product(productId: number) {
 }
 
 async function searchProducts(keyword = '') {
+  if (!form.customer_id) {
+    products.value = []
+    return
+  }
   const sequence = ++productSearchSequence
   productLoading.value = true
   try {
-    const result = await queryOrderProducts(keyword)
+    const result = await queryOrderProducts(form.customer_id, keyword)
     if (sequence !== productSearchSequence) return
     const selected = products.value.filter(item => (
       form.items.some(orderItem => orderItem.product_id === item.id)
@@ -52,15 +69,23 @@ async function searchProducts(keyword = '') {
   }
 }
 
+async function changeCustomer() {
+  form.items = []
+  products.value = []
+  if (!form.customer_id) return
+  await searchProducts()
+  addItem()
+}
+
 async function save() {
-  if (!form.customer_order_no.trim() || !form.customer_name.trim() || !form.items.length
+  if (!form.customer_order_no.trim() || !form.customer_id || !form.items.length
     || form.items.some((item) => !item.product_id || item.quantity < 1 || !item.delivery_date)) {
     return ElMessage.warning('请完整填写订单和产品明细')
   }
   try {
     const payload: CustomerOrderPayload = {
       customer_order_no: form.customer_order_no,
-      customer_name: form.customer_name,
+      customer_id: form.customer_id,
       remark: form.remark,
       items: form.items.map(({ product_id, quantity, delivery_date, remark }) => ({
         product_id, quantity, delivery_date, remark,
@@ -77,7 +102,12 @@ async function save() {
 }
 
 onMounted(async () => {
-  await searchProducts()
+  customerLoading.value = true
+  try {
+    customers.value = await queryCustomers()
+  } finally {
+    customerLoading.value = false
+  }
   if (effectiveOrderId.value) {
     const order = await queryCustomerOrder(effectiveOrderId.value)
     production.value = await queryCustomerOrderProduction(effectiveOrderId.value)
@@ -85,10 +115,11 @@ onMounted(async () => {
     revision.value = order.revision
     Object.assign(form, {
       customer_order_no: order.customer_order_no,
-      customer_name: order.customer_name,
+      customer_id: order.customer_id,
       remark: order.remark,
       items: order.items.map((item): CustomerOrderItem => ({ ...item })),
     })
+    await searchProducts()
     const missingIds = [...new Set(
       order.items.map(item => item.product_id).filter(id => !product(id)),
     )]
@@ -96,7 +127,7 @@ onMounted(async () => {
       const missing = await Promise.all(missingIds.map(id => queryOrderProduct(id)))
       products.value.push(...missing)
     }
-  } else addItem()
+  }
 })
 </script>
 
@@ -105,14 +136,30 @@ onMounted(async () => {
     <header v-if="!props.embedded"><div><span>业务部</span><h1>{{ effectiveOrderId ? '客户订单详情' : '创建客户订单' }}</h1></div><div><ElButton @click="router.push('/business/orders')">返回</ElButton><ElButton v-if="!readOnly" type="primary" @click="save">保存草稿</ElButton></div></header>
     <section v-if="!effectiveOrderId" class="card">
       <ElForm :model="form" :disabled="readOnly" label-position="top">
-        <div class="grid"><ElFormItem label="客户订单编号"><ElInput v-model="form.customer_order_no" /></ElFormItem><ElFormItem label="客户名称"><ElInput v-model="form.customer_name" /></ElFormItem></div>
+        <div class="grid">
+          <ElFormItem label="客户订单编号"><ElInput v-model="form.customer_order_no" /></ElFormItem>
+          <ElFormItem label="客户名称" required>
+            <ElSelect
+              v-model="form.customer_id"
+              placement="top-start"
+              :fallback-placements="['top-start', 'top-end']"
+              filterable
+              :loading="customerLoading"
+              placeholder="请先选择客户"
+              style="width: 100%"
+              @change="changeCustomer"
+            >
+              <ElOption v-for="customer in customers" :key="customer.id" :label="customer.customer_name" :value="customer.id" />
+            </ElSelect>
+          </ElFormItem>
+        </div>
         <ElFormItem label="备注"><ElInput v-model="form.remark" type="textarea" /></ElFormItem>
       </ElForm>
     </section>
     <section class="card" :class="{ readonly: readOnly }">
-      <div class="heading"><h2>产品明细</h2><ElButton v-if="!readOnly" @click="addItem">新增产品</ElButton></div>
+      <div class="heading"><h2>产品明细</h2><ElButton v-if="!readOnly" :disabled="!form.customer_id" @click="addItem">新增产品</ElButton></div>
       <ElTable :data="form.items" border>
-        <ElTableColumn label="产品" min-width="220"><template #default="{ row }"><ElSelect v-model="row.product_id" :disabled="readOnly" filterable remote :remote-method="searchProducts" :loading="productLoading"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" /></ElSelect></template></ElTableColumn>
+        <ElTableColumn label="产品" min-width="220"><template #default="{ row }"><ElSelect v-model="row.product_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" :disabled="readOnly || !form.customer_id" filterable remote :remote-method="searchProducts" :loading="productLoading" placeholder="选择该客户的产品"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" /></ElSelect></template></ElTableColumn>
         <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.product_version ?? product(row.product_id)?.version ?? '-' }}</template></ElTableColumn>
         <ElTableColumn label="数量" width="140"><template #default="{ row }"><ElInputNumber v-model="row.quantity" :disabled="readOnly" :min="1" /></template></ElTableColumn>
         <ElTableColumn label="交期" width="170"><template #default="{ row }"><ElDatePicker v-model="row.delivery_date" :disabled="readOnly" value-format="YYYY-MM-DD" /></template></ElTableColumn>

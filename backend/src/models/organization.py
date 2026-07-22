@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     Numeric,
     Text,
     TIMESTAMP,
@@ -89,20 +90,32 @@ class ProcedureTagPrice(Base):
             ["procedure_tag.id", "procedure_tag.procedure_id"],
             name="fk_procedure_tag_price_tag",
         ),
+        ForeignKeyConstraint(
+            ["product_id", "product_version"],
+            ["product_version.product_id", "product_version.version"],
+            ondelete="CASCADE",
+            name="fk_procedure_tag_price_product_version",
+        ),
         UniqueConstraint(
-            "product_bom_id",
+            "product_id",
+            "product_version",
+            "origin_flow_node_id",
             "procedure_tag_id",
             name="uq_procedure_tag_price_part_tag",
         ),
-        Index("idx_procedure_tag_price_procedure", "procedure_id", "product_bom_id"),
+        Index(
+            "idx_procedure_tag_price_procedure",
+            "procedure_id",
+            "product_id",
+            "product_version",
+            "origin_flow_node_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    product_bom_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("product_bom.id", ondelete="CASCADE"),
-        nullable=False,
-    )
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    origin_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     procedure_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     procedure_tag_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
@@ -157,6 +170,21 @@ class Worker(Base):
             ["workshop.id", "workshop.department_id"],
         ),
         Index("idx_worker_department_name", "department_id", "worker_name", "id"),
+        Index(
+            "uq_worker_workshop_name",
+            "department_id",
+            "workshop_id",
+            "worker_name",
+            unique=True,
+            postgresql_where=text("workshop_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_worker_department_direct_name",
+            "department_id",
+            "worker_name",
+            unique=True,
+            postgresql_where=text("workshop_id IS NULL"),
+        ),
         Index(
             "idx_worker_workshop_department",
             "workshop_id",

@@ -16,6 +16,7 @@ class ProcedureTagPriceTagResponse(ProcedureTagPriceModel):
 class ProcedureTagPriceProcedureResponse(ProcedureTagPriceModel):
     procedure_id: int
     procedure_name: str
+    tags_locked: bool
     available_tags: list[ProcedureTagPriceTagResponse]
     configured_tags: list[ProcedureTagPriceTagResponse]
 
@@ -25,7 +26,8 @@ class ProcedureTagPricePartResponse(ProcedureTagPriceModel):
     product_version: int
     product_name: str
     factory_code: str
-    product_bom_id: int
+    product_bom_id: int | None
+    origin_flow_node_id: str
     part_name: str
     part_no: str
     procedures: list[ProcedureTagPriceProcedureResponse]

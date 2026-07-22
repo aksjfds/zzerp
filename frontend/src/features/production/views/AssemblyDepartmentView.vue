@@ -24,7 +24,7 @@ onMounted(load)
 
 <template>
   <main class="production-page">
-    <DepartmentPageHeader department-name="装配部门" description="到达装配节点的配件资料与装配工单。" @refresh="refresh" />
+    <DepartmentPageHeader department-name="装配部门" description="到达装配节点的配件资料与装配工单。" workers-path="/production/assembly/workers" @refresh="refresh" />
     <RepositoryFilterBar @search="applyFilters" />
     <section class="production-workspace">
       <div class="production-card">
@@ -38,7 +38,8 @@ onMounted(load)
           selectedGroup?.name || selectedRepository.part_name }}</strong><span>{{ selectedRepository.customer_order_no }} · {{
               selectedRepository.procedure_name }}</span></div>
         <WorkOrderCards :items="workOrders" :loading="detailLoading" mode="assembly" @submit="workOrderActions.submit"
-          @cancel="workOrderActions.cancel" />
+          @submit-qc="workOrderActions.submitQc" @resubmit-qc="workOrderActions.resubmitQc"
+          @cancel="workOrderActions.cancel" @undo="workOrderActions.undo" />
         <ElPagination v-model:current-page="historyPage" class="production-pagination" layout="prev, pager, next, total"
           :page-size="pageSize" :total="historyTotal" @current-change="loadDetails" />
       </div>

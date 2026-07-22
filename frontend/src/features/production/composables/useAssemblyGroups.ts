@@ -12,6 +12,16 @@ export type AssemblyGroup = {
   status: RepositoryItem['work_status']
   arrivedAt: string | null
   sources: Array<{ name: string; available: number; required: number }>
+  kind: 'current' | 'processing' | 'history'
+}
+
+function groupKind(item: RepositoryItem) {
+  if (!item.card_key.startsWith('history:')) return 'current' as const
+  return item.work_status === 'processing' ? 'processing' as const : 'history' as const
+}
+
+export function assemblyGroupKey(item: RepositoryItem) {
+  return `${groupKind(item)}:${item.customer_order_item_id}:${item.flow_node_id}`
 }
 
 export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
@@ -20,11 +30,12 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
   const groups = computed<AssemblyGroup[]>(() => {
     const grouped = new Map<string, RepositoryItem[]>()
     items.value.forEach((item) => {
-      const key = `${item.customer_order_item_id}:${item.flow_node_id}`
+      const key = assemblyGroupKey(item)
       grouped.set(key, [...(grouped.get(key) || []), item])
     })
     return [...grouped.entries()].map(([key, groupItems]) => {
       const firstItem = groupItems[0]!
+      const kind = groupKind(firstItem)
       const complete = groupItems.every(item => item.assembly_group_complete)
       const sources = new Map<string, RepositoryItem[]>()
       groupItems.forEach(item => sources.set(
@@ -42,7 +53,10 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
           : 0,
         complete,
         productName: firstItem.product_name,
-        name: `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`,
+        name: complete
+          ? firstItem.assembly_output_name
+            || `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`
+          : `待装配物料：${[...new Set(groupItems.map(item => item.part_name))].join('、')}`,
         orderNo: firstItem.customer_order_no,
         status: groupItems.some(item => item.work_status === 'processing')
           ? 'processing'
@@ -53,6 +67,7 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
           available: sourceItems.reduce((sum, item) => sum + item.available_quantity, 0),
           required: sourceItems[0]!.assembly_unit_quantity,
         })),
+        kind,
       }
     })
   })

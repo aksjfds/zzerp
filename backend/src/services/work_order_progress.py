@@ -4,6 +4,10 @@ from collections import defaultdict
 from dataclasses import dataclass
 from typing import Iterable
 
+from sqlalchemy import select
+
+from domain.time import utc_now
+from domain.production_types import REWORK_TRACKED_WORK_ORDER_TYPES
 from models.production import WorkOrder, WorkOrderBatch
 
 
@@ -86,7 +90,7 @@ def calculate_work_order_progress(
     initial_batches = [
         batch for batch in batch_list if batch.rework_source_batch_id is None
     ]
-    track_rework = order.work_order_type == "tag"
+    track_rework = order.work_order_type in REWORK_TRACKED_WORK_ORDER_TYPES
     rework_pending_by_batch = (
         rework_pending_quantities(batch_list) if track_rework else {}
     )
@@ -111,3 +115,24 @@ def calculate_work_order_progress(
         lost_quantity=sum(batch.lost_quantity or 0 for batch in completed_batches),
         rework_pending_by_batch=rework_pending_by_batch,
     )
+
+
+def refresh_qc_work_order_closed(session, order: WorkOrder) -> bool:
+    if (
+        order.work_order_type not in REWORK_TRACKED_WORK_ORDER_TYPES
+        or order.status != "open"
+    ):
+        return False
+    batches = list(session.scalars(
+        select(WorkOrderBatch).where(WorkOrderBatch.work_order_id == order.id)
+    ).all())
+    progress = calculate_work_order_progress(order, batches)
+    if (
+        order.completed_quantity == order.quantity
+        and progress.pending_qc_quantity == 0
+        and progress.rework_pending_quantity == 0
+    ):
+        order.status = "closed"
+        order.closed_at = utc_now()
+        return True
+    return False

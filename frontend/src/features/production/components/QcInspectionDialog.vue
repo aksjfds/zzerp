@@ -60,7 +60,7 @@ function submit() {
   <ElDialog :model-value="modelValue" title="录入 QC 结果" width="520px" @update:model-value="emit('update:modelValue', $event)">
     <p class="inspection-title">{{ batch?.work_order_name }} · 送检数量：{{ batch?.submitted_quantity }}</p>
     <ElFormItem label="QC 工人" required>
-      <ElSelect v-model="inspection.qc_worker_id" placeholder="请选择 QC 工人" style="width: 100%">
+      <ElSelect v-model="inspection.qc_worker_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" placeholder="请选择 QC 工人" style="width: 100%">
         <ElOption v-for="worker in workers" :key="worker.id" :label="worker.worker_name" :value="worker.id" />
       </ElSelect>
     </ElFormItem>

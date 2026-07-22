@@ -53,7 +53,7 @@ function submit() {
         />
       </ElFormItem>
       <ElFormItem label="执行工人">
-        <ElSelect v-model="form.workerId" clearable placeholder="暂不分配工人">
+        <ElSelect v-model="form.workerId" placement="top-start" :fallback-placements="['top-start', 'top-end']" clearable placeholder="暂不分配工人">
           <ElOption
             v-for="worker in workers"
             :key="worker.id"

@@ -11,6 +11,7 @@ from models.organization import Department, Worker, Workshop
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch
 from services.work_order_presenters import item_display
 from services.work_order_progress import calculate_work_order_progress
+from services.errors import DomainError
 
 
 PRODUCTION_DEPARTMENT_CODES = ("stamp", "polish", "qc", "assembly", "warehouse")
@@ -49,11 +50,92 @@ def worker_overview() -> list[dict]:
         ]
 
 
-def worker_history(worker_id: int, month: str) -> list[dict]:
+def department_worker_overview(department_code: str) -> dict:
+    with SessionLocal() as session:
+        department = _production_department(session, department_code)
+        workshops = session.scalars(
+            select(Workshop)
+            .where(Workshop.department_id == department.id)
+            .order_by(Workshop.workshop_name, Workshop.id)
+        ).all()
+        workshop_by_id = {item.id: item for item in workshops}
+        workers = session.scalars(
+            select(Worker)
+            .where(Worker.department_id == department.id)
+            .order_by(Worker.worker_name, Worker.id)
+        ).all()
+        return {
+            "department_id": department.id,
+            "department_name": department.department_name,
+            "department_code": department.department_code,
+            "workshops": workshops,
+            "workers": [
+                _serialize_worker(
+                    department,
+                    worker,
+                    workshop_by_id.get(worker.workshop_id),
+                )
+                for worker in workers
+            ],
+        }
+
+
+def create_department_worker(
+    department_code: str,
+    worker_name: str,
+    workshop_id: int | None,
+) -> dict:
+    normalized_name = worker_name.strip()
+    with SessionLocal.begin() as session:
+        department = _production_department(session, department_code)
+        workshop = session.get(Workshop, workshop_id) if workshop_id else None
+        department_has_workshops = session.scalar(
+            select(Workshop.id)
+            .where(Workshop.department_id == department.id)
+            .limit(1)
+        ) is not None
+        if department_has_workshops and workshop_id is None:
+            raise DomainError("worker_workshop_required", "请选择工人所属车间")
+        if workshop_id and (
+            workshop is None or workshop.department_id != department.id
+        ):
+            raise DomainError("worker_workshop_invalid", "所选车间不属于当前部门")
+        existing = session.scalar(
+            select(Worker.id).where(
+                Worker.department_id == department.id,
+                Worker.workshop_id == workshop_id,
+                Worker.worker_name == normalized_name,
+            ).limit(1)
+        )
+        if existing is not None:
+            raise DomainError("worker_already_exists", "当前部门和车间已存在同名工人")
+        worker = Worker(
+            worker_name=normalized_name,
+            department_id=department.id,
+            workshop_id=workshop_id,
+        )
+        session.add(worker)
+        session.flush()
+        return _serialize_worker(department, worker, workshop)
+
+
+def worker_history(
+    worker_id: int,
+    month: str,
+    department_code: str | None = None,
+) -> list[dict]:
     with SessionLocal() as session:
         worker = session.get(Worker, worker_id)
         if worker is None:
             return []
+        if department_code is not None:
+            department = _production_department(session, department_code)
+            if worker.department_id != department.id:
+                raise DomainError(
+                    "worker_department_mismatch",
+                    "工人不属于当前部门",
+                    status_code=404,
+                )
 
         month_start, month_end = _month_bounds(month)
         work_orders = session.scalars(
@@ -128,6 +210,17 @@ def _serialize_worker(department: Department, worker: Worker, workshop: Workshop
         "workshop_id": worker.workshop_id,
         "workshop_name": workshop.workshop_name if workshop else None,
     }
+
+
+def _production_department(session, department_code: str) -> Department:
+    if department_code not in PRODUCTION_DEPARTMENT_CODES:
+        raise DomainError("department_not_found", "生产部门不存在", status_code=404)
+    department = session.scalar(
+        select(Department).where(Department.department_code == department_code)
+    )
+    if department is None:
+        raise DomainError("department_not_found", "生产部门不存在", status_code=404)
+    return department
 
 
 def _serialize_history_item(

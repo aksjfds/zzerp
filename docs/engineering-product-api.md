@@ -1,6 +1,16 @@
 # 生产标记接口
 
-`flow_json` 配置宏观工艺节点、正常流向和工艺节点的 `qc_required`。生产标记及标记顺序不在流程图中配置。BOM 配件节点的首个执行节点可以是工艺节点，也可以直接是装配节点。
+## 客户与产品
+
+- `GET /customers?keyword=`：工程部和业务部查询共用客户主数据。
+- `POST /products`：提交已有 `customer_id`，或提交空的 `customer_id` 和新 `customer_name`；后一种情况会在创建产品的同一事务中新增客户。
+- `GET /products?customer_id=`：按客户筛选产品，业务部创建订单时使用。
+- `POST /customer-orders`：必须提交 `customer_id`，且所有订单明细产品必须属于该客户。
+- `GET /customer-orders?include_progress=true`：供 PMC 看板返回每个订单产品的总数、完工、报废、遗失、未完工和欠 PO 数量；普通订单列表不请求时不执行进度统计。
+
+产品和订单响应继续返回 `customer_name` 供界面展示，但客户名称以 `customer` 表为唯一来源。
+
+`flow_json` 使用 schema v3 配置配件、工艺、独立 QC、装配、发货节点及正常流向。生产标记及标记顺序不在流程图中配置。BOM 配件节点的首个执行节点可以是工艺节点，也可以直接是装配节点。QC 上游可以是工艺或装配，下游可以是工艺、装配或发货；发货必须是流程终点且上游必须是 QC。跨部门流转和所有标准打标工艺都必须经过 QC。
 
 ## 标记与横栏
 
@@ -16,14 +26,14 @@
 - 未打标记来源：`repository_id`；
 - 已有组合来源：`procedure_tag_stock_id`。
 
-标准工艺还必须提交非空 `tag_names: string[]`、正整数数量和可选工人；一张工单最多新增 20 个标记。服务会先去除首尾空白和重复名称，再复用或创建标记，将这些标记保存为本次新增集合，并生成“来源集合 ∪ 本次新增集合”的目标集合。任一新增标记已在来源组合中时拒绝开单。外购入库提交空数组。
+标准工艺还必须提交非空 `tag_names: string[]`、正整数数量和可选工人；一张工单最多新增 20 个标记。名称必须属于当前产品版本、配件来源节点在 `procedure_tag_price` 中预先配置的必做标记，装配输出也可作为配件来源。服务去除首尾空白和重复名称后，将这些标记保存为本次新增集合，并生成“来源集合 ∪ 本次新增集合”的目标集合。任一新增标记已在来源组合中或超出预配置集合时拒绝开单。外购入库提交空数组。
 
-`GET /departments/{department_code}/work-orders` 可用 `production_item_id`、`flow_node_id`、`source_flow_node_id` 和 `target_tag_set_id` 筛选目标组合工单。
+`GET /departments/{department_code}/work-orders` 可用 `production_item_id`、`flow_node_id`、`source_flow_node_id`、已有标记 ID 和本次新增标记 ID 筛选工单。
 
-`qc_required = true` 的标准生产工单通过 `POST /work-orders/{id}/submissions` 和 `completion_action = qc` 创建首次送检批次，送检不会自动结单。`POST /work-order-batches/{batch_id}/rework-submissions` 把该 QC 批次尚未处理的返工数量重新送检，并在原工单下创建关联子批次。`POST /work-orders/{id}/complete` 由生产部门主动结单；存在待检、待返工或尚未送检数量时拒绝。`qc_required = false` 时不允许送检，剩余数量在生产部门结单时直接完成。
+标准生产工单只能通过 `POST /work-orders/{id}/submissions` 和 `completion_action = qc` 创建首次送检批次；流程中缺少独立 QC 节点时拒绝执行，项目不提供绕过 QC 的直接结单接口。非最终标记的合格数量形成目标组合，最终标记的合格数量由 QC 通过 `POST /qc/work-order-batches/{batch_id}/dispatch` 放行。`POST /work-order-batches/{batch_id}/rework-submissions` 把标记或装配返工数量再次送到 QC。全部数量已经处理且没有待检、待返工数量后，系统自动结单。
 
 ## QC 与出货
 
-QC 是否必需由流程图工艺节点的 `qc_required` 配置。合格数量进入目标组合；标准生产工单的返工数量回到原工单加工中，不进入公共库存，也不改变工单状态；报废和遗失离开生产。
+非最终标记工单的合格数量立即进入目标标记组合，不等待工单结单。最终标记工单的合格数量停留在独立 QC 节点，通过 `POST /qc/work-order-batches/{batch_id}/dispatch` 分批放行到 QC 后续节点；放行不依赖工单状态。返工数量回到原工单加工中，报废和遗失离开生产。
 
-`POST /procedure-tag-stocks/{tag_stock_id}/dispatches` 从一个非空已完成标记组合出货，并沿宏观工艺的正常边进入下一节点。未打标记数量不能出货。
+`POST /procedure-tag-stocks/{tag_stock_id}/dispatches` 不再允许标准标记库存绕过 QC 出货。QC 放行到 `shipping` 节点时表示实体已发货，不生成新的生产库存。

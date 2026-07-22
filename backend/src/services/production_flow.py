@@ -61,6 +61,26 @@ def normal_target(flow: dict, nodes: dict[str, dict], node_id: str) -> dict | No
     return targets[0] if targets else None
 
 
+def process_qc_node(
+    flow: dict,
+    nodes: dict[str, dict],
+    process_node_id: str,
+) -> dict | None:
+    target = normal_target(flow, nodes, process_node_id)
+    return target if target and target.get("type") == "qc" else None
+
+
+def next_execution_node(
+    flow: dict,
+    nodes: dict[str, dict],
+    node_id: str,
+) -> dict | None:
+    target = normal_target(flow, nodes, node_id)
+    if target and target.get("type") == "qc":
+        return normal_target(flow, nodes, target["id"])
+    return target
+
+
 def part_route_procedure_ids(
     flow: dict,
     bom_item_id: int,
@@ -93,6 +113,35 @@ def part_route_procedure_ids(
                 allowed_procedure_ids is None
                 or procedure_id in allowed_procedure_ids
             )
+            and procedure_id not in procedure_ids
+        ):
+            procedure_ids.append(procedure_id)
+        node = normal_target(flow, nodes, node["id"])
+    return procedure_ids
+
+
+def origin_route_procedure_ids(
+    flow: dict,
+    origin_node_id: str,
+    allowed_procedure_ids: set[int] | None = None,
+) -> list[int]:
+    """Return procedures applied to one physical item before it is assembled again."""
+    nodes = {item["id"]: item for item in flow.get("nodes", [])}
+    origin = nodes.get(origin_node_id)
+    if origin is None or origin.get("type") not in {"part", "assembly"}:
+        return []
+    procedure_ids: list[int] = []
+    visited: set[str] = set()
+    node = normal_target(flow, nodes, origin_node_id)
+    while node is not None and node["id"] not in visited:
+        visited.add(node["id"])
+        if node.get("type") == "assembly":
+            break
+        procedure_id = node.get("procedure_id")
+        if (
+            node.get("type") == "process"
+            and isinstance(procedure_id, int)
+            and (allowed_procedure_ids is None or procedure_id in allowed_procedure_ids)
             and procedure_id not in procedure_ids
         ):
             procedure_ids.append(procedure_id)

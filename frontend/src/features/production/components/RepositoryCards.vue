@@ -6,20 +6,12 @@ const props = withDefaults(defineProps<{
   loading: boolean
   selectedKey?: string | null
   allowWorkOrder?: boolean
-  allowDispatch?: boolean
   mode?: 'production' | 'purchase'
 }>(), { mode: 'production' })
 const emit = defineEmits<{
   select: [item: RepositoryItem]
   createWorkOrder: [item: RepositoryItem]
-  dispatch: [item: RepositoryItem]
 }>()
-
-function isDispatchOnly(item: RepositoryItem) {
-  return props.mode === 'production'
-    && item.can_dispatch
-    && item.quantity === item.available_quantity
-}
 </script>
 
 <template>
@@ -35,13 +27,9 @@ function isDispatchOnly(item: RepositoryItem) {
     >
       <div class="card-heading">
         <strong>{{ item.part_no === item.part_name ? item.part_name : `${item.part_no} - ${item.part_name}` }}</strong>
-        <ElTag :type="isDispatchOnly(item) || item.work_status === 'completed' ? 'success' : item.work_status === 'processing' ? 'warning' : 'info'" size="small">
-          {{ isDispatchOnly(item)
-            ? '待出货'
-            : item.work_status === 'processing'
+        <ElTag :type="item.work_status === 'completed' ? 'success' : item.work_status === 'processing' ? 'warning' : 'info'" size="small">
+          {{ item.work_status === 'processing'
             ? (props.mode === 'purchase' ? '采购中' : '加工中')
-            : props.mode === 'production' && item.can_dispatch
-              ? '待出货'
             : item.work_status === 'completed'
               ? (props.mode === 'purchase' ? '已入库' : '已完成')
               : (props.mode === 'purchase' ? '待采购' : '未加工') }}
@@ -56,17 +44,8 @@ function isDispatchOnly(item: RepositoryItem) {
         <div><dt>{{ props.mode === 'purchase' ? '需求数量' : '当前数量' }}</dt><dd>{{ item.quantity }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求时间' : '到达时间' }}</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
       </dl>
-      <div v-if="allowDispatch || allowWorkOrder" class="card-actions">
+      <div v-if="allowWorkOrder" class="card-actions">
         <ElButton
-          v-if="allowDispatch && props.mode === 'production'"
-          type="primary"
-          plain
-          size="small"
-          :disabled="!item.can_dispatch || item.available_quantity < 1"
-          @click.stop="emit('dispatch', item)"
-        >出货</ElButton>
-        <ElButton
-          v-if="allowWorkOrder"
           type="primary"
           plain
           size="small"

@@ -32,6 +32,7 @@ from services.procedure_tags import (
     tag_suggestions,
 )
 from services.work_order_presenters import production_item_name
+from services.work_order_progress import calculate_work_order_progress
 
 
 def list_production_cards(
@@ -54,13 +55,26 @@ def list_production_cards(
         cards = []
         if work_status != "completed":
             active_cards = _current_cards(session, department, None, None, None)
-            if department_code != "assembly":
+            if department_code == "assembly":
+                active_cards.extend(
+                    _historical_cards(
+                        session,
+                        department,
+                        _current_positions(session, department),
+                        keyword,
+                        arrived_from,
+                        arrived_to,
+                    )
+                )
+            else:
                 active_cards.extend(
                     _tag_stock_cards(session, department, None, None, None)
                 )
                 active_cards.extend(_pending_standard_cards(session, department))
             cards.extend(_aggregate_standard_parent_cards(session, active_cards))
-        if work_status in {"all", "completed"}:
+        if work_status in {"all", "completed"} and (
+            department_code != "assembly" or work_status == "completed"
+        ):
             cards.extend(
                 _historical_cards(
                     session,
@@ -171,15 +185,14 @@ def _aggregate_standard_parent_cards(session, cards: list[dict]) -> list[dict]:
         pending_qc_quantity = sum(
             item.get("_pending_qc_quantity", 0) for item in group
         )
-        dispatchable_quantity = sum(
+        openable_quantity = sum(
             item["available_quantity"]
             for item in group
-            if item.get("tag_stock_id") is not None
+            if item.get("can_create_work_order", False)
         )
         status = (
             "processing"
             if pending_qc_quantity
-            or dispatchable_quantity
             or any(item["work_status"] == "processing" for item in group)
             else "unprocessed"
         )
@@ -204,13 +217,12 @@ def _aggregate_standard_parent_cards(session, cards: list[dict]) -> list[dict]:
                 "current_tag_set_name": "标记组合",
                 "quantity": sum(item["quantity"] for item in group)
                 + pending_qc_quantity,
-                "available_quantity": dispatchable_quantity,
+                "available_quantity": openable_quantity,
                 "arrived_at": arrived_at,
                 "work_status": status,
                 "can_create_work_order": any(
                     item.get("can_create_work_order", False) for item in group
                 ),
-                "can_dispatch": dispatchable_quantity > 0,
             }
         )
     return passthrough
@@ -219,7 +231,6 @@ def _aggregate_standard_parent_cards(session, cards: list[dict]) -> list[dict]:
 def _pending_standard_cards(session, department: Department) -> list[dict]:
     rows = session.execute(
         select(
-            WorkOrderBatch,
             WorkOrder,
             ProductionItem,
             CustomerOrderItem,
@@ -229,7 +240,6 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
             Procedure,
             Workshop,
         )
-        .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
         .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
         .join(
             CustomerOrderItem,
@@ -241,16 +251,25 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
         .join(Procedure, Procedure.id == WorkOrder.procedure_id)
         .join(Workshop, Workshop.id == Procedure.workshop_id)
         .where(
-            WorkOrderBatch.recorded_at.is_(None),
+            WorkOrder.status == "open",
+            WorkOrder.work_order_type == "tag",
             Procedure.procedure_type == "standard",
             Workshop.department_id == department.id,
         )
     ).all()
     cards = []
     for row in rows:
+        batches = list(session.scalars(
+            select(WorkOrderBatch).where(
+                WorkOrderBatch.work_order_id == row.WorkOrder.id
+            )
+        ).all())
+        progress = calculate_work_order_progress(row.WorkOrder, batches)
+        if progress.pending_qc_quantity == 0 and progress.rework_pending_quantity == 0:
+            continue
         production_item = row.ProductionItem
         context = load_production_flow(session, production_item)
-        source = context.nodes.get(row.WorkOrderBatch.source_flow_node_id, {})
+        source = context.nodes.get(row.WorkOrder.source_flow_node_id, {})
         part_no, part_name = context.item_name(production_item)
         if context.bom_item is None:
             part_name = production_item_name(session, production_item, set())
@@ -258,7 +277,7 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
         movement_at = session.scalar(
             select(ProductionMovement.created_at)
             .where(
-                ProductionMovement.work_order_batch_id == row.WorkOrderBatch.id,
+                ProductionMovement.work_order_id == row.WorkOrder.id,
                 ProductionMovement.movement_type.in_(("process", "purchase_receipt")),
             )
             .order_by(ProductionMovement.id.desc())
@@ -266,13 +285,13 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
         )
         cards.append(
             {
-                "card_key": f"pending-qc:{row.WorkOrderBatch.id}",
+                "card_key": f"open-tag-order:{row.WorkOrder.id}",
                 "repository_id": None,
                 "tag_stock_id": None,
                 "production_item_id": production_item.id,
                 "customer_order_item_id": row.CustomerOrderItem.id,
                 "customer_order_no": row.CustomerOrder.customer_order_no,
-                "customer_name": row.CustomerOrder.customer_name,
+                "customer_name": row.CustomerOrder.customer.customer_name,
                 "product_id": row.Product.id,
                 "product_version": row.CustomerOrderItem.product_version,
                 "product_name": row.Product.product_name,
@@ -281,11 +300,15 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
                 "part_name": part_name,
                 "part_no": part_no,
                 "flow_node_id": row.WorkOrder.flow_node_id,
-                "source_flow_node_id": row.WorkOrderBatch.source_flow_node_id,
+                "source_flow_node_id": row.WorkOrder.source_flow_node_id,
                 "source_node_label": source.get("label", "未知来源"),
                 "procedure_id": row.Procedure.id,
                 "procedure_name": row.Procedure.procedure_name,
-                "current_tag_set_name": "质检中",
+                "current_tag_set_name": (
+                    "待返工"
+                    if progress.rework_pending_quantity
+                    else "质检中"
+                ),
                 "available_tags": [
                     serialize_tag(item)
                     for item in tag_suggestions(session, row.Procedure.id)
@@ -294,7 +317,7 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
                     serialize_tag(item)
                     for item in configured_tag_suggestions(
                         session,
-                        row.ProductBom.id if row.ProductBom else None,
+                        production_item,
                         row.Procedure.id,
                     )
                 ],
@@ -324,8 +347,7 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
                 ),
                 "work_status": "processing",
                 "can_create_work_order": False,
-                "can_dispatch": False,
-                "_pending_qc_quantity": row.WorkOrderBatch.submitted_quantity,
+                "_pending_qc_quantity": progress.pending_qc_quantity,
             }
         )
     return cards

@@ -13,8 +13,17 @@ import {
   queryCustomerOrders,
 } from '../api/customerOrders'
 import type { CustomerOrder } from '../domain/types'
+import OrderProductProgress from '../components/OrderProductProgress.vue'
 
-const props = defineProps<{ embedded?: boolean }>()
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  readOnly?: boolean
+  showProductProgress?: boolean
+}>(), {
+  embedded: false,
+  readOnly: false,
+  showProductProgress: false,
+})
 const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(false)
@@ -45,7 +54,11 @@ const filteredOrders = computed(() => {
 async function loadOrders() {
   loading.value = true
   try {
-    const result = await queryCustomerOrders(page.value, pageSize)
+    const result = await queryCustomerOrders(
+      page.value,
+      pageSize,
+      props.showProductProgress,
+    )
     orders.value = result.items
     total.value = result.total
   }
@@ -68,7 +81,7 @@ async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete'
 }
 
 async function openOrder(order: CustomerOrder) {
-  if (order.status === 'draft') {
+  if (order.status === 'draft' && !props.readOnly) {
     await router.push(`/business/orders/${order.id}`)
     return
   }
@@ -101,6 +114,15 @@ onMounted(loadOrders)
         <ElTableColumn label="产品明细" min-width="260">
           <template #default="{ row }"><div v-for="item in row.items" :key="item.id">{{ item.factory_code }}-{{ item.product_name }}-{{ item.quantity }}个</div></template>
         </ElTableColumn>
+        <ElTableColumn v-if="props.showProductProgress" label="产品进度" min-width="540">
+          <template #default="{ row }">
+            <OrderProductProgress
+              v-for="progress in row.product_progress"
+              :key="progress.customer_order_item_id"
+              :progress="progress"
+            />
+          </template>
+        </ElTableColumn>
         <ElTableColumn label="状态" width="100">
           <template #default="{ row }">
             <ElTag :type="statusTagTypes[row.status as keyof typeof statusTagTypes]" effect="light">
@@ -109,12 +131,14 @@ onMounted(loadOrders)
           </template>
         </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" width="170" />
-        <ElTableColumn label="操作" width="240" fixed="right">
+        <ElTableColumn label="操作" :width="props.readOnly ? 90 : 240" fixed="right">
           <template #default="{ row }">
-            <ElButton link @click="openOrder(row)">{{ row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
-            <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.confirm" link type="primary" @click="act(row, 'confirm')">确认</ElButton>
-            <ElButton v-if="['draft', 'confirmed', 'planned'].includes(row.status)" v-permission="ORDER_PERMISSIONS.cancel" link type="warning" @click="act(row, 'cancel')">取消</ElButton>
-            <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.edit" link type="danger" @click="act(row, 'delete')">删除</ElButton>
+            <ElButton link @click="openOrder(row)">{{ props.readOnly ? '查看' : row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
+            <template v-if="!props.readOnly">
+              <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.confirm" link type="primary" @click="act(row, 'confirm')">确认</ElButton>
+              <ElButton v-if="['draft', 'confirmed', 'planned'].includes(row.status)" v-permission="ORDER_PERMISSIONS.cancel" link type="warning" @click="act(row, 'cancel')">取消</ElButton>
+              <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.edit" link type="danger" @click="act(row, 'delete')">删除</ElButton>
+            </template>
           </template>
         </ElTableColumn>
       </ElTable>

@@ -1,10 +1,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import {
-  dispatchProcedureTagStock,
-  queryProductionTagCards,
-} from '../api/departmentRepositories'
+import { queryProductionTagCards } from '../api/departmentRepositories'
 import { createWorkOrder } from '../api/workOrders'
 import type {
   RepositoryFilters,
@@ -31,9 +28,7 @@ export function useProductionDepartment(
   )
   const activeRepository = ref<RepositoryItem>()
   const dialogVisible = ref(false)
-  const dispatchDialogVisible = ref(false)
   const submitting = ref(false)
-  const dispatchSubmitting = ref(false)
   const tagItems = ref<TagCard[]>([])
   const tagLoading = ref(false)
   const existingTagIds = ref<number[]>([])
@@ -67,8 +62,8 @@ export function useProductionDepartment(
 
   async function loadTags(item = workspace.selectedRepository.value) {
     const sequence = ++tagSequence
-    tagItems.value = []
     if (mode !== 'production' || !item) {
+      tagItems.value = []
       tagLoading.value = false
       return
     }
@@ -147,6 +142,7 @@ export function useProductionDepartment(
       if (workspace.selectedCardKey.value !== item.card_key) return
       if (!tagItems.value.some(source => (
         source.available_quantity > 0
+        && source.can_create_work_order
         && ((source.repository_id === null) !== (source.tag_stock_id === null))
       ))) {
         ElMessage.warning('当前配件没有可用的开单来源')
@@ -186,37 +182,6 @@ export function useProductionDepartment(
     }
   }
 
-  async function openDispatch(item: RepositoryItem) {
-    workspace.selectRepository(item)
-    clearTagState()
-    workOrderList.reset()
-    activeRepository.value = item
-    await loadTags(item)
-    if (workspace.selectedCardKey.value !== item.card_key) return
-    await loadDetails()
-    if (!tagItems.value.some(
-      source => source.tag_stock_id !== null && source.available_quantity > 0,
-    )) {
-      ElMessage.warning('当前配件暂无可出货的已完成标记组合')
-      return
-    }
-    dispatchDialogVisible.value = true
-  }
-
-  async function saveDispatch(payload: { tagStockId: number; quantity: number }) {
-    dispatchSubmitting.value = true
-    try {
-      await dispatchProcedureTagStock(payload.tagStockId, payload.quantity)
-      dispatchDialogVisible.value = false
-      await reloadWorkspace()
-      ElMessage.success('出货完成')
-    } catch (error) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '出货失败')
-    } finally {
-      dispatchSubmitting.value = false
-    }
-  }
-
   async function refresh() {
     clearTagState()
     workOrderList.reset()
@@ -244,14 +209,10 @@ export function useProductionDepartment(
     applyFilters,
     changeRepositoryPage,
     dialogVisible,
-    dispatchDialogVisible,
-    dispatchSubmitting,
     load,
     loadDetails,
-    openDispatch,
     openWorkOrder,
     refresh,
-    saveDispatch,
     saveWorkOrder,
     selectRepository,
     existingTagIds,

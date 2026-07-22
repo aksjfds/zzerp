@@ -10,6 +10,7 @@ from schemas.engineering import ProcessFlowPayload
 from schemas.sales import CustomerOrderItemInput
 from services.errors import DomainError
 from services.production_flow import load_product_flow
+from services.customer_order_progress import order_item_progress
 
 
 def order_not_found() -> DomainError:
@@ -29,6 +30,8 @@ def serialize_order(
     session,
     order: CustomerOrder,
     products: dict[int, Product] | None = None,
+    *,
+    include_progress: bool = False,
 ) -> dict:
     if products is None:
         product_ids = {item.product_id for item in order.items}
@@ -38,26 +41,40 @@ def serialize_order(
                 select(Product).where(Product.id.in_(product_ids))
             ).all()
         }
+    item_rows = [
+        {
+            "id": item.id,
+            "product_id": item.product_id,
+            "product_version": item.product_version,
+            "product_name": products[item.product_id].product_name,
+            "factory_code": products[item.product_id].factory_code,
+            "quantity": item.quantity,
+            "delivery_date": item.delivery_date,
+            "remark": item.remark or "",
+        }
+        for item in order.items
+    ]
+    progress_rows = []
+    if include_progress:
+        for item in order.items:
+            progress = order_item_progress(
+                session,
+                item,
+                order_status=order.status,
+            )
+            progress["product_name"] = products[item.product_id].product_name
+            progress["factory_code"] = products[item.product_id].factory_code
+            progress_rows.append(progress)
     return {
         "id": order.id,
         "customer_order_no": order.customer_order_no,
-        "customer_name": order.customer_name,
+        "customer_id": order.customer_id,
+        "customer_name": order.customer.customer_name,
         "status": order.status,
         "revision": order.revision,
         "remark": order.remark or "",
-        "items": [
-            {
-                "id": item.id,
-                "product_id": item.product_id,
-                "product_version": item.product_version,
-                "product_name": products[item.product_id].product_name,
-                "factory_code": products[item.product_id].factory_code,
-                "quantity": item.quantity,
-                "delivery_date": item.delivery_date,
-                "remark": item.remark or "",
-            }
-            for item in order.items
-        ],
+        "items": item_rows,
+        "product_progress": progress_rows,
         "created_at": business_iso(order.created_at),
         "updated_at": business_iso(order.updated_at),
     }
@@ -66,6 +83,7 @@ def serialize_order(
 def resolve_order_products(
     session,
     items: list[CustomerOrderItemInput],
+    customer_id: int,
 ) -> dict[int, Product]:
     product_ids = {item.product_id for item in items}
     products = {
@@ -80,6 +98,12 @@ def resolve_order_products(
     if len(products) != len(product_ids):
         raise DomainError("invalid_order_product", "订单包含不存在的产品", path="items")
     for product in products.values():
+        if product.customer_id != customer_id:
+            raise DomainError(
+                "order_product_customer_mismatch",
+                "订单产品必须属于所选客户",
+                path="items",
+            )
         _validate_product_engineering_data(session, product)
     return products
 

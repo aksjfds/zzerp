@@ -1,5 +1,6 @@
 from copy import deepcopy
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
@@ -8,6 +9,7 @@ from domain.engineering_products import validate_expected_revision
 from domain.models import BomItemCommand
 from domain.time import utc_now
 from models.engineering import ProductVersion
+from models.organization import ProcedureTagPrice
 from repositories.engineering_products import EngineeringProductRepository
 from services.engineering_product_command_support import command_result, product_versions
 from services.engineering_product_editability import ensure_product_version_editable
@@ -60,9 +62,10 @@ def create_product_version(
                 ],
             )
             repository.flush()
+            copied_by_part_no = {item.part_no: item for item in copied_items}
             id_map = {
-                source.id: copied.id
-                for source, copied in zip(source_items, copied_items, strict=True)
+                source.id: copied_by_part_no[source.part_no].id
+                for source in source_items
             }
             source_flow = next(
                 (
@@ -75,8 +78,29 @@ def create_product_version(
             copied_flow = deepcopy(source_flow)
             for node in copied_flow.get("nodes", []):
                 if node.get("type") == "part":
-                    node["bom_item_id"] = id_map[node["bom_item_id"]]
+                    source_bom_id = node.get("bom_item_id")
+                    if source_bom_id not in id_map:
+                        raise DomainError(
+                            "source_flow_bom_invalid",
+                            "源版本流程中的配件节点未引用有效 BOM 行，请先修复源版本流程",
+                            element_id=node.get("id"),
+                        )
+                    node["bom_item_id"] = id_map[source_bom_id]
             repository.set_process_flow(product, next_version, copied_flow)
+            for price in session.scalars(
+                select(ProcedureTagPrice).where(
+                    ProcedureTagPrice.product_id == product.id,
+                    ProcedureTagPrice.product_version == copy_from_version,
+                )
+            ):
+                session.add(ProcedureTagPrice(
+                    product_id=product.id,
+                    product_version=next_version,
+                    origin_flow_node_id=price.origin_flow_node_id,
+                    procedure_id=price.procedure_id,
+                    procedure_tag_id=price.procedure_tag_id,
+                    unit_price=price.unit_price,
+                ))
             product.version = next_version
             product.revision += 1
             product.updated_at = utc_now()

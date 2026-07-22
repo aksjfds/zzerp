@@ -36,11 +36,11 @@ export type RepositoryItem = {
   assembly_unit_quantity: number
   assembly_required_source_ids: string[]
   assembly_group_complete: boolean
+  assembly_output_name: string | null
   delivery_date: string
   arrived_at: string | null
   work_status: 'unprocessed' | 'processing' | 'completed'
   can_create_work_order: boolean
-  can_dispatch: boolean
 }
 
 export type TagCard = {
@@ -59,6 +59,12 @@ export type TagCard = {
   processing_quantity: number
   pending_qc_quantity: number
   completed_quantity: number
+  processing_details: Array<{
+    tag_names: string[]
+    tag_set_name: string
+    quantity: number
+  }>
+  can_create_work_order: boolean
 }
 
 export type RepositoryFilters = {
@@ -118,6 +124,14 @@ export type WorkOrder = {
   created_at: string
   closed_at: string | null
   batches: WorkOrderBatch[]
+  undo_operation: {
+    id: number
+    work_order_batch_id: number | null
+    operation_type: 'submission' | 'rework_submission'
+    operation_label: string
+    actor_username: string
+    created_at: string
+  } | null
 }
 
 export type PendingQcBatch = WorkOrderBatch & {
@@ -128,7 +142,8 @@ export type PendingQcBatch = WorkOrderBatch & {
   part_no: string
   part_name: string
   work_order_name: string
-  remaining_quantity: number
+  dispatchable_quantity: number
+  target_node_label: string | null
 }
 
 export type CompletionAction = 'direct' | 'qc'

@@ -1,0 +1,40 @@
+import { service } from '@/api/request'
+import type {
+  DepartmentWorkerOverview,
+  WorkerHistoryItem,
+  WorkerOverviewItem,
+} from '@/features/workers/domain/types'
+
+export async function queryDepartmentWorkerOverview(departmentCode: string) {
+  const response = await service.get<{ data: DepartmentWorkerOverview }>(
+    `/departments/${departmentCode}/worker-overview`,
+  )
+  return response.data.data
+}
+
+export async function queryDepartmentWorkerHistory(
+  departmentCode: string,
+  workerId: number,
+  month: string,
+) {
+  const response = await service.get<{ data: WorkerHistoryItem[] }>(
+    `/departments/${departmentCode}/workers/${workerId}/work-history`,
+    { params: { month } },
+  )
+  return response.data.data
+}
+
+export async function createDepartmentWorker(
+  departmentCode: string,
+  workerName: string,
+  workshopId: number | null,
+) {
+  const response = await service.post<{ data: WorkerOverviewItem }>(
+    `/departments/${departmentCode}/workers`,
+    {
+      worker_name: workerName,
+      workshop_id: workshopId,
+    },
+  )
+  return response.data.data
+}

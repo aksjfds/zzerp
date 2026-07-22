@@ -51,6 +51,9 @@ function nodeLabel(label: string, stat?: ProductionNodeStat): string {
   if (stat.node_type === 'part') {
     return `${label}\n投入${stat.entered_quantity} 转出${stat.transferred_quantity}`
   }
+  if (stat.node_type === 'shipping') {
+    return `${label}\n已发货${stat.entered_quantity}`
+  }
   return `${label}\n入${stat.entered_quantity} 出${stat.transferred_quantity} 现${stat.current_quantity}`
 }
 

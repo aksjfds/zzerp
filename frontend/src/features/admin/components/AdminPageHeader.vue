@@ -1,15 +1,24 @@
 <script setup lang="ts">
+withDefaults(defineProps<{
+  accountLabel?: string
+  title?: string
+  refreshLabel?: string
+}>(), {
+  accountLabel: 'admin 管理员',
+  title: '管理看板',
+  refreshLabel: '刷新工人总览',
+})
 defineEmits<{ refresh: []; logout: [] }>()
 </script>
 
 <template>
   <header class="admin-header">
     <div>
-      <span>admin 管理员</span>
-      <h1>管理看板</h1>
+      <span>{{ accountLabel }}</span>
+      <h1>{{ title }}</h1>
     </div>
     <div>
-      <ElButton @click="$emit('refresh')">刷新工人总览</ElButton>
+      <ElButton @click="$emit('refresh')">{{ refreshLabel }}</ElButton>
       <ElButton @click="$emit('logout')">退出登录</ElButton>
     </div>
   </header>

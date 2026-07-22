@@ -6,7 +6,7 @@ defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
 <template>
   <div v-loading="loading" class="assembly-groups">
     <article v-for="group in groups" :key="group.key" class="assembly-group-card" :class="{ selected: group.key === selectedKey }" tabindex="0" @click="$emit('select', group)" @keydown.enter="$emit('select', group)">
-      <div class="heading"><strong>{{ group.productName }} · {{ group.name }}</strong><ElTag :type="group.status === 'processing' ? 'warning' : group.status === 'completed' ? 'success' : 'info'" size="small">{{ group.status === 'processing' ? '加工中' : group.status === 'completed' ? '已完成' : '未加工' }}</ElTag></div>
+      <div class="heading"><strong>{{ group.productName }} · {{ group.name }}</strong><ElTag :type="group.status === 'processing' ? 'warning' : group.status === 'completed' ? 'success' : 'info'" size="small">{{ group.kind === 'history' ? '历史' : !group.complete ? '等待物料' : group.status === 'processing' ? '加工中' : group.status === 'completed' ? '已完成' : '未加工' }}</ElTag></div>
       <p>到达时间：{{ group.arrivedAt || '-' }}</p>
       <ul>
         <li v-for="source in group.sources" :key="source.name">{{ source.name }}：可用 {{ source.available }} / 每件用量 {{
@@ -14,7 +14,7 @@ defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
           <li>可装配 {{ group.capacity }}</li>
           <li v-if="!group.complete">等待其余装配物料到齐</li>
       </ul>
-      <ElButton type="primary" :disabled="group.capacity < 1" @click.stop="$emit('open', group)">开装配工单</ElButton>
+      <ElButton v-if="group.kind === 'current'" type="primary" :disabled="!group.complete || group.capacity < 1" @click.stop="$emit('open', group)">开装配工单</ElButton>
     </article>
     <ElEmpty v-if="!loading && !groups.length" description="暂无可装配物料" :image-size="72" />
   </div>

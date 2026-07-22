@@ -6,6 +6,7 @@ from sqlalchemy import BigInteger, CheckConstraint, Date, ForeignKey, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database import Base
+from models.customer import Customer
 
 
 class CustomerOrder(Base):
@@ -16,12 +17,15 @@ class CustomerOrder(Base):
             name="ck_customer_order_status",
         ),
         CheckConstraint("revision > 0", name="ck_customer_order_revision"),
+        Index("idx_customer_order_customer", "customer_id"),
         Index("idx_customer_order_updated", text("updated_at DESC"), text("id DESC")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_order_no: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("customer.id"), nullable=False
+    )
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -34,6 +38,7 @@ class CustomerOrder(Base):
     items: Mapped[list[CustomerOrderItem]] = relationship(
         back_populates="order", cascade="all, delete-orphan", order_by="CustomerOrderItem.id"
     )
+    customer: Mapped[Customer] = relationship()
 
 
 class CustomerOrderItem(Base):

@@ -3,7 +3,7 @@ import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { createAssemblyWorkOrder } from '../api/workOrders'
 import type { RepositoryFilters, RepositoryItem } from '../domain/types'
-import { useAssemblyGroups, type AssemblyGroup } from './useAssemblyGroups'
+import { assemblyGroupKey, useAssemblyGroups, type AssemblyGroup } from './useAssemblyGroups'
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
 import { useWorkOrderList } from './useWorkOrders'
 import { useAssemblyWorkOrderActions } from './useAssemblyWorkOrderActions'
@@ -20,7 +20,7 @@ export function useAssemblyDepartment() {
   const dialogVisible = ref(false)
   const submitting = ref(false)
   const selectedGroupKey = computed(() => workspace.selectedRepository.value
-    ? `${workspace.selectedRepository.value.customer_order_item_id}:${workspace.selectedRepository.value.flow_node_id}`
+    ? assemblyGroupKey(workspace.selectedRepository.value)
     : null)
   const selectedGroup = computed(() => assembly.groups.value.find(
     group => group.key === selectedGroupKey.value,

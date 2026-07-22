@@ -1,31 +1,47 @@
 <script setup lang="ts">
 import type {
-  AdminWorker,
-  AdminWorkerDepartment,
-  AdminWorkerHistoryItem,
+  WorkerHistoryItem,
+  WorkerOverviewDepartment,
+  WorkerOverviewItem,
 } from '../domain/types'
 
-defineProps<{
-  departments: AdminWorkerDepartment[]
-  workers: AdminWorker[]
-  selectedWorker?: AdminWorker
+withDefaults(defineProps<{
+  departments: WorkerOverviewDepartment[]
+  workers: WorkerOverviewItem[]
+  selectedWorker?: WorkerOverviewItem
   selectedWorkerTitle: string
-  history: AdminWorkerHistoryItem[]
+  history: WorkerHistoryItem[]
   workersLoading: boolean
   historyLoading: boolean
-}>()
+  showDepartmentFilter?: boolean
+  allowCreate?: boolean
+}>(), {
+  showDepartmentFilter: true,
+  allowCreate: false,
+})
 const workerKeyword = defineModel<string>('workerKeyword', { required: true })
 const departmentFilter = defineModel<number | ''>('departmentFilter', { required: true })
 const selectedMonth = defineModel<string>('selectedMonth', { required: true })
-defineEmits<{ select: [worker: AdminWorker]; monthChange: [] }>()
+defineEmits<{
+  select: [worker: WorkerOverviewItem]
+  monthChange: []
+  create: []
+}>()
 </script>
 
 <template>
   <div class="worker-layout">
-    <section v-loading="workersLoading" class="admin-card worker-list">
+    <section v-loading="workersLoading" class="worker-panel worker-list">
       <div class="worker-filters">
         <ElInput v-model="workerKeyword" clearable placeholder="搜索工人名字" />
-        <ElSelect v-model="departmentFilter" clearable placeholder="筛选部门">
+        <ElSelect
+          v-if="showDepartmentFilter"
+          v-model="departmentFilter"
+          placement="top-start"
+          :fallback-placements="['top-start', 'top-end']"
+          clearable
+          placeholder="筛选部门"
+        >
           <ElOption
             v-for="department in departments"
             :key="department.department_id"
@@ -33,6 +49,7 @@ defineEmits<{ select: [worker: AdminWorker]; monthChange: [] }>()
             :value="department.department_id"
           />
         </ElSelect>
+        <ElButton v-if="allowCreate" type="primary" @click="$emit('create')">录入工人</ElButton>
       </div>
       <div v-if="!workers.length" class="empty-text">暂无匹配工人</div>
       <button
@@ -48,7 +65,7 @@ defineEmits<{ select: [worker: AdminWorker]; monthChange: [] }>()
       </button>
     </section>
 
-    <section class="admin-card history-panel">
+    <section class="worker-panel history-panel">
       <div class="history-heading">
         <div>
           <span>工人工作情况</span>
@@ -80,7 +97,7 @@ defineEmits<{ select: [worker: AdminWorker]; monthChange: [] }>()
 </template>
 
 <style scoped>
-.admin-card {
+.worker-panel {
   padding: 20px;
   border: 1px solid var(--erp-border);
   border-radius: 10px;

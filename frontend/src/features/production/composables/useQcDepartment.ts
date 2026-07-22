@@ -1,8 +1,8 @@
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { queryDepartmentWorkers } from '../api/departmentRepositories'
-import { inspectQcBatch, queryPendingQcBatches } from '../api/qc'
+import { dispatchQcBatch, inspectQcBatch, queryPendingQcBatches } from '../api/qc'
 import type {
   PendingQcBatch,
   QcInspectionPayload,
@@ -10,6 +10,7 @@ import type {
 } from '../domain/types'
 
 export function useQcDepartment() {
+  const activeView = ref<'active' | 'history'>('active')
   const batches = ref<PendingQcBatch[]>([])
   const workers = ref<WorkerItem[]>([])
   const activeBatch = ref<PendingQcBatch>()
@@ -19,21 +20,32 @@ export function useQcDepartment() {
   const pageSize = 50
   const dialogVisible = ref(false)
   const submitting = ref(false)
+  const keyword = ref('')
   let loadSequence = 0
 
   async function loadBatches() {
     const sequence = ++loadSequence
     const requestedPage = page.value
-    batches.value = []
-    total.value = 0
     loading.value = true
     try {
-      let result = await queryPendingQcBatches(requestedPage, pageSize)
+      let result = await queryPendingQcBatches(
+        requestedPage,
+        pageSize,
+        undefined,
+        activeView.value === 'history',
+        keyword.value,
+      )
       if (sequence !== loadSequence) return
       const lastPage = Math.max(1, Math.ceil(result.total / pageSize))
       if (requestedPage > lastPage) {
         page.value = lastPage
-        result = await queryPendingQcBatches(lastPage, pageSize)
+        result = await queryPendingQcBatches(
+          lastPage,
+          pageSize,
+          undefined,
+          activeView.value === 'history',
+          keyword.value,
+        )
         if (sequence !== loadSequence) return
       }
       batches.value = result.items
@@ -74,6 +86,35 @@ export function useQcDepartment() {
     }
   }
 
+  async function dispatch(batch: PendingQcBatch) {
+    try {
+      const { value } = await ElMessageBox.prompt(
+        `请输入出货到${batch.target_node_label || '下一节点'}的数量`,
+        `QC批次 ${batch.id} 出货`,
+        {
+          inputValue: String(batch.dispatchable_quantity),
+          inputPattern: /^[1-9]\d*$/,
+          inputErrorMessage: '请输入正整数',
+        },
+      )
+      const quantity = Number(value)
+      if (quantity < 1 || quantity > batch.dispatchable_quantity) {
+        ElMessage.warning('出货数量不能超过合格待出货数量')
+        return
+      }
+      submitting.value = true
+      await dispatchQcBatch(batch.id, quantity)
+      await loadBatches()
+      ElMessage.success(`已向${batch.target_node_label || '下一节点'}出货 ${quantity} 件`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(getApiErrorDetail(error)?.message || 'QC出货失败')
+      }
+    } finally {
+      submitting.value = false
+    }
+  }
+
   async function refresh() {
     page.value = 1
     await Promise.all([loadBatches(), loadWorkers()])
@@ -84,15 +125,30 @@ export function useQcDepartment() {
     await loadBatches()
   }
 
+  async function changeView(view: 'active' | 'history') {
+    activeView.value = view
+    page.value = 1
+    await loadBatches()
+  }
+
+  async function search(value: string) {
+    keyword.value = value.trim()
+    page.value = 1
+    await loadBatches()
+  }
+
   async function load() {
     await Promise.all([loadBatches(), loadWorkers()])
   }
 
   return {
+    activeView,
     activeBatch,
     batches,
     changePage,
+    changeView,
     dialogVisible,
+    dispatch,
     load,
     loadBatches,
     loading,
@@ -101,6 +157,7 @@ export function useQcDepartment() {
     pageSize,
     refresh,
     saveInspection,
+    search,
     submitting,
     total,
     workers,

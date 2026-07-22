@@ -28,6 +28,7 @@ const form = reactive({
 })
 const sourceOptions = computed(() => props.sources.filter(item => (
   item.available_quantity > 0
+  && item.can_create_work_order
   && ((item.repository_id === null) !== (item.tag_stock_id === null))
 )))
 const selectedSource = computed(() => sourceOptions.value.find(
@@ -133,7 +134,7 @@ function submit() {
     </p>
     <ElForm label-width="96px">
       <ElFormItem label="来源组合" required>
-        <ElSelect v-model="form.sourceKey" placeholder="请选择来源标记组合">
+        <ElSelect v-model="form.sourceKey" placement="top-start" :fallback-placements="['top-start', 'top-end']" placeholder="请选择来源标记组合">
           <ElOption
             v-for="source in sourceOptions"
             :key="source.card_key"
@@ -145,15 +146,16 @@ function submit() {
       <ElFormItem label="新增标记" required>
         <ElSelect
           :model-value="form.tagNames"
+          placement="top-start"
+          :fallback-placements="['top-start', 'top-end']"
           multiple
           filterable
-          allow-create
           default-first-option
           clearable
           :multiple-limit="20"
           tag-type="danger"
           tag-effect="dark"
-          placeholder="输入或选择标记，可添加多个"
+          placeholder="选择一个或多个已配置必做标记"
           @update:model-value="updateTagNames"
         >
           <ElOption
@@ -171,7 +173,7 @@ function submit() {
         <ElInputNumber v-model="form.quantity" :min="1" :max="maximumQuantity" />
       </ElFormItem>
       <ElFormItem label="执行工人">
-        <ElSelect v-model="form.workerId" clearable placeholder="暂不分配工人">
+        <ElSelect v-model="form.workerId" placement="top-start" :fallback-placements="['top-start', 'top-end']" clearable placeholder="暂不分配工人">
           <ElOption
             v-for="worker in workers"
             :key="worker.id"

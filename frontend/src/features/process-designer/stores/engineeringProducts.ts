@@ -51,6 +51,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
   async function createProduct(form: ProductForm) {
     return withSaving(async () => {
       const product = await createProductApi({
+        customer_id: form.customer_id,
         customer_name: form.customer_name,
         product_name: form.product_name,
         factory_code: form.factory_code,
@@ -152,6 +153,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
       id: product.id,
       version: product.version,
       revision: product.revision,
+      customer_id: product.customer_id,
       customer_name: product.customer_name,
       product_name: product.product_name,
       factory_code: product.factory_code,

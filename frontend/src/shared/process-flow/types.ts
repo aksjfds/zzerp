@@ -1,5 +1,5 @@
-export const PROCESS_FLOW_SCHEMA_VERSION = 2 as const
-export type FlowNodeType = 'part' | 'process' | 'assembly'
+export const PROCESS_FLOW_SCHEMA_VERSION = 3 as const
+export type FlowNodeType = 'part' | 'process' | 'qc' | 'assembly' | 'shipping'
 export type FlowPoint = { x: number; y: number }
 type FlowNodeBase = FlowPoint & { id: string; label: string; label_position?: FlowPoint; z_index?: number; rotation?: number }
 export type FlowNode =
@@ -8,8 +8,9 @@ export type FlowNode =
       type: 'process'
       process_code: string
       procedure_id: number
-      qc_required: boolean
     })
+  | (FlowNodeBase & { type: 'qc' })
+  | (FlowNodeBase & { type: 'shipping' })
   | (FlowNodeBase & { type: 'assembly'; output_name: string; output_pcs: number })
 export type FlowEdge = {
   id: string

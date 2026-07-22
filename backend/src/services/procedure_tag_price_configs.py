@@ -1,10 +1,10 @@
 from collections import defaultdict
 from decimal import Decimal
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, select
 
 from database import SessionLocal
-from models.engineering import Product, ProductBom, ProductProcessFlow
+from models.engineering import Product, ProductBom, ProductProcessFlow, ProductVersion
 from models.organization import (
     Department,
     Procedure,
@@ -12,10 +12,11 @@ from models.organization import (
     ProcedureTagPrice,
     Workshop,
 )
+from models.production import ProductionItem, WorkOrder
 from schemas.procedure_tag_prices import ProcedureTagPriceUpdate
 from services.errors import DomainError
 from services.procedure_tags import get_or_create_tag
-from services.production_flow import part_route_procedure_ids
+from services.production_flow import origin_route_procedure_ids
 
 
 def list_procedure_tag_prices(
@@ -41,14 +42,7 @@ def list_procedure_tag_prices(
             return [], 0
 
         statement = (
-            select(Product, ProductBom, ProductProcessFlow)
-            .join(
-                ProductBom,
-                and_(
-                    ProductBom.product_id == Product.id,
-                    ProductBom.product_version == Product.version,
-                ),
-            )
+            select(Product, ProductProcessFlow)
             .join(
                 ProductProcessFlow,
                 and_(
@@ -56,35 +50,61 @@ def list_procedure_tag_prices(
                     ProductProcessFlow.product_version == Product.version,
                 ),
             )
-            .order_by(Product.updated_at.desc(), Product.id.desc(), ProductBom.sort_order)
+            .order_by(Product.updated_at.desc(), Product.id.desc())
         )
         value = (keyword or "").strip()
-        if value:
-            pattern = f"%{value}%"
-            statement = statement.where(or_(
-                Product.product_name.ilike(pattern),
-                Product.factory_code.ilike(pattern),
-                ProductBom.part_name.ilike(pattern),
-                ProductBom.part_no.ilike(pattern),
-            ))
-
-        candidates: list[tuple[Product, ProductBom, list[int]]] = []
-        for product, bom, flow_record in session.execute(statement):
-            procedure_ids = part_route_procedure_ids(
-                flow_record.flow_json,
-                bom.id,
-                set(procedures_by_id),
-            )
-            if procedure_ids:
-                candidates.append((product, bom, procedure_ids))
+        candidates: list[dict] = []
+        for product, flow_record in session.execute(statement):
+            boms = {
+                bom.id: bom
+                for bom in session.scalars(
+                    select(ProductBom).where(
+                        ProductBom.product_id == product.id,
+                        ProductBom.product_version == product.version,
+                    )
+                )
+            }
+            for node in flow_record.flow_json.get("nodes", []):
+                node_type = node.get("type")
+                if node_type not in {"part", "assembly"}:
+                    continue
+                procedure_ids = origin_route_procedure_ids(
+                    flow_record.flow_json,
+                    node["id"],
+                    set(procedures_by_id),
+                )
+                if not procedure_ids:
+                    continue
+                bom = boms.get(node.get("bom_item_id")) if node_type == "part" else None
+                if node_type == "part" and bom is None:
+                    continue
+                part_name = bom.part_name if bom else (
+                    node.get("output_name") or node.get("label") or "装配体"
+                )
+                part_no = bom.part_no if bom else part_name
+                searchable = " ".join((
+                    product.product_name,
+                    product.factory_code,
+                    part_name,
+                    part_no,
+                )).lower()
+                if value and value.lower() not in searchable:
+                    continue
+                candidates.append({
+                    "product": product,
+                    "bom": bom,
+                    "origin_flow_node_id": node["id"],
+                    "part_name": part_name,
+                    "part_no": part_no,
+                    "procedure_ids": procedure_ids,
+                })
 
         total = len(candidates)
         selected = candidates[(page - 1) * page_size:page * page_size]
-        bom_ids = [bom.id for _, bom, _ in selected]
         selected_procedure_ids = {
             procedure_id
-            for _, _, procedure_ids in selected
-            for procedure_id in procedure_ids
+            for candidate in selected
+            for procedure_id in candidate["procedure_ids"]
         }
         tags_by_procedure: dict[int, list[ProcedureTag]] = defaultdict(list)
         if selected_procedure_ids:
@@ -95,34 +115,73 @@ def list_procedure_tag_prices(
             ):
                 tags_by_procedure[tag.procedure_id].append(tag)
         prices = {
-            (item.product_bom_id, item.procedure_tag_id): item.unit_price
+            (
+                item.product_id,
+                item.product_version,
+                item.origin_flow_node_id,
+                item.procedure_tag_id,
+            ): item.unit_price
             for item in session.scalars(
-                select(ProcedureTagPrice).where(
-                    ProcedureTagPrice.product_bom_id.in_(bom_ids)
-                )
+                select(ProcedureTagPrice).where(ProcedureTagPrice.product_id.in_(
+                    {candidate["product"].id for candidate in selected}
+                ))
             )
-        } if bom_ids else {}
+        } if selected else {}
+        locked_configs = set(session.execute(
+            select(
+                ProductionItem.product_id,
+                ProductionItem.product_version,
+                ProductionItem.origin_flow_node_id,
+                WorkOrder.procedure_id,
+            )
+            .join(WorkOrder, WorkOrder.production_item_id == ProductionItem.id)
+            .where(
+                ProductionItem.product_id.in_(
+                    {candidate["product"].id for candidate in selected}
+                ),
+                WorkOrder.procedure_id.in_(selected_procedure_ids),
+            )
+        ).all()) if selected and selected_procedure_ids else set()
 
         data = []
-        for product, bom, procedure_ids in selected:
+        for candidate in selected:
+            product = candidate["product"]
+            bom = candidate["bom"]
+            origin_id = candidate["origin_flow_node_id"]
             procedure_data = []
-            for procedure_id in procedure_ids:
+            for procedure_id in candidate["procedure_ids"]:
                 procedure = procedures_by_id[procedure_id]
                 available_tags = [
                     {
                         "id": tag.id,
                         "tag_name": tag.tag_name,
-                        "unit_price": prices.get((bom.id, tag.id)),
+                        "unit_price": prices.get((
+                            product.id,
+                            product.version,
+                            origin_id,
+                            tag.id,
+                        )),
                     }
                     for tag in tags_by_procedure.get(procedure_id, [])
                 ]
                 procedure_data.append({
                     "procedure_id": procedure.id,
                     "procedure_name": procedure.procedure_name,
+                    "tags_locked": (
+                        product.id,
+                        product.version,
+                        origin_id,
+                        procedure.id,
+                    ) in locked_configs,
                     "available_tags": available_tags,
                     "configured_tags": [
                         tag for tag in available_tags
-                        if (bom.id, tag["id"]) in prices
+                        if (
+                            product.id,
+                            product.version,
+                            origin_id,
+                            tag["id"],
+                        ) in prices
                     ],
                 })
             data.append({
@@ -130,9 +189,10 @@ def list_procedure_tag_prices(
                 "product_version": product.version,
                 "product_name": product.product_name,
                 "factory_code": product.factory_code,
-                "product_bom_id": bom.id,
-                "part_name": bom.part_name,
-                "part_no": bom.part_no,
+                "product_bom_id": bom.id if bom else None,
+                "origin_flow_node_id": origin_id,
+                "part_name": candidate["part_name"],
+                "part_no": candidate["part_no"],
                 "procedures": procedure_data,
             })
         return data, total
@@ -140,7 +200,9 @@ def list_procedure_tag_prices(
 
 def update_procedure_tag_prices(
     department_code: str,
-    product_bom_id: int,
+    product_id: int,
+    product_version: int,
+    origin_flow_node_id: str,
     procedure_id: int,
     payload: ProcedureTagPriceUpdate,
     user_department: str,
@@ -160,18 +222,19 @@ def update_procedure_tag_prices(
             or workshop.department_id != department.id
         ):
             raise DomainError("procedure_tag_price_procedure_invalid", "当前工艺不属于该部门")
-        bom = session.get(ProductBom, product_bom_id, with_for_update=True)
-        if bom is None:
-            raise DomainError("product_bom_not_found", "配件不存在", status_code=404)
+        product = session.get(Product, product_id)
+        version = session.get(ProductVersion, (product_id, product_version))
+        if product is None or version is None:
+            raise DomainError("product_version_not_found", "产品版本不存在", status_code=404)
         flow_record = session.scalar(select(ProductProcessFlow).where(
-            ProductProcessFlow.product_id == bom.product_id,
-            ProductProcessFlow.product_version == bom.product_version,
+            ProductProcessFlow.product_id == product_id,
+            ProductProcessFlow.product_version == product_version,
         ))
         if (
             flow_record is None
-            or procedure.id not in part_route_procedure_ids(
+            or procedure.id not in origin_route_procedure_ids(
                 flow_record.flow_json,
-                bom.id,
+                origin_flow_node_id,
                 {procedure.id},
             )
         ):
@@ -182,6 +245,38 @@ def update_procedure_tag_prices(
             name = item.tag_name.strip()
             if name:
                 normalized[name] = item.unit_price
+        configured_names = {
+            tag_name
+            for tag_name, in session.execute(
+                select(ProcedureTag.tag_name)
+                .join(
+                    ProcedureTagPrice,
+                    ProcedureTagPrice.procedure_tag_id == ProcedureTag.id,
+                )
+                .where(
+                    ProcedureTagPrice.product_id == product_id,
+                    ProcedureTagPrice.product_version == product_version,
+                    ProcedureTagPrice.origin_flow_node_id == origin_flow_node_id,
+                    ProcedureTagPrice.procedure_id == procedure.id,
+                )
+            )
+        }
+        has_orders = session.scalar(
+            select(WorkOrder.id)
+            .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
+            .where(
+                ProductionItem.product_id == product_id,
+                ProductionItem.product_version == product_version,
+                ProductionItem.origin_flow_node_id == origin_flow_node_id,
+                WorkOrder.procedure_id == procedure.id,
+            )
+            .limit(1)
+        ) is not None
+        if has_orders and set(normalized) != configured_names:
+            raise DomainError(
+                "procedure_tags_locked",
+                "该配件已经开过工单，只能修改标记单价",
+            )
         tags = {
             name: get_or_create_tag(session, procedure, name)
             for name in normalized
@@ -189,7 +284,9 @@ def update_procedure_tag_prices(
         existing = list(session.scalars(
             select(ProcedureTagPrice)
             .where(
-                ProcedureTagPrice.product_bom_id == bom.id,
+                ProcedureTagPrice.product_id == product_id,
+                ProcedureTagPrice.product_version == product_version,
+                ProcedureTagPrice.origin_flow_node_id == origin_flow_node_id,
                 ProcedureTagPrice.procedure_id == procedure.id,
             )
             .with_for_update()
@@ -203,7 +300,9 @@ def update_procedure_tag_prices(
             price = existing_by_tag.get(tag.id)
             if price is None:
                 session.add(ProcedureTagPrice(
-                    product_bom_id=bom.id,
+                    product_id=product_id,
+                    product_version=product_version,
+                    origin_flow_node_id=origin_flow_node_id,
                     procedure_id=procedure.id,
                     procedure_tag_id=tag.id,
                     unit_price=normalized[name],
@@ -221,4 +320,3 @@ def _department(session, code: str, user_department: str) -> Department:
     if user_department not in {"sys", code}:
         raise DomainError("department_access_denied", "无权维护该部门配置", status_code=403)
     return department
-

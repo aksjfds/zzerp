@@ -26,6 +26,8 @@ function updateApplyingTagIds(ids?: number[]) {
   <div v-loading="loading" class="procedure-tag-filters">
     <ElSelect
       :model-value="existingTagIds"
+      placement="top-start"
+      :fallback-placements="['top-start', 'top-end']"
       :disabled="disabled"
       multiple
       filterable
@@ -44,6 +46,8 @@ function updateApplyingTagIds(ids?: number[]) {
     </ElSelect>
     <ElSelect
       :model-value="applyingTagIds"
+      placement="top-start"
+      :fallback-placements="['top-start', 'top-end']"
       :disabled="disabled"
       multiple
       filterable

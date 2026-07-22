@@ -7,6 +7,8 @@ import {
   startPartDrag,
   startAssemblyDrag,
   startProcessDrag,
+  startQcDrag,
+  startShippingDrag,
   updateNodeDefinition,
 } from '../logicflow/commands'
 
@@ -27,6 +29,17 @@ const { currentFlow, emitChange, instance, renderFlow, setReadonly } = useLogicF
 })
 
 watch(() => props.readonly, value => setReadonly(Boolean(value)))
+
+watch(
+  () => props.modelValue,
+  (flow) => {
+    if (!instance.value || JSON.stringify(currentFlow()) === JSON.stringify(flow)) return
+    emit('selectNode', null)
+    emit('selectEdge', null)
+    renderFlow(flow)
+  },
+  { deep: true },
+)
 
 function withInstance(action: (lf: NonNullable<typeof instance.value>) => void) {
   if (instance.value) action(instance.value)
@@ -51,6 +64,16 @@ function dragAssembly() {
   withInstance(startAssemblyDrag)
 }
 
+function dragQc() {
+  if (props.readonly) return
+  withInstance(startQcDrag)
+}
+
+function dragShipping() {
+  if (props.readonly) return
+  withInstance(startShippingDrag)
+}
+
 function updateNode(nodeId: string, label: string, property: Parameters<typeof updateNodeDefinition>[3]) {
   if (props.readonly) return
   withInstance((lf) => { updateNodeDefinition(lf, nodeId, label, property); emitChange() })
@@ -66,6 +89,8 @@ defineExpose({
   dragPart,
   dragAssembly,
   dragProcess,
+  dragQc,
+  dragShipping,
   focusElement,
   getGraphData: currentFlow,
   renderFlow,

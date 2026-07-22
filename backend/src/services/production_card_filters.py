@@ -36,11 +36,17 @@ def filter_and_paginate_assembly_groups(
     arrived_to: date | None,
     work_status: str,
 ) -> tuple[list[dict], int]:
-    groups: dict[tuple[int, str], list[dict]] = defaultdict(list)
+    groups: dict[tuple[str, int, str], list[dict]] = defaultdict(list)
     for item in cards:
-        groups[(item["customer_order_item_id"], item["flow_node_id"])].append(item)
+        if not item["card_key"].startswith("history:"):
+            kind = "current"
+        elif item["work_status"] == "processing":
+            kind = "processing"
+        else:
+            kind = "history"
+        groups[(kind, item["customer_order_item_id"], item["flow_node_id"])].append(item)
 
-    filtered_groups: list[tuple[tuple[int, str], list[dict]]] = []
+    filtered_groups: list[tuple[tuple[str, int, str], list[dict]]] = []
     for group_key, group in groups.items():
         required_sources = {
             source_id
@@ -66,14 +72,18 @@ def filter_and_paginate_assembly_groups(
             item["work_status"] = status
             item["arrived_at"] = arrived_at
             item["assembly_group_complete"] = group_complete
+            item["can_create_work_order"] = (
+                item["can_create_work_order"] and group_complete
+            )
         filtered_groups.append((group_key, group))
 
     ordered = sorted(
         filtered_groups,
         key=lambda entry: (
             entry[1][0]["arrived_at"] or "",
-            entry[0][0],
             entry[0][1],
+            entry[0][0],
+            entry[0][2],
         ),
         reverse=True,
     )

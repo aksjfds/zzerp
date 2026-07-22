@@ -30,9 +30,9 @@ export function useWorkOrderList(
           applyingTagIds: [...scope.value.applyingTagIds],
         }
       : null
-    items.value = []
-    total.value = 0
     if (!requestedProductionItemId || (scope && !requestedScope)) {
+      items.value = []
+      total.value = 0
       loading.value = false
       return
     }

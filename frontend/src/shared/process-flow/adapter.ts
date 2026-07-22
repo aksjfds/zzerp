@@ -8,10 +8,12 @@ import {
   type ProcessFlow,
 } from './types'
 
-const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'assembly'])
+const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'qc', 'assembly', 'shipping'])
 const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }> = {
   part: { halfWidth: 75, halfHeight: 28 },
   process: { halfWidth: 75, halfHeight: 28 },
+  qc: { halfWidth: 60, halfHeight: 28 },
+  shipping: { halfWidth: 75, halfHeight: 28 },
   assembly: { halfWidth: 88, halfHeight: 54 },
 }
 
@@ -90,9 +92,10 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
       type,
       process_code: stringValue(properties.processCode),
       procedure_id: requiredNumber(properties.procedureId, 'procedureId'),
-      qc_required: Boolean(properties.qcRequired),
     }
   }
+  if (type === 'qc') return { ...base, type: 'qc' }
+  if (type === 'shipping') return { ...base, type: 'shipping' }
   return {
     ...base,
     type: 'assembly',
@@ -124,9 +127,10 @@ function nodeProperties(node: FlowNode): Record<string, unknown> {
     return {
       processCode: node.process_code,
       procedureId: node.procedure_id,
-      qcRequired: node.qc_required,
     }
   }
+  if (node.type === 'qc') return {}
+  if (node.type === 'shipping') return {}
   if (node.type === 'assembly') {
     return { outputName: node.output_name, outputPcs: node.output_pcs }
   }

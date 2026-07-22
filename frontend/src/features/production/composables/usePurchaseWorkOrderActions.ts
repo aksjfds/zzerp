@@ -4,6 +4,7 @@ import { submitWorkOrder } from '../api/workOrders'
 import type { WorkOrder } from '../domain/types'
 import {
   createCancelWorkOrderAction,
+  createUndoProductionOperationAction,
   ignoreWorkOrderAction,
   type WorkOrderActions,
 } from './workOrderActionSupport'
@@ -40,5 +41,6 @@ export function usePurchaseWorkOrderActions(
     resubmitQc: ignoreWorkOrderAction,
     submit,
     submitQc: ignoreWorkOrderAction,
+    undo: createUndoProductionOperationAction(onChanged),
   }
 }

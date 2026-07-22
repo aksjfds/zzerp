@@ -2,14 +2,23 @@ from sqlalchemy import select
 
 from database import SessionLocal
 from domain.time import utc_now
+from domain.production_types import (
+    QC_SUPPORTED_WORK_ORDER_TYPES,
+    REWORK_TRACKED_WORK_ORDER_TYPES,
+    WORK_ORDER_ASSEMBLY,
+    WORK_ORDER_PURCHASE_RECEIPT,
+    WORK_ORDER_TAG,
+)
 from models.organization import Department, Procedure, Worker
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch
 from schemas.production import QcInspection
+from services import assembly_qc_routing, purchase_qc_routing, tag_qc_routing
 from services.errors import DomainError
-from services import purchase_qc_routing, tag_qc_routing
 from services.production_movements import record_movement
 from services.work_order_presenters import serialize_batch
 from services.work_order_support import node_context, refresh_order_closed
+from services.production_flow import process_qc_node
+from services.work_order_progress import refresh_qc_work_order_closed
 
 
 def inspect_batch(
@@ -40,9 +49,9 @@ def inspect_batch(
             raise DomainError("qc_batch_not_found", "送检批次所属工单不存在", status_code=404)
         if batch.recorded_at is not None:
             raise DomainError("qc_batch_completed", "该批次已经完成质检")
-        if order.work_order_type not in {"tag", "purchase_receipt"}:
+        if order.work_order_type not in QC_SUPPORTED_WORK_ORDER_TYPES:
             raise DomainError("qc_work_order_type_invalid", "当前工单不支持送 QC")
-        if order.work_order_type == "tag" and order.status != "open":
+        if order.work_order_type in REWORK_TRACKED_WORK_ORDER_TYPES and order.status != "open":
             raise DomainError("work_order_closed", "生产工单已经结单")
 
         total = _inspection_total(payload)
@@ -59,15 +68,23 @@ def inspect_batch(
         if production_item is None:
             raise DomainError("production_context_missing", "送检工单的生产资料不完整")
         context, node = node_context(session, production_item, order.flow_node_id)
-        procedure = session.get(Procedure, node.get("procedure_id"))
-        if procedure is None or order.procedure_id != procedure.id:
-            raise DomainError("production_context_missing", "送检工单的工艺资料不完整")
-        routing = (
-            tag_qc_routing
-            if order.work_order_type == "tag"
-            else purchase_qc_routing
+        procedure = (
+            session.get(Procedure, node.get("procedure_id"))
+            if node.get("type") == "process"
+            else None
         )
+        if order.work_order_type != WORK_ORDER_ASSEMBLY and (
+            procedure is None or order.procedure_id != procedure.id
+        ):
+            raise DomainError("production_context_missing", "送检工单的工艺资料不完整")
+        routing = {
+            WORK_ORDER_TAG: tag_qc_routing,
+            WORK_ORDER_PURCHASE_RECEIPT: purchase_qc_routing,
+            WORK_ORDER_ASSEMBLY: assembly_qc_routing,
+        }[order.work_order_type]
         routing.validate_context(session, order, procedure)
+        qc_node = process_qc_node(context.flow, context.nodes, node["id"])
+        qc_flow_node_id = qc_node["id"] if qc_node is not None else node["id"]
 
         if payload.qualified_quantity:
             target_node_id, target_department_id = routing.route_qualified(
@@ -85,7 +102,7 @@ def inspect_batch(
                 production_item=production_item,
                 quantity=payload.qualified_quantity,
                 movement_type="qc_qualified",
-                source_flow_node_id=node["id"],
+                source_flow_node_id=qc_flow_node_id,
                 target_flow_node_id=target_node_id,
                 source_tag_set_id=order.target_tag_set_id,
                 target_tag_set_id=order.target_tag_set_id,
@@ -110,7 +127,7 @@ def inspect_batch(
                 production_item=production_item,
                 quantity=payload.rework_quantity,
                 movement_type="qc_rework",
-                source_flow_node_id=node["id"],
+                source_flow_node_id=qc_flow_node_id,
                 target_flow_node_id=node["id"],
                 source_tag_set_id=order.target_tag_set_id,
                 target_tag_set_id=order.source_tag_set_id,
@@ -125,7 +142,7 @@ def inspect_batch(
             production_item,
             order,
             batch,
-            node["id"],
+            qc_flow_node_id,
             payload.scrap_quantity,
             "scrap",
             qc_department.id,
@@ -136,7 +153,7 @@ def inspect_batch(
             production_item,
             order,
             batch,
-            node["id"],
+            qc_flow_node_id,
             payload.lost_quantity,
             "lost",
             qc_department.id,
@@ -145,11 +162,13 @@ def inspect_batch(
         session.flush()
         _complete_batch(batch, payload, qc_worker)
         session.flush()
+        refresh_qc_work_order_closed(session, order)
+        session.flush()
         refresh_order_closed(session, production_item)
         return serialize_batch(
             batch,
             rework_pending_quantity=payload.rework_quantity,
-            track_rework=order.work_order_type == "tag",
+            track_rework=order.work_order_type in REWORK_TRACKED_WORK_ORDER_TYPES,
         )
 
 

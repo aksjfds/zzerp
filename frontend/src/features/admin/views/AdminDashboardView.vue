@@ -1,14 +1,16 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import CustomerOrdersView from '@/features/customer-orders/views/CustomerOrdersView.vue'
 import { useAuthStore } from '@/stores/auth'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
-import WorkerOverview from '../components/WorkerOverview.vue'
+import WorkerOverview from '@/features/workers/components/WorkerOverview.vue'
 import { useAdminWorkers } from '../composables/useAdminWorkers'
 
 const router = useRouter()
 const authStore = useAuthStore()
+const props = withDefaults(defineProps<{ mode?: 'admin' | 'pmc' }>(), { mode: 'admin' })
+const isPmc = computed(() => props.mode === 'pmc')
 const activeTab = ref<'orders' | 'workers'>('orders')
 const workers = useAdminWorkers()
 
@@ -22,11 +24,20 @@ onMounted(workers.loadWorkers)
 
 <template>
   <main class="admin-page">
-    <AdminPageHeader @refresh="workers.loadWorkers" @logout="logout" />
+    <AdminPageHeader
+      :account-label="isPmc ? 'PMC 生产计划与物料控制' : 'admin 管理员'"
+      :title="isPmc ? 'PMC 看板' : '管理看板'"
+      @refresh="workers.loadWorkers"
+      @logout="logout"
+    />
     <ElTabs v-model="activeTab" class="admin-tabs">
       <ElTabPane label="客户订单生产情况" name="orders">
         <section class="orders-card">
-          <CustomerOrdersView embedded />
+          <CustomerOrdersView
+            embedded
+            :read-only="isPmc"
+            :show-product-progress="isPmc"
+          />
         </section>
       </ElTabPane>
       <ElTabPane label="工人总览" name="workers">

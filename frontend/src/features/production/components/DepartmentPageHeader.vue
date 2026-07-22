@@ -5,7 +5,9 @@ import { useAuthStore } from '@/stores/auth'
 defineProps<{
   departmentName: string
   description: string
+  pageTitle?: string
   tagConfigPath?: string
+  workersPath?: string
   backPath?: string
 }>()
 defineEmits<{ refresh: [] }>()
@@ -23,9 +25,10 @@ function navigate(path: string) {
 
 <template>
   <header class="page-header">
-    <div><span>{{ departmentName }}</span><h1>{{ departmentName }}工作台</h1><p>{{ description }}</p></div>
+    <div><span>{{ departmentName }}</span><h1>{{ pageTitle || `${departmentName}工作台` }}</h1><p>{{ description }}</p></div>
     <div class="actions">
       <ElButton v-if="backPath" @click="navigate(backPath)">返回工作台</ElButton>
+      <ElButton v-if="workersPath" type="primary" plain @click="navigate(workersPath)">工人管理</ElButton>
       <ElButton v-if="tagConfigPath" type="primary" plain @click="navigate(tagConfigPath)">标记与单价配置</ElButton>
       <ElButton @click="$emit('refresh')">刷新</ElButton>
       <ElButton @click="logout">退出登录</ElButton>

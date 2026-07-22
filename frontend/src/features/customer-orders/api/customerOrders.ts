@@ -1,9 +1,9 @@
 import { service } from '@/api/request'
 import type { CustomerOrder, CustomerOrderPayload, CustomerOrderProduction } from '../domain/types'
 
-export async function queryCustomerOrders(page = 1, pageSize = 50) {
+export async function queryCustomerOrders(page = 1, pageSize = 50, includeProgress = false) {
   const response = await service.get<{ data: CustomerOrder[]; total: number }>('/customer-orders', {
-    params: { page, page_size: pageSize },
+    params: { page, page_size: pageSize, include_progress: includeProgress || undefined },
   })
   return { items: response.data.data, total: response.data.total }
 }

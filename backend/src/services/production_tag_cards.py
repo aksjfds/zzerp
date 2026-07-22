@@ -12,7 +12,11 @@ from models.production import (
     WorkOrderBatch,
 )
 from services.errors import DomainError
-from services.procedure_tags import serialize_tag_set
+from services.procedure_tags import (
+    configured_tag_suggestions,
+    is_final_tag_set,
+    serialize_tag_set,
+)
 from services.production_card_status import reserved_quantities, reserved_tag_quantities
 from services.production_flow import load_production_flow
 from services.work_order_progress import (
@@ -96,12 +100,17 @@ def list_tag_cards(
         ) if all_orders else []
         orders_by_id = {order.id: order for order in all_orders}
         pending_by_target: dict[int, int] = defaultdict(int)
+        completed_by_target: dict[int, int] = defaultdict(int)
         for batch in batches:
             order = orders_by_id[batch.work_order_id]
-            if batch.recorded_at is not None:
+            if order.target_tag_set_id is None:
                 continue
-            if order.target_tag_set_id is not None:
+            if batch.recorded_at is None:
                 pending_by_target[order.target_tag_set_id] += batch.submitted_quantity
+            else:
+                completed_by_target[order.target_tag_set_id] += (
+                    batch.qualified_quantity or 0
+                )
         pending_rework_by_order = rework_pending_by_order(batches)
 
         evidenced_orders = [order for order in all_orders if order.status != "cancelled"]
@@ -133,6 +142,11 @@ def list_tag_cards(
             (repository.quantity if repository else 0) - repository_reserved,
             0,
         )
+        tags_configured = bool(configured_tag_suggestions(
+            session,
+            production_item,
+            procedure.id,
+        ))
         cards = [{
             "card_key": f"untagged:{production_item.id}:{flow_node_id}:{source_flow_node_id}",
             "production_item_id": production_item.id,
@@ -149,6 +163,8 @@ def list_tag_cards(
             "processing_quantity": 0,
             "pending_qc_quantity": 0,
             "completed_quantity": repository_available,
+            "processing_details": [],
+            "can_create_work_order": repository_available > 0 and tags_configured,
         }]
         reserved_by_stock = reserved_tag_quantities(session, [stock.id for stock in stocks])
         ordered_set_ids = sorted(
@@ -167,6 +183,28 @@ def list_tag_cards(
                 + pending_rework_by_order.get(order.id, 0)
                 for order in open_by_target.get(tag_set_id, [])
             )
+            processing_details_by_set: dict[int, int] = defaultdict(int)
+            for order in open_by_target.get(tag_set_id, []):
+                quantity = (
+                    order_remaining_quantity(order)
+                    + pending_rework_by_order.get(order.id, 0)
+                )
+                if quantity and order.applied_tag_set_id is not None:
+                    processing_details_by_set[order.applied_tag_set_id] += quantity
+            processing_details = []
+            for applied_set_id, quantity in processing_details_by_set.items():
+                applied_set = serialize_tag_set(session, applied_set_id)
+                processing_details.append({
+                    "tag_names": applied_set["tag_names"],
+                    "tag_set_name": applied_set["tag_set_name"],
+                    "quantity": quantity,
+                })
+            final_tag_set = is_final_tag_set(
+                session,
+                production_item,
+                procedure.id,
+                tag_set_id,
+            )
             cards.append({
                 "card_key": f"tag-set:{tag_set_id}",
                 "production_item_id": production_item.id,
@@ -179,6 +217,8 @@ def list_tag_cards(
                 "available_quantity": completed,
                 "processing_quantity": processing,
                 "pending_qc_quantity": pending_by_target.get(tag_set_id, 0),
-                "completed_quantity": completed,
+                "completed_quantity": completed_by_target.get(tag_set_id, 0),
+                "processing_details": processing_details,
+                "can_create_work_order": completed > 0 and not final_tag_set,
             })
         return cards

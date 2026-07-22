@@ -1,39 +1,20 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import {
-  completeWorkOrder,
   resubmitReworkBatch,
   submitWorkOrder,
 } from '../api/workOrders'
 import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 import {
   createCancelWorkOrderAction,
+  createUndoProductionOperationAction,
+  ignoreWorkOrderAction,
   type WorkOrderActions,
 } from './workOrderActionSupport'
 
 export function useProductionWorkOrderActions(
   onChanged: () => Promise<void>,
 ): WorkOrderActions {
-  async function submit(item: WorkOrder) {
-    try {
-      const initialRemaining = Math.max(item.quantity - item.submitted_quantity, 0)
-      await ElMessageBox.confirm(
-        initialRemaining
-          ? `确认将剩余 ${initialRemaining} 件按无需 QC 完成，并结单？`
-          : '确认该工单的送检和返工已经处理完毕，并结单？',
-        '完成工单',
-        { type: 'warning' },
-      )
-      await completeWorkOrder(item.id)
-      await onChanged()
-      ElMessage.success('工单已完成并结单')
-    } catch (error) {
-      if (error !== 'cancel' && error !== 'close') {
-        ElMessage.error(getApiErrorDetail(error)?.message || '工艺提交失败')
-      }
-    }
-  }
-
   async function submitQc(item: WorkOrder) {
     try {
       const initialRemaining = Math.max(item.quantity - item.submitted_quantity, 0)
@@ -95,7 +76,8 @@ export function useProductionWorkOrderActions(
   return {
     cancel: createCancelWorkOrderAction(onChanged),
     resubmitQc,
-    submit,
+    submit: ignoreWorkOrderAction,
     submitQc,
+    undo: createUndoProductionOperationAction(onChanged),
   }
 }

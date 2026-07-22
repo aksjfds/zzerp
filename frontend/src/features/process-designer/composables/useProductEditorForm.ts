@@ -11,6 +11,7 @@ export function useProductEditorForm() {
   const form = reactive<ProductForm>({
     version: null,
     revision: null,
+    customer_id: null,
     customer_name: '',
     product_name: '',
     factory_code: '',
@@ -22,6 +23,7 @@ export function useProductEditorForm() {
   const bomSnapshot = ref('')
   const flowSnapshot = ref('')
   const serializeBase = () => JSON.stringify({
+    customer_id: form.customer_id,
     customer_name: form.customer_name,
     product_name: form.product_name,
     factory_code: form.factory_code,
@@ -41,6 +43,7 @@ export function useProductEditorForm() {
 
   function normalizedFields(): ProductFields {
     return {
+      customer_id: form.customer_id,
       customer_name: form.customer_name.trim(),
       product_name: form.product_name.trim(),
       factory_code: form.factory_code.trim(),
@@ -81,6 +84,7 @@ export function useProductEditorForm() {
     Object.assign(form, {
       version: product.version,
       revision: product.revision,
+      customer_id: product.customer_id,
       customer_name: product.customer_name,
       product_name: product.product_name,
       factory_code: product.factory_code,

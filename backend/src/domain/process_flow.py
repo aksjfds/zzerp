@@ -73,6 +73,7 @@ def validate_process_flow(
     normal_outgoing: dict[str, int] = defaultdict(int)
     normal_adjacency: dict[str, list[str]] = defaultdict(list)
     normal_targets: dict[str, list[str]] = defaultdict(list)
+    normal_sources: dict[str, list[str]] = defaultdict(list)
     normal_indegree = {node_id: 0 for node_id in node_map}
     undirected: dict[str, set[str]] = defaultdict(set)
     for index, edge in enumerate(flow.edges):
@@ -97,15 +98,16 @@ def validate_process_flow(
         normal_outgoing[source.id] += 1
         normal_adjacency[source.id].append(target.id)
         normal_targets[source.id].append(target.id)
+        normal_sources[target.id].append(source.id)
         normal_indegree[target.id] += 1
 
     for index, node in enumerate(flow.nodes):
         path = f"process_flow.nodes.{index}"
         if node.type == "part":
             if normal_incoming[node.id] != 0:
-                _fail("part_has_incoming_edge", "配件节点不能有普通输入连线", path, node.id)
+                _fail("part_has_incoming_edge", f"配件“{node.label}”不能有输入连线", path, node.id)
             if normal_outgoing[node.id] != 1:
-                _fail("part_output_count", "配件节点必须且只能连接一个首节点", path, node.id)
+                _fail("part_output_count", f"配件“{node.label}”必须且只能连接一个首节点", path, node.id)
             if node_map[normal_targets[node.id][0]].type not in {"process", "assembly"}:
                 _fail(
                     "part_first_node_invalid",
@@ -113,13 +115,42 @@ def validate_process_flow(
                     path,
                     node.id,
                 )
+        elif node.type == "qc":
+            if normal_incoming[node.id] != 1:
+                _fail("qc_input_count", f"QC节点“{node.label}”必须且只能连接一个上游工艺或装配", path, node.id)
+            source = node_map[normal_sources[node.id][0]]
+            if source.type not in {"process", "assembly"}:
+                _fail("qc_source_invalid", f"QC节点“{node.label}”的上游必须是工艺或装配节点", path, node.id)
+            if normal_outgoing[node.id] != 1:
+                _fail("qc_output_count", f"QC节点“{node.label}”必须且只能连接一个后续节点", path, node.id)
+            target = node_map[normal_targets[node.id][0]]
+            if target.type not in {"process", "assembly", "shipping"}:
+                _fail("qc_target_invalid", f"QC节点“{node.label}”后只能连接工艺、装配或发货节点", path, node.id)
+        elif node.type == "shipping":
+            if normal_incoming[node.id] != 1:
+                _fail("shipping_input_count", f"发货节点“{node.label}”必须且只能连接一个上游QC", path, node.id)
+            if node_map[normal_sources[node.id][0]].type != "qc":
+                _fail("shipping_source_invalid", f"发货节点“{node.label}”的上游必须是QC节点", path, node.id)
+            if normal_outgoing[node.id] != 0:
+                _fail("shipping_has_output", f"发货节点“{node.label}”必须是流程终点，不能再连接后续节点", path, node.id)
         else:
             minimum = 2 if node.type == "assembly" else 1
             if normal_incoming[node.id] < minimum:
-                message = "装配节点至少需要两条普通输入连线" if minimum == 2 else "节点缺少普通输入连线"
+                message = (
+                    f"装配节点“{node.label}”至少需要两条输入连线"
+                    if minimum == 2
+                    else f"工艺节点“{node.label}”缺少输入连线"
+                )
                 _fail("insufficient_normal_inputs", message, path, node.id)
-        if node.type != "part" and normal_outgoing[node.id] > 1:
-            _fail("multiple_normal_outputs", "普通节点最多只能有一条后续连线", path, node.id)
+            if node.type == "process" and normal_incoming[node.id] != 1:
+                _fail(
+                    "process_input_count",
+                    f"工艺节点“{node.label}”只能有一个上游；多路配件合并必须使用装配节点",
+                    path,
+                    node.id,
+                )
+            if normal_outgoing[node.id] != 1:
+                _fail("execution_output_count", f"节点“{node.label}”必须且只能连接一个后续节点", path, node.id)
 
     _validate_normal_dag(node_map, normal_adjacency, normal_indegree)
     _validate_connected(node_map, undirected)

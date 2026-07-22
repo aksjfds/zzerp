@@ -35,7 +35,7 @@ onBeforeUnmount(() => clearTimeout(timer))
 
 <template>
   <section class="repository-filter-bar">
-    <ElSelect v-model="form.work_status" aria-label="生产状态">
+    <ElSelect v-model="form.work_status" placement="top-start" :fallback-placements="['top-start', 'top-end']" aria-label="生产状态">
       <ElOption label="全部状态" value="all" />
       <ElOption label="未加工" value="unprocessed" />
       <ElOption label="加工中" value="processing" />

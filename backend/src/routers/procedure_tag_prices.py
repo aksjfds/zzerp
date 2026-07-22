@@ -37,19 +37,23 @@ def procedure_tag_prices(
 
 
 @router.put(
-    "/departments/{department_code}/procedure-tag-prices/{product_bom_id}/{procedure_id}",
+    "/departments/{department_code}/procedure-tag-prices/{product_id}/{product_version}/{origin_flow_node_id}/{procedure_id}",
     status_code=204,
 )
 def procedure_tag_price_update(
     department_code: str,
-    product_bom_id: int,
+    product_id: int,
+    product_version: int,
+    origin_flow_node_id: str,
     procedure_id: int,
     payload: ProcedureTagPriceUpdate,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     update_procedure_tag_prices(
         department_code,
-        product_bom_id,
+        product_id,
+        product_version,
+        origin_flow_node_id,
         procedure_id,
         payload,
         user["department"],

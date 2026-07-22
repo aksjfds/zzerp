@@ -32,7 +32,14 @@ class ProcessNodePayload(FlowNodeBase):
     type: Literal["process"]
     process_code: str = Field(min_length=1, max_length=100)
     procedure_id: int = Field(gt=0)
-    qc_required: bool = False
+
+
+class QcNodePayload(FlowNodeBase):
+    type: Literal["qc"]
+
+
+class ShippingNodePayload(FlowNodeBase):
+    type: Literal["shipping"]
 
 
 class AssemblyNodePayload(FlowNodeBase):
@@ -42,7 +49,7 @@ class AssemblyNodePayload(FlowNodeBase):
 
 
 FlowNodePayload = Annotated[
-    PartNodePayload | ProcessNodePayload | AssemblyNodePayload,
+    PartNodePayload | ProcessNodePayload | QcNodePayload | ShippingNodePayload | AssemblyNodePayload,
     Field(discriminator="type"),
 ]
 
@@ -63,7 +70,7 @@ class FlowEdgePayload(ContractModel):
 
 
 class ProcessFlowPayload(ContractModel):
-    schema_version: Literal[2] = 2
+    schema_version: Literal[3] = 3
     nodes: list[FlowNodePayload] = Field(default_factory=list, max_length=500)
     edges: list[FlowEdgePayload] = Field(default_factory=list, max_length=2000)
 
@@ -76,18 +83,21 @@ class BomItemPayload(ContractModel):
     remark: str | None = Field(default=None, max_length=1000)
 
 
-class ProductFields(ContractModel):
-    customer_name: str = Field(min_length=1, max_length=200)
+class ProductDataFields(ContractModel):
     product_name: str = Field(min_length=1, max_length=200)
     factory_code: str = Field(min_length=1, max_length=200)
     customer_code: str = Field(min_length=1, max_length=200)
 
 
-class CreateProductPayload(ProductFields):
+class CreateProductPayload(ProductDataFields):
+    customer_id: int | None = Field(default=None, gt=0)
+    customer_name: str = Field(min_length=1, max_length=200)
     bom_items: list[BomItemPayload] = Field(min_length=1, max_length=1000)
 
 
-class UpdateProductPayload(ProductFields):
+class UpdateProductPayload(ProductDataFields):
+    customer_id: int = Field(gt=0)
+    customer_name: str | None = Field(default=None, min_length=1, max_length=200)
     expected_revision: int = Field(gt=0)
 
 
@@ -114,7 +124,12 @@ class BomItemResponse(ContractModel):
     sort_order: int
 
 
-class ProductSummaryResponse(ProductFields):
+class ProductResponseFields(ProductDataFields):
+    customer_id: int
+    customer_name: str
+
+
+class ProductSummaryResponse(ProductResponseFields):
     id: int
     version: int
     revision: int
@@ -123,7 +138,7 @@ class ProductSummaryResponse(ProductFields):
     updated_at: str
 
 
-class ProductDetailResponse(ProductFields):
+class ProductDetailResponse(ProductResponseFields):
     id: int
     version: int
     current_version: int

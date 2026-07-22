@@ -4,10 +4,10 @@ import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
 import ProcedureTagFilterBar from '../components/ProcedureTagFilterBar.vue'
+import TagProductionOverview from '../components/TagProductionOverview.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
 import PurchaseWorkOrderDialog from '../components/PurchaseWorkOrderDialog.vue'
-import DispatchTagStockDialog from '../components/DispatchTagStockDialog.vue'
 import { useProductionDepartment } from '../composables/useProductionDepartment'
 import '../styles/workspace.css'
 
@@ -26,8 +26,7 @@ const {
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
 const {
   activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails,
-  dispatchDialogVisible, dispatchSubmitting, openDispatch, openWorkOrder,
-  refresh, saveDispatch, saveWorkOrder, selectRepository,
+  openWorkOrder, refresh, saveWorkOrder, selectRepository,
   existingTagIds, applyingTagIds, setExistingTagFilter, setApplyingTagFilter,
   tagItems, tagLoading, submitting,
 } = controller
@@ -40,6 +39,7 @@ onMounted(load)
     <DepartmentPageHeader
       :department-name="departmentName"
       :description="description"
+      :workers-path="`/production/${departmentCode}/workers`"
       :tag-config-path="mode === 'production' ? `/production/${departmentCode}/tag-prices` : undefined"
       @refresh="refresh"
     />
@@ -64,14 +64,17 @@ onMounted(load)
           :selected-key="selectedCardKey"
           :mode="mode"
           allow-work-order
-          :allow-dispatch="mode === 'production'"
           @select="selectRepository"
           @create-work-order="openWorkOrder"
-          @dispatch="openDispatch"
         />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total" :page-size="pageSize" :total="repositoryTotal" @current-change="changeRepositoryPage" />
       </div>
       <div class="production-execution">
+        <TagProductionOverview
+            v-if="mode === 'production' && selectedRepository"
+            :items="tagItems"
+            :loading="tagLoading"
+          />
         <div class="production-card production-details">
           <div v-if="selectedRepository" class="production-selection">
             <strong>{{ selectedRepository.part_no === selectedRepository.part_name ? selectedRepository.part_name : `${selectedRepository.part_no} - ${selectedRepository.part_name}` }}</strong>
@@ -81,6 +84,7 @@ onMounted(load)
               <template v-else> · 待到货</template>
             </span>
           </div>
+
           <WorkOrderCards
             v-if="showSelectedWorkOrders"
             :items="workOrders"
@@ -90,6 +94,7 @@ onMounted(load)
             @submit-qc="workOrderActions.submitQc"
             @resubmit-qc="workOrderActions.resubmitQc"
             @cancel="workOrderActions.cancel"
+            @undo="workOrderActions.undo"
           />
           <ElEmpty
             v-else
@@ -124,14 +129,6 @@ onMounted(load)
       :workers="workers"
       :submitting="submitting"
       @submit="saveWorkOrder"
-    />
-    <DispatchTagStockDialog
-      v-if="mode === 'production'"
-      v-model="dispatchDialogVisible"
-      :item="activeRepository"
-      :tag-cards="tagItems"
-      :submitting="dispatchSubmitting"
-      @submit="saveDispatch"
     />
   </main>
 </template>

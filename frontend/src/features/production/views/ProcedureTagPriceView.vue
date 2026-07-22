@@ -84,7 +84,9 @@ async function save(part: EditablePart, procedure: EditableProcedure) {
   try {
     await saveProcedureTagPrices(
       departmentCode.value,
-      part.product_bom_id,
+      part.product_id,
+      part.product_version,
+      part.origin_flow_node_id,
       procedure.procedure_id,
       names.map(name => ({
         tag_name: name,
@@ -122,10 +124,10 @@ onMounted(load)
       <ElButton type="primary" @click="search">查询</ElButton>
     </section>
     <section v-loading="loading" class="part-list">
-      <article v-for="part in items" :key="part.product_bom_id" class="part-card">
+      <article v-for="part in items" :key="`${part.product_id}:${part.product_version}:${part.origin_flow_node_id}`" class="part-card">
         <header>
           <div>
-            <strong>{{ part.part_no }} - {{ part.part_name }}</strong>
+            <strong>{{ part.part_no === part.part_name ? part.part_name : `${part.part_no} - ${part.part_name}` }}</strong>
             <span>{{ part.product_name }} · {{ part.factory_code }} · V{{ part.product_version }}</span>
           </div>
         </header>
@@ -137,15 +139,17 @@ onMounted(load)
           <h3>{{ procedure.procedure_name }}</h3>
           <ElSelect
             v-model="procedure.tagNames"
+            placement="top-start"
+            :fallback-placements="['top-start', 'top-end']"
+            tag-type="danger"
+            tag-effect="dark"
             multiple
             filterable
             allow-create
             default-first-option
             clearable
-            collapse-tags
-            collapse-tags-tooltip
-            :disabled="!canManage"
-            placeholder="选择或输入该配件可用标记"
+            :disabled="!canManage || procedure.tags_locked"
+            placeholder="选择或输入该配件必做标记"
           >
             <ElOption
               v-for="tag in procedure.available_tags"
@@ -154,6 +158,7 @@ onMounted(load)
               :value="tag.tag_name"
             />
           </ElSelect>
+          <p v-if="procedure.tags_locked" class="locked-hint">已开过工单，必做标记已锁定，仅可修改单价。</p>
           <div v-if="procedure.tagNames.length" class="price-list">
             <div v-for="tagName in procedure.tagNames" :key="tagName" class="price-row">
               <span>{{ tagName }}</span>
@@ -202,6 +207,7 @@ onMounted(load)
 .procedure-config { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--erp-border); }
 .procedure-config h3 { margin: 0 0 12px; font-size: 15px; }
 .procedure-config > .el-select { width: min(680px, 100%); }
+.locked-hint { margin: 8px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
 .price-list { display: grid; gap: 8px; margin: 12px 0; }
 .price-row { display: grid; grid-template-columns: minmax(120px, 1fr) 180px 58px; gap: 10px; align-items: center; max-width: 680px; padding: 10px 12px; border-radius: 7px; background: var(--el-fill-color-light); }
 .price-row em { color: var(--el-text-color-secondary); font-size: 12px; font-style: normal; }

@@ -13,17 +13,20 @@ from services.errors import product_not_found
 
 
 def list_products(
-    page: int, page_size: int, keyword: str | None = None
+    page: int,
+    page_size: int,
+    keyword: str | None = None,
+    customer_id: int | None = None,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         repository = EngineeringProductRepository(session)
         data = [
             serialize_product_summary(product, bom_count)
             for product, bom_count in repository.list_with_bom_counts(
-                (page - 1) * page_size, page_size, keyword
+                (page - 1) * page_size, page_size, keyword, customer_id
             )
         ]
-        return data, repository.count(keyword)
+        return data, repository.count(keyword, customer_id)
 
 
 def get_product(product_id: int, version: int | None = None) -> dict:

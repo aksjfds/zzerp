@@ -37,9 +37,10 @@ def product_list(
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
     keyword: str | None = Query(default=None, max_length=200),
+    customer_id: int | None = Query(default=None, gt=0),
     _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
 ):
-    data, total = list_products(page, page_size, keyword)
+    data, total = list_products(page, page_size, keyword, customer_id)
     return {"data": data, "total": total}
 
 

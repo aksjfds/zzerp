@@ -4,6 +4,7 @@ export type OrderProduct = {
   id: number
   version: number
   revision: number
+  customer_id: number
   customer_name: string
   product_name: string
   factory_code: string
@@ -18,9 +19,14 @@ type ProductDetail = Omit<OrderProduct, 'version' | 'bom_count'> & {
   bom_items: unknown[]
 }
 
-export async function queryOrderProducts(keyword?: string) {
+export async function queryOrderProducts(customerId: number, keyword?: string) {
   const response = await service.get<{ data: OrderProduct[] }>('/products', {
-    params: { page: 1, page_size: 50, keyword: keyword || undefined },
+    params: {
+      page: 1,
+      page_size: 50,
+      customer_id: customerId,
+      keyword: keyword || undefined,
+    },
   })
   return response.data.data
 }
@@ -32,6 +38,7 @@ export async function queryOrderProduct(productId: number): Promise<OrderProduct
     id: product.id,
     version: product.current_version,
     revision: product.revision,
+    customer_id: product.customer_id,
     customer_name: product.customer_name,
     product_name: product.product_name,
     factory_code: product.factory_code,

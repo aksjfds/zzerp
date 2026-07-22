@@ -12,6 +12,14 @@ export const service = axios.create({
 
 export function getApiErrorDetail(error: unknown): ApiErrorDetail | null {
   if (!axios.isAxiosError(error)) return null
+  if (!error.response) {
+    return {
+      code: error.code === 'ECONNABORTED' ? 'request_timeout' : 'network_error',
+      message: error.code === 'ECONNABORTED'
+        ? '请求超时，后端可能正在处理或暂时不可用'
+        : '无法连接后端服务，请检查后端是否正常运行',
+    }
+  }
   const detail = error.response?.data?.detail
   if (typeof detail === 'string') {
     return {

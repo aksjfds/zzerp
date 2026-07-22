@@ -15,13 +15,11 @@ from services.assembly_work_orders import create_assembly_work_order
 from services.process_work_orders import (
     cancel_work_order,
     create_work_order,
+    resubmit_work_order_rework_batch,
     submit_work_order,
 )
-from services.tag_work_orders import (
-    complete_tag_work_order,
-    resubmit_tag_rework_batch,
-)
 from services.work_order_queries import list_department_work_orders
+from services.production_operation_undo import undo_production_operation
 
 
 router = APIRouter(tags=["work-orders"])
@@ -105,16 +103,9 @@ def work_order_submit(
             payload.quantity,
             payload.completion_action,
             user["department"],
+            user["username"],
         )
     }
-
-
-@router.post("/work-orders/{work_order_id}/complete", response_model=WorkOrderEnvelope)
-def work_order_complete(
-    work_order_id: int,
-    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
-):
-    return {"data": complete_tag_work_order(work_order_id, user["department"])}
 
 
 @router.post(
@@ -127,10 +118,28 @@ def work_order_batch_rework_submit(
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     return {
-        "data": resubmit_tag_rework_batch(
+        "data": resubmit_work_order_rework_batch(
             batch_id,
             payload.quantity,
             user["department"],
+            user["username"],
+        )
+    }
+
+
+@router.post(
+    "/production-operations/{operation_id}/undo",
+    response_model=WorkOrderEnvelope,
+)
+def production_operation_undo(
+    operation_id: int,
+    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
+):
+    return {
+        "data": undo_production_operation(
+            operation_id,
+            user["department"],
+            user["username"],
         )
     }
 

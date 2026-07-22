@@ -1,10 +1,18 @@
 from sqlalchemy import select
 
 from domain.time import business_iso
+from domain.production_types import (
+    REWORK_TRACKED_WORK_ORDER_TYPES,
+    WORK_ORDER_ASSEMBLY,
+)
 from models.organization import Worker
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch, WorkOrderMaterial
+from services.production_operation_undo import (
+    latest_undoable_operation,
+    serialize_undo_operation,
+)
 from models.sales import CustomerOrder
-from services.production_flow import load_production_flow
+from services.production_flow import load_production_flow, process_qc_node
 from services.work_order_progress import calculate_work_order_progress
 
 
@@ -29,7 +37,7 @@ def production_item_name(session, production_item: ProductionItem, visited: set[
         select(WorkOrder)
         .where(
             WorkOrder.production_item_id == production_item.id,
-            WorkOrder.work_order_type == "assembly",
+            WorkOrder.work_order_type == WORK_ORDER_ASSEMBLY,
         )
         .order_by(WorkOrder.id.desc())
         .limit(1)
@@ -51,7 +59,7 @@ def production_item_sort_order(
         select(WorkOrder)
         .where(
             WorkOrder.production_item_id == production_item.id,
-            WorkOrder.work_order_type == "assembly",
+            WorkOrder.work_order_type == WORK_ORDER_ASSEMBLY,
         )
         .order_by(WorkOrder.id.desc())
         .limit(1)
@@ -138,7 +146,7 @@ def serialize_batch(
 def serialize_work_order(session, order: WorkOrder) -> dict:
     customer_order, _, production_item, flow_context = work_order_context(session, order)
     part_no, part_name = flow_context.item_name(production_item)
-    if order.work_order_type == "assembly":
+    if order.work_order_type == WORK_ORDER_ASSEMBLY:
         part_name = assembly_output_name(session, order)
         part_no = part_name
     worker = session.get(Worker, order.worker_id) if order.worker_id else None
@@ -149,6 +157,22 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         .order_by(WorkOrderBatch.id)
     ).all()
     progress = calculate_work_order_progress(order, batches)
+    undo_cache = session.info.get("work_order_undo_cache")
+    undo_operation = (
+        undo_cache.get(order.id)
+        if undo_cache is not None
+        else latest_undoable_operation(session, order.id)
+    )
+    if undo_operation is not None and undo_operation.work_order_batch_id is not None:
+        operation_batch = next(
+            (
+                batch for batch in batches
+                if batch.id == undo_operation.work_order_batch_id
+            ),
+            None,
+        )
+        if operation_batch is None or operation_batch.recorded_at is not None:
+            undo_operation = None
     return {
         "id": order.id,
         "work_order_no": order.work_order_no,
@@ -162,9 +186,11 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         "source_tag_set_id": order.source_tag_set_id,
         "target_tag_set_id": order.target_tag_set_id,
         "work_order_type": order.work_order_type,
-        "qc_required": bool(
-            flow_context.nodes.get(order.flow_node_id, {}).get("qc_required", False)
-        ),
+        "qc_required": process_qc_node(
+            flow_context.flow,
+            flow_context.nodes,
+            order.flow_node_id,
+        ) is not None,
         "customer_order_no": customer_order.customer_order_no,
         "part_no": part_no,
         "part_name": part_name,
@@ -189,10 +215,11 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
                     item.id,
                     0,
                 ),
-                track_rework=order.work_order_type == "tag",
+                track_rework=order.work_order_type in REWORK_TRACKED_WORK_ORDER_TYPES,
             )
             for item in batches
         ],
+        "undo_operation": serialize_undo_operation(undo_operation),
         "input_production_item_ids": (
             session.info["work_order_material_cache"].get(order.id, [])
             if "work_order_material_cache" in session.info

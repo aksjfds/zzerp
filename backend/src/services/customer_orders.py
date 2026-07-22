@@ -4,6 +4,7 @@ from sqlalchemy.exc import IntegrityError
 from database import SessionLocal
 from domain.time import utc_now
 from models.engineering import Product
+from models.customer import Customer
 from models.sales import CustomerOrder
 from repositories.customer_orders import CustomerOrderRepository
 from schemas.sales import CustomerOrderCreate, CustomerOrderUpdate
@@ -19,7 +20,12 @@ from services.errors import DomainError
 from services.production_order_lifecycle import cancel_order_production, initialize_order_production
 
 
-def list_orders(page: int, page_size: int) -> tuple[list[dict], int]:
+def list_orders(
+    page: int,
+    page_size: int,
+    *,
+    include_progress: bool = False,
+) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         repository = CustomerOrderRepository(session)
         orders = repository.list((page - 1) * page_size, page_size)
@@ -28,7 +34,15 @@ def list_orders(page: int, page_size: int) -> tuple[list[dict], int]:
             item.id: item
             for item in session.scalars(select(Product).where(Product.id.in_(product_ids))).all()
         }
-        return [serialize_order(session, item, products) for item in orders], repository.count()
+        return [
+            serialize_order(
+                session,
+                item,
+                products,
+                include_progress=include_progress,
+            )
+            for item in orders
+        ], repository.count()
 
 
 def get_order(order_id: int) -> dict:
@@ -43,10 +57,13 @@ def create_order(payload: CustomerOrderCreate) -> dict:
     try:
         with SessionLocal.begin() as session:
             repository = CustomerOrderRepository(session)
-            products = resolve_order_products(session, payload.items)
+            customer = session.get(Customer, payload.customer_id)
+            if customer is None:
+                raise DomainError("customer_not_found", "所选客户不存在", path="customer_id")
+            products = resolve_order_products(session, payload.items, customer.id)
             order = CustomerOrder(
                 customer_order_no=payload.customer_order_no,
-                customer_name=payload.customer_name,
+                customer=customer,
                 remark=payload.remark or None,
             )
             repository.add(order)
@@ -68,11 +85,14 @@ def update_order(order_id: int, payload: CustomerOrderUpdate) -> dict:
             if order.status != "draft":
                 raise DomainError("customer_order_not_editable", "只有草稿订单允许修改")
             ensure_expected_revision(order, payload.expected_revision)
-            products = resolve_order_products(session, payload.items)
+            target_customer_id = payload.customer_id or order.customer_id
+            customer = session.get(Customer, target_customer_id)
+            if customer is None:
+                raise DomainError("customer_not_found", "所选客户不存在", path="customer_id")
+            products = resolve_order_products(session, payload.items, customer.id)
             if payload.customer_order_no is not None:
                 order.customer_order_no = payload.customer_order_no
-            if payload.customer_name is not None:
-                order.customer_name = payload.customer_name
+            order.customer = customer
             order.remark = payload.remark or None
             order.updated_at = utc_now()
             order.revision += 1

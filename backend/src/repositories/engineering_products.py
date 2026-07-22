@@ -3,6 +3,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from models.customer import Customer
 from models.engineering import Product, ProductBom, ProductProcessFlow
 from domain.models import BomItemCommand
 
@@ -12,17 +13,28 @@ class EngineeringProductRepository:
         self.session = session
 
     def list_with_bom_counts(
-        self, offset: int = 0, limit: int = 50, keyword: str | None = None
+        self,
+        offset: int = 0,
+        limit: int = 50,
+        keyword: str | None = None,
+        customer_id: int | None = None,
     ) -> list[tuple[Product, int]]:
         condition = self._search_condition(keyword)
         statement = (
             select(Product, func.count(ProductBom.id))
+            .options(selectinload(Product.customer))
+            .join(Customer, Customer.id == Product.customer_id)
             .outerjoin(
                 ProductBom,
                 (ProductBom.product_id == Product.id)
                 & (ProductBom.product_version == Product.version),
             )
-            .where(condition)
+            .where(
+                condition,
+                Product.customer_id == customer_id
+                if customer_id is not None
+                else True,
+            )
             .group_by(Product.id)
             .order_by(Product.updated_at.desc(), Product.id.desc())
             .offset(offset)
@@ -30,9 +42,16 @@ class EngineeringProductRepository:
         )
         return [(product, count) for product, count in self.session.execute(statement).all()]
 
-    def count(self, keyword: str | None = None) -> int:
+    def count(self, keyword: str | None = None, customer_id: int | None = None) -> int:
         return self.session.scalar(
-            select(func.count(Product.id)).where(self._search_condition(keyword))
+            select(func.count(Product.id))
+            .join(Customer, Customer.id == Product.customer_id)
+            .where(
+                self._search_condition(keyword),
+                Product.customer_id == customer_id
+                if customer_id is not None
+                else True,
+            )
         ) or 0
 
     @staticmethod
@@ -42,7 +61,7 @@ class EngineeringProductRepository:
             return True
         pattern = f"%{value}%"
         return (
-            Product.customer_name.ilike(pattern)
+            Customer.customer_name.ilike(pattern)
             | Product.product_name.ilike(pattern)
             | Product.factory_code.ilike(pattern)
             | Product.customer_code.ilike(pattern)
@@ -55,6 +74,7 @@ class EngineeringProductRepository:
                 selectinload(Product.bom_items),
                 selectinload(Product.process_flows),
                 selectinload(Product.versions),
+                selectinload(Product.customer),
             )
             .where(Product.id == product_id)
         )

@@ -76,13 +76,6 @@ export async function submitWorkOrder(
   return response.data.data
 }
 
-export async function completeWorkOrder(workOrderId: number) {
-  const response = await service.post<{ data: WorkOrder }>(
-    `/work-orders/${workOrderId}/complete`,
-  )
-  return response.data.data
-}
-
 export async function resubmitReworkBatch(batchId: number, quantity: number) {
   const response = await service.post<{ data: WorkOrder['batches'][number] }>(
     `/work-order-batches/${batchId}/rework-submissions`,
@@ -94,6 +87,13 @@ export async function resubmitReworkBatch(batchId: number, quantity: number) {
 export async function cancelWorkOrder(workOrderId: number) {
   const response = await service.post<{ data: WorkOrder }>(
     `/work-orders/${workOrderId}/cancel`,
+  )
+  return response.data.data
+}
+
+export async function undoProductionOperation(operationId: number) {
+  const response = await service.post<{ data: WorkOrder }>(
+    `/production-operations/${operationId}/undo`,
   )
   return response.data.data
 }

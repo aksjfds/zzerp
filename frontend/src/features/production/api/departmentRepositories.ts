@@ -47,13 +47,3 @@ export async function queryProductionTagCards(
   )
   return response.data.data
 }
-
-export async function dispatchProcedureTagStock(
-  procedureTagStockId: number,
-  quantity: number,
-) {
-  await service.post(
-    `/procedure-tag-stocks/${procedureTagStockId}/dispatches`,
-    { quantity },
-  )
-}

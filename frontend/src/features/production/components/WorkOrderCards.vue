@@ -16,6 +16,7 @@ const emit = defineEmits<{
   submitQc: [item: WorkOrder]
   resubmitQc: [item: WorkOrder, batch: WorkOrderBatch]
   cancel: [item: WorkOrder]
+  undo: [item: WorkOrder]
 }>()
 
 const policies = {
@@ -115,6 +116,13 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
           size="small"
           @click="emit('cancel', item)"
         >取消工单</ElButton>
+        <ElButton
+          v-if="item.undo_operation"
+          type="danger"
+          plain
+          size="small"
+          @click="emit('undo', item)"
+        >{{ item.undo_operation.operation_label }}</ElButton>
       </div>
     </article>
     <ElEmpty v-if="!loading && !items.length" description="所选配件暂无工单" :image-size="64" />
@@ -133,7 +141,7 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
 .metrics dt { color: var(--el-text-color-secondary); font-size: 12px; }
 .metrics dd { margin: 5px 0 0; font-size: 17px; font-weight: 700; }
 .purchase-metrics { grid-template-columns: repeat(5, minmax(90px, 1fr)); }
-.assembly-metrics { grid-template-columns: repeat(4, minmax(100px, 1fr)); }
+.assembly-metrics { grid-template-columns: repeat(5, minmax(90px, 1fr)); }
 .batches { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--erp-border); }
 .batches h4 { margin: 0 0 8px; font-size: 13px; }
 .batch-row { padding: 9px 10px; border-radius: 6px; background: #fff; font-size: 12px; }

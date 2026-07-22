@@ -7,7 +7,7 @@ from services.errors import DomainError
 
 
 def empty_process_flow() -> dict:
-    return {"schema_version": 2, "nodes": [], "edges": []}
+    return {"schema_version": 3, "nodes": [], "edges": []}
 
 
 def bom_commands(items: list[BomItemPayload]) -> list[BomItemCommand]:
@@ -35,6 +35,13 @@ def raise_integrity_error(exc: IntegrityError) -> None:
     if constraint_name == "uq_product_factory_code":
         raise DomainError(
             "factory_code_conflict", "本厂型号已存在", status_code=409, path="factory_code"
+        ) from exc
+    if "customer_name" in constraint_name:
+        raise DomainError(
+            "customer_name_conflict",
+            "客户名称已存在，请选择已有客户后重试",
+            status_code=409,
+            path="customer_name",
         ) from exc
     if constraint_name == "uq_product_bom_part_no":
         raise DomainError(

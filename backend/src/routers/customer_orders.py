@@ -32,9 +32,10 @@ router = APIRouter(prefix="/customer-orders", tags=["customer-orders"])
 def customer_order_list(
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
+    include_progress: bool = Query(default=False),
     _: dict = Depends(require_any_permission(ORDER_VIEW)),
 ):
-    data, total = list_orders(page, page_size)
+    data, total = list_orders(page, page_size, include_progress=include_progress)
     return {"data": data, "total": total}
 
 

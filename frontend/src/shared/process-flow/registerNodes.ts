@@ -47,13 +47,39 @@ class ProcessNodeModel extends RectNodeModel {
   }
 
   getNodeStyle() {
-    const qcRequired = Boolean(this.properties?.qcRequired)
-    return {
-      ...super.getNodeStyle(),
-      fill: qcRequired ? '#fef0f0' : '#f0f9eb',
-      stroke: qcRequired ? '#f56c6c' : '#67c23a',
-      strokeWidth: 2,
-    }
+    return { ...super.getNodeStyle(), fill: '#f0f9eb', stroke: '#67c23a', strokeWidth: 2 }
+  }
+
+  getDefaultAnchor() {
+    return fourMidpointAnchors(this)
+  }
+}
+
+class QcNodeModel extends RectNodeModel {
+  setAttributes() {
+    this.width = 120
+    this.height = 56
+    this.radius = 8
+  }
+
+  getNodeStyle() {
+    return { ...super.getNodeStyle(), fill: '#fef0f0', stroke: '#f56c6c', strokeWidth: 2 }
+  }
+
+  getDefaultAnchor() {
+    return fourMidpointAnchors(this)
+  }
+}
+
+class ShippingNodeModel extends RectNodeModel {
+  setAttributes() {
+    this.width = 150
+    this.height = 56
+    this.radius = 8
+  }
+
+  getNodeStyle() {
+    return { ...super.getNodeStyle(), fill: '#f4f4f5', stroke: '#909399', strokeWidth: 2 }
   }
 
   getDefaultAnchor() {
@@ -80,6 +106,8 @@ export function registerProcessNodes(lf: LogicFlow) {
   lf.batchRegister([
     { type: 'part', view: RectNode, model: PartNodeModel },
     { type: 'process', view: RectNode, model: ProcessNodeModel },
+    { type: 'qc', view: RectNode, model: QcNodeModel },
+    { type: 'shipping', view: RectNode, model: ShippingNodeModel },
     { type: 'assembly', view: DiamondNode, model: AssemblyNodeModel },
   ])
 }

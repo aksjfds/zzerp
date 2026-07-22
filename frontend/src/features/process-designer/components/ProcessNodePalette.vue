@@ -5,6 +5,8 @@ import type { ProcedureOption } from '@/api/organization'
 defineProps<{ bomItems: BomItem[]; procedures: ProcedureOption[] }>()
 const emit = defineEmits<{
   dragAssembly: []
+  dragQc: []
+  dragShipping: []
   dragProcedure: [procedure: ProcedureOption]
   dragPart: [item: BomItem]
 }>()
@@ -34,6 +36,8 @@ const emit = defineEmits<{
     >＋ {{ procedure.procedure_name }}{{ procedure.procedure_type === 'purchase_receipt' ? '（外购）' : '' }}</button>
     <p v-if="!procedures.length" class="empty">暂无可用工艺</p>
     <h3>流程节点</h3>
+    <button class="palette-item qc" type="button" @mousedown="emit('dragQc')">QC</button>
+    <button class="palette-item shipping" type="button" @mousedown="emit('dragShipping')">发货</button>
     <button class="palette-item assembly" type="button" @mousedown="emit('dragAssembly')">装配</button>
   </aside>
 </template>
@@ -46,6 +50,8 @@ h3 { margin: 0 0 10px; font-size: 14px; }
 .palette-item span { margin-top: 3px; color: #64748b; font-size: 11px; }
 .palette-item.part { border-color: #409eff; }
 .palette-item.process { border-color: #67c23a; }
+.palette-item.qc { border-color: #f56c6c; }
+.palette-item.shipping { border-color: #909399; }
 .palette-item.assembly { border-color: #e6a23c; }
 .palette-item:disabled { cursor: not-allowed; opacity: .45; }
 .empty { margin: 0; color: var(--el-text-color-secondary); font-size: 12px; }

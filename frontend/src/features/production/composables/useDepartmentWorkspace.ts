@@ -26,11 +26,12 @@ export function useDepartmentWorkspace(departmentCode: string, loadWorkers = fal
 
   async function loadRepositories() {
     const sequence = ++repositorySequence
+    const selectedBeforeLoad = items.value.find(
+      item => item.card_key === selectedCardKey.value,
+    )
     repositoryController?.abort()
     const controller = new AbortController()
     repositoryController = controller
-    items.value = []
-    repositoryTotal.value = 0
     loading.value = true
     try {
       const query = (page: number) => queryDepartmentRepositories(departmentCode, {
@@ -49,7 +50,22 @@ export function useDepartmentWorkspace(departmentCode: string, loadWorkers = fal
       }
       items.value = result.items
       repositoryTotal.value = result.total
-      if (!items.value.some(item => item.card_key === selectedCardKey.value)) clearSelection()
+      const selectedAfterLoad = items.value.find(
+        item => item.card_key === selectedCardKey.value,
+      ) || (selectedBeforeLoad && items.value.find(item => (
+        item.production_item_id === selectedBeforeLoad.production_item_id
+        && item.flow_node_id === selectedBeforeLoad.flow_node_id
+        && (
+          departmentCode === 'assembly'
+          || item.source_flow_node_id === selectedBeforeLoad.source_flow_node_id
+        )
+      )))
+      if (selectedAfterLoad) {
+        selectedCardKey.value = selectedAfterLoad.card_key
+        selectedProductionItemId.value = selectedAfterLoad.production_item_id
+      } else if (selectedCardKey.value) {
+        clearSelection()
+      }
     } catch {
       if (sequence === repositorySequence && !controller.signal.aborted) {
         clearSelection()

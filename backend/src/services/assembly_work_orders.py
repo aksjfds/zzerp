@@ -9,12 +9,21 @@ from models.production import (
     ProductionItem,
     Repository,
     WorkOrder,
+    WorkOrderBatch,
     WorkOrderMaterial,
 )
 from services.errors import DomainError
 from services.production_movements import record_movement
-from services.work_order_presenters import serialize_work_order
-from services.work_order_progress import order_remaining_quantity
+from services.work_order_presenters import serialize_batch, serialize_work_order
+from services.work_order_progress import (
+    order_remaining_quantity,
+    rework_pending_quantities,
+)
+from services.production_flow import process_qc_node
+from services.production_operation_undo import (
+    capture_operation_state,
+    record_undoable_operation,
+)
 from services.work_order_support import (
     consume_repository,
     mark_order_planned,
@@ -91,7 +100,7 @@ def create_assembly_work_order(
                 or "装配"
             ),
             flow_node_id=assembly_node["id"],
-            source_flow_node_id=None,
+            source_flow_node_id=assembly_node["id"],
             worker_id=worker_id,
             quantity=quantity,
         )
@@ -170,14 +179,17 @@ def submit_assembly_work_order(
 ) -> dict:
     if user_department not in {"sys", "assembly"}:
         raise DomainError("department_access_denied", "只有装配部门可以操作装配工单", status_code=403)
-    if completion_action != "direct":
-        raise DomainError("assembly_qc_not_supported", "装配工单当前仅支持直接结单")
     remaining = order_remaining_quantity(order)
     if quantity != remaining:
         raise DomainError("partial_completion_not_allowed", "装配工单必须一次完成剩余数量")
 
     input_item = session.get(ProductionItem, order.production_item_id, with_for_update=True)
     context, assembly_node = node_context(session, input_item, order.flow_node_id)
+    qc_node = process_qc_node(context.flow, context.nodes, assembly_node["id"])
+    if completion_action == "qc" and qc_node is None:
+        raise DomainError("work_order_qc_not_configured", "装配节点后未配置QC节点")
+    if completion_action == "direct" and qc_node is not None:
+        raise DomainError("work_order_qc_required", "该装配节点必须送QC")
     materials = session.scalars(
         select(WorkOrderMaterial)
         .where(WorkOrderMaterial.work_order_id == order.id)
@@ -218,8 +230,38 @@ def submit_assembly_work_order(
     session.flush()
     order.production_item_id = output_item.id
     session.flush()
-    target = context.normal_target(assembly_node["id"])
     output_quantity = quantity * int(assembly_node.get("output_pcs", 1))
+    if completion_action == "qc":
+        qc_department_id = session.scalar(
+            select(Department.id).where(Department.department_code == "qc")
+        )
+        if qc_department_id is None:
+            raise DomainError("department_not_found", "QC部门不存在")
+        batch = WorkOrderBatch(
+            work_order_id=order.id,
+            submitted_quantity=output_quantity,
+            source_flow_node_id=assembly_node["id"],
+        )
+        session.add(batch)
+        session.flush()
+        record_movement(
+            session,
+            production_item=output_item,
+            quantity=output_quantity,
+            movement_type="assembly_output",
+            source_flow_node_id=assembly_node["id"],
+            target_flow_node_id=qc_node["id"],
+            source_department_id=target_department_id(session, assembly_node),
+            target_department_id=qc_department_id,
+            work_order_id=order.id,
+            work_order_batch_id=batch.id,
+        )
+        order.completed_quantity += quantity
+        session.flush()
+        refresh_order_closed(session, output_item)
+        return serialize_work_order(session, order)
+
+    target = context.normal_target(assembly_node["id"])
     target_department = move_to_node(
         session, output_item, target, output_quantity, assembly_node["id"]
     )
@@ -242,3 +284,76 @@ def submit_assembly_work_order(
     session.flush()
     refresh_order_closed(session, output_item)
     return serialize_work_order(session, order)
+
+
+def resubmit_assembly_rework_batch(
+    source_batch_id: int,
+    quantity: int,
+    user_department: str,
+    actor_username: str,
+) -> dict:
+    with SessionLocal.begin() as session:
+        source_batch = session.get(WorkOrderBatch, source_batch_id, with_for_update=True)
+        if source_batch is None:
+            raise DomainError("qc_batch_not_found", "返工来源批次不存在", status_code=404)
+        order = session.get(WorkOrder, source_batch.work_order_id, with_for_update=True)
+        if order is None or order.work_order_type != "assembly":
+            raise DomainError("qc_rework_order_invalid", "返工批次所属装配工单无效")
+        if order.status != "open":
+            raise DomainError("work_order_closed", "装配工单已经结单")
+        before = capture_operation_state(session, order)
+        if source_batch.recorded_at is None or source_batch.rework_quantity is None:
+            raise DomainError("qc_batch_not_completed", "QC尚未录入返工结果")
+        batches = list(session.scalars(
+            select(WorkOrderBatch).where(WorkOrderBatch.work_order_id == order.id)
+        ).all())
+        available = rework_pending_quantities(batches).get(source_batch.id, 0)
+        if quantity <= 0 or quantity > available:
+            raise DomainError("qc_rework_quantity_exceeded", "返工送检数量超过待返工数量")
+        if user_department not in {"sys", "assembly"}:
+            raise DomainError("department_access_denied", "只有装配部门可以提交返工送检", status_code=403)
+
+        output_item = session.get(ProductionItem, order.production_item_id)
+        if output_item is None:
+            raise DomainError("production_context_missing", "装配产出不存在")
+        context, assembly_node = node_context(session, output_item, order.flow_node_id)
+        qc_node = process_qc_node(context.flow, context.nodes, assembly_node["id"])
+        if qc_node is None:
+            raise DomainError("work_order_qc_not_configured", "装配节点后未配置QC节点")
+        qc_department_id = session.scalar(
+            select(Department.id).where(Department.department_code == "qc")
+        )
+        if qc_department_id is None:
+            raise DomainError("department_not_found", "QC部门不存在")
+
+        batch = WorkOrderBatch(
+            work_order_id=order.id,
+            submitted_quantity=quantity,
+            source_flow_node_id=assembly_node["id"],
+            rework_source_batch_id=source_batch.id,
+        )
+        session.add(batch)
+        session.flush()
+        record_movement(
+            session,
+            production_item=output_item,
+            quantity=quantity,
+            movement_type="assembly_output",
+            source_flow_node_id=assembly_node["id"],
+            target_flow_node_id=qc_node["id"],
+            source_department_id=target_department_id(session, assembly_node),
+            target_department_id=qc_department_id,
+            work_order_id=order.id,
+            work_order_batch_id=batch.id,
+        )
+        session.flush()
+        record_undoable_operation(
+            session,
+            order,
+            before,
+            operation_type="rework_submission",
+            operation_label="撤回返工送检",
+            department_code="assembly",
+            actor_username=actor_username,
+        )
+        return serialize_batch(batch, track_rework=True)
