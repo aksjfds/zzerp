@@ -90,6 +90,30 @@ export function useProductSaveActions(options: Options) {
     }
   }
 
+  async function saveProductInfo() {
+    if (!productId.value || form.revision === null || !await validateBase()) return
+    try {
+      const fields = normalizedFields()
+      const product = await store.saveProductInfo(
+        productId.value,
+        form.revision,
+        fields,
+      )
+      Object.assign(form, fields, {
+        customer_id: product.customer_id,
+        customer_name: product.customer_name,
+        product_name: product.product_name,
+        factory_code: product.factory_code,
+        customer_code: product.customer_code,
+        revision: product.revision,
+      })
+      markSaved(['base'])
+      ElMessage.success('产品基础信息已保存')
+    } catch (error) {
+      showSaveError(error, '产品基础信息保存失败')
+    }
+  }
+
   async function saveFlow() {
     if (!productId.value || form.revision === null || form.version === null || !flowEditor.value) return
     flowSaveError.value = null
@@ -132,5 +156,12 @@ export function useProductSaveActions(options: Options) {
     flowSaveError.value = null
   }
 
-  return { clearFlowSaveError, createProduct, flowSaveError, saveBom, saveFlow }
+  return {
+    clearFlowSaveError,
+    createProduct,
+    flowSaveError,
+    saveBom,
+    saveFlow,
+    saveProductInfo,
+  }
 }

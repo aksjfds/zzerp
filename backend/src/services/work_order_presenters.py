@@ -195,6 +195,7 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         "part_no": part_no,
         "part_name": part_name,
         "work_order_name": order.work_order_name,
+        "remark": order.remark or "",
         "worker_id": order.worker_id,
         "worker_name": worker.worker_name if worker else None,
         "quantity": order.quantity,

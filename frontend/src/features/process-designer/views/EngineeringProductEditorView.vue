@@ -25,7 +25,9 @@ const editorReady = ref(false)
 const customers = ref<Customer[]>([])
 const customerLoading = ref(false)
 const {
+  allDirty,
   applyProduct,
+  baseDirty,
   bomDirty,
   bomSnapshot,
   flowDirty,
@@ -44,7 +46,6 @@ const productId = computed(() => {
 })
 const mode = computed(() => route.query.mode === 'view' ? 'view' : 'edit')
 const canEditProduct = computed(() => authStore.hasPermission(PRODUCT_PERMISSIONS.edit))
-const baseReadOnly = computed(() => Boolean(productId.value))
 
 const baseRules: FormRules<ProductFields> = {
   customer_name: [{ required: true, whitespace: true, message: '请输入客户名称', trigger: 'blur' }],
@@ -84,7 +85,14 @@ async function validateBase() {
   }
 }
 
-const { clearFlowSaveError, createProduct, flowSaveError, saveBom, saveFlow } = useProductSaveActions({
+const {
+  clearFlowSaveError,
+  createProduct,
+  flowSaveError,
+  saveBom,
+  saveFlow,
+  saveProductInfo,
+} = useProductSaveActions({
   applyProduct,
   bomSnapshot,
   editorReady,
@@ -119,10 +127,17 @@ const {
   productId,
   router,
   store,
-  versionDirty: rawVersionDirty,
+  versionDirty: allDirty,
 })
 const selectedVersion = computed(() => form.version || currentVersion.value)
 const versionDirty = computed(() => !loadingProduct.value && rawVersionDirty.value)
+const pageDirty = computed(() => !loadingProduct.value && allDirty.value)
+const baseReadOnly = computed(() => Boolean(
+  mode.value === 'view'
+  || !canEditProduct.value
+  || !baseInfoEditable.value
+  || store.saving,
+))
 const versionReadOnly = computed(() => Boolean(
   mode.value === 'view'
   || !canEditProduct.value
@@ -145,7 +160,7 @@ function updateBom(items: BomItem[]) {
   form.bom_items = items
 }
 
-useUnsavedChangesGuard(versionDirty)
+useUnsavedChangesGuard(pageDirty)
 
 const { createVersion, deleteSelectedVersion, enterEditMode, returnViewMode } = useProductVersionActions({
   form,
@@ -155,7 +170,7 @@ const { createVersion, deleteSelectedVersion, enterEditMode, returnViewMode } = 
   router,
   selectedVersion,
   store,
-  versionDirty,
+  versionDirty: pageDirty,
 })
 
 onMounted(async () => {
@@ -236,6 +251,14 @@ onMounted(async () => {
           <h2>产品基础信息</h2>
           <span>产品级资料，所有版本共享；创建订单后不可修改。</span>
         </div>
+        <ElButton
+          v-if="productId && mode === 'edit' && canEditProduct && baseInfoEditable"
+          type="primary"
+          plain
+          :disabled="!baseDirty"
+          :loading="store.saving"
+          @click="saveProductInfo"
+        >保存基础信息</ElButton>
       </div>
       <ElAlert
         v-if="productId && !baseInfoEditable"

@@ -123,6 +123,7 @@ class WorkOrderCreate(ProductionModel):
     tag_names: list[str] = Field(default_factory=list, max_length=20)
     quantity: int = Field(gt=0)
     worker_id: int | None = Field(default=None, gt=0)
+    remark: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def validate_source(self) -> Self:
@@ -135,6 +136,7 @@ class AssemblyWorkOrderCreate(ProductionModel):
     repository_ids: list[int] = Field(min_length=2)
     quantity: int = Field(gt=0)
     worker_id: int | None = Field(default=None, gt=0)
+    remark: str | None = Field(default=None, max_length=1000)
 
 
 class WorkOrderSubmission(ProductionModel):
@@ -200,6 +202,7 @@ class WorkOrderResponse(ProductionModel):
     part_no: str
     part_name: str
     work_order_name: str
+    remark: str
     worker_id: int | None
     worker_name: str | None
     quantity: int

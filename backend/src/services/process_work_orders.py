@@ -40,6 +40,7 @@ def create_work_order(
     tag_names: list[str],
     quantity: int,
     worker_id: int | None,
+    remark: str | None,
     user_department: str,
 ) -> dict:
     if (repository_id is None) == (procedure_tag_stock_id is None):
@@ -78,6 +79,7 @@ def create_work_order(
             "tag_names": tag_names,
             "quantity": quantity,
             "worker_id": worker_id,
+            "remark": remark,
         }
         if procedure.procedure_type == "standard":
             order = create_tag_order(**common)

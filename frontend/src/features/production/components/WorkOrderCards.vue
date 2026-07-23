@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 import type { WorkOrderMode } from '../domain/workOrderCardPolicy'
 import { assemblyWorkOrderCardPolicy } from '../domain/assemblyWorkOrderCardPolicy'
 import { productionWorkOrderCardPolicy } from '../domain/productionWorkOrderCardPolicy'
 import { purchaseWorkOrderCardPolicy } from '../domain/purchaseWorkOrderCardPolicy'
+import WorkOrderPrintDialog from './WorkOrderPrintDialog.vue'
 
 const props = withDefaults(defineProps<{
   items: WorkOrder[]
@@ -25,6 +26,13 @@ const policies = {
   assembly: assemblyWorkOrderCardPolicy,
 }
 const policy = computed(() => policies[props.mode])
+const printVisible = ref(false)
+const printItem = ref<WorkOrder>()
+
+function openPrint(item: WorkOrder) {
+  printItem.value = item
+  printVisible.value = true
+}
 
 function qcResultText(batch: WorkOrderBatch) {
   const hasRework = Boolean(batch.rework_quantity)
@@ -56,6 +64,7 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
         <span>执行工人：{{ item.worker_name || '未分配' }}</span>
         <span>创建：{{ item.created_at }}</span>
       </div>
+      <p v-if="item.remark" class="remark">备注：{{ item.remark }}</p>
       <dl class="metrics" :class="policy.metricsClass">
         <div v-for="metric in policy.metrics(item)" :key="metric.label">
           <dt>{{ metric.label }}</dt><dd>{{ metric.value }}</dd>
@@ -97,6 +106,7 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
         </div>
       </div>
       <div class="work-order-actions">
+        <ElButton size="small" plain @click="openPrint(item)">打印工单</ElButton>
         <ElButton
           v-if="policy.showComplete(item)"
           type="primary"
@@ -126,6 +136,7 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
       </div>
     </article>
     <ElEmpty v-if="!loading && !items.length" description="所选配件暂无工单" :image-size="64" />
+    <WorkOrderPrintDialog v-model="printVisible" :item="printItem" />
   </div>
 </template>
 
@@ -136,6 +147,7 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
 .heading div { display: grid; gap: 4px; }
 .heading span, .meta { color: var(--el-text-color-secondary); font-size: 13px; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
+.remark { margin: 10px 0 0; padding: 9px 11px; border-radius: 6px; color: var(--el-text-color-secondary); background: #fff; font-size: 13px; white-space: pre-wrap; }
 .metrics { display: grid; grid-template-columns: repeat(6, minmax(80px, 1fr)); gap: 8px; margin: 14px 0 0; }
 .metrics div { padding: 10px; border-radius: 6px; background: #fff; }
 .metrics dt { color: var(--el-text-color-secondary); font-size: 12px; }

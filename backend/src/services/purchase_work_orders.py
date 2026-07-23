@@ -25,6 +25,7 @@ def create_purchase_order(
     tag_names: list[str],
     quantity: int,
     worker_id: int | None,
+    remark: str | None,
 ) -> WorkOrder:
     if not isinstance(source, Repository):
         raise DomainError("purchase_source_invalid", "外购入库单只能使用待外购数量")
@@ -38,6 +39,7 @@ def create_purchase_order(
         quantity=quantity,
         worker_id=worker_id,
         work_order_type="purchase_receipt",
+        remark=remark,
     )
 
 

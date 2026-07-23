@@ -25,6 +25,7 @@ def create_order_record(
     quantity: int,
     worker_id: int | None,
     work_order_type: str,
+    remark: str | None = None,
     applied_tag_set_id: int | None = None,
     applied_tag_names: list[str] | None = None,
     source_tag_set_id: int | None = None,
@@ -52,6 +53,7 @@ def create_order_record(
             f"{procedure.procedure_name}-{' + '.join(applied_tag_names)}"
             if applied_tag_names else procedure.procedure_name
         ),
+        remark=(remark or "").strip() or None,
         worker_id=worker_id,
         quantity=quantity,
     )

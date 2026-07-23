@@ -39,6 +39,7 @@ def create_assembly_work_order(
     repository_ids: list[int],
     quantity: int,
     worker_id: int | None,
+    remark: str | None,
     user_department: str,
 ) -> dict:
     if user_department not in {"sys", "assembly"}:
@@ -99,6 +100,7 @@ def create_assembly_work_order(
                 or assembly_node.get("output_name")
                 or "装配"
             ),
+            remark=(remark or "").strip() or None,
             flow_node_id=assembly_node["id"],
             source_flow_node_id=assembly_node["id"],
             worker_id=worker_id,

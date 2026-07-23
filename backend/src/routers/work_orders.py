@@ -71,6 +71,7 @@ def work_order_create(
             payload.tag_names,
             payload.quantity,
             payload.worker_id,
+            payload.remark,
             user["department"],
         )
     }
@@ -86,6 +87,7 @@ def assembly_work_order_create(
             payload.repository_ids,
             payload.quantity,
             payload.worker_id,
+            payload.remark,
             user["department"],
         )
     }

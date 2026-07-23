@@ -96,8 +96,8 @@ class CreateProductPayload(ProductDataFields):
 
 
 class UpdateProductPayload(ProductDataFields):
-    customer_id: int = Field(gt=0)
-    customer_name: str | None = Field(default=None, min_length=1, max_length=200)
+    customer_id: int | None = Field(default=None, gt=0)
+    customer_name: str = Field(min_length=1, max_length=200)
     expected_revision: int = Field(gt=0)
 
 

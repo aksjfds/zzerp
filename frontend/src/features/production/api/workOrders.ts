@@ -32,6 +32,7 @@ export async function createWorkOrder(
   tagNames: string[],
   quantity: number,
   workerId: number | null,
+  remark: string,
 ) {
   if ((repositoryId === null) === (procedureTagStockId === null)) {
     throw new Error('工单来源必须且只能选择一种库存')
@@ -44,6 +45,7 @@ export async function createWorkOrder(
     tag_names: tagNames,
     quantity,
     worker_id: workerId,
+    remark,
   })
   return response.data.data
 }
@@ -52,11 +54,13 @@ export async function createAssemblyWorkOrder(
   repositoryIds: number[],
   quantity: number,
   workerId: number | null,
+  remark: string,
 ) {
   const response = await service.post<{ data: WorkOrder }>('/assembly-work-orders', {
     repository_ids: repositoryIds,
     quantity,
     worker_id: workerId,
+    remark,
   })
   return response.data.data
 }

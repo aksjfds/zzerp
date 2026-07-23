@@ -11,17 +11,19 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
-  submit: [payload: { quantity: number; workerId: number | null }]
+  submit: [payload: { quantity: number; workerId: number | null; remark: string }]
 }>()
 const form = reactive({
   quantity: 1,
   workerId: null as number | null,
+  remark: '',
 })
 
 watch(() => props.modelValue, (visible) => {
   if (!visible) return
   form.quantity = props.item?.available_quantity || 1
   form.workerId = null
+  form.remark = ''
 })
 
 function submit() {
@@ -30,7 +32,11 @@ function submit() {
     ElMessage.warning('装配数量超过当前可装配数量')
     return
   }
-  emit('submit', { quantity: form.quantity, workerId: form.workerId })
+  emit('submit', {
+    quantity: form.quantity,
+    workerId: form.workerId,
+    remark: form.remark.trim(),
+  })
 }
 </script>
 
@@ -61,6 +67,9 @@ function submit() {
             :value="worker.id"
           />
         </ElSelect>
+      </ElFormItem>
+      <ElFormItem label="备注">
+        <ElInput v-model="form.remark" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="填写装配工单备注（可选）" />
       </ElFormItem>
     </ElForm>
     <template #footer>

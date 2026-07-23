@@ -65,7 +65,7 @@ export function useProductVersionLoader(options: Options) {
     if (versionDirty.value) {
       try {
         await ElMessageBox.confirm(
-          '当前版本 BOM 或流程有未保存内容，切换版本会丢失修改，是否继续？',
+          '当前产品基础信息、BOM 或流程有未保存内容，切换版本会丢失修改，是否继续？',
           '未保存修改',
           {
             type: 'warning',

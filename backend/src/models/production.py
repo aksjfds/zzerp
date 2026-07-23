@@ -257,6 +257,7 @@ class WorkOrder(Base):
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     work_order_name: Mapped[str] = mapped_column(Text, nullable=False)
+    remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     worker_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("worker.id"), nullable=True
     )

@@ -46,6 +46,7 @@ def create_tag_order(
     tag_names: list[str],
     quantity: int,
     worker_id: int | None,
+    remark: str | None,
 ) -> WorkOrder:
     source_tag_set_id = validate_tag_source(session, source, procedure)
     normalized_tag_names = normalize_tag_names(tag_names)
@@ -84,6 +85,7 @@ def create_tag_order(
         quantity=quantity,
         worker_id=worker_id,
         work_order_type="tag",
+        remark=remark,
         applied_tag_set_id=applied_set.id,
         applied_tag_names=[tag.tag_name for tag in applied_tags],
         source_tag_set_id=source_tag_set_id,

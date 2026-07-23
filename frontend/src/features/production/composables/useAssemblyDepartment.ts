@@ -61,13 +61,18 @@ export function useAssemblyDepartment() {
     dialogVisible.value = true
   }
 
-  async function saveWorkOrder(payload: { quantity: number; workerId: number | null }) {
+  async function saveWorkOrder(payload: {
+    quantity: number
+    workerId: number | null
+    remark: string
+  }) {
     submitting.value = true
     try {
       await createAssemblyWorkOrder(
         assembly.selectedIds.value,
         payload.quantity,
         payload.workerId,
+        payload.remark,
       )
       dialogVisible.value = false
       assembly.clear()

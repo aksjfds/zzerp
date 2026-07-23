@@ -18,6 +18,7 @@ const emit = defineEmits<{
     quantity: number
     workerId: number | null
     tagNames: string[]
+    remark: string
   }]
 }>()
 const form = reactive({
@@ -25,6 +26,7 @@ const form = reactive({
   quantity: 1,
   workerId: null as number | null,
   tagNames: [] as string[],
+  remark: '',
 })
 const sourceOptions = computed(() => props.sources.filter(item => (
   item.available_quantity > 0
@@ -75,6 +77,7 @@ watch(
     form.quantity = source?.available_quantity || props.item?.available_quantity || 1
     form.workerId = null
     form.tagNames = []
+    form.remark = ''
   },
 )
 
@@ -118,6 +121,7 @@ function submit() {
     quantity: form.quantity,
     workerId: form.workerId,
     tagNames,
+    remark: form.remark.trim(),
   })
 }
 </script>
@@ -181,6 +185,9 @@ function submit() {
             :value="worker.id"
           />
         </ElSelect>
+      </ElFormItem>
+      <ElFormItem label="备注">
+        <ElInput v-model="form.remark" type="textarea" :rows="3" maxlength="1000" show-word-limit placeholder="填写工单备注（可选）" />
       </ElFormItem>
     </ElForm>
     <template #footer>

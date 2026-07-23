@@ -313,6 +313,7 @@ CREATE TABLE work_order (
     -- 工单创建时记录执行来源快照；装配工单记录自身装配节点，物料来源另见 work_order_material。
     source_flow_node_id TEXT,
     work_order_name TEXT NOT NULL,
+    remark TEXT,
     worker_id BIGINT REFERENCES worker(id),
     quantity INT NOT NULL CHECK (quantity > 0),
     completed_quantity INT NOT NULL DEFAULT 0
@@ -912,6 +913,7 @@ BEGIN
         NEW.target_tag_set_id,
         NEW.work_order_type,
         NEW.work_order_name,
+        NEW.remark,
         NEW.flow_node_id,
         NEW.source_flow_node_id
     ) IS DISTINCT FROM (
@@ -921,6 +923,7 @@ BEGIN
         OLD.target_tag_set_id,
         OLD.work_order_type,
         OLD.work_order_name,
+        OLD.remark,
         OLD.flow_node_id,
         OLD.source_flow_node_id
     ) AND EXISTS (
@@ -1176,7 +1179,7 @@ ON work_order
 FOR EACH ROW EXECUTE FUNCTION validate_work_order_tag_context();
 
 CREATE TRIGGER trg_work_order_movement_items
-BEFORE UPDATE OF production_item_id, procedure_id, applied_tag_set_id, source_tag_set_id, target_tag_set_id, work_order_type, work_order_name, flow_node_id, source_flow_node_id
+BEFORE UPDATE OF production_item_id, procedure_id, applied_tag_set_id, source_tag_set_id, target_tag_set_id, work_order_type, work_order_name, remark, flow_node_id, source_flow_node_id
 ON work_order
 FOR EACH ROW EXECUTE FUNCTION validate_work_order_movement_items();
 
@@ -1365,7 +1368,7 @@ INSERT INTO users (username, password, department, role, permissions) VALUES
     '1',
     'pmc',
     'pmc',
-    'order:view,production:view'
+    'engineering:product:view,order:view,production:view'
 ),
 (
     'stamp', '1', 'stamp', 'operator', 'production:view,production:manage'
@@ -1438,7 +1441,7 @@ CROSS JOIN (
 ) AS tag(tag_name)
 WHERE procedure.procedure_name = '粗光';
 
--- 示例产品：只包含基础信息与 BOM，故意不配置 product_process_flow。
+-- 示例产品：基础信息、BOM，以及“主体粗光后与弹簧装配”的完整流程图。
 INSERT INTO customer (customer_name) VALUES ('示例客户');
 
 INSERT INTO product (
@@ -1481,6 +1484,136 @@ INSERT INTO product_bom (
 )
 SELECT id, 1, '弹簧', 'DEMO-001-02', 1, '外购', 2
 FROM product WHERE factory_code = 'DEMO-001';
+
+-- 主体 -> 粗光 -> QC -> 装配 -> QC -> 出货
+-- 弹簧 -----------------> 装配
+-- BOM 与工艺均按业务键查找，不依赖数据库自增 ID。
+INSERT INTO product_process_flow (
+    product_id,
+    product_version,
+    flow_json
+)
+SELECT
+    product.id,
+    1,
+    jsonb_build_object(
+        'schema_version', 3,
+        'nodes', jsonb_build_array(
+            jsonb_build_object(
+                'id', 'demo-part-body',
+                'type', 'part',
+                'label', '主体',
+                'x', 80,
+                'y', 100,
+                'bom_item_id', body_bom.id,
+                'part_no', body_bom.part_no
+            ),
+            jsonb_build_object(
+                'id', 'demo-part-spring',
+                'type', 'part',
+                'label', '弹簧',
+                'x', 280,
+                'y', 320,
+                'bom_item_id', spring_bom.id,
+                'part_no', spring_bom.part_no
+            ),
+            jsonb_build_object(
+                'id', 'demo-process-polish',
+                'type', 'process',
+                'label', '粗光',
+                'x', 280,
+                'y', 100,
+                'process_code', 'procedure_' || polish_procedure.id,
+                'procedure_id', polish_procedure.id
+            ),
+            jsonb_build_object(
+                'id', 'demo-qc-polish',
+                'type', 'qc',
+                'label', '粗光 QC',
+                'x', 480,
+                'y', 100
+            ),
+            jsonb_build_object(
+                'id', 'demo-assembly-body-spring',
+                'type', 'assembly',
+                'label', '主体与弹簧装配',
+                'x', 680,
+                'y', 210,
+                'output_name', '主体-弹簧装配体',
+                'output_pcs', 1
+            ),
+            jsonb_build_object(
+                'id', 'demo-qc-final',
+                'type', 'qc',
+                'label', '装配 QC',
+                'x', 880,
+                'y', 210
+            ),
+            jsonb_build_object(
+                'id', 'demo-shipping',
+                'type', 'shipping',
+                'label', '出货',
+                'x', 1080,
+                'y', 210
+            )
+        ),
+        'edges', jsonb_build_array(
+            jsonb_build_object(
+                'id', 'demo-edge-body-polish',
+                'edge_type', 'polyline',
+                'source_node_id', 'demo-part-body',
+                'target_node_id', 'demo-process-polish'
+            ),
+            jsonb_build_object(
+                'id', 'demo-edge-polish-qc',
+                'edge_type', 'polyline',
+                'source_node_id', 'demo-process-polish',
+                'target_node_id', 'demo-qc-polish'
+            ),
+            jsonb_build_object(
+                'id', 'demo-edge-polish-qc-assembly',
+                'edge_type', 'polyline',
+                'source_node_id', 'demo-qc-polish',
+                'target_node_id', 'demo-assembly-body-spring'
+            ),
+            jsonb_build_object(
+                'id', 'demo-edge-spring-assembly',
+                'edge_type', 'polyline',
+                'source_node_id', 'demo-part-spring',
+                'target_node_id', 'demo-assembly-body-spring'
+            ),
+            jsonb_build_object(
+                'id', 'demo-edge-assembly-qc',
+                'edge_type', 'polyline',
+                'source_node_id', 'demo-assembly-body-spring',
+                'target_node_id', 'demo-qc-final'
+            ),
+            jsonb_build_object(
+                'id', 'demo-edge-qc-shipping',
+                'edge_type', 'polyline',
+                'source_node_id', 'demo-qc-final',
+                'target_node_id', 'demo-shipping'
+            )
+        )
+    )
+FROM product
+JOIN product_bom AS body_bom
+    ON body_bom.product_id = product.id
+    AND body_bom.product_version = 1
+    AND body_bom.part_no = 'DEMO-001-01'
+JOIN product_bom AS spring_bom
+    ON spring_bom.product_id = product.id
+    AND spring_bom.product_version = 1
+    AND spring_bom.part_no = 'DEMO-001-02'
+JOIN procedure AS polish_procedure
+    ON polish_procedure.procedure_name = '粗光'
+JOIN workshop AS polish_workshop
+    ON polish_workshop.id = polish_procedure.workshop_id
+    AND polish_workshop.workshop_name = '手磨车间'
+JOIN department AS polish_department
+    ON polish_department.id = polish_workshop.department_id
+    AND polish_department.department_code = 'polish'
+WHERE product.factory_code = 'DEMO-001';
 
 
 INSERT INTO worker (worker_name, department_id, workshop_id)

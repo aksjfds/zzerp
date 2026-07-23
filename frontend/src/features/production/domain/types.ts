@@ -110,6 +110,7 @@ export type WorkOrder = {
   part_no: string
   part_name: string
   work_order_name: string
+  remark: string
   worker_id: number | null
   worker_name: string | null
   quantity: number

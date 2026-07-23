@@ -42,7 +42,7 @@ export function useProductVersionActions(options: Options) {
     if (versionDirty.value) {
       try {
         await ElMessageBox.confirm(
-          '当前版本 BOM 或流程有未保存内容，返回查看会丢失修改，是否继续？',
+          '当前产品基础信息、BOM 或流程有未保存内容，返回查看会丢失修改，是否继续？',
           '未保存修改',
           {
             type: 'warning',
@@ -61,7 +61,7 @@ export function useProductVersionActions(options: Options) {
   async function createVersion() {
     if (!productId.value || form.revision === null || !selectedVersion.value) return
     if (versionDirty.value) {
-      ElMessage.warning('当前版本 BOM 或流程有未保存内容，请先保存后再创建新版本')
+      ElMessage.warning('当前产品资料有未保存内容，请先保存后再创建新版本')
       return
     }
     try {
@@ -81,7 +81,7 @@ export function useProductVersionActions(options: Options) {
   async function deleteSelectedVersion() {
     if (!productId.value || !selectedVersion.value || form.revision === null) return
     if (versionDirty.value) {
-      ElMessage.warning('当前版本 BOM 或流程有未保存内容，请先保存或切换查看模式后再删除版本')
+      ElMessage.warning('当前产品资料有未保存内容，请先保存或切换查看模式后再删除版本')
       return
     }
     try {

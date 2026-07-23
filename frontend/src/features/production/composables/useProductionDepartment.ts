@@ -159,6 +159,7 @@ export function useProductionDepartment(
     quantity: number
     workerId: number | null
     tagNames: string[]
+    remark: string
   }) {
     if (!activeRepository.value) return
     if ((payload.repositoryId === null) === (payload.tagStockId === null)) return
@@ -171,6 +172,7 @@ export function useProductionDepartment(
         payload.tagNames,
         payload.quantity,
         payload.workerId,
+        payload.remark,
       )
       dialogVisible.value = false
       await reloadWorkspace()

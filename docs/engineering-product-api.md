@@ -4,6 +4,7 @@
 
 - `GET /customers?keyword=`：工程部和业务部查询共用客户主数据。
 - `POST /products`：提交已有 `customer_id`，或提交空的 `customer_id` 和新 `customer_name`；后一种情况会在创建产品的同一事务中新增客户。
+- `PUT /products/{product_id}`：产品尚未被订单引用时可修改共享基础信息，也支持选择已有客户或输入新客户；任意版本已被订单引用后，基础信息保持只读。
 - `GET /products?customer_id=`：按客户筛选产品，业务部创建订单时使用。
 - `POST /customer-orders`：必须提交 `customer_id`，且所有订单明细产品必须属于该客户。
 - `GET /customer-orders?include_progress=true`：供 PMC 看板返回每个订单产品的总数、完工、报废、遗失、未完工和欠 PO 数量；普通订单列表不请求时不执行进度统计。

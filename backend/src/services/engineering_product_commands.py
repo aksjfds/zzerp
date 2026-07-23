@@ -201,8 +201,8 @@ def update_product_info(product_id: int, payload: UpdateProductPayload) -> dict:
             customer = _resolve_product_customer(
                 session,
                 payload.customer_id,
-                None,
-                allow_create=False,
+                payload.customer_name,
+                allow_create=True,
             )
             unchanged = (
                 product.customer_id == customer.id
