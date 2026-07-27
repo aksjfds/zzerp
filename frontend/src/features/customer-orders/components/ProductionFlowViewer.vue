@@ -176,7 +176,7 @@ onMounted(async () => {
     edgeType: 'polyline',
     stopZoomGraph: false,
     stopScrollGraph: false,
-    stopMoveGraph: false,
+    stopMoveGraph: true,
     plugins: [Control],
   })
   registerProcessNodes(instance)
