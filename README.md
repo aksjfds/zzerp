@@ -20,14 +20,16 @@ pnpm run check
 ## Docker 开发
 
 ```bash
-docker compose up -d app
+docker compose up -d --build app
 docker exec -it app bash
 pnpm f
 ```
 
 Compose 会为容器创建独立的 `frontend/node_modules` 数据卷，并按照容器的
 Linux 架构自动安装锁文件中的依赖。不要把宿主机的 `node_modules` 直接共享给
-容器；Vite/Rolldown 等工具包含平台相关的原生二进制。
+容器；Vite/Rolldown 等工具包含平台相关的原生二进制。开发镜像固定使用
+Python 3.12 和 Node 22，并在构建阶段安装 `backend/requirements-dev.txt`；
+后端依赖变更后再次执行带 `--build` 的启动命令即可。
 
 ## 文档入口
 

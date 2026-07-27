@@ -1,0 +1,9 @@
+.git
+.github
+.pnpm-store
+**/__pycache__
+**/*.py[cod]
+**/node_modules
+frontend/dist
+backend/.env.*
+frontend/.env.*

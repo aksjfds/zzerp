@@ -1,5 +1,8 @@
 services:
   app:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: zzerp
     container_name: app
     working_dir: /zzerp
