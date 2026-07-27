@@ -9,8 +9,18 @@ const props = defineProps<{
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
+type InspectionRow = {
+  label: string
+  ok: number | ''
+  ng: number | ''
+  qcWorker: string
+  date: string
+  defectReason: string
+  returned: number | ''
+}
+
 const inspectionLabels = ['首批', '返修1', '返修2', '返修3', '返修4', '返修5', '返修6']
-const inspectionRows = computed(() => inspectionLabels.map((label, index) => {
+const inspectionRows = computed<InspectionRow[]>(() => inspectionLabels.map((label, index) => {
   const batch = props.item?.batches[index]
   if (!batch || batch.qualified_quantity === null) {
     return {
@@ -33,6 +43,18 @@ const inspectionRows = computed(() => inspectionLabels.map((label, index) => {
     returned: batch.rework_quantity ?? 0,
   }
 }))
+
+function inspectionRow(index: number): InspectionRow {
+  return inspectionRows.value[index] ?? {
+    label: '',
+    ok: '',
+    ng: '',
+    qcWorker: '',
+    date: '',
+    defectReason: '',
+    returned: '',
+  }
+}
 
 function print() {
   const sheet = document.querySelector<HTMLElement>('.polish-print-sheet')
@@ -168,13 +190,13 @@ function print() {
             <td rowspan="2" class="quantity">{{ item.quantity }}</td>
             <th>日期</th>
             <th>时间</th>
-            <td>{{ inspectionRows[0].label }}</td>
-            <td>{{ inspectionRows[0].ok }}</td>
-            <td>{{ inspectionRows[0].ng }}</td>
-            <td>{{ inspectionRows[0].qcWorker }}</td>
-            <td>{{ inspectionRows[0].date }}</td>
-            <td>{{ inspectionRows[0].defectReason }}</td>
-            <td>{{ inspectionRows[0].returned }}</td>
+            <td>{{ inspectionRow(0).label }}</td>
+            <td>{{ inspectionRow(0).ok }}</td>
+            <td>{{ inspectionRow(0).ng }}</td>
+            <td>{{ inspectionRow(0).qcWorker }}</td>
+            <td>{{ inspectionRow(0).date }}</td>
+            <td>{{ inspectionRow(0).defectReason }}</td>
+            <td>{{ inspectionRow(0).returned }}</td>
             <td rowspan="3" class="vertical-label">良品</td>
             <td>返修</td>
             <td />
@@ -182,13 +204,13 @@ function print() {
           <tr>
             <td />
             <td />
-            <td>{{ inspectionRows[1].label }}</td>
-            <td>{{ inspectionRows[1].ok }}</td>
-            <td>{{ inspectionRows[1].ng }}</td>
-            <td>{{ inspectionRows[1].qcWorker }}</td>
-            <td>{{ inspectionRows[1].date }}</td>
-            <td>{{ inspectionRows[1].defectReason }}</td>
-            <td>{{ inspectionRows[1].returned }}</td>
+            <td>{{ inspectionRow(1).label }}</td>
+            <td>{{ inspectionRow(1).ok }}</td>
+            <td>{{ inspectionRow(1).ng }}</td>
+            <td>{{ inspectionRow(1).qcWorker }}</td>
+            <td>{{ inspectionRow(1).date }}</td>
+            <td>{{ inspectionRow(1).defectReason }}</td>
+            <td>{{ inspectionRow(1).returned }}</td>
             <td>遗失</td>
             <td />
           </tr>
@@ -196,26 +218,26 @@ function print() {
             <th rowspan="2">清洗确认</th>
             <th>出清洗数</th>
             <th>签收人：</th>
-            <td>{{ inspectionRows[2].label }}</td>
-            <td>{{ inspectionRows[2].ok }}</td>
-            <td>{{ inspectionRows[2].ng }}</td>
-            <td>{{ inspectionRows[2].qcWorker }}</td>
-            <td>{{ inspectionRows[2].date }}</td>
-            <td>{{ inspectionRows[2].defectReason }}</td>
-            <td>{{ inspectionRows[2].returned }}</td>
+            <td>{{ inspectionRow(2).label }}</td>
+            <td>{{ inspectionRow(2).ok }}</td>
+            <td>{{ inspectionRow(2).ng }}</td>
+            <td>{{ inspectionRow(2).qcWorker }}</td>
+            <td>{{ inspectionRow(2).date }}</td>
+            <td>{{ inspectionRow(2).defectReason }}</td>
+            <td>{{ inspectionRow(2).returned }}</td>
             <td>取样</td>
             <td />
           </tr>
           <tr>
             <td />
             <td />
-            <td>{{ inspectionRows[3].label }}</td>
-            <td>{{ inspectionRows[3].ok }}</td>
-            <td>{{ inspectionRows[3].ng }}</td>
-            <td>{{ inspectionRows[3].qcWorker }}</td>
-            <td>{{ inspectionRows[3].date }}</td>
-            <td>{{ inspectionRows[3].defectReason }}</td>
-            <td>{{ inspectionRows[3].returned }}</td>
+            <td>{{ inspectionRow(3).label }}</td>
+            <td>{{ inspectionRow(3).ok }}</td>
+            <td>{{ inspectionRow(3).ng }}</td>
+            <td>{{ inspectionRow(3).qcWorker }}</td>
+            <td>{{ inspectionRow(3).date }}</td>
+            <td>{{ inspectionRow(3).defectReason }}</td>
+            <td>{{ inspectionRow(3).returned }}</td>
             <td rowspan="2" class="vertical-label">报废</td>
             <td>来料</td>
             <td />
@@ -223,13 +245,13 @@ function print() {
           <tr>
             <td />
             <th colspan="2">线检出</th>
-            <td>{{ inspectionRows[4].label }}</td>
-            <td>{{ inspectionRows[4].ok }}</td>
-            <td>{{ inspectionRows[4].ng }}</td>
-            <td>{{ inspectionRows[4].qcWorker }}</td>
-            <td>{{ inspectionRows[4].date }}</td>
-            <td>{{ inspectionRows[4].defectReason }}</td>
-            <td>{{ inspectionRows[4].returned }}</td>
+            <td>{{ inspectionRow(4).label }}</td>
+            <td>{{ inspectionRow(4).ok }}</td>
+            <td>{{ inspectionRow(4).ng }}</td>
+            <td>{{ inspectionRow(4).qcWorker }}</td>
+            <td>{{ inspectionRow(4).date }}</td>
+            <td>{{ inspectionRow(4).defectReason }}</td>
+            <td>{{ inspectionRow(4).returned }}</td>
             <td>加工</td>
             <td />
           </tr>
@@ -237,13 +259,13 @@ function print() {
             <th rowspan="2">QC确认</th>
             <th>出QC数</th>
             <th>核对员</th>
-            <td>{{ inspectionRows[5].label }}</td>
-            <td>{{ inspectionRows[5].ok }}</td>
-            <td>{{ inspectionRows[5].ng }}</td>
-            <td>{{ inspectionRows[5].qcWorker }}</td>
-            <td>{{ inspectionRows[5].date }}</td>
-            <td>{{ inspectionRows[5].defectReason }}</td>
-            <td>{{ inspectionRows[5].returned }}</td>
+            <td>{{ inspectionRow(5).label }}</td>
+            <td>{{ inspectionRow(5).ok }}</td>
+            <td>{{ inspectionRow(5).ng }}</td>
+            <td>{{ inspectionRow(5).qcWorker }}</td>
+            <td>{{ inspectionRow(5).date }}</td>
+            <td>{{ inspectionRow(5).defectReason }}</td>
+            <td>{{ inspectionRow(5).returned }}</td>
             <td rowspan="2" class="vertical-label">允收数</td>
             <td rowspan="2" colspan="2" class="accepted-quantity">
               {{ item.status === 'closed' ? item.qualified_quantity : '' }}
@@ -252,13 +274,13 @@ function print() {
           <tr>
             <td />
             <td />
-            <td>{{ inspectionRows[6].label }}</td>
-            <td>{{ inspectionRows[6].ok }}</td>
-            <td>{{ inspectionRows[6].ng }}</td>
-            <td>{{ inspectionRows[6].qcWorker }}</td>
-            <td>{{ inspectionRows[6].date }}</td>
-            <td>{{ inspectionRows[6].defectReason }}</td>
-            <td>{{ inspectionRows[6].returned }}</td>
+            <td>{{ inspectionRow(6).label }}</td>
+            <td>{{ inspectionRow(6).ok }}</td>
+            <td>{{ inspectionRow(6).ng }}</td>
+            <td>{{ inspectionRow(6).qcWorker }}</td>
+            <td>{{ inspectionRow(6).date }}</td>
+            <td>{{ inspectionRow(6).defectReason }}</td>
+            <td>{{ inspectionRow(6).returned }}</td>
           </tr>
         </tbody>
       </table>

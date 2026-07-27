@@ -2,6 +2,7 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { queryDepartmentRepositories, queryDepartmentWorkers } from '../api/departmentRepositories'
 import type { RepositoryFilters, RepositoryItem, WorkerItem } from '../domain/types'
+import { departmentSupports } from '@/features/departments/registry'
 
 const EMPTY_FILTERS = (): RepositoryFilters => ({
   keyword: '', arrived_from: null, arrived_to: null, work_status: 'all',
@@ -56,7 +57,7 @@ export function useDepartmentWorkspace(departmentCode: string, loadWorkers = fal
         item.production_item_id === selectedBeforeLoad.production_item_id
         && item.flow_node_id === selectedBeforeLoad.flow_node_id
         && (
-          departmentCode === 'assembly'
+          departmentSupports(departmentCode, 'assembly')
           || item.source_flow_node_id === selectedBeforeLoad.source_flow_node_id
         )
       )))

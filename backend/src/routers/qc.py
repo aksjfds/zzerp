@@ -9,12 +9,12 @@ from schemas.production import (
     QcInspection,
     WorkOrderBatchEnvelope,
 )
-from services.qc_inspections import inspect_batch
-from services.qc_dispatches import dispatch_qc_batch
-from services.work_order_queries import list_qc_batches
+from departments.contracts import CAP_QUALITY
+from departments.registry import department_api
 
 
 router = APIRouter(prefix="/qc", tags=["qc"])
+qc_department = department_api("qc", CAP_QUALITY)
 
 
 @router.get("/work-order-batches", response_model=PendingQcListEnvelope)
@@ -28,7 +28,7 @@ def pending_qc_batches(
 ):
     if user["department"] not in {"sys", "qc"}:
         raise HTTPException(status_code=403, detail="只有 QC 可以查看质检批次")
-    data, total = list_qc_batches(
+    data, total = qc_department.list_qc_batches(
         page,
         page_size,
         production_item_id,
@@ -47,7 +47,15 @@ def qc_batch_inspect(
     payload: QcInspection,
     user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
 ):
-    return {"data": inspect_batch(batch_id, payload, user["department"])}
+    if user["department"] not in {"sys", "qc"}:
+        raise HTTPException(status_code=403, detail="只有 QC 可以录入质检结果")
+    return {
+        "data": qc_department.inspect_qc_batch(
+            batch_id,
+            payload,
+            user["department"],
+        )
+    }
 
 
 @router.post(
@@ -59,6 +67,12 @@ def qc_batch_dispatch(
     payload: QcDispatchCreate,
     user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
 ):
+    if user["department"] not in {"sys", "qc"}:
+        raise HTTPException(status_code=403, detail="只有 QC 可以出货合格数量")
     return {
-        "data": dispatch_qc_batch(batch_id, payload.quantity, user["department"])
+        "data": qc_department.dispatch_qc_batch(
+            batch_id,
+            payload.quantity,
+            user["department"],
+        )
     }

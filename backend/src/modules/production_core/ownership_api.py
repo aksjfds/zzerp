@@ -1,0 +1,105 @@
+"""Transaction-aware write API for production-core owned records.
+
+Callers provide the current SQLAlchemy session so cross-module workflows keep
+their existing atomic transaction without constructing production ORM records
+outside this module.
+"""
+
+from sqlalchemy import select
+
+from modules.production_core.persistence import ProductionItem, Repository, WorkOrder
+
+
+def create_production_item(
+    session,
+    *,
+    customer_order_item_id: int,
+    product_id: int,
+    product_version: int,
+    product_bom_id: int | None,
+    origin_flow_node_id: str,
+) -> ProductionItem:
+    item = ProductionItem(
+        customer_order_item_id=customer_order_item_id,
+        product_id=product_id,
+        product_version=product_version,
+        product_bom_id=product_bom_id,
+        origin_flow_node_id=origin_flow_node_id,
+    )
+    session.add(item)
+    session.flush()
+    return item
+
+
+def create_assembly_work_order_record(
+    session,
+    *,
+    production_item_id: int,
+    flow_node_id: str,
+    work_order_name: str,
+    worker_id: int | None,
+    quantity: int,
+    remark: str | None,
+) -> WorkOrder:
+    order = WorkOrder(
+        repository_id=None,
+        procedure_tag_stock_id=None,
+        production_item_id=production_item_id,
+        procedure_id=None,
+        applied_tag_set_id=None,
+        source_tag_set_id=None,
+        target_tag_set_id=None,
+        work_order_type="assembly",
+        flow_node_id=flow_node_id,
+        source_flow_node_id=flow_node_id,
+        work_order_name=work_order_name,
+        remark=(remark or "").strip() or None,
+        worker_id=worker_id,
+        quantity=quantity,
+    )
+    session.add(order)
+    session.flush()
+    return order
+
+
+def add_repository_quantity(
+    session,
+    *,
+    production_item_id: int,
+    flow_node_id: str,
+    source_flow_node_id: str,
+    department_id: int,
+    quantity: int,
+) -> Repository | None:
+    if quantity <= 0:
+        return None
+    session.get(ProductionItem, production_item_id, with_for_update=True)
+    repository = session.scalar(
+        select(Repository)
+        .where(
+            Repository.production_item_id == production_item_id,
+            Repository.flow_node_id == flow_node_id,
+            Repository.source_flow_node_id == source_flow_node_id,
+            Repository.department_id == department_id,
+        )
+        .with_for_update()
+    )
+    if repository is None:
+        repository = Repository(
+            production_item_id=production_item_id,
+            flow_node_id=flow_node_id,
+            source_flow_node_id=source_flow_node_id,
+            department_id=department_id,
+            quantity=quantity,
+        )
+        session.add(repository)
+    else:
+        repository.quantity += quantity
+    return repository
+
+
+__all__ = [
+    "add_repository_quantity",
+    "create_assembly_work_order_record",
+    "create_production_item",
+]

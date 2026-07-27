@@ -10,6 +10,7 @@ import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
 import PurchaseWorkOrderDialog from '../components/PurchaseWorkOrderDialog.vue'
 import { useProductionDepartment } from '../composables/useProductionDepartment'
 import { workOrderProductionOverview } from '../domain/productionOverview'
+import { departmentSupports } from '@/features/departments/registry'
 import '../styles/workspace.css'
 
 const props = withDefaults(defineProps<{
@@ -36,6 +37,12 @@ const nonTagOverview = computed(() => workOrderProductionOverview(
   workOrders.value,
   selectedRepository.value?.available_quantity ?? 0,
 ))
+const supportsTagConfiguration = computed(() => (
+  departmentSupports(props.departmentCode, 'standard_execution')
+))
+const supportsSpecialPrinting = computed(() => (
+  departmentSupports(props.departmentCode, 'special_printing')
+))
 onMounted(load)
 </script>
 
@@ -45,7 +52,7 @@ onMounted(load)
       :department-name="departmentName"
       :description="description"
       :workers-path="`/production/${departmentCode}/workers`"
-      :tag-config-path="mode === 'production' ? `/production/${departmentCode}/tag-prices` : undefined"
+      :tag-config-path="supportsTagConfiguration ? `/production/${departmentCode}/tag-prices` : undefined"
       @refresh="refresh"
     />
     <div class="repository-filter-row">
@@ -90,7 +97,7 @@ onMounted(load)
           :items="workOrders"
           :loading="detailLoading"
           :mode="mode"
-          :department-code="departmentCode"
+          :special-printing="supportsSpecialPrinting"
           @submit="workOrderActions.submit"
           @submit-qc="workOrderActions.submitQc"
           @resubmit-qc="workOrderActions.resubmitQc"

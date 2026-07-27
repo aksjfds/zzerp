@@ -22,7 +22,7 @@ from routers import (
     qc,
     work_orders,
 )
-from services.errors import DomainError
+from modules.errors import DomainError
 
 app = FastAPI(title="zzerp")
 settings = get_settings()

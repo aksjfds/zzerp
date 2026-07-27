@@ -1,0 +1,45 @@
+"""Authoritative ownership of persisted tables in the modular monolith.
+
+Ownership means schema evolution and write invariants belong to one module.
+ORM definitions live in the owning module's ``persistence.py``. Other modules
+may use explicitly registered shared-database read access during migration,
+but new write APIs must be added to the owner instead of creating a second
+writer.
+"""
+
+
+TABLE_OWNERS = {
+    "users": "identity",
+    "user_sessions": "identity",
+    "customer": "sales",
+    "customer_order": "sales",
+    "customer_order_item": "sales",
+    "product": "engineering",
+    "product_version": "engineering",
+    "product_bom": "engineering",
+    "product_process_flow": "engineering",
+    "department": "organization",
+    "workshop": "organization",
+    "procedure": "organization",
+    "worker": "workforce",
+    "procedure_tag": "standard_execution",
+    "procedure_tag_price": "standard_execution",
+    "procedure_tag_set": "standard_execution",
+    "procedure_tag_set_member": "standard_execution",
+    "procedure_tag_stock": "standard_execution",
+    "production_item": "production_core",
+    "repository": "production_core",
+    "work_order": "production_core",
+    "work_order_pay_detail": "standard_execution",
+    "work_order_material": "assembly",
+    "work_order_batch": "quality",
+    "production_movement": "production_core",
+    "production_operation_undo": "production_core",
+}
+
+
+def table_owner(table_name: str) -> str:
+    try:
+        return TABLE_OWNERS[table_name]
+    except KeyError as exc:
+        raise LookupError(f"Table has no module owner: {table_name}") from exc

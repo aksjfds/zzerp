@@ -1,41 +1,38 @@
-# frontend
+# zzerp frontend
 
-This template should help get you started developing with Vue 3 in Vite.
+Vue 3 frontend for v5. Feature code is grouped by business capability under
+`src/features/`. Production departments are registered independently under
+`src/features/departments/`; the router and post-login default route consume
+that registry instead of maintaining separate department lists.
 
-## Recommended IDE Setup
+## Main folders
 
-[VS Code](https://code.visualstudio.com/) + [Vue (Official)](https://marketplace.visualstudio.com/items?itemName=Vue.volar) (and disable Vetur).
+- `src/api`: shared HTTP client, authentication and organization lookups.
+- `src/features/departments`: department module metadata, permissions and routes.
+- `src/features/production`: shared production workspace and department policies.
+- `src/features/process-designer`: engineering product, BOM and process-flow editor.
+- `src/features/customer-orders`: sales orders and production progress.
+- `src/features/admin`: administration and PMC projections.
+- `src/permission`: permission constants, route guard and default-route selection.
+- `src/shared`: reusable material tokens and process-flow adapters.
 
-## Recommended Browser Setup
+Routes remain lazy-loaded. `vite.config.ts` splits Vue, Element Plus, LogicFlow
+and remaining vendor code into cacheable chunks so department growth does not
+create one oversized shared bundle.
 
-- Chromium-based browsers (Chrome, Edge, Brave, etc.):
-  - [Vue.js devtools](https://chromewebstore.google.com/detail/vuejs-devtools/nhdogjmejiglipccpnnnanhbledajbpd)
-  - [Turn on Custom Object Formatter in Chrome DevTools](http://bit.ly/object-formatters)
-- Firefox:
-  - [Vue.js devtools](https://addons.mozilla.org/en-US/firefox/addon/vue-js-devtools/)
-  - [Turn on Custom Object Formatter in Firefox DevTools](https://fxdx.dev/firefox-devtools-custom-object-formatters/)
-
-## Type Support for `.vue` Imports in TS
-
-TypeScript cannot handle type information for `.vue` imports by default, so we replace the `tsc` CLI with `vue-tsc` for type checking. In editors, we need [Volar](https://marketplace.visualstudio.com/items?itemName=Vue.volar) to make the TypeScript language service aware of `.vue` types.
-
-## Customize configuration
-
-See [Vite Configuration Reference](https://vite.dev/config/).
-
-## Project Setup
+## Project setup
 
 ```sh
 pnpm install
 ```
 
-### Compile and Hot-Reload for Development
+### Development
 
 ```sh
 pnpm dev
 ```
 
-### Type-Check, Compile and Minify for Production
+### Type-check and production build
 
 ```sh
 pnpm build

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from authorization import require_any_permission
 from domain.permissions import PRODUCTION_VIEW
-from services.pmc_part_progress import list_part_progress
+from modules.planning.api import list_part_progress
 
 
 router = APIRouter(prefix="/pmc", tags=["pmc"])

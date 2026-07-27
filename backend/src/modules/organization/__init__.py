@@ -1,0 +1,1 @@
+"""Organization master-data module."""

@@ -3,6 +3,12 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from authorization import ensure_department_access, require_any_permission
+from departments.contracts import (
+    CAP_REPOSITORIES,
+    CAP_STANDARD_EXECUTION,
+    CAP_WORKERS,
+)
+from departments.registry import department_api
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from schemas.production import (
     DepartmentWorkerCreate,
@@ -13,15 +19,6 @@ from schemas.production import (
     RepositoryListEnvelope,
     TagCardListEnvelope,
     WorkerListEnvelope,
-)
-from services.production_card_listing import list_production_cards
-from services.production_tag_cards import list_tag_cards
-from services.work_order_queries import list_department_workers
-from services.admin_workers import (
-    create_department_worker,
-    department_worker_overview,
-    worker_history,
-    worker_pay_summary,
 )
 
 
@@ -46,8 +43,11 @@ def department_repositories(
         raise HTTPException(status_code=403, detail="无权访问该部门")
     if arrived_from and arrived_to and arrived_from > arrived_to:
         raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
-    data, total = list_production_cards(
-        department_code, page, page_size, keyword, arrived_from, arrived_to, work_status
+    data, total = department_api(
+        department_code,
+        CAP_REPOSITORIES,
+    ).list_repositories(
+        page, page_size, keyword, arrived_from, arrived_to, work_status
     )
     return {"data": data, "total": total}
 
@@ -62,7 +62,12 @@ def department_workers(
 ):
     if user["department"] not in {"sys", department_code}:
         raise HTTPException(status_code=403, detail="无权访问该部门")
-    return {"data": list_department_workers(department_code)}
+    return {
+        "data": department_api(
+            department_code,
+            CAP_WORKERS,
+        ).list_workers()
+    }
 
 
 @router.get(
@@ -74,7 +79,12 @@ def department_worker_overview_get(
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
-    return {"data": department_worker_overview(department_code)}
+    return {
+        "data": department_api(
+            department_code,
+            CAP_WORKERS,
+        ).worker_overview()
+    }
 
 
 @router.get(
@@ -89,7 +99,10 @@ def department_worker_history_get(
 ):
     ensure_department_access(user, department_code)
     try:
-        data = worker_history(worker_id, month, department_code)
+        data = department_api(
+            department_code,
+            CAP_WORKERS,
+        ).worker_history(worker_id, month)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": data}
@@ -107,7 +120,10 @@ def department_worker_pay_get(
 ):
     ensure_department_access(user, department_code)
     try:
-        data = worker_pay_summary(worker_id, month, department_code)
+        data = department_api(
+            department_code,
+            CAP_WORKERS,
+        ).worker_pay_summary(worker_id, month)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": data}
@@ -126,8 +142,10 @@ def department_worker_create(
 ):
     ensure_department_access(user, department_code)
     return {
-        "data": create_department_worker(
+        "data": department_api(
             department_code,
+            CAP_WORKERS,
+        ).create_worker(
             payload.worker_name,
             payload.workshop_id,
         )
@@ -148,8 +166,10 @@ def production_item_tag_cards(
     if user["department"] not in {"sys", department_code}:
         raise HTTPException(status_code=403, detail="无权访问该部门")
     return {
-        "data": list_tag_cards(
+        "data": department_api(
             department_code,
+            CAP_STANDARD_EXECUTION,
+        ).list_tag_cards(
             production_item_id,
             flow_node_id,
             source_flow_node_id,

@@ -1,0 +1,1 @@
+"""Composable department capability implementations."""

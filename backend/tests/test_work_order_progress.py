@@ -1,7 +1,8 @@
 from datetime import UTC, datetime
 
-from models.production import WorkOrder, WorkOrderBatch
-from services.work_order_progress import calculate_work_order_progress
+from modules.production_core.model_api import WorkOrder
+from modules.quality.model_api import WorkOrderBatch
+from modules.production_core.work_order_progress import calculate_work_order_progress
 
 
 def _tag_order(quantity: int = 10, submitted: int = 0) -> WorkOrder:

@@ -20,7 +20,9 @@ const form = reactive({
 watch(() => props.modelValue, (visible) => {
   if (!visible) return
   form.workerName = ''
-  form.workshopId = props.workshops.length === 1 ? props.workshops[0].id : null
+  form.workshopId = props.workshops.length === 1
+    ? (props.workshops[0]?.id ?? null)
+    : null
 })
 
 function submit() {

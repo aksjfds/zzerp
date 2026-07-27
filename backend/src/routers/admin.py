@@ -7,7 +7,7 @@ from schemas.admin import (
     AdminWorkerOverviewEnvelope,
     AdminWorkerPayEnvelope,
 )
-from services.admin_workers import worker_history, worker_overview, worker_pay_summary
+from modules.workforce.api import worker_history, worker_overview, worker_pay_summary
 
 
 router = APIRouter(prefix="/admin", tags=["admin"])

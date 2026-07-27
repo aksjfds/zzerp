@@ -11,21 +11,17 @@ from schemas.engineering import (
     UpdateProcessFlowPayload,
     UpdateProductPayload,
 )
-from services.engineering_product_commands import (
+from modules.engineering.api import (
     create_product,
-    delete_product,
-    replace_product_bom,
-    update_product_info,
-    update_product_process_flow,
-)
-from services.engineering_product_versions import (
     create_product_version,
+    delete_product,
     delete_product_version,
-)
-from services.engineering_product_queries import (
     get_product,
     list_product_versions,
     list_products,
+    replace_product_bom,
+    update_product_info,
+    update_product_process_flow,
 )
 
 

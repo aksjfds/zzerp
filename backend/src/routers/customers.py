@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, Query
 from authorization import require_any_permission
 from domain.permissions import ORDER_VIEW, PRODUCT_VIEW
 from schemas.customers import CustomerListEnvelope
-from services.customers import list_customers
+from modules.sales.api import list_customers
 
 
 router = APIRouter(prefix="/customers", tags=["customers"])

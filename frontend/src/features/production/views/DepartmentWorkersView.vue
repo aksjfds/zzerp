@@ -8,7 +8,9 @@ import { useDepartmentWorkers } from '../composables/useDepartmentWorkers'
 import '../styles/workspace.css'
 
 const route = useRoute()
-const departmentCode = String(route.params.departmentCode)
+const departmentCode = String(
+  route.params.departmentCode || route.meta.departmentCode || '',
+)
 const departmentNames: Record<string, string> = {
   stamp: '冲压部门',
   cnc: '机加部门',

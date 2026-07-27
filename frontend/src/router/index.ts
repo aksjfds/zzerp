@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { departmentRoutes, departmentSupportRoutes } from '@/features/departments/registry'
 import { setupRouterGuard } from '@/permission/guard'
 import { ORDER_PERMISSIONS, PRODUCT_PERMISSIONS, PRODUCTION_PERMISSIONS } from '@/permission/constants'
 
@@ -17,48 +18,8 @@ const router = createRouter({
       component: () => import('@/views/ForbiddenView.vue'),
       meta: { requiresAuth: true },
     },
-    {
-      path: '/stamp', name: 'stamp-department',
-      component: () => import('@/features/production/views/StampDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
-    },
-    {
-      path: '/cnc', name: 'cnc-department',
-      component: () => import('@/features/production/views/CncDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
-    },
-    {
-      path: '/polish', name: 'polish-department',
-      component: () => import('@/features/production/views/PolishDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
-    },
-    {
-      path: '/qc', name: 'qc-department',
-      component: () => import('@/features/production/views/QcDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.inspect] },
-    },
-    {
-      path: '/assembly', name: 'assembly-department',
-      component: () => import('@/features/production/views/AssemblyDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
-    },
-    {
-      path: '/warehouse', name: 'warehouse-department',
-      component: () => import('@/features/production/views/WarehouseDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
-    },
-    {
-      path: '/production/:departmentCode/tag-prices',
-      name: 'procedure-tag-prices',
-      component: () => import('@/features/production/views/ProcedureTagPriceView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
-    },
-    {
-      path: '/production/:departmentCode/workers',
-      name: 'department-workers',
-      component: () => import('@/features/production/views/DepartmentWorkersView.vue'),
-      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
-    },
+    ...departmentRoutes,
+    ...departmentSupportRoutes,
     {
       path: '/admin',
       name: 'admin-dashboard',

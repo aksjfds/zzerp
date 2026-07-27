@@ -6,7 +6,7 @@ from schemas.procedure_tag_prices import (
     ProcedureTagPriceListEnvelope,
     ProcedureTagPriceUpdate,
 )
-from services.procedure_tag_price_configs import (
+from modules.standard_execution.api import (
     list_procedure_tag_prices,
     update_procedure_tag_prices,
 )

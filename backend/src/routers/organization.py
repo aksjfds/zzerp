@@ -1,10 +1,14 @@
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
 
 from authorization import require_any_permission
-from database import SessionLocal
+from departments.registry import department_manifests
 from domain.permissions import PRODUCT_VIEW
-from models.organization import Department, Procedure, ProcedureTag, Workshop
+from modules.organization.api import (
+    list_departments,
+    list_procedure_tags,
+    list_procedures,
+    list_workshops,
+)
 from schemas.organization import (
     DepartmentResponse,
     ProcedureResponse,
@@ -16,10 +20,16 @@ from schemas.organization import (
 router = APIRouter(tags=["organization"])
 
 
+@router.get("/department-modules")
+def department_modules(
+    _: dict = Depends(require_any_permission(PRODUCT_VIEW, "production:view")),
+):
+    return department_manifests()
+
+
 @router.get("/departments", response_model=list[DepartmentResponse])
 def departments(_: dict = Depends(require_any_permission(PRODUCT_VIEW, "order:view"))):
-    with SessionLocal() as session:
-        return session.scalars(select(Department).order_by(Department.id)).all()
+    return list_departments()
 
 
 @router.get(
@@ -29,18 +39,12 @@ def workshops(
     department_id: int,
     _: dict = Depends(require_any_permission(PRODUCT_VIEW, "order:view")),
 ):
-    with SessionLocal() as session:
-        return session.scalars(
-            select(Workshop)
-            .where(Workshop.department_id == department_id)
-            .order_by(Workshop.id)
-        ).all()
+    return list_workshops(department_id)
 
 
 @router.get("/procedures", response_model=list[ProcedureResponse])
 def procedures(_: dict = Depends(require_any_permission(PRODUCT_VIEW))):
-    with SessionLocal() as session:
-        return session.scalars(select(Procedure).order_by(Procedure.id)).all()
+    return list_procedures()
 
 
 @router.get(
@@ -51,9 +55,4 @@ def procedure_tags(
     procedure_id: int,
     _: dict = Depends(require_any_permission(PRODUCT_VIEW, "production:view")),
 ):
-    with SessionLocal() as session:
-        return session.scalars(
-            select(ProcedureTag)
-            .where(ProcedureTag.procedure_id == procedure_id)
-            .order_by(ProcedureTag.tag_name, ProcedureTag.id)
-        ).all()
+    return list_procedure_tags(procedure_id)

@@ -1,7 +1,7 @@
 from fastapi import Depends, HTTPException, Request, status
 
 from config import get_settings
-from services.user_sessions import (
+from modules.identity.api import (
     ExpiredSession,
     InvalidSession,
     matches_csrf_token,

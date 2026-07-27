@@ -3,12 +3,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from auth_dependencies import get_optional_current_user, require_csrf
 from config import get_settings
 from schemas.user import LoginPayload
-from services.user_sessions import (
+from modules.identity.api import (
+    authenticate_user,
     create_user_session,
     get_csrf_token,
     revoke_user_session,
 )
-from services.authentication import authenticate_user
 
 router = APIRouter(tags=["auth"])
 settings = get_settings()

@@ -11,15 +11,20 @@ from schemas.production import (
     WorkOrderListEnvelope,
     WorkOrderSubmission,
 )
-from services.assembly_work_orders import create_assembly_work_order
-from services.process_work_orders import (
+from departments.contracts import (
+    CAP_ASSEMBLY,
+    CAP_PURCHASING,
+    CAP_STANDARD_EXECUTION,
+    CAP_WORK_ORDERS,
+)
+from departments.registry import department_api, department_api_for_any
+from modules.production_core.api import (
     cancel_work_order,
     create_work_order,
     resubmit_work_order_rework_batch,
     submit_work_order,
+    undo_production_operation,
 )
-from services.work_order_queries import list_department_work_orders
-from services.production_operation_undo import undo_production_operation
 
 
 router = APIRouter(tags=["work-orders"])
@@ -46,8 +51,10 @@ def department_work_orders(
 ):
     if user["department"] not in {"sys", department_code}:
         raise HTTPException(status_code=403, detail="无权访问该部门")
-    data, total = list_department_work_orders(
-        department_code=department_code,
+    data, total = department_api(
+        department_code,
+        CAP_WORK_ORDERS,
+    ).list_work_orders(
         page=page,
         page_size=page_size,
         production_item_id=production_item_id,
@@ -64,8 +71,8 @@ def work_order_create(
     payload: WorkOrderCreate,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
-    return {
-        "data": create_work_order(
+    if user["department"] == "sys":
+        data = create_work_order(
             payload.repository_id,
             payload.procedure_tag_stock_id,
             payload.tag_names,
@@ -74,6 +81,20 @@ def work_order_create(
             payload.remark,
             user["department"],
         )
+    else:
+        data = department_api_for_any(
+            user["department"],
+            (CAP_STANDARD_EXECUTION, CAP_PURCHASING),
+        ).create_source_work_order(
+            payload.repository_id,
+            payload.procedure_tag_stock_id,
+            payload.tag_names,
+            payload.quantity,
+            payload.worker_id,
+            payload.remark,
+        )
+    return {
+        "data": data
     }
 
 
@@ -82,8 +103,13 @@ def assembly_work_order_create(
     payload: AssemblyWorkOrderCreate,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
+    if user["department"] not in {"sys", "assembly"}:
+        raise HTTPException(status_code=403, detail="只有装配部门可以开装配工单")
     return {
-        "data": create_assembly_work_order(
+        "data": department_api(
+            "assembly",
+            CAP_ASSEMBLY,
+        ).create_assembly_work_order(
             payload.repository_ids,
             payload.quantity,
             payload.worker_id,

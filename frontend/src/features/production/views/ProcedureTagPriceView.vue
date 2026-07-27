@@ -29,7 +29,9 @@ const departmentNames: Record<string, string> = {
 }
 const route = useRoute()
 const authStore = useAuthStore()
-const departmentCode = computed(() => String(route.params.departmentCode || ''))
+const departmentCode = computed(() => String(
+  route.params.departmentCode || route.meta.departmentCode || '',
+))
 const departmentName = computed(() => departmentNames[departmentCode.value] || departmentCode.value)
 const canManage = computed(() => authStore.hasPermission(PRODUCTION_PERMISSIONS.manage))
 const items = ref<EditablePart[]>([])

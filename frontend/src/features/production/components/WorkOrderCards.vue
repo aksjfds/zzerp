@@ -12,7 +12,7 @@ const props = withDefaults(defineProps<{
   items: WorkOrder[]
   loading: boolean
   mode?: WorkOrderMode
-  departmentCode?: string
+  specialPrinting?: boolean
 }>(), { mode: 'production' })
 const emit = defineEmits<{
   submit: [item: WorkOrder]
@@ -139,7 +139,7 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
     </article>
     <ElEmpty v-if="!loading && !items.length" description="所选配件暂无工单" :image-size="64" />
     <PolishWorkOrderPrintDialog
-      v-if="departmentCode === 'polish'"
+      v-if="specialPrinting"
       v-model="printVisible"
       :item="printItem"
     />

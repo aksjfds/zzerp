@@ -10,7 +10,9 @@
     "f:preview:prod": "pnpm --dir frontend preview:prod",
     "b": "pnpm run b:dev",
     "b:check": "APP_ENV=development python3 scripts/check_backend.py",
+    "b:test": "python3 -m pytest backend/tests -q",
     "b:dev": "APP_ENV=development uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
-    "b:prod": "APP_ENV=production uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}"
+    "b:prod": "APP_ENV=production uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}",
+    "check": "pnpm run b:test && pnpm run b:check && pnpm --dir frontend type-check && pnpm --dir frontend build-only:prod"
   }
 }

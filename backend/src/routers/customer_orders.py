@@ -14,15 +14,15 @@ from schemas.sales import (
     CustomerOrderListEnvelope,
     CustomerOrderUpdate,
 )
-from services.customer_orders import (
+from modules.sales.api import (
     change_status,
     create_order,
     delete_order,
+    get_customer_order_production,
     get_order,
     list_orders,
     update_order,
 )
-from services.customer_order_production import get_customer_order_production
 
 
 router = APIRouter(prefix="/customer-orders", tags=["customer-orders"])
