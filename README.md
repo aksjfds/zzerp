@@ -17,6 +17,18 @@ pnpm run check
 表结构与模块所有权清单是否一致。GitHub Actions 会自动执行这两类验证以及
 前端类型检查和生产构建。
 
+## Docker 开发
+
+```bash
+docker compose up -d app
+docker exec -it app bash
+pnpm f
+```
+
+Compose 会为容器创建独立的 `frontend/node_modules` 数据卷，并按照容器的
+Linux 架构自动安装锁文件中的依赖。不要把宿主机的 `node_modules` 直接共享给
+容器；Vite/Rolldown 等工具包含平台相关的原生二进制。
+
 ## 文档入口
 
 - [项目目录与文件职责](docs/project-structure.md)
