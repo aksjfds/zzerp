@@ -9,6 +9,7 @@ import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
 import PurchaseWorkOrderDialog from '../components/PurchaseWorkOrderDialog.vue'
 import { useProductionDepartment } from '../composables/useProductionDepartment'
+import { workOrderProductionOverview } from '../domain/productionOverview'
 import '../styles/workspace.css'
 
 const props = withDefaults(defineProps<{
@@ -31,6 +32,10 @@ const {
   tagItems, tagLoading, submitting,
 } = controller
 const showSelectedWorkOrders = computed(() => Boolean(selectedRepository.value))
+const nonTagOverview = computed(() => workOrderProductionOverview(
+  workOrders.value,
+  selectedRepository.value?.available_quantity ?? 0,
+))
 onMounted(load)
 </script>
 
@@ -71,46 +76,41 @@ onMounted(load)
       </div>
       <div class="production-execution">
         <TagProductionOverview
-            v-if="mode === 'production' && selectedRepository"
-            :items="tagItems"
-            :loading="tagLoading"
-          />
-        <div class="production-card production-details">
-          <div v-if="selectedRepository" class="production-selection">
-            <strong>{{ selectedRepository.part_no === selectedRepository.part_name ? selectedRepository.part_name : `${selectedRepository.part_no} - ${selectedRepository.part_name}` }}</strong>
-            <span>
-              {{ selectedRepository.customer_order_no }} · {{ selectedRepository.procedure_name }}
-              <template v-if="mode === 'production'"> · 相关标记工单</template>
-              <template v-else> · 待到货</template>
-            </span>
-          </div>
-
-          <WorkOrderCards
-            v-if="showSelectedWorkOrders"
-            :items="workOrders"
-            :loading="detailLoading"
-            :mode="mode"
-            @submit="workOrderActions.submit"
-            @submit-qc="workOrderActions.submitQc"
-            @resubmit-qc="workOrderActions.resubmitQc"
-            @cancel="workOrderActions.cancel"
-            @undo="workOrderActions.undo"
-          />
-          <ElEmpty
-            v-else
-            description="请先选择配件"
-            :image-size="64"
-          />
-          <ElPagination
-            v-if="showSelectedWorkOrders"
-            v-model:current-page="historyPage"
-            class="production-pagination"
-            layout="prev, pager, next, total"
-            :page-size="pageSize"
-            :total="historyTotal"
-            @current-change="loadDetails"
-          />
-        </div>
+          v-if="selectedRepository"
+          :items="mode === 'production' ? tagItems : undefined"
+          :summary="mode === 'purchase' ? nonTagOverview : undefined"
+          :loading="mode === 'production' ? tagLoading : detailLoading"
+          :subtitle="mode === 'production' ? '按当前配件和工艺统计' : '按当前外购配件统计'"
+          :pending-label="mode === 'production' ? '待打标记' : '待入库'"
+          :processing-label="mode === 'production' ? '正在打标记' : '入库处理中'"
+          :completed-label="mode === 'production' ? '已打完标记（累计合格）' : '已入库（累计合格）'"
+        />
+        <WorkOrderCards
+          v-if="showSelectedWorkOrders"
+          :items="workOrders"
+          :loading="detailLoading"
+          :mode="mode"
+          :department-code="departmentCode"
+          @submit="workOrderActions.submit"
+          @submit-qc="workOrderActions.submitQc"
+          @resubmit-qc="workOrderActions.resubmitQc"
+          @cancel="workOrderActions.cancel"
+          @undo="workOrderActions.undo"
+        />
+        <ElEmpty
+          v-else
+          description="请先选择配件"
+          :image-size="64"
+        />
+        <ElPagination
+          v-if="showSelectedWorkOrders"
+          v-model:current-page="historyPage"
+          class="production-pagination"
+          layout="prev, pager, next, total"
+          :page-size="pageSize"
+          :total="historyTotal"
+          @current-change="loadDetails"
+        />
       </div>
     </section>
     <CreateWorkOrderDialog
@@ -150,6 +150,11 @@ onMounted(load)
 @media (max-width: 1280px) {
   .repository-filter-row {
     flex-wrap: wrap;
+  }
+  .repository-filter-row :deep(.repository-filter-bar),
+  .repository-filter-row :deep(.procedure-tag-filters) {
+    width: 100%;
+    max-width: none;
   }
 }
 

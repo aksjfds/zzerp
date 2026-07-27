@@ -60,11 +60,12 @@ const emit = defineEmits<{
 
 <style scoped>
 .repository-cards { display: grid; grid-template-columns: 1fr; gap: 12px; min-height: 150px; }
-.repository-card { padding: 14px; border: 1px solid var(--erp-border); border-radius: 8px; background: #f8fafc; cursor: pointer; transition: border-color .15s, box-shadow .15s; }
+.repository-card { padding: 14px; border: 1px solid transparent; border-radius: var(--erp-radius); background: var(--md-surface-container-low); cursor: pointer; transition: background-color .16s, border-color .16s, box-shadow .16s; }
 .repository-card:hover, .repository-card:focus-visible { border-color: var(--erp-primary); outline: none; }
-.repository-card.selected { border-color: var(--erp-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--erp-primary) 14%, transparent); }
+.repository-card:hover { background: var(--md-surface-container); }
+.repository-card.selected { border-color: var(--md-primary); background: var(--md-primary-container); box-shadow: none; }
 .card-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
-.card-heading strong { min-width: 0; color: var(--erp-text); font-size: 14px; line-height: 1.45; }
+.card-heading strong { min-width: 0; color: var(--md-on-surface); font-size: 14px; line-height: 1.45; }
 dl { margin: 13px 0 0; }
 dl div { display: grid; grid-template-columns: 68px minmax(0, 1fr); gap: 8px; margin-top: 7px; font-size: 13px; }
 dt { color: var(--el-text-color-secondary); }
@@ -72,4 +73,8 @@ dd { margin: 0; overflow-wrap: anywhere; }
 .repository-cards :deep(.el-empty) { grid-column: 1 / -1; }
 .card-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; margin-top: 12px; }
 .card-actions :deep(.el-button) { width: 100%; margin: 0; }
+@media (max-width: 480px) {
+  .card-heading { align-items: flex-start; flex-direction: column; }
+  .card-actions { grid-template-columns: 1fr; }
+}
 </style>

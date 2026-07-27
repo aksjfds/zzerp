@@ -70,7 +70,7 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.property-panel { padding: 16px; border-left: 1px solid var(--erp-border); background: #f8fafc; }
+.property-panel { padding: 16px; border-left: 1px solid var(--md-outline-variant); background: var(--md-surface-container-low); }
 h3 { margin: 0 0 12px; font-size: 14px; }
 label { display: block; margin: 13px 0 5px; color: var(--el-text-color-secondary); font-size: 12px; }
 p { margin: 0 0 12px; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }

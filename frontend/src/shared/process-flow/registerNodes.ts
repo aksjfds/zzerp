@@ -4,6 +4,7 @@ import LogicFlow, {
   RectNode,
   RectNodeModel,
 } from '@logicflow/core'
+import { materialColors } from '@/shared/material/tokens'
 
 function fourMidpointAnchors(model: { id: string; x: number; y: number; width: number; height: number }) {
   const { id, x, y, width, height } = model
@@ -27,11 +28,16 @@ class PartNodeModel extends RectNodeModel {
   setAttributes() {
     this.width = 150
     this.height = 56
-    this.radius = 8
+    this.radius = 12
   }
 
   getNodeStyle() {
-    return { ...super.getNodeStyle(), fill: '#ecf5ff', stroke: '#409eff', strokeWidth: 2 }
+    return {
+      ...super.getNodeStyle(),
+      fill: materialColors.primaryContainer,
+      stroke: materialColors.primary,
+      strokeWidth: 2,
+    }
   }
 
   getDefaultAnchor() {
@@ -47,7 +53,12 @@ class ProcessNodeModel extends RectNodeModel {
   }
 
   getNodeStyle() {
-    return { ...super.getNodeStyle(), fill: '#f0f9eb', stroke: '#67c23a', strokeWidth: 2 }
+    return {
+      ...super.getNodeStyle(),
+      fill: materialColors.successContainer,
+      stroke: materialColors.success,
+      strokeWidth: 2,
+    }
   }
 
   getDefaultAnchor() {
@@ -59,11 +70,16 @@ class QcNodeModel extends RectNodeModel {
   setAttributes() {
     this.width = 120
     this.height = 56
-    this.radius = 8
+    this.radius = 12
   }
 
   getNodeStyle() {
-    return { ...super.getNodeStyle(), fill: '#fef0f0', stroke: '#f56c6c', strokeWidth: 2 }
+    return {
+      ...super.getNodeStyle(),
+      fill: materialColors.tertiaryContainer,
+      stroke: materialColors.tertiary,
+      strokeWidth: 2,
+    }
   }
 
   getDefaultAnchor() {
@@ -75,11 +91,16 @@ class ShippingNodeModel extends RectNodeModel {
   setAttributes() {
     this.width = 150
     this.height = 56
-    this.radius = 8
+    this.radius = 12
   }
 
   getNodeStyle() {
-    return { ...super.getNodeStyle(), fill: '#f4f4f5', stroke: '#909399', strokeWidth: 2 }
+    return {
+      ...super.getNodeStyle(),
+      fill: materialColors.secondaryContainer,
+      stroke: materialColors.secondary,
+      strokeWidth: 2,
+    }
   }
 
   getDefaultAnchor() {
@@ -94,7 +115,12 @@ class AssemblyNodeModel extends DiamondNodeModel {
   }
 
   getNodeStyle() {
-    return { ...super.getNodeStyle(), fill: '#fdf6ec', stroke: '#e6a23c', strokeWidth: 2 }
+    return {
+      ...super.getNodeStyle(),
+      fill: materialColors.warningContainer,
+      stroke: materialColors.warning,
+      strokeWidth: 2,
+    }
   }
 
   getDefaultAnchor() {

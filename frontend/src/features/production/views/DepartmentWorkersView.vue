@@ -11,6 +11,7 @@ const route = useRoute()
 const departmentCode = String(route.params.departmentCode)
 const departmentNames: Record<string, string> = {
   stamp: '冲压部门',
+  cnc: '机加部门',
   polish: '表面处理部门',
   qc: 'QC部门',
   assembly: '装配部门',
@@ -46,10 +47,12 @@ onMounted(controller.loadWorkers)
       :history="controller.history.value"
       :workers-loading="controller.workersLoading.value"
       :history-loading="controller.historyLoading.value"
+      :pay-summary="controller.paySummary.value"
+      :pay-loading="controller.payLoading.value"
       :show-department-filter="false"
       allow-create
       @select="controller.selectWorker"
-      @month-change="controller.loadHistory"
+      @month-change="controller.loadWorkerDetails"
       @create="controller.dialogVisible.value = true"
     />
     <CreateWorkerDialog

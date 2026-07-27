@@ -16,6 +16,20 @@ type Callbacks = {
 
 export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>, callbacks: Callbacks) {
   const instance = shallowRef<LogicFlow | null>(null)
+  let resizeObserver: ResizeObserver | null = null
+  let resizeFrame: number | null = null
+
+  function fitToContainer() {
+    if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+    resizeFrame = requestAnimationFrame(() => {
+      resizeFrame = null
+      const element = container.value
+      const lf = instance.value
+      if (!element || !lf) return
+      lf.resize(element.clientWidth, element.clientHeight)
+      if (currentFlow().nodes.length) lf.fitView(24, 24)
+    })
+  }
 
   function setReadonly(readonly: boolean) {
     const lf = instance.value
@@ -104,9 +118,16 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       callbacks.onConnectionError(msg || '该连线不符合流程规则')
     })
     renderFlow(callbacks.initialFlow())
+    resizeObserver = new ResizeObserver(fitToContainer)
+    resizeObserver.observe(container.value)
+    fitToContainer()
   })
 
   onBeforeUnmount(() => {
+    resizeObserver?.disconnect()
+    resizeObserver = null
+    if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+    resizeFrame = null
     instance.value?.destroy()
     instance.value = null
   })

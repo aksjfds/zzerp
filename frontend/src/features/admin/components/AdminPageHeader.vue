@@ -32,14 +32,19 @@ defineEmits<{ refresh: []; logout: [] }>()
   gap: 20px;
   margin-bottom: 18px;
   padding: 20px 24px;
-  border: 1px solid var(--erp-border);
-  border-radius: 10px;
-  background: #fff;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--erp-radius-lg);
+  background: var(--md-surface-container-lowest);
   box-shadow: var(--erp-shadow-sm);
 }
 .admin-header span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-.admin-header h1 { margin: 5px 0 0; }
+.admin-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 @media (max-width: 900px) {
   .admin-header { align-items: flex-start; flex-direction: column; }
+}
+@media (max-width: 600px) {
+  .admin-header { padding: 16px; }
+  .admin-header > div:last-child { display: grid; width: 100%; grid-template-columns: 1fr; gap: 8px; }
+  .admin-header :deep(.el-button) { width: 100%; margin: 0; }
 }
 </style>

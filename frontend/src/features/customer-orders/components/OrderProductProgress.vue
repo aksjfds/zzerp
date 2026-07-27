@@ -48,17 +48,21 @@ const segments = computed(() => {
 .product-progress + .product-progress { margin-top: 14px; padding-top: 14px; border-top: 1px dashed var(--erp-border); }
 .product-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
 .product-heading strong { font-size: 13px; }
-.progress-track { display: flex; width: 100%; height: 10px; overflow: hidden; border-radius: 999px; background: #e5e7eb; }
+.progress-track { display: flex; width: 100%; height: 10px; overflow: hidden; border-radius: 999px; background: var(--md-surface-container-highest); }
 .progress-segment { min-width: 0; height: 100%; }
-.progress-segment.completed { background: #67c23a; }
-.progress-segment.scrap { background: #f56c6c; }
-.progress-segment.lost { background: #909399; }
-.progress-segment.unfinished { background: #dcdfe6; }
+.progress-segment.completed { background: var(--erp-success); }
+.progress-segment.scrap { background: var(--md-error); }
+.progress-segment.lost { background: var(--md-secondary); }
+.progress-segment.unfinished { background: var(--md-outline-variant); }
 .progress-values { display: grid; grid-template-columns: repeat(6, minmax(max-content, 1fr)); gap: 6px 12px; margin-top: 8px; color: var(--el-text-color-secondary); font-size: 12px; }
 .progress-values b { color: var(--el-text-color-primary); }
-.progress-values .completed b { color: #529b2e; }
-.progress-values .scrap b { color: #d73737; }
-.progress-values .lost b { color: #73767a; }
-.progress-values .po b { color: #b88230; }
+.progress-values .completed b { color: var(--erp-success); }
+.progress-values .scrap b { color: var(--md-error); }
+.progress-values .lost b { color: var(--md-secondary); }
+.progress-values .po b { color: var(--erp-warning); }
 @media (max-width: 900px) { .progress-values { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 520px) {
+  .product-heading { align-items: flex-start; flex-direction: column; }
+  .progress-values { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 </style>

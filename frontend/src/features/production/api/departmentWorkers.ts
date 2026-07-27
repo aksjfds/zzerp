@@ -3,6 +3,7 @@ import type {
   DepartmentWorkerOverview,
   WorkerHistoryItem,
   WorkerOverviewItem,
+  WorkerPaySummary,
 } from '@/features/workers/domain/types'
 
 export async function queryDepartmentWorkerOverview(departmentCode: string) {
@@ -19,6 +20,18 @@ export async function queryDepartmentWorkerHistory(
 ) {
   const response = await service.get<{ data: WorkerHistoryItem[] }>(
     `/departments/${departmentCode}/workers/${workerId}/work-history`,
+    { params: { month } },
+  )
+  return response.data.data
+}
+
+export async function queryDepartmentWorkerPay(
+  departmentCode: string,
+  workerId: number,
+  month: string,
+) {
+  const response = await service.get<{ data: WorkerPaySummary }>(
+    `/departments/${departmentCode}/workers/${workerId}/pay`,
     { params: { month } },
   )
   return response.data.data

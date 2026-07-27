@@ -336,10 +336,10 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.editor-page { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
-.editor-header, .editor-card { border: 1px solid var(--erp-border); border-radius: 10px; background: #fff; box-shadow: var(--erp-shadow-sm); }
-.editor-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; padding: 18px 22px; }
-.editor-header h1 { margin: 5px 0 0; font-size: 23px; }
+.editor-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
+.editor-header, .editor-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+.editor-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; padding: 18px 22px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+.editor-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 .editor-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .editor-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
@@ -354,5 +354,19 @@ onMounted(async () => {
 .basic-section :deep(.el-form-item) { margin-bottom: 12px; }
 .flow-loading { display: grid; min-height: 260px; place-items: center; color: var(--el-text-color-secondary); }
 .read-only-content { pointer-events: none; opacity: .82; }
-@media (max-width: 680px) { .editor-page { padding: 12px; } .editor-header { align-items: flex-start; flex-direction: column; } .form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) {
+  .editor-page { padding: 16px; }
+  .editor-header { align-items: flex-start; flex-direction: column; padding: 16px; }
+  .editor-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .editor-actions :deep(.el-button), .editor-actions :deep(.el-select) { width: 100% !important; margin: 0; }
+  .editor-card { padding: 16px; }
+  .form-grid { grid-template-columns: 1fr; }
+  .section-heading { align-items: flex-start; flex-direction: column; }
+  .section-heading > div { align-items: flex-start; flex-direction: column; gap: 4px; }
+}
+@media (max-width: 440px) {
+  .editor-page { padding: 12px; }
+  .editor-actions { grid-template-columns: 1fr; }
+  .editor-card { padding: 12px; }
+}
 </style>

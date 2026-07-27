@@ -5,6 +5,7 @@ from domain.production_types import (
     REWORK_TRACKED_WORK_ORDER_TYPES,
     WORK_ORDER_ASSEMBLY,
 )
+from models.engineering import Product
 from models.organization import Worker
 from models.production import ProductionItem, WorkOrder, WorkOrderBatch, WorkOrderMaterial
 from services.production_operation_undo import (
@@ -145,6 +146,8 @@ def serialize_batch(
 
 def serialize_work_order(session, order: WorkOrder) -> dict:
     customer_order, _, production_item, flow_context = work_order_context(session, order)
+    product = session.get(Product, production_item.product_id)
+    procedure_name = flow_context.nodes.get(order.flow_node_id, {}).get("label") or ""
     part_no, part_name = flow_context.item_name(production_item)
     if order.work_order_type == WORK_ORDER_ASSEMBLY:
         part_name = assembly_output_name(session, order)
@@ -192,8 +195,11 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
             order.flow_node_id,
         ) is not None,
         "customer_order_no": customer_order.customer_order_no,
+        "factory_code": product.factory_code if product else "",
+        "product_name": product.product_name if product else "",
         "part_no": part_no,
         "part_name": part_name,
+        "procedure_name": procedure_name,
         "work_order_name": order.work_order_name,
         "remark": order.remark or "",
         "worker_id": order.worker_id,

@@ -115,4 +115,8 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
 h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; }
 .bom-editor :deep(.el-form-item) { margin-bottom: 14px; }
+@media (max-width: 600px) {
+  .section-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .section-heading :deep(.el-button) { width: 100%; }
+}
 </style>

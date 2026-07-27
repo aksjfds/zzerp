@@ -58,6 +58,10 @@ export type ProductionNodeStat = {
   output_quantity: number
   input_details: Record<string, number>
 }
+export type ProductionEdgeStat = {
+  flow_edge_id: string
+  transferred_quantity: number
+}
 export type CustomerOrderProduction = {
   customer_order_id: number
   status: CustomerOrderStatus
@@ -69,5 +73,6 @@ export type CustomerOrderProduction = {
     order_quantity: number
     process_flow: ProcessFlow
     node_stats: ProductionNodeStat[]
+    edge_stats: ProductionEdgeStat[]
   }>
 }

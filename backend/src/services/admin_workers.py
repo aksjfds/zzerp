@@ -2,19 +2,33 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import func, select
 
 from database import SessionLocal
 from domain.time import BUSINESS_TIMEZONE, business_iso
+from models.engineering import Product
 from models.organization import Department, Worker, Workshop
-from models.production import ProductionItem, WorkOrder, WorkOrderBatch
+from models.production import (
+    ProductionItem,
+    WorkOrder,
+    WorkOrderBatch,
+    WorkOrderPayDetail,
+)
 from services.work_order_presenters import item_display
 from services.work_order_progress import calculate_work_order_progress
 from services.errors import DomainError
 
 
-PRODUCTION_DEPARTMENT_CODES = ("stamp", "polish", "qc", "assembly", "warehouse")
+PRODUCTION_DEPARTMENT_CODES = (
+    "stamp",
+    "cnc",
+    "polish",
+    "qc",
+    "assembly",
+    "warehouse",
+)
 
 
 def worker_overview() -> list[dict]:
@@ -142,6 +156,7 @@ def worker_history(
             select(WorkOrder)
             .where(
                 WorkOrder.worker_id == worker_id,
+                WorkOrder.status != "cancelled",
                 func.coalesce(WorkOrder.closed_at, WorkOrder.created_at) >= month_start,
                 func.coalesce(WorkOrder.closed_at, WorkOrder.created_at) < month_end,
             )
@@ -154,8 +169,10 @@ def worker_history(
             row[0]
             for row in session.execute(
                 select(WorkOrderBatch.work_order_id)
+                .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
                 .where(
                     WorkOrderBatch.qc_worker_id == worker.id,
+                    WorkOrder.status != "cancelled",
                     WorkOrderBatch.recorded_at >= month_start,
                     WorkOrderBatch.recorded_at < month_end,
                 )
@@ -167,7 +184,10 @@ def worker_history(
             work_orders.extend(
                 item
                 for item in session.scalars(
-                    select(WorkOrder).where(WorkOrder.id.in_(qc_order_ids))
+                    select(WorkOrder).where(
+                        WorkOrder.id.in_(qc_order_ids),
+                        WorkOrder.status != "cancelled",
+                    )
                 ).all()
                 if item.id not in existing_ids
             )
@@ -198,6 +218,108 @@ def worker_history(
             key=lambda item: item["completed_at"] or "",
             reverse=True,
         )
+
+
+def worker_pay_summary(
+    worker_id: int,
+    month: str,
+    department_code: str | None = None,
+) -> dict:
+    with SessionLocal() as session:
+        worker = session.get(Worker, worker_id)
+        if worker is None:
+            return _empty_pay_summary(worker_id, month)
+        if department_code is not None:
+            department = _production_department(session, department_code)
+            if worker.department_id != department.id:
+                raise DomainError(
+                    "worker_department_mismatch",
+                    "工人不属于当前部门",
+                    status_code=404,
+                )
+
+        month_start, month_end = _month_bounds(month)
+        batch_rows = session.execute(
+            select(WorkOrderBatch, WorkOrder)
+            .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
+            .where(
+                WorkOrder.worker_id == worker_id,
+                WorkOrder.work_order_type == "tag",
+                WorkOrder.status != "cancelled",
+                WorkOrderBatch.recorded_at >= month_start,
+                WorkOrderBatch.recorded_at < month_end,
+                WorkOrderBatch.qualified_quantity > 0,
+            )
+            .order_by(WorkOrderBatch.recorded_at.desc(), WorkOrderBatch.id.desc())
+        ).all()
+        if not batch_rows:
+            return _empty_pay_summary(worker_id, month)
+
+        order_ids = {order.id for _, order in batch_rows}
+        pay_details_by_order: dict[int, list[WorkOrderPayDetail]] = defaultdict(list)
+        for detail in session.scalars(
+            select(WorkOrderPayDetail)
+            .where(WorkOrderPayDetail.work_order_id.in_(order_ids))
+            .order_by(WorkOrderPayDetail.tag_name, WorkOrderPayDetail.id)
+        ):
+            pay_details_by_order[detail.work_order_id].append(detail)
+
+        groups: dict[tuple, dict] = {}
+        total_quantity = 0
+        total_pay = Decimal("0")
+        unpriced_quantity = 0
+        for batch, order in batch_rows:
+            quantity = batch.qualified_quantity or 0
+            total_quantity += quantity
+            details = pay_details_by_order.get(order.id, [])
+            unit_price = (
+                sum((item.unit_price for item in details), Decimal("0"))
+                if details else None
+            )
+            tag_names = tuple(item.tag_name for item in details)
+            item_name = _worker_item_name(session, order)
+            key = (
+                order.production_item_id,
+                order.procedure_id,
+                tag_names,
+                unit_price,
+            )
+            group = groups.setdefault(key, {
+                "item_name": item_name,
+                "procedure_name": order.work_order_name,
+                "tag_names": list(tag_names),
+                "qualified_quantity": 0,
+                "unit_price": unit_price,
+                "pay_amount": Decimal("0") if unit_price is not None else None,
+            })
+            group["qualified_quantity"] += quantity
+            if unit_price is None:
+                unpriced_quantity += quantity
+            else:
+                amount = unit_price * quantity
+                group["pay_amount"] += amount
+                total_pay += amount
+
+        items = list(groups.values())
+        return {
+            "worker_id": worker_id,
+            "month": month,
+            "qualified_quantity": total_quantity,
+            "total_pay": total_pay,
+            "unpriced_quantity": unpriced_quantity,
+            "items": items,
+        }
+
+
+def _empty_pay_summary(worker_id: int, month: str) -> dict:
+    return {
+        "worker_id": worker_id,
+        "month": month,
+        "qualified_quantity": 0,
+        "total_pay": Decimal("0"),
+        "unpriced_quantity": 0,
+        "items": [],
+    }
 
 
 def _serialize_worker(department: Department, worker: Worker, workshop: Workshop | None) -> dict:
@@ -231,6 +353,12 @@ def _serialize_history_item(
 ) -> dict:
     production_item = session.get(ProductionItem, order.production_item_id)
     _, item_name = item_display(session, production_item) if production_item else ("", "未知配件")
+    product = (
+        session.get(Product, production_item.product_id)
+        if production_item else None
+    )
+    if product is not None:
+        item_name = f"{product.factory_code}-{product.product_name}-{item_name}"
     worker_batches = [
         item for item in batches if item.qc_worker_id == worker.id
     ]
@@ -272,6 +400,18 @@ def _serialize_history_item(
         "status": status,
         "completed_at": business_iso(completed_at),
     }
+
+
+def _worker_item_name(session, order: WorkOrder) -> str:
+    production_item = session.get(ProductionItem, order.production_item_id)
+    if production_item is None:
+        return "未知配件"
+    _, item_name = item_display(session, production_item)
+    product = session.get(Product, production_item.product_id)
+    return (
+        f"{product.factory_code}-{product.product_name}-{item_name}"
+        if product is not None else item_name
+    )
 
 
 def _history_date_for_worker(

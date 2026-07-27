@@ -29,14 +29,14 @@ defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
 
 .assembly-group-card {
   padding: 14px;
-  border: 1px solid var(--erp-border);
-  border-radius: 8px;
-  background: #f8fafc;
+  border: 1px solid transparent;
+  border-radius: var(--erp-radius);
+  background: var(--md-surface-container-low);
   cursor: pointer;
   transition: border-color .15s, box-shadow .15s;
 }
-.assembly-group-card:hover, .assembly-group-card:focus-visible { border-color: var(--erp-primary); outline: none; }
-.assembly-group-card.selected { border-color: var(--erp-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--erp-primary) 14%, transparent); }
+.assembly-group-card:hover, .assembly-group-card:focus-visible { border-color: var(--erp-primary); background: var(--md-surface-container); outline: none; }
+.assembly-group-card.selected { border-color: var(--md-primary); background: var(--md-primary-container); box-shadow: none; }
 .heading { display: flex; justify-content: space-between; gap: 12px; }
 
 .assembly-group-card p,
@@ -48,4 +48,5 @@ defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
 .assembly-group-card ul {
   padding-left: 18px;
 }
+@media (max-width: 480px) { .heading { align-items: flex-start; flex-direction: column; } }
 </style>

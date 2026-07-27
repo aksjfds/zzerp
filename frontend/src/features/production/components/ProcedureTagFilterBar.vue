@@ -74,11 +74,6 @@ function updateApplyingTagIds(ids?: number[]) {
   grid-template-columns: repeat(2, minmax(210px, 1fr));
   gap: 12px;
   align-items: center;
-  padding: 16px 20px;
-  border: 1px solid var(--erp-border);
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: var(--erp-shadow-sm);
 }
 
 .el-select { width: 100%; }

@@ -5,12 +5,14 @@ import type { WorkOrderMode } from '../domain/workOrderCardPolicy'
 import { assemblyWorkOrderCardPolicy } from '../domain/assemblyWorkOrderCardPolicy'
 import { productionWorkOrderCardPolicy } from '../domain/productionWorkOrderCardPolicy'
 import { purchaseWorkOrderCardPolicy } from '../domain/purchaseWorkOrderCardPolicy'
+import PolishWorkOrderPrintDialog from './PolishWorkOrderPrintDialog.vue'
 import WorkOrderPrintDialog from './WorkOrderPrintDialog.vue'
 
 const props = withDefaults(defineProps<{
   items: WorkOrder[]
   loading: boolean
   mode?: WorkOrderMode
+  departmentCode?: string
 }>(), { mode: 'production' })
 const emit = defineEmits<{
   submit: [item: WorkOrder]
@@ -136,27 +138,32 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
       </div>
     </article>
     <ElEmpty v-if="!loading && !items.length" description="所选配件暂无工单" :image-size="64" />
-    <WorkOrderPrintDialog v-model="printVisible" :item="printItem" />
+    <PolishWorkOrderPrintDialog
+      v-if="departmentCode === 'polish'"
+      v-model="printVisible"
+      :item="printItem"
+    />
+    <WorkOrderPrintDialog v-else v-model="printVisible" :item="printItem" />
   </div>
 </template>
 
 <style scoped>
 .work-order-list { display: grid; gap: 14px; min-height: 160px; }
-.work-order-card { padding: 16px; border: 1px solid var(--erp-border); border-radius: 8px; background: #f8fafc; }
+.work-order-card { padding: 16px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
 .heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .heading div { display: grid; gap: 4px; }
 .heading span, .meta { color: var(--el-text-color-secondary); font-size: 13px; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
-.remark { margin: 10px 0 0; padding: 9px 11px; border-radius: 6px; color: var(--el-text-color-secondary); background: #fff; font-size: 13px; white-space: pre-wrap; }
+.remark { margin: 10px 0 0; padding: 9px 11px; border-radius: var(--erp-radius-sm); color: var(--md-on-surface-variant); background: var(--md-surface-container-lowest); font-size: 13px; white-space: pre-wrap; }
 .metrics { display: grid; grid-template-columns: repeat(6, minmax(80px, 1fr)); gap: 8px; margin: 14px 0 0; }
-.metrics div { padding: 10px; border-radius: 6px; background: #fff; }
+.metrics div { padding: 10px; border-radius: var(--erp-radius-sm); background: var(--md-surface-container-lowest); }
 .metrics dt { color: var(--el-text-color-secondary); font-size: 12px; }
 .metrics dd { margin: 5px 0 0; font-size: 17px; font-weight: 700; }
 .purchase-metrics { grid-template-columns: repeat(5, minmax(90px, 1fr)); }
 .assembly-metrics { grid-template-columns: repeat(5, minmax(90px, 1fr)); }
 .batches { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--erp-border); }
 .batches h4 { margin: 0 0 8px; font-size: 13px; }
-.batch-row { padding: 9px 10px; border-radius: 6px; background: #fff; font-size: 12px; }
+.batch-row { padding: 9px 10px; border-radius: var(--erp-radius-sm); background: var(--md-surface-container-lowest); font-size: 12px; }
 .batch-row + .batch-row { margin-top: 7px; }
 .batch-heading { display: flex; justify-content: space-between; gap: 10px; color: var(--el-text-color-secondary); }
 .batch-heading strong { color: var(--erp-text); }
@@ -166,4 +173,14 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
 .work-order-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .work-order-actions :deep(.el-button) { margin: 0; }
 @media (max-width: 1150px) { .metrics { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 620px) {
+  .heading, .batch-heading { align-items: flex-start; flex-direction: column; }
+  .batch-result { justify-content: flex-start; }
+  .metrics, .purchase-metrics, .assembly-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .work-order-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .work-order-actions :deep(.el-button) { width: 100%; }
+}
+@media (max-width: 420px) {
+  .work-order-actions { grid-template-columns: 1fr; }
+}
 </style>

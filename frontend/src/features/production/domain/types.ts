@@ -67,6 +67,18 @@ export type TagCard = {
   can_create_work_order: boolean
 }
 
+export type ProductionOverviewRow = {
+  name: string
+  quantity: number
+}
+
+export type ProductionOverviewSummary = {
+  pendingQuantity: number
+  processingRows: ProductionOverviewRow[]
+  pendingQcRows: ProductionOverviewRow[]
+  completedRows: ProductionOverviewRow[]
+}
+
 export type RepositoryFilters = {
   keyword: string
   arrived_from: string | null
@@ -107,8 +119,11 @@ export type WorkOrder = {
   qc_required: boolean
   input_production_item_ids: number[]
   customer_order_no: string
+  factory_code: string
+  product_name: string
   part_no: string
   part_name: string
+  procedure_name: string
   work_order_name: string
   remark: string
   worker_id: number | null

@@ -47,6 +47,11 @@ function product(productId: number) {
   return products.value.find((item) => item.id === productId)
 }
 
+function productLabel(productId: number) {
+  const item = product(productId)
+  return item ? `${item.factory_code} · ${item.product_name}` : `产品 #${productId}`
+}
+
 async function searchProducts(keyword = '') {
   if (!form.customer_id) {
     products.value = []
@@ -159,11 +164,16 @@ onMounted(async () => {
     <section class="card" :class="{ readonly: readOnly }">
       <div class="heading"><h2>产品明细</h2><ElButton v-if="!readOnly" :disabled="!form.customer_id" @click="addItem">新增产品</ElButton></div>
       <ElTable :data="form.items" border>
-        <ElTableColumn label="产品" min-width="220"><template #default="{ row }"><ElSelect v-model="row.product_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" :disabled="readOnly || !form.customer_id" filterable remote :remote-method="searchProducts" :loading="productLoading" placeholder="选择该客户的产品"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" /></ElSelect></template></ElTableColumn>
+        <ElTableColumn label="产品" min-width="220">
+          <template #default="{ row }">
+            <span v-if="readOnly" class="readonly-value">{{ productLabel(row.product_id) }}</span>
+            <ElSelect v-else v-model="row.product_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" :disabled="!form.customer_id" filterable remote :remote-method="searchProducts" :loading="productLoading" placeholder="选择该客户的产品"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" /></ElSelect>
+          </template>
+        </ElTableColumn>
         <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.product_version ?? product(row.product_id)?.version ?? '-' }}</template></ElTableColumn>
-        <ElTableColumn label="数量" width="140"><template #default="{ row }"><ElInputNumber v-model="row.quantity" :disabled="readOnly" :min="1" /></template></ElTableColumn>
-        <ElTableColumn label="交期" width="170"><template #default="{ row }"><ElDatePicker v-model="row.delivery_date" :disabled="readOnly" value-format="YYYY-MM-DD" /></template></ElTableColumn>
-        <ElTableColumn label="备注" min-width="180"><template #default="{ row }"><ElInput v-model="row.remark" :disabled="readOnly" /></template></ElTableColumn>
+        <ElTableColumn label="数量" width="140"><template #default="{ row }"><span v-if="readOnly" class="readonly-value readonly-number">{{ row.quantity }}</span><ElInputNumber v-else v-model="row.quantity" :min="1" /></template></ElTableColumn>
+        <ElTableColumn label="交期" width="170"><template #default="{ row }"><span v-if="readOnly" class="readonly-value">{{ row.delivery_date || '-' }}</span><ElDatePicker v-else v-model="row.delivery_date" value-format="YYYY-MM-DD" /></template></ElTableColumn>
+        <ElTableColumn label="备注" min-width="180"><template #default="{ row }"><span v-if="readOnly" class="readonly-value">{{ row.remark || '-' }}</span><ElInput v-else v-model="row.remark" /></template></ElTableColumn>
         <ElTableColumn v-if="!readOnly" label="操作" width="80"><template #default="{ $index }"><ElButton link type="danger" @click="form.items.splice($index, 1)">删除</ElButton></template></ElTableColumn>
       </ElTable>
     </section>
@@ -176,7 +186,11 @@ onMounted(async () => {
           class="product-status-section"
         >
           <h3>{{ productStatus.factory_code }} · {{ productStatus.product_name }} · 订单数量 {{ productStatus.order_quantity }}</h3>
-          <ProductionFlowViewer :flow="productStatus.process_flow" :stats="productStatus.node_stats" />
+          <ProductionFlowViewer
+            :flow="productStatus.process_flow"
+            :stats="productStatus.node_stats"
+            :edge-stats="productStatus.edge_stats"
+          />
         </section>
       </div>
     </section>
@@ -184,17 +198,34 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.editor-page { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
+.editor-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .editor-page.embedded { min-height: 0; padding: 0; background: transparent; }
 .editor-page.embedded .card { box-shadow: none; }
-header, .card { border: 1px solid var(--erp-border); border-radius: 10px; background: white; box-shadow: var(--erp-shadow-sm); }
-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 18px 22px; }
+header, .card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 18px 22px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
 header span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-header h1 { margin: 5px 0 0; }
+header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 .card { margin-bottom: 18px; padding: 20px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .heading h2 { margin: 0; font-size: 18px; }
-.product-status-section { margin-top: 14px; padding: 14px; border: 1px solid var(--erp-border); border-radius: 8px; }
+.readonly-value { color: var(--md-on-surface); line-height: 1.5; overflow-wrap: anywhere; }
+.readonly-number { font-variant-numeric: tabular-nums; }
+.product-status-section { margin-top: 14px; padding: 14px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
 .product-status-section h3 { margin: 0 0 12px; }
+@media (max-width: 760px) {
+  .editor-page:not(.embedded) { padding: 16px; }
+  header { align-items: flex-start; flex-direction: column; gap: 16px; padding: 16px; }
+  header > div:last-child { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  header :deep(.el-button) { width: 100%; margin: 0; }
+  .card { padding: 16px; }
+  .grid { grid-template-columns: 1fr; gap: 0; }
+  .heading { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .heading :deep(.el-button) { width: 100%; }
+}
+@media (max-width: 480px) {
+  .editor-page:not(.embedded) { padding: 12px; }
+  .card { padding: 12px; }
+  header > div:last-child { grid-template-columns: 1fr; }
+}
 </style>

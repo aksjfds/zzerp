@@ -1,39 +1,47 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import type { TagCard } from '../domain/types'
+import type {
+  ProductionOverviewSummary,
+  TagCard,
+} from '../domain/types'
+import { aggregateProductionOverviewRows } from '../domain/productionOverview'
 
-const props = defineProps<{
-  items: TagCard[]
+const props = withDefaults(defineProps<{
+  items?: TagCard[]
   loading: boolean
-}>()
+  summary?: ProductionOverviewSummary
+  subtitle?: string
+  pendingLabel?: string
+  processingLabel?: string
+  pendingQcLabel?: string
+  completedLabel?: string
+}>(), {
+  items: () => [],
+  summary: undefined,
+  subtitle: '按当前配件和工艺统计',
+  pendingLabel: '待打标记',
+  processingLabel: '正在打标记',
+  pendingQcLabel: '质检中',
+  completedLabel: '已打完标记（累计合格）',
+})
 
-type SummaryRow = { name: string; quantity: number }
-
-function aggregate(rows: SummaryRow[]) {
-  const quantities = new Map<string, number>()
-  rows.forEach(row => quantities.set(row.name, (quantities.get(row.name) || 0) + row.quantity))
-  return [...quantities.entries()]
-    .filter(([, quantity]) => quantity > 0)
-    .map(([name, quantity]) => ({ name, quantity }))
-}
-
-const untaggedQuantity = computed(() => props.items
+const pendingQuantity = computed(() => props.summary?.pendingQuantity ?? props.items
   .filter(item => item.tag_set_id === null)
   .reduce((sum, item) => sum + item.available_quantity, 0))
 
-const processingRows = computed(() => aggregate(props.items.flatMap(item =>
+const processingRows = computed(() => props.summary?.processingRows ?? aggregateProductionOverviewRows(props.items.flatMap(item =>
   item.processing_details.map(detail => ({
     name: detail.tag_set_name,
     quantity: detail.quantity,
   })),
 )))
 
-const pendingQcRows = computed(() => aggregate(props.items.map(item => ({
+const pendingQcRows = computed(() => props.summary?.pendingQcRows ?? aggregateProductionOverviewRows(props.items.map(item => ({
   name: item.tag_set_name,
   quantity: item.pending_qc_quantity,
 }))))
 
-const completedRows = computed(() => aggregate(props.items
+const completedRows = computed(() => props.summary?.completedRows ?? aggregateProductionOverviewRows(props.items
   .filter(item => item.tag_set_id !== null)
   .map(item => ({
     name: item.tag_set_name,
@@ -45,16 +53,16 @@ const completedRows = computed(() => aggregate(props.items
   <section v-loading="loading" class="tag-production-overview">
     <header>
       <strong>配件生产情况</strong>
-      <span>按当前配件和工艺统计</span>
+      <span>{{ subtitle }}</span>
     </header>
     <div class="overview-grid">
       <article>
-        <h4>待打标记</h4>
-        <strong class="total">{{ untaggedQuantity }}</strong>
+        <h4>{{ pendingLabel }}</h4>
+        <strong class="total">{{ pendingQuantity }}</strong>
         <span>个</span>
       </article>
       <article>
-        <h4>正在打标记</h4>
+        <h4>{{ processingLabel }}</h4>
         <div v-for="row in processingRows" :key="row.name" class="summary-row">
           <ElTag type="warning" effect="plain">{{ row.name }}</ElTag>
           <strong>{{ row.quantity }} 个</strong>
@@ -62,7 +70,7 @@ const completedRows = computed(() => aggregate(props.items
         <span v-if="!processingRows.length" class="empty-text">暂无</span>
       </article>
       <article>
-        <h4>质检中</h4>
+        <h4>{{ pendingQcLabel }}</h4>
         <div v-for="row in pendingQcRows" :key="row.name" class="summary-row">
           <ElTag type="info" effect="plain">{{ row.name }}</ElTag>
           <strong>{{ row.quantity }} 个</strong>
@@ -70,7 +78,7 @@ const completedRows = computed(() => aggregate(props.items
         <span v-if="!pendingQcRows.length" class="empty-text">暂无</span>
       </article>
       <article>
-        <h4>已打完标记（累计合格）</h4>
+        <h4>{{ completedLabel }}</h4>
         <div v-for="row in completedRows" :key="row.name" class="summary-row">
           <ElTag type="success" effect="plain">{{ row.name }}</ElTag>
           <strong>{{ row.quantity }} 个</strong>
@@ -82,11 +90,11 @@ const completedRows = computed(() => aggregate(props.items
 </template>
 
 <style scoped>
-.tag-production-overview { margin: 14px 0; padding: 14px; border: 1px solid var(--erp-border); border-radius: 8px; background: #fff; }
+.tag-production-overview { margin: 0 0 14px; padding: 14px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-lowest); }
 .tag-production-overview header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 12px; }
 .tag-production-overview header span, .empty-text { color: var(--el-text-color-secondary); font-size: 12px; }
 .overview-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-.overview-grid article { min-width: 0; padding: 11px; border-radius: 7px; background: #f8fafc; }
+.overview-grid article { min-width: 0; padding: 11px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
 .overview-grid h4 { margin: 0 0 9px; color: var(--el-text-color-secondary); font-size: 12px; font-weight: 500; }
 .total { font-size: 22px; }
 .overview-grid article > span:not(.empty-text) { margin-left: 4px; color: var(--el-text-color-secondary); font-size: 12px; }

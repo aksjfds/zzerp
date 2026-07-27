@@ -9,6 +9,7 @@ from schemas.production import (
     DepartmentWorkerEnvelope,
     DepartmentWorkerHistoryEnvelope,
     DepartmentWorkerOverviewEnvelope,
+    DepartmentWorkerPayEnvelope,
     RepositoryListEnvelope,
     TagCardListEnvelope,
     WorkerListEnvelope,
@@ -20,6 +21,7 @@ from services.admin_workers import (
     create_department_worker,
     department_worker_overview,
     worker_history,
+    worker_pay_summary,
 )
 
 
@@ -88,6 +90,24 @@ def department_worker_history_get(
     ensure_department_access(user, department_code)
     try:
         data = worker_history(worker_id, month, department_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"data": data}
+
+
+@router.get(
+    "/departments/{department_code}/workers/{worker_id}/pay",
+    response_model=DepartmentWorkerPayEnvelope,
+)
+def department_worker_pay_get(
+    department_code: str,
+    worker_id: int,
+    month: str = Query(pattern=r"^\d{4}-\d{2}$"),
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, department_code)
+    try:
+        data = worker_pay_summary(worker_id, month, department_code)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"data": data}

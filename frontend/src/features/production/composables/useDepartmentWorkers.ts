@@ -5,11 +5,13 @@ import type {
   DepartmentWorkerOverview,
   WorkerHistoryItem,
   WorkerOverviewItem,
+  WorkerPaySummary,
 } from '@/features/workers/domain/types'
 import {
   createDepartmentWorker,
   queryDepartmentWorkerHistory,
   queryDepartmentWorkerOverview,
+  queryDepartmentWorkerPay,
 } from '../api/departmentWorkers'
 
 function currentLocalMonth() {
@@ -21,6 +23,7 @@ export function useDepartmentWorkers(departmentCode: string) {
   const overview = ref<DepartmentWorkerOverview>()
   const workersLoading = ref(false)
   const historyLoading = ref(false)
+  const payLoading = ref(false)
   const submitting = ref(false)
   const dialogVisible = ref(false)
   const selectedWorker = ref<WorkerOverviewItem>()
@@ -28,6 +31,7 @@ export function useDepartmentWorkers(departmentCode: string) {
   const workerKeyword = ref('')
   const departmentFilter = ref<number | ''>('')
   const history = ref<WorkerHistoryItem[]>([])
+  const paySummary = ref<WorkerPaySummary>()
 
   const departments = computed(() => overview.value ? [overview.value] : [])
   const filteredWorkers = computed(() => {
@@ -59,6 +63,29 @@ export function useDepartmentWorkers(departmentCode: string) {
     }
   }
 
+  async function loadPay() {
+    if (!selectedWorker.value) {
+      paySummary.value = undefined
+      return
+    }
+    payLoading.value = true
+    try {
+      paySummary.value = await queryDepartmentWorkerPay(
+        departmentCode,
+        selectedWorker.value.id,
+        selectedMonth.value,
+      )
+    } catch (error) {
+      ElMessage.error(getApiErrorDetail(error)?.message || '工人工资加载失败')
+    } finally {
+      payLoading.value = false
+    }
+  }
+
+  async function loadWorkerDetails() {
+    await Promise.all([loadHistory(), loadPay()])
+  }
+
   async function loadWorkers(preferredWorkerId?: number) {
     workersLoading.value = true
     try {
@@ -67,7 +94,7 @@ export function useDepartmentWorkers(departmentCode: string) {
       selectedWorker.value = overview.value.workers.find(
         worker => worker.id === (preferredWorkerId ?? selectedWorker.value?.id),
       ) || overview.value.workers[0]
-      await loadHistory()
+      await loadWorkerDetails()
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '工人总览加载失败')
     } finally {
@@ -77,7 +104,7 @@ export function useDepartmentWorkers(departmentCode: string) {
 
   async function selectWorker(worker: WorkerOverviewItem) {
     selectedWorker.value = worker
-    await loadHistory()
+    await loadWorkerDetails()
   }
 
   async function saveWorker(payload: { workerName: string; workshopId: number | null }) {
@@ -101,7 +128,7 @@ export function useDepartmentWorkers(departmentCode: string) {
   watch(filteredWorkers, async (workers) => {
     if (!selectedWorker.value || !workers.some(worker => worker.id === selectedWorker.value?.id)) {
       selectedWorker.value = workers[0]
-      await loadHistory()
+      await loadWorkerDetails()
     }
   })
 
@@ -113,6 +140,7 @@ export function useDepartmentWorkers(departmentCode: string) {
     history,
     historyLoading,
     loadHistory,
+    loadWorkerDetails,
     loadWorkers,
     overview,
     saveWorker,
@@ -123,5 +151,7 @@ export function useDepartmentWorkers(departmentCode: string) {
     submitting,
     workerKeyword,
     workersLoading,
+    payLoading,
+    paySummary,
   }
 }

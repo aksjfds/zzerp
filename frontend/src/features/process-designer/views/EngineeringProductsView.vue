@@ -91,10 +91,10 @@ onMounted(() => store.loadProducts(page.value, pageSize))
 </template>
 
 <style scoped>
-.page-shell { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
-.page-header, .content-card { border: 1px solid var(--erp-border); border-radius: 10px; background: #fff; box-shadow: var(--erp-shadow-sm); }
-.page-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 20px 24px; }
-.page-header h1 { margin: 5px 0; font-size: 24px; }
+.page-shell { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
+.page-header, .content-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+.page-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 20px 24px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+.page-header h1 { margin: 5px 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 .page-header p { margin: 0; color: var(--el-text-color-secondary); }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
 .header-actions { display: flex; align-items: center; }
@@ -102,5 +102,16 @@ onMounted(() => store.loadProducts(page.value, pageSize))
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 13px; }
 .toolbar .el-input { max-width: 360px; }
 .pagination { justify-content: flex-end; margin-top: 16px; }
-@media (max-width: 680px) { .page-shell { padding: 12px; } .page-header { flex-direction: column; } }
+@media (max-width: 680px) {
+  .page-shell { padding: 16px; }
+  .page-header { align-items: flex-start; flex-direction: column; padding: 16px; }
+  .header-actions, .header-actions :deep(.el-button) { width: 100%; }
+  .content-card { padding: 16px; }
+  .toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
+  .toolbar .el-input { width: 100%; max-width: none; }
+}
+@media (max-width: 480px) {
+  .page-shell { padding: 12px; }
+  .content-card { padding: 12px; }
+}
 </style>

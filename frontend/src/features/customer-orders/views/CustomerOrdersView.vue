@@ -159,14 +159,27 @@ onMounted(loadOrders)
 </template>
 
 <style scoped>
-.page-shell { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
+.page-shell { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .page-shell.embedded { min-height: auto; padding: 0; background: transparent; }
-.page-header, .content-card { border: 1px solid var(--erp-border); border-radius: 10px; background: white; box-shadow: var(--erp-shadow-sm); }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 20px 24px; }
+.page-header, .content-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 20px 24px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
 .page-header span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-.page-header h1 { margin: 5px 0 0; }
+.page-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 .content-card { padding: 20px; }
 .content-card.embedded { border: 0; box-shadow: none; padding: 0; }
-.search { width: 360px; margin-bottom: 16px; }
+.search { width: min(384px, 100%); margin-bottom: 16px; }
 .pagination { justify-content: flex-end; margin-top: 16px; }
+@media (max-width: 760px) {
+  .page-shell:not(.embedded) { padding: 16px; }
+  .page-header { align-items: flex-start; flex-direction: column; gap: 16px; padding: 16px; }
+  .page-header > div:last-child { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .page-header :deep(.el-button) { width: 100%; margin: 0; }
+  .content-card { padding: 16px; }
+  .search { width: 100%; }
+}
+@media (max-width: 480px) {
+  .page-shell:not(.embedded) { padding: 12px; }
+  .content-card { padding: 12px; }
+  .page-header > div:last-child { grid-template-columns: 1fr; }
+}
 </style>

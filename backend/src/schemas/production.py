@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -117,6 +118,28 @@ class DepartmentWorkerHistoryEnvelope(ProductionModel):
     data: list[DepartmentWorkerHistoryItem]
 
 
+class DepartmentWorkerPayItem(ProductionModel):
+    item_name: str
+    procedure_name: str
+    tag_names: list[str]
+    qualified_quantity: int
+    unit_price: Decimal | None
+    pay_amount: Decimal | None
+
+
+class DepartmentWorkerPaySummary(ProductionModel):
+    worker_id: int
+    month: str
+    qualified_quantity: int
+    total_pay: Decimal
+    unpriced_quantity: int
+    items: list[DepartmentWorkerPayItem]
+
+
+class DepartmentWorkerPayEnvelope(ProductionModel):
+    data: DepartmentWorkerPaySummary
+
+
 class WorkOrderCreate(ProductionModel):
     repository_id: int | None = Field(default=None, gt=0)
     procedure_tag_stock_id: int | None = Field(default=None, gt=0)
@@ -199,8 +222,11 @@ class WorkOrderResponse(ProductionModel):
     qc_required: bool
     input_production_item_ids: list[int]
     customer_order_no: str
+    factory_code: str
+    product_name: str
     part_no: str
     part_name: str
+    procedure_name: str
     work_order_name: str
     remark: str
     worker_id: int | None

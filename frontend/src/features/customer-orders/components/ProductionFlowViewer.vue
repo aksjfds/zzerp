@@ -5,26 +5,30 @@ import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import LogicFlow, { PolylineEdge, PolylineEdgeModel } from '@logicflow/core'
 import { Control } from '@logicflow/extension'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
+import { materialColors } from '@/shared/material/tokens'
 import { toLogicFlowData } from '@/shared/process-flow/adapter'
 import type { FlowEdge, ProcessFlow } from '@/shared/process-flow/types'
-import type { ProductionNodeStat } from '../domain/types'
+import type { ProductionEdgeStat, ProductionNodeStat } from '../domain/types'
 
 const props = defineProps<{
   flow: ProcessFlow
   stats: ProductionNodeStat[]
+  edgeStats: ProductionEdgeStat[]
 }>()
 const container = ref<HTMLDivElement>()
 let instance: LogicFlow | null = null
+let resizeObserver: ResizeObserver | null = null
+let resizeFrame: number | null = null
 type ProductionEdgeState = 'pending' | 'active' | 'done'
 
 const EDGE_STYLE: Record<ProductionEdgeState, Record<string, unknown>> = {
-  pending: { stroke: '#c0c4cc', strokeWidth: 2, strokeDasharray: '6 4' },
-  active: { stroke: '#e6a23c', strokeWidth: 3, strokeDasharray: '10 5' },
-  done: { stroke: '#67c23a', strokeWidth: 3 },
+  pending: { stroke: materialColors.outlineVariant, strokeWidth: 2, strokeDasharray: '6 4' },
+  active: { stroke: materialColors.warning, strokeWidth: 3, strokeDasharray: '10 5' },
+  done: { stroke: materialColors.success, strokeWidth: 3 },
 }
 
 const EDGE_ANIMATION_STYLE: Record<string, unknown> = {
-  stroke: '#e6a23c',
+  stroke: materialColors.warning,
   strokeDasharray: '14,6',
   strokeDashoffset: '100%',
   animationDuration: '12s',
@@ -61,17 +65,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function edgeState(edge: FlowEdge, status: Map<string, ProductionNodeStat>): ProductionEdgeState {
+function edgeState(
+  edge: FlowEdge,
+  status: Map<string, ProductionNodeStat>,
+  edgeStatus: Map<string, ProductionEdgeStat>,
+): ProductionEdgeState {
   const sourceStat = status.get(edge.source_node_id)
-  const targetStat = status.get(edge.target_node_id)
-  if (!targetStat) return 'pending'
-  if (targetStat.current_quantity > 0) return 'active'
-  if (targetStat.entered_quantity > 0 || (sourceStat?.transferred_quantity ?? 0) > 0) return 'done'
+  if ((sourceStat?.current_quantity ?? 0) > 0) return 'active'
+  if ((edgeStatus.get(edge.id)?.transferred_quantity ?? 0) > 0) return 'done'
   return 'pending'
 }
 
-function shouldAnimateEdge(edge: FlowEdge, status: Map<string, ProductionNodeStat>): boolean {
-  return edgeState(edge, status) === 'active'
+function shouldAnimateEdge(
+  edge: FlowEdge,
+  status: Map<string, ProductionNodeStat>,
+  edgeStatus: Map<string, ProductionEdgeStat>,
+): boolean {
+  return edgeState(edge, status, edgeStatus) === 'active'
 }
 
 function productionFlow(status: Map<string, ProductionNodeStat>): ProcessFlow {
@@ -88,14 +98,22 @@ function productionFlow(status: Map<string, ProductionNodeStat>): ProcessFlow {
   }
 }
 
-function withProductionEdgeStyle(data: LogicFlow.GraphConfigData, status: Map<string, ProductionNodeStat>): LogicFlow.GraphConfigData {
+function withProductionEdgeStyle(
+  data: LogicFlow.GraphConfigData,
+  status: Map<string, ProductionNodeStat>,
+  edgeStatus: Map<string, ProductionEdgeStat>,
+): LogicFlow.GraphConfigData {
   const businessEdges = new Map(props.flow.edges.map(edge => [edge.id, edge]))
   return {
     ...data,
     edges: data.edges?.map(edge => {
       const businessEdge = businessEdges.get(edge.id ?? '')
-      const state = businessEdge ? edgeState(businessEdge, status) : 'pending'
-      const animated = businessEdge ? shouldAnimateEdge(businessEdge, status) : false
+      const state = businessEdge
+        ? edgeState(businessEdge, status, edgeStatus)
+        : 'pending'
+      const animated = businessEdge
+        ? shouldAnimateEdge(businessEdge, status, edgeStatus)
+        : false
       return {
         ...edge,
         properties: {
@@ -109,10 +127,13 @@ function withProductionEdgeStyle(data: LogicFlow.GraphConfigData, status: Map<st
   }
 }
 
-function applyEdgeAnimation(status: Map<string, ProductionNodeStat>) {
+function applyEdgeAnimation(
+  status: Map<string, ProductionNodeStat>,
+  edgeStatus: Map<string, ProductionEdgeStat>,
+) {
   if (!instance) return
   props.flow.edges.forEach(edge => {
-    if (shouldAnimateEdge(edge, status)) {
+    if (shouldAnimateEdge(edge, status, edgeStatus)) {
       instance?.openEdgeAnimation(edge.id)
     } else {
       instance?.closeEdgeAnimation(edge.id)
@@ -123,10 +144,25 @@ function applyEdgeAnimation(status: Map<string, ProductionNodeStat>) {
 function render() {
   if (!instance) return
   const status = new Map(props.stats.map(node => [node.flow_node_id, node]))
-  instance.renderRawData(withProductionEdgeStyle(toLogicFlowData(productionFlow(status)), status))
+  const edgeStatus = new Map(props.edgeStats.map(edge => [edge.flow_edge_id, edge]))
+  instance.renderRawData(withProductionEdgeStyle(
+    toLogicFlowData(productionFlow(status)),
+    status,
+    edgeStatus,
+  ))
   requestAnimationFrame(() => {
-    applyEdgeAnimation(status)
+    applyEdgeAnimation(status, edgeStatus)
     instance?.fitView(24, 24)
+  })
+}
+
+function fitToContainer() {
+  if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+  resizeFrame = requestAnimationFrame(() => {
+    resizeFrame = null
+    if (!instance || !container.value) return
+    instance.resize(container.value.clientWidth, container.value.clientHeight)
+    instance.fitView(24, 24)
   })
 }
 
@@ -148,10 +184,17 @@ onMounted(async () => {
     { type: 'production-polyline', view: PolylineEdge, model: ProductionPolylineEdgeModel },
   ])
   render()
+  resizeObserver = new ResizeObserver(fitToContainer)
+  resizeObserver.observe(container.value)
+  fitToContainer()
 })
 
-watch(() => [props.flow, props.stats], render, { deep: true })
+watch(() => [props.flow, props.stats, props.edgeStats], render, { deep: true })
 onBeforeUnmount(() => {
+  resizeObserver?.disconnect()
+  resizeObserver = null
+  if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
+  resizeFrame = null
   instance?.destroy()
   instance = null
 })
@@ -197,24 +240,28 @@ onBeforeUnmount(() => {
 }
 
 .legend-line.pending {
-  border-color: #c0c4cc;
+  border-color: var(--md-outline-variant);
   border-style: dashed;
 }
 
 .legend-line.active {
-  border-color: #e6a23c;
+  border-color: var(--erp-warning);
   border-style: dashed;
 }
 
 .legend-line.done {
-  border-color: #67c23a;
+  border-color: var(--erp-success);
 }
 
 .production-flow-viewer {
   width: 100%;
   height: clamp(560px, 70vh, 840px);
-  border: 1px solid var(--erp-border);
-  border-radius: 8px;
-  background: #fff;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: var(--erp-radius);
+  background: var(--md-surface-container-lowest);
+}
+@media (max-width: 760px) {
+  .production-flow-legend { gap: 8px 12px; }
+  .production-flow-viewer { height: clamp(420px, 65vh, 560px); }
 }
 </style>

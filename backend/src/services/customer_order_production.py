@@ -17,6 +17,7 @@ from services.errors import DomainError
 from services.production_flow import load_product_flow
 from services.work_order_presenters import production_item_name
 from services.work_order_progress import rework_pending_by_order
+from services.work_order_support import production_item_unit_quantity
 
 
 def get_customer_order_production(order_id: int) -> dict:
@@ -123,8 +124,14 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
 
     current_by_node: dict[str, int] = defaultdict(int)
     current_inputs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
+    current_repository_sources: dict[str, dict[str, list[Repository]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
     for repository in repositories:
         current_by_node[repository.flow_node_id] += repository.quantity
+        current_repository_sources[repository.flow_node_id][
+            repository.source_flow_node_id
+        ].append(repository)
         production_item = session.get(ProductionItem, repository.production_item_id)
         source_name = (
             production_item_name(session, production_item, set())
@@ -169,14 +176,22 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
     for flow_node_id, quantity in held_qc_by_node.items():
         current_by_node[flow_node_id] += max(quantity, 0)
     pending_rework = rework_pending_by_order(work_order_batches)
+    pending_rework_by_node: dict[str, int] = defaultdict(int)
     for work_order in work_orders:
-        current_by_node[work_order.flow_node_id] += pending_rework.get(work_order.id, 0)
+        quantity = pending_rework.get(work_order.id, 0)
+        current_by_node[work_order.flow_node_id] += quantity
+        pending_rework_by_node[work_order.flow_node_id] += quantity
 
     material_inputs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     entered_by_node: dict[str, int] = defaultdict(int)
     transferred_by_node: dict[str, int] = defaultdict(int)
+    transferred_by_edge: dict[str, int] = defaultdict(int)
     abnormal_by_node: dict[str, int] = defaultdict(int)
     assembly_output_by_node: dict[str, int] = defaultdict(int)
+    edge_id_by_nodes = {
+        (edge["source_node_id"], edge["target_node_id"]): edge["id"]
+        for edge in flow.get("edges", [])
+    }
     for movement in movements:
         if (
             movement.target_flow_node_id
@@ -199,6 +214,11 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             transferred_by_node[movement.source_flow_node_id] += movement.quantity
         if movement.source_flow_node_id and movement.movement_type in {"scrap", "lost"}:
             abnormal_by_node[movement.source_flow_node_id] += movement.quantity
+        edge_id = edge_id_by_nodes.get(
+            (movement.source_flow_node_id, movement.target_flow_node_id)
+        )
+        if edge_id is not None:
+            transferred_by_edge[edge_id] += movement.quantity
         movement_batch = batches_by_id.get(movement.work_order_batch_id)
         if (
             movement.movement_type == "assembly_output"
@@ -237,8 +257,41 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             output_quantity = assembly_output_by_node[node_id]
             output_pcs = int(node.get("output_pcs", 1))
             transferred = output_quantity // output_pcs if output_pcs else 0
-            entered = 0
-            current = 0
+            required_source_ids = {
+                edge["source_node_id"]
+                for edge in flow.get("edges", [])
+                if edge["target_node_id"] == node_id
+            }
+            source_capacities = []
+            for source_id in required_source_ids:
+                source_repositories = current_repository_sources[node_id].get(
+                    source_id, []
+                )
+                if not source_repositories:
+                    source_capacities.append(0)
+                    continue
+                first_item = session.get(
+                    ProductionItem,
+                    source_repositories[0].production_item_id,
+                )
+                bom_item = (
+                    session.get(ProductBom, first_item.product_bom_id)
+                    if first_item and first_item.product_bom_id else None
+                )
+                unit_quantity = (
+                    production_item_unit_quantity(session, first_item, bom_item)
+                    if first_item else 1
+                )
+                source_quantity = sum(
+                    repository.quantity for repository in source_repositories
+                )
+                source_capacities.append(
+                    source_quantity // unit_quantity if unit_quantity else 0
+                )
+            current = (
+                min(source_capacities, default=0)
+                + pending_rework_by_node[node_id]
+            )
         elif node_type == "shipping":
             output_quantity = entered
             transferred = entered
@@ -255,6 +308,13 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
                 "input_details": input_details,
             }
         )
+    edge_stats = [
+        {
+            "flow_edge_id": edge["id"],
+            "transferred_quantity": transferred_by_edge[edge["id"]],
+        }
+        for edge in flow.get("edges", [])
+    ]
     return {
         "customer_order_item_id": order_item.id,
         "product_name": product.product_name,
@@ -263,4 +323,5 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         "order_quantity": order_item.quantity,
         "process_flow": flow,
         "node_stats": stats,
+        "edge_stats": edge_stats,
     }

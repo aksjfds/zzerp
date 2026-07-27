@@ -6,13 +6,23 @@ import { useAuthStore } from '@/stores/auth'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
 import WorkerOverview from '@/features/workers/components/WorkerOverview.vue'
 import { useAdminWorkers } from '../composables/useAdminWorkers'
+import PmcPartProgressView from './PmcPartProgressView.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const props = withDefaults(defineProps<{ mode?: 'admin' | 'pmc' }>(), { mode: 'admin' })
 const isPmc = computed(() => props.mode === 'pmc')
-const activeTab = ref<'orders' | 'workers'>('orders')
+const activeTab = ref<'orders' | 'parts' | 'workers'>('orders')
 const workers = useAdminWorkers()
+const partProgressView = ref<{ load: () => Promise<void> }>()
+
+function refresh() {
+  if (isPmc.value && activeTab.value === 'parts') {
+    void partProgressView.value?.load()
+    return
+  }
+  void workers.loadWorkers()
+}
 
 async function logout() {
   await authStore.logout()
@@ -27,7 +37,7 @@ onMounted(workers.loadWorkers)
     <AdminPageHeader
       :account-label="isPmc ? 'PMC 生产计划与物料控制' : 'admin 管理员'"
       :title="isPmc ? 'PMC 看板' : '管理看板'"
-      @refresh="workers.loadWorkers"
+      @refresh="refresh"
       @logout="logout"
     />
     <ElTabs v-model="activeTab" class="admin-tabs">
@@ -39,6 +49,11 @@ onMounted(workers.loadWorkers)
             :show-product-progress="isPmc"
           />
         </section>
+      </ElTabPane>
+      <ElTabPane v-if="isPmc" label="配件生产进度" name="parts">
+        <PmcPartProgressView
+          ref="partProgressView"
+        />
       </ElTabPane>
       <ElTabPane label="工人总览" name="workers">
         <WorkerOverview
@@ -52,8 +67,10 @@ onMounted(workers.loadWorkers)
           :history="workers.history.value"
           :workers-loading="workers.workersLoading.value"
           :history-loading="workers.historyLoading.value"
+          :pay-summary="workers.paySummary.value"
+          :pay-loading="workers.payLoading.value"
           @select="workers.selectWorker"
-          @month-change="workers.loadHistory"
+          @month-change="workers.loadWorkerDetails"
         />
       </ElTabPane>
     </ElTabs>
@@ -61,14 +78,15 @@ onMounted(workers.loadWorkers)
 </template>
 
 <style scoped>
-.admin-page { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
+.admin-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .admin-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }
 .orders-card {
   padding: 20px;
   border: 1px solid var(--erp-border);
-  border-radius: 10px;
-  background: #fff;
+  border-radius: var(--erp-radius-lg);
+  background: var(--md-surface-container-lowest);
   box-shadow: var(--erp-shadow-sm);
 }
-@media (max-width: 900px) { .admin-page { padding: 12px; } }
+@media (max-width: 900px) { .admin-page { padding: 16px; } }
+@media (max-width: 560px) { .admin-page { padding: 12px; } .orders-card { padding: 12px; border-radius: var(--erp-radius); } }
 </style>

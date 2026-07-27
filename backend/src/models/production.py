@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    Numeric,
     Text,
     TIMESTAMP,
     UniqueConstraint,
@@ -268,6 +270,39 @@ class WorkOrder(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
     closed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+
+
+class WorkOrderPayDetail(Base):
+    __tablename__ = "work_order_pay_detail"
+    __table_args__ = (
+        CheckConstraint(
+            "tag_name = btrim(tag_name) AND tag_name <> ''",
+            name="ck_work_order_pay_detail_tag_name",
+        ),
+        CheckConstraint(
+            "unit_price >= 0",
+            name="ck_work_order_pay_detail_nonnegative",
+        ),
+        UniqueConstraint(
+            "work_order_id",
+            "procedure_tag_id",
+            name="uq_work_order_pay_detail_order_tag",
+        ),
+        Index("idx_work_order_pay_detail_order", "work_order_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("work_order.id", ondelete="CASCADE"), nullable=False
+    )
+    procedure_tag_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure_tag.id"), nullable=False
+    )
+    tag_name: Mapped[str] = mapped_column(Text, nullable=False)
+    unit_price: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
 
 
 class WorkOrderBatch(Base):

@@ -30,6 +30,26 @@ export type WorkerHistoryItem = {
   completed_at: string | null
 }
 
+export type MoneyValue = number | string
+
+export type WorkerPayItem = {
+  item_name: string
+  procedure_name: string
+  tag_names: string[]
+  qualified_quantity: number
+  unit_price: MoneyValue | null
+  pay_amount: MoneyValue | null
+}
+
+export type WorkerPaySummary = {
+  worker_id: number
+  month: string
+  qualified_quantity: number
+  total_pay: MoneyValue
+  unpriced_quantity: number
+  items: WorkerPayItem[]
+}
+
 export type WorkerWorkshop = {
   id: number
   department_id: number

@@ -58,9 +58,9 @@ function itemName(batch: PendingQcBatch) {
 
 .qc-card {
   padding: 14px;
-  border: 1px solid var(--erp-border);
-  border-radius: 8px;
-  background: #f8fafc;
+  border: 1px solid transparent;
+  border-radius: var(--erp-radius);
+  background: var(--md-surface-container-low);
 }
 
 .qc-card p {
@@ -70,4 +70,8 @@ function itemName(batch: PendingQcBatch) {
 }
 
 .dispatch-row { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-top: 10px; }
+@media (max-width: 560px) {
+  .dispatch-row { align-items: stretch; flex-direction: column; }
+  .dispatch-row :deep(.el-button) { width: 100%; }
+}
 </style>

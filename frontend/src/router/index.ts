@@ -23,6 +23,11 @@ const router = createRouter({
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
     },
     {
+      path: '/cnc', name: 'cnc-department',
+      component: () => import('@/features/production/views/CncDepartmentView.vue'),
+      meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },
+    },
+    {
       path: '/polish', name: 'polish-department',
       component: () => import('@/features/production/views/PolishDepartmentView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCTION_PERMISSIONS.view] },

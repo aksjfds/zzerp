@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from pydantic import BaseModel, ConfigDict
 
 
@@ -43,3 +45,25 @@ class AdminWorkerHistoryItem(AdminModel):
 
 class AdminWorkerHistoryEnvelope(AdminModel):
     data: list[AdminWorkerHistoryItem]
+
+
+class AdminWorkerPayItem(AdminModel):
+    item_name: str
+    procedure_name: str
+    tag_names: list[str]
+    qualified_quantity: int
+    unit_price: Decimal | None
+    pay_amount: Decimal | None
+
+
+class AdminWorkerPaySummary(AdminModel):
+    worker_id: int
+    month: str
+    qualified_quantity: int
+    total_pay: Decimal
+    unpriced_quantity: int
+    items: list[AdminWorkerPayItem]
+
+
+class AdminWorkerPayEnvelope(AdminModel):
+    data: AdminWorkerPaySummary

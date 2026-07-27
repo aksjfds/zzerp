@@ -84,4 +84,5 @@ function submit() {
 <style scoped>
 .inspection-title { margin-top: 0; font-weight: 700; }
 .inspection-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 560px) { .inspection-grid { grid-template-columns: 1fr; } }
 </style>

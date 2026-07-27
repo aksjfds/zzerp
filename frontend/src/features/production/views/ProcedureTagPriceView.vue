@@ -23,6 +23,7 @@ type EditablePart = Omit<ProcedureTagPricePart, 'procedures'> & {
 
 const departmentNames: Record<string, string> = {
   stamp: '冲压部门',
+  cnc: '机加部门',
   polish: '表面处理部门',
   warehouse: '仓库部门',
 }
@@ -196,11 +197,11 @@ onMounted(load)
 </template>
 
 <style scoped>
-.tag-price-page { min-height: 100vh; padding: 24px; background: var(--erp-bg); }
-.filter-bar { display: flex; gap: 10px; margin-bottom: 18px; padding: 16px 20px; border: 1px solid var(--erp-border); border-radius: 10px; background: #fff; box-shadow: var(--erp-shadow-sm); }
+.tag-price-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
+.filter-bar { display: flex; gap: 10px; margin-bottom: 18px; }
 .filter-bar .el-input { max-width: 440px; }
 .part-list { display: grid; gap: 16px; min-height: 220px; }
-.part-card { padding: 20px; border: 1px solid var(--erp-border); border-radius: 10px; background: #fff; box-shadow: var(--erp-shadow-sm); }
+.part-card { padding: 20px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
 .part-card header div { display: grid; gap: 5px; }
 .part-card header strong { font-size: 17px; }
 .part-card header span { color: var(--el-text-color-secondary); font-size: 13px; }
@@ -209,11 +210,15 @@ onMounted(load)
 .procedure-config > .el-select { width: min(680px, 100%); }
 .locked-hint { margin: 8px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
 .price-list { display: grid; gap: 8px; margin: 12px 0; }
-.price-row { display: grid; grid-template-columns: minmax(120px, 1fr) 180px 58px; gap: 10px; align-items: center; max-width: 680px; padding: 10px 12px; border-radius: 7px; background: var(--el-fill-color-light); }
+.price-row { display: grid; grid-template-columns: minmax(120px, 1fr) 180px 58px; gap: 10px; align-items: center; max-width: 680px; padding: 10px 12px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
 .price-row em { color: var(--el-text-color-secondary); font-size: 12px; font-style: normal; }
 .pagination { justify-content: flex-end; margin-top: 18px; }
 @media (max-width: 700px) {
+  .tag-price-page { padding: 16px; }
   .filter-bar { align-items: stretch; flex-direction: column; }
+  .filter-bar .el-input, .filter-bar :deep(.el-button) { width: 100%; max-width: none; }
+  .part-card { padding: 16px; }
   .price-row { grid-template-columns: 1fr; }
 }
+@media (max-width: 480px) { .tag-price-page { padding: 12px; } .part-card { padding: 12px; border-radius: var(--erp-radius); } }
 </style>

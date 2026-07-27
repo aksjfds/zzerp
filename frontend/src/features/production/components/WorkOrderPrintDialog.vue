@@ -104,6 +104,16 @@ td { width: 35%; }
 .progress-grid strong { font-size: 18px; }
 .print-sheet footer { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; margin-top: 52px; }
 
+@media screen and (max-width: 620px) {
+  .print-sheet header { align-items: flex-start; flex-direction: column; gap: 12px; }
+  .order-number { text-align: left; }
+  th, td { padding: 8px 6px; font-size: 12px; }
+  .progress-grid { grid-template-columns: repeat(2, 1fr); }
+  .progress-grid div { border: 0; border-bottom: 1px solid #374151; }
+  .progress-grid div + div { border-left: 0; }
+  .print-sheet footer { grid-template-columns: 1fr; gap: 16px; margin-top: 32px; }
+}
+
 @media print {
   :global(body > *) { display: none !important; }
   :global(body > .work-order-print-overlay--active) {
@@ -121,7 +131,7 @@ td { width: 35%; }
   .print-sheet { position: static; width: auto; padding: 0; }
   :global(.work-order-print-dialog .el-dialog__header),
   :global(.work-order-print-dialog .el-dialog__footer) { display: none !important; }
-  :global(.work-order-print-dialog.el-dialog) { width: auto !important; margin: 0 !important; padding: 0 !important; border: 0 !important; box-shadow: none !important; }
+  :global(.work-order-print-dialog.el-dialog) { width: auto !important; margin: 0 !important; padding: 0 !important; border: 0 !important; border-radius: 0 !important; background: #fff !important; box-shadow: none !important; }
   :global(.work-order-print-dialog .el-dialog__body) { padding: 0 !important; }
 }
 

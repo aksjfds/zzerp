@@ -64,16 +64,17 @@ async function submitLogin() {
   place-items: center;
   padding: 24px;
   background:
-    linear-gradient(135deg, rgb(37 99 235 / 12%), transparent 38%),
-    linear-gradient(180deg, #f8fafc 0, #edf1f5 100%);
+    radial-gradient(circle at 12% 10%, var(--md-primary-container), transparent 34%),
+    radial-gradient(circle at 88% 90%, var(--md-tertiary-container), transparent 30%),
+    var(--md-surface);
 }
 
 .login-panel {
   width: min(420px, 100%);
   padding: 30px;
-  border: 1px solid var(--erp-border);
-  border-radius: 8px;
-  background: #ffffff;
+  border: 1px solid var(--md-outline-variant);
+  border-radius: 28px;
+  background: var(--md-surface-container-lowest);
   box-shadow: var(--erp-shadow-md);
 }
 
@@ -89,15 +90,17 @@ async function submitLogin() {
   width: 44px;
   height: 44px;
   place-items: center;
-  border-radius: 8px;
-  background: #2563eb;
-  color: #ffffff;
+  border-radius: 14px;
+  background: var(--md-primary);
+  color: var(--md-on-primary);
   font-weight: 800;
 }
 
 .login-brand h1 {
   margin: 0;
   font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -.02em;
 }
 
 .login-brand p {
@@ -114,5 +117,9 @@ async function submitLogin() {
 .login-button {
   width: 100%;
   margin-top: 6px;
+}
+@media (max-width: 480px) {
+  .login-page { padding: 12px; }
+  .login-panel { padding: 24px 20px; border-radius: 24px; }
 }
 </style>

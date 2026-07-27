@@ -57,11 +57,6 @@ onBeforeUnmount(() => clearTimeout(timer))
   gap: 12px;
   align-items: center;
   margin-bottom: 18px;
-  padding: 16px 20px;
-  border: 1px solid var(--erp-border);
-  border-radius: 10px;
-  background: #fff;
-  box-shadow: var(--erp-shadow-sm);
 }
 
 .actions {
@@ -77,6 +72,10 @@ onBeforeUnmount(() => clearTimeout(timer))
 
   .repository-filter-bar :deep(.el-date-editor),
   .repository-filter-bar .el-select {
+    width: 100%;
+  }
+
+  .actions, .actions :deep(.el-button) {
     width: 100%;
   }
 }

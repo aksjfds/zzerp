@@ -1,6 +1,6 @@
 import type { UserProfile } from '@/types/auth'
 
-const PRODUCTION_DEPARTMENTS = new Set(['stamp', 'polish', 'qc', 'assembly', 'warehouse'])
+const PRODUCTION_DEPARTMENTS = new Set(['stamp', 'cnc', 'polish', 'qc', 'assembly', 'warehouse'])
 
 export function getDefaultDashboardPath(user?: UserProfile | null) {
   if (!user) return '/login'

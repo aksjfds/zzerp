@@ -1,10 +1,15 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { queryAdminWorkerHistory, queryAdminWorkerOverview } from '../api/admin'
+import {
+  queryAdminWorkerHistory,
+  queryAdminWorkerOverview,
+  queryAdminWorkerPay,
+} from '../api/admin'
 import type {
   AdminWorker,
   AdminWorkerDepartment,
   AdminWorkerHistoryItem,
+  AdminWorkerPaySummary,
 } from '../domain/types'
 
 function currentLocalMonth() {
@@ -16,11 +21,13 @@ export function useAdminWorkers() {
   const departments = ref<AdminWorkerDepartment[]>([])
   const workersLoading = ref(false)
   const historyLoading = ref(false)
+  const payLoading = ref(false)
   const selectedWorker = ref<AdminWorker>()
   const selectedMonth = ref(currentLocalMonth())
   const workerKeyword = ref('')
   const departmentFilter = ref<number | ''>('')
   const history = ref<AdminWorkerHistoryItem[]>([])
+  const paySummary = ref<AdminWorkerPaySummary>()
 
   const allWorkers = computed(() => departments.value.flatMap(item => item.workers))
   const filteredWorkers = computed(() => {
@@ -52,12 +59,34 @@ export function useAdminWorkers() {
     }
   }
 
+  async function loadPay() {
+    if (!selectedWorker.value) {
+      paySummary.value = undefined
+      return
+    }
+    payLoading.value = true
+    try {
+      paySummary.value = await queryAdminWorkerPay(
+        selectedWorker.value.id,
+        selectedMonth.value,
+      )
+    } catch {
+      ElMessage.error('工人工资加载失败')
+    } finally {
+      payLoading.value = false
+    }
+  }
+
+  async function loadWorkerDetails() {
+    await Promise.all([loadHistory(), loadPay()])
+  }
+
   async function loadWorkers() {
     workersLoading.value = true
     try {
       departments.value = await queryAdminWorkerOverview()
       if (!selectedWorker.value) selectedWorker.value = filteredWorkers.value[0]
-      await loadHistory()
+      await loadWorkerDetails()
     } catch {
       ElMessage.error('工人总览加载失败')
     } finally {
@@ -67,13 +96,13 @@ export function useAdminWorkers() {
 
   async function selectWorker(worker: AdminWorker) {
     selectedWorker.value = worker
-    await loadHistory()
+    await loadWorkerDetails()
   }
 
   watch(filteredWorkers, async (workers) => {
     if (!selectedWorker.value || !workers.some(worker => worker.id === selectedWorker.value?.id)) {
       selectedWorker.value = workers[0]
-      await loadHistory()
+      await loadWorkerDetails()
     }
   })
 
@@ -84,6 +113,7 @@ export function useAdminWorkers() {
     history,
     historyLoading,
     loadHistory,
+    loadWorkerDetails,
     loadWorkers,
     selectedMonth,
     selectedWorker,
@@ -91,5 +121,7 @@ export function useAdminWorkers() {
     selectWorker,
     workerKeyword,
     workersLoading,
+    payLoading,
+    paySummary,
   }
 }

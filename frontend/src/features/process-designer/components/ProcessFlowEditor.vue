@@ -143,13 +143,16 @@ onMounted(async () => { procedures.value = await queryProcedures() })
 .section-heading { margin-bottom: 14px; }
 h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
-.designer-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 560px; border: 1px solid var(--erp-border); border-radius: 8px; overflow: hidden; }
+.designer-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 560px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); overflow: hidden; }
 .designer-shell.has-property { grid-template-columns: 190px minmax(0, 1fr) 220px; }
 .designer-shell.is-readonly { grid-template-columns: minmax(0, 1fr); }
 .designer-shell.is-readonly.has-property { grid-template-columns: minmax(0, 1fr) 220px; }
 @media (max-width: 900px) {
-  .designer-shell:not(.is-readonly), .designer-shell.has-property:not(.is-readonly) { grid-template-columns: 150px minmax(600px, 1fr); overflow-x: auto; }
-  .designer-shell.is-readonly, .designer-shell.is-readonly.has-property { grid-template-columns: minmax(600px, 1fr); overflow-x: auto; }
-  .designer-shell :deep(.property-panel) { display: none; }
+  .designer-shell:not(.is-readonly), .designer-shell.has-property:not(.is-readonly) { grid-template-columns: minmax(0, 1fr); }
+  .designer-shell.is-readonly, .designer-shell.is-readonly.has-property { grid-template-columns: minmax(0, 1fr); }
+  .designer-shell :deep(.property-panel) { border-top: 1px solid var(--md-outline-variant); border-left: 0; }
+}
+@media (max-width: 600px) {
+  .designer-shell { min-height: 480px; border-radius: var(--erp-radius); }
 }
 </style>

@@ -364,6 +364,18 @@ CREATE TABLE work_order (
         REFERENCES procedure_tag_stock(id, production_item_id)
 );
 
+-- work_order_pay_detail：在标记工单开单时冻结各标记的计件单价，避免后续调价改变历史工资。
+CREATE TABLE work_order_pay_detail (
+    id BIGSERIAL PRIMARY KEY,
+    work_order_id BIGINT NOT NULL REFERENCES work_order(id) ON DELETE CASCADE,
+    procedure_tag_id BIGINT NOT NULL REFERENCES procedure_tag(id),
+    tag_name TEXT NOT NULL
+        CHECK (tag_name = btrim(tag_name) AND tag_name <> ''),
+    unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (work_order_id, procedure_tag_id)
+);
+
 -- work_order_material：保存装配工单占用的来源库存、生产对象和物料数量。
 CREATE TABLE work_order_material (
     id BIGSERIAL PRIMARY KEY,
@@ -1296,6 +1308,8 @@ CREATE INDEX idx_work_order_tag_position
         target_tag_set_id,
         id DESC
     ) WHERE work_order_type = 'tag';
+CREATE INDEX idx_work_order_pay_detail_order
+    ON work_order_pay_detail(work_order_id);
 CREATE INDEX idx_work_order_batch_order ON work_order_batch(work_order_id);
 CREATE INDEX idx_work_order_batch_rework_source
     ON work_order_batch(rework_source_batch_id);
@@ -1374,6 +1388,9 @@ INSERT INTO users (username, password, department, role, permissions) VALUES
     'stamp', '1', 'stamp', 'operator', 'production:view,production:manage'
 ),
 (
+    'cnc', '1', 'cnc', 'operator', 'production:view,production:manage'
+),
+(
     'polish', '1', 'polish', 'operator', 'production:view,production:manage'
 ),
 (
@@ -1391,29 +1408,68 @@ INSERT INTO department (department_name, department_code) VALUES
 ('业务部', 'business'),
 ('PMC部门', 'pmc'),
 ('冲压部门', 'stamp'),
+('机加部门', 'cnc'),
 ('表面处理部门', 'polish'),
 ('QC部门', 'qc'),
 ('装配部门', 'assembly'),
 ('仓库部门', 'warehouse');
 
 INSERT INTO workshop (department_id, workshop_name)
-SELECT id, '激光开料车间' FROM department WHERE department_code = 'stamp';
-
-INSERT INTO workshop (department_id, workshop_name)
-SELECT id, '手磨车间' FROM department WHERE department_code = 'polish';
-
-INSERT INTO workshop (department_id, workshop_name)
-SELECT id, '外购件管理' FROM department WHERE department_code = 'warehouse';
-
-INSERT INTO procedure (workshop_id, procedure_name)
-SELECT id, '激光开料' FROM workshop WHERE workshop_name = '激光开料车间';
-
-INSERT INTO procedure (workshop_id, procedure_name)
-SELECT id, '粗光' FROM workshop WHERE workshop_name = '手磨车间';
+SELECT department.id, source.workshop_name
+FROM (
+    VALUES
+        ('stamp', '激光开料车间'),
+        ('stamp', '水磨车间'),
+        ('stamp', '溜光车间'),
+        ('stamp', '热锻车间'),
+        ('stamp', '冷锻车间'),
+        ('stamp', '冲床车间'),
+        ('cnc', 'CNC1车间'),
+        ('cnc', 'CNC2车间'),
+        ('cnc', '钻床'),
+        ('cnc', '车床'),
+        ('polish', '手磨1车间'),
+        ('polish', '手磨2'),
+        ('polish', '手磨3'),
+        ('polish', '砂机车间'),
+        ('polish', '干滚'),
+        ('polish', '电抛'),
+        ('polish', '震机'),
+        ('polish', '清光'),
+        ('warehouse', '外购件管理')
+) AS source(department_code, workshop_name)
+JOIN department
+    ON department.department_code = source.department_code;
 
 INSERT INTO procedure (workshop_id, procedure_name, procedure_type)
-SELECT id, '外购入库', 'purchase_receipt'
-FROM workshop WHERE workshop_name = '外购件管理';
+SELECT workshop.id, source.procedure_name, source.procedure_type
+FROM (
+    VALUES
+        ('stamp', '激光开料车间', '激光开料', 'standard'),
+        ('stamp', '水磨车间', '水磨', 'standard'),
+        ('stamp', '溜光车间', '溜光', 'standard'),
+        ('stamp', '热锻车间', '热压', 'standard'),
+        ('stamp', '冷锻车间', '冷锻', 'standard'),
+        ('stamp', '冲床车间', '冲压', 'standard'),
+        ('cnc', 'CNC1车间', 'CNC加工', 'standard'),
+        ('cnc', 'CNC2车间', 'CNC加工', 'standard'),
+        ('cnc', '钻床', '钻孔', 'standard'),
+        ('cnc', '车床', '车削', 'standard'),
+        ('polish', '手磨1车间', '粗光', 'standard'),
+        ('polish', '手磨2', '粗光', 'standard'),
+        ('polish', '手磨3', '粗光', 'standard'),
+        ('polish', '砂机车间', '砂机', 'standard'),
+        ('polish', '干滚', '干滚', 'standard'),
+        ('polish', '电抛', '电抛', 'standard'),
+        ('polish', '震机', '震机', 'standard'),
+        ('polish', '清光', '清光', 'standard'),
+        ('warehouse', '外购件管理', '外购入库', 'purchase_receipt')
+) AS source(department_code, workshop_name, procedure_name, procedure_type)
+JOIN department
+    ON department.department_code = source.department_code
+JOIN workshop
+    ON workshop.department_id = department.id
+    AND workshop.workshop_name = source.workshop_name;
 
 -- 标记只作为开工单时的名称建议，不定义固定路线或先后顺序。
 INSERT INTO procedure_tag (
@@ -1422,7 +1478,37 @@ INSERT INTO procedure_tag (
 )
 SELECT id, '全工序'
 FROM procedure
-WHERE procedure_name = '激光开料';
+WHERE procedure_name IN (
+    '激光开料',
+    '水磨',
+    '溜光',
+    '冷锻',
+    '冲压',
+    'CNC加工',
+    '钻孔',
+    '车削',
+    '砂机',
+    '干滚',
+    '电抛',
+    '震机',
+    '清光'
+);
+
+INSERT INTO procedure_tag (
+    procedure_id,
+    tag_name
+)
+SELECT
+    procedure.id,
+    tag.tag_name
+FROM procedure
+CROSS JOIN (
+    VALUES
+        ('热压1'),
+        ('热压2'),
+        ('热压3')
+) AS tag(tag_name)
+WHERE procedure.procedure_name = '热压';
 
 INSERT INTO procedure_tag (
     procedure_id,
@@ -1609,7 +1695,7 @@ JOIN procedure AS polish_procedure
     ON polish_procedure.procedure_name = '粗光'
 JOIN workshop AS polish_workshop
     ON polish_workshop.id = polish_procedure.workshop_id
-    AND polish_workshop.workshop_name = '手磨车间'
+    AND polish_workshop.workshop_name = '手磨1车间'
 JOIN department AS polish_department
     ON polish_department.id = polish_workshop.department_id
     AND polish_department.department_code = 'polish'
@@ -1632,7 +1718,13 @@ INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT '表面处理示例工人', department.id, workshop.id
 FROM department
 JOIN workshop ON workshop.department_id = department.id
-WHERE department.department_code = 'polish' AND workshop.workshop_name = '手磨车间';
+WHERE department.department_code = 'polish' AND workshop.workshop_name = '手磨1车间';
+
+INSERT INTO worker (worker_name, department_id, workshop_id)
+SELECT '机加示例工人', department.id, workshop.id
+FROM department
+JOIN workshop ON workshop.department_id = department.id
+WHERE department.department_code = 'cnc' AND workshop.workshop_name = 'CNC1车间';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT 'QC示例工人', id, NULL FROM department WHERE department_code = 'qc';

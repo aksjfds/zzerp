@@ -1,11 +1,12 @@
 from sqlalchemy import select
 
 from database import SessionLocal
-from models.organization import Department, Procedure
+from models.organization import Department, Procedure, ProcedureTagPrice
 from models.production import (
     ProductionItem,
     WorkOrder,
     WorkOrderBatch,
+    WorkOrderPayDetail,
 )
 from services.errors import DomainError
 from services.procedure_tags import (
@@ -77,7 +78,32 @@ def create_tag_order(
     configured_ids = {tag.id for tag in configured_tags}
     if not target_ids <= configured_ids:
         raise DomainError("procedure_tag_set_not_configured", "目标标记组合超出配件配置")
-    return create_order_record(
+    prices = {
+        item.procedure_tag_id: item.unit_price
+        for item in session.scalars(
+            select(ProcedureTagPrice).where(
+                ProcedureTagPrice.product_id == production_item.product_id,
+                ProcedureTagPrice.product_version == production_item.product_version,
+                ProcedureTagPrice.origin_flow_node_id
+                == production_item.origin_flow_node_id,
+                ProcedureTagPrice.procedure_id == procedure.id,
+                ProcedureTagPrice.procedure_tag_id.in_(
+                    [tag.id for tag in applied_tags]
+                ),
+            )
+        )
+    }
+    missing_price_names = [
+        tag.tag_name
+        for tag in applied_tags
+        if prices.get(tag.id) is None
+    ]
+    if missing_price_names:
+        raise DomainError(
+            "procedure_tag_price_required",
+            f"请先配置标记单价：{'、'.join(missing_price_names)}",
+        )
+    order = create_order_record(
         session,
         source=source,
         production_item=production_item,
@@ -91,6 +117,16 @@ def create_tag_order(
         source_tag_set_id=source_tag_set_id,
         target_tag_set_id=target_set.id,
     )
+    session.add_all([
+        WorkOrderPayDetail(
+            work_order_id=order.id,
+            procedure_tag_id=tag.id,
+            tag_name=tag.tag_name,
+            unit_price=prices[tag.id],
+        )
+        for tag in applied_tags
+    ])
+    return order
 
 
 def submit_tag_order(
