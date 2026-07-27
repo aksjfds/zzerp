@@ -25,7 +25,7 @@ class StampDepartmentApi(
 API = StampDepartmentApi(
     DepartmentDescriptor(
         code="stamp",
-        name="冲压部门",
+        name="冲压部",
         execution_module="standard_execution",
         capabilities=frozenset(
             {

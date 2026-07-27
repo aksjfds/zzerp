@@ -25,7 +25,7 @@ class CncDepartmentApi(
 API = CncDepartmentApi(
     DepartmentDescriptor(
         code="cnc",
-        name="机加部门",
+        name="机加部",
         execution_module="standard_execution",
         capabilities=frozenset(
             {

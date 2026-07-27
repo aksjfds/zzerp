@@ -123,7 +123,7 @@ CREATE TABLE product_process_flow (
 -- 部门、车间、工艺、标记与人员
 -- ------------------------------------------------------------
 
--- department：保存系统中的工程、业务、生产、QC、装配和仓库等部门。
+-- department：保存系统中的工程、业务、生产、QC、装配和成品等部门。
 CREATE TABLE department (
     id BIGSERIAL PRIMARY KEY,
     department_name TEXT NOT NULL UNIQUE,
@@ -1407,36 +1407,40 @@ INSERT INTO department (department_name, department_code) VALUES
 ('工程部', 'engineering'),
 ('业务部', 'business'),
 ('PMC部门', 'pmc'),
-('冲压部门', 'stamp'),
-('机加部门', 'cnc'),
-('表面处理部门', 'polish'),
+('冲压部', 'stamp'),
+('机加部', 'cnc'),
+('表面处理部', 'polish'),
 ('QC部门', 'qc'),
-('装配部门', 'assembly'),
-('仓库部门', 'warehouse');
+('装配部', 'assembly'),
+('成品部', 'warehouse');
 
 INSERT INTO workshop (department_id, workshop_name)
 SELECT department.id, source.workshop_name
 FROM (
     VALUES
         ('stamp', '激光开料车间'),
-        ('stamp', '水磨车间'),
-        ('stamp', '溜光车间'),
         ('stamp', '热锻车间'),
         ('stamp', '冷锻车间'),
         ('stamp', '冲床车间'),
-        ('cnc', 'CNC1车间'),
-        ('cnc', 'CNC2车间'),
-        ('cnc', '钻床'),
-        ('cnc', '车床'),
-        ('polish', '手磨1车间'),
-        ('polish', '手磨2'),
-        ('polish', '手磨3'),
+        ('stamp', '回火车间'),
+        ('stamp', '除油车间'),
+        ('stamp', '水磨车间'),
+        ('stamp', '溜磨车间'),
+        ('cnc', 'CNC车间'),
+        ('cnc', 'NC车间'),
+        ('cnc', '钻床车间'),
+        ('cnc', '激光焊接车间'),
+        ('polish', '手磨车间'),
         ('polish', '砂机车间'),
-        ('polish', '干滚'),
-        ('polish', '电抛'),
-        ('polish', '震机'),
-        ('polish', '清光'),
-        ('warehouse', '外购件管理')
+        ('polish', '自动平磨车间'),
+        ('polish', '双面水磨车间'),
+        ('polish', '酸洗车间'),
+        ('polish', '电抛车间'),
+        ('polish', '振机车间'),
+        ('polish', '干滚车间'),
+        ('polish', '清光车间'),
+        ('assembly', '装包车间'),
+        ('warehouse', '成品车间')
 ) AS source(department_code, workshop_name)
 JOIN department
     ON department.department_code = source.department_code;
@@ -1446,24 +1450,28 @@ SELECT workshop.id, source.procedure_name, source.procedure_type
 FROM (
     VALUES
         ('stamp', '激光开料车间', '激光开料', 'standard'),
-        ('stamp', '水磨车间', '水磨', 'standard'),
-        ('stamp', '溜光车间', '溜光', 'standard'),
         ('stamp', '热锻车间', '热压', 'standard'),
         ('stamp', '冷锻车间', '冷锻', 'standard'),
         ('stamp', '冲床车间', '冲压', 'standard'),
-        ('cnc', 'CNC1车间', 'CNC加工', 'standard'),
-        ('cnc', 'CNC2车间', 'CNC加工', 'standard'),
-        ('cnc', '钻床', '钻孔', 'standard'),
-        ('cnc', '车床', '车削', 'standard'),
-        ('polish', '手磨1车间', '粗光', 'standard'),
-        ('polish', '手磨2', '粗光', 'standard'),
-        ('polish', '手磨3', '粗光', 'standard'),
+        ('stamp', '回火车间', '回火', 'standard'),
+        ('stamp', '除油车间', '除油', 'standard'),
+        ('stamp', '水磨车间', '水磨', 'standard'),
+        ('stamp', '溜磨车间', '溜磨', 'standard'),
+        ('cnc', 'CNC车间', 'CNC加工', 'standard'),
+        ('cnc', 'NC车间', 'NC加工', 'standard'),
+        ('cnc', '钻床车间', '钻孔', 'standard'),
+        ('cnc', '激光焊接车间', '激光焊接', 'standard'),
+        ('polish', '手磨车间', '粗光', 'standard'),
         ('polish', '砂机车间', '砂机', 'standard'),
-        ('polish', '干滚', '干滚', 'standard'),
-        ('polish', '电抛', '电抛', 'standard'),
-        ('polish', '震机', '震机', 'standard'),
-        ('polish', '清光', '清光', 'standard'),
-        ('warehouse', '外购件管理', '外购入库', 'purchase_receipt')
+        ('polish', '自动平磨车间', '自动平磨', 'standard'),
+        ('polish', '双面水磨车间', '双面水磨', 'standard'),
+        ('polish', '酸洗车间', '酸洗', 'standard'),
+        ('polish', '电抛车间', '电抛', 'standard'),
+        ('polish', '振机车间', '振机', 'standard'),
+        ('polish', '干滚车间', '干滚', 'standard'),
+        ('polish', '清光车间', '清光', 'standard'),
+        ('assembly', '装包车间', '装包', 'standard'),
+        ('warehouse', '成品车间', '外购入库', 'purchase_receipt')
 ) AS source(department_code, workshop_name, procedure_name, procedure_type)
 JOIN department
     ON department.department_code = source.department_code
@@ -1481,17 +1489,24 @@ FROM procedure
 WHERE procedure_name IN (
     '激光开料',
     '水磨',
-    '溜光',
+    '溜磨',
     '冷锻',
     '冲压',
+    '回火',
+    '除油',
     'CNC加工',
+    'NC加工',
     '钻孔',
-    '车削',
+    '激光焊接',
     '砂机',
+    '自动平磨',
+    '双面水磨',
+    '酸洗',
     '干滚',
     '电抛',
-    '震机',
-    '清光'
+    '振机',
+    '清光',
+    '装包'
 );
 
 INSERT INTO procedure_tag (
@@ -1695,7 +1710,7 @@ JOIN procedure AS polish_procedure
     ON polish_procedure.procedure_name = '粗光'
 JOIN workshop AS polish_workshop
     ON polish_workshop.id = polish_procedure.workshop_id
-    AND polish_workshop.workshop_name = '手磨1车间'
+    AND polish_workshop.workshop_name = '手磨车间'
 JOIN department AS polish_department
     ON polish_department.id = polish_workshop.department_id
     AND polish_department.department_code = 'polish'
@@ -1718,24 +1733,27 @@ INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT '表面处理示例工人', department.id, workshop.id
 FROM department
 JOIN workshop ON workshop.department_id = department.id
-WHERE department.department_code = 'polish' AND workshop.workshop_name = '手磨1车间';
+WHERE department.department_code = 'polish' AND workshop.workshop_name = '手磨车间';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT '机加示例工人', department.id, workshop.id
 FROM department
 JOIN workshop ON workshop.department_id = department.id
-WHERE department.department_code = 'cnc' AND workshop.workshop_name = 'CNC1车间';
+WHERE department.department_code = 'cnc' AND workshop.workshop_name = 'CNC车间';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT 'QC示例工人', id, NULL FROM department WHERE department_code = 'qc';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
-SELECT '装配示例工人', id, NULL FROM department WHERE department_code = 'assembly';
-
-INSERT INTO worker (worker_name, department_id, workshop_id)
-SELECT '仓库示例员工', department.id, workshop.id
+SELECT '装配示例工人', department.id, workshop.id
 FROM department
 JOIN workshop ON workshop.department_id = department.id
-WHERE department.department_code = 'warehouse' AND workshop.workshop_name = '外购件管理';
+WHERE department.department_code = 'assembly' AND workshop.workshop_name = '装包车间';
+
+INSERT INTO worker (worker_name, department_id, workshop_id)
+SELECT '成品示例员工', department.id, workshop.id
+FROM department
+JOIN workshop ON workshop.department_id = department.id
+WHERE department.department_code = 'warehouse' AND workshop.workshop_name = '成品车间';
 
 COMMIT;

@@ -104,7 +104,7 @@ def assembly_work_order_create(
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     if user["department"] not in {"sys", "assembly"}:
-        raise HTTPException(status_code=403, detail="只有装配部门可以开装配工单")
+        raise HTTPException(status_code=403, detail="只有装配部可以开装配工单")
     return {
         "data": department_api(
             "assembly",

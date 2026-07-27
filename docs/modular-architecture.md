@@ -29,11 +29,11 @@ Model、Repository 或数据库 Session。
 
 ## 部门模块
 
-`backend/src/departments/` 中的冲压、CNC、表面处理、仓库、装配和 QC
+`backend/src/departments/` 中的冲压、机加、表面处理、成品、装配和 QC
 都是独立注册包。部门模块拥有能力声明、权限和表现策略，但不复制生产状态。
 
 - 冲压、CNC、表面处理使用 `standard_execution`。
-- 仓库使用 `purchasing`。
+- 成品部使用 `purchasing`。
 - 装配使用 `assembly`。
 - QC 使用 `quality`。
 - 表面处理额外声明专用打印能力。

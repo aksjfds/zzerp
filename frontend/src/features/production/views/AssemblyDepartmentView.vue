@@ -30,7 +30,7 @@ onMounted(load)
 
 <template>
   <main class="production-page">
-    <DepartmentPageHeader department-name="装配部门" description="到达装配节点的配件资料与装配工单。" workers-path="/production/assembly/workers" @refresh="refresh" />
+    <DepartmentPageHeader department-name="装配部" description="到达装配节点的配件资料与装配工单。" workers-path="/production/assembly/workers" @refresh="refresh" />
     <RepositoryFilterBar @search="applyFilters" />
     <section class="production-workspace">
       <div class="production-card">

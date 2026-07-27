@@ -4,7 +4,7 @@ import type { DepartmentModule } from '../contracts'
 
 export const warehouseDepartment: DepartmentModule = {
   code: 'warehouse',
-  name: '仓库部门',
+  name: '成品部',
   routePath: '/warehouse',
   routeName: 'warehouse-department',
   requiredPermission: PRODUCTION_PERMISSIONS.view,

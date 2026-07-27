@@ -25,7 +25,7 @@ class WarehouseDepartmentApi(
 API = WarehouseDepartmentApi(
     DepartmentDescriptor(
         code="warehouse",
-        name="仓库部门",
+        name="成品部",
         execution_module="purchasing",
         capabilities=frozenset(
             {

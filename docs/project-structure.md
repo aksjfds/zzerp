@@ -83,7 +83,7 @@
 | `stamp` | `standard_execution` | 库存、工单、工人、标准执行 |
 | `cnc` | `standard_execution` | 库存、工单、工人、标准执行 |
 | `polish` | `standard_execution` | 标准能力和专用打印 |
-| `warehouse` | `purchasing` | 库存、工单、工人、外购 |
+| `warehouse` | `purchasing` | 成品库存、工单、工人、外购 |
 | `assembly` | `assembly` | 库存、工单、工人、装配 |
 | `qc` | `quality` | 工人、检验和放行 |
 

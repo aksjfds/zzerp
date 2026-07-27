@@ -62,7 +62,7 @@ def create_assembly_work_order(
     user_department: str,
 ) -> dict:
     if user_department not in {"sys", "assembly"}:
-        raise DomainError("department_access_denied", "只有装配部门可以开装配工单", status_code=403)
+        raise DomainError("department_access_denied", "只有装配部可以开装配工单", status_code=403)
     with SessionLocal.begin() as session:
         unique_repository_ids = sorted(set(repository_ids))
         repositories = load_repositories(
@@ -107,7 +107,7 @@ def create_assembly_work_order(
         if worker_id and (
             worker is None or worker.department_id != assembly_department_id
         ):
-            raise DomainError("worker_invalid", "工人不属于装配部门")
+            raise DomainError("worker_invalid", "工人不属于装配部")
 
         material_quantities = _allocate_materials(
             session, repositories, input_items, quantity
@@ -208,7 +208,7 @@ def submit_assembly_work_order(
     user_department: str,
 ) -> dict:
     if user_department not in {"sys", "assembly"}:
-        raise DomainError("department_access_denied", "只有装配部门可以操作装配工单", status_code=403)
+            raise DomainError("department_access_denied", "只有装配部可以操作装配工单", status_code=403)
     remaining = order_remaining_quantity(order)
     if quantity != remaining:
         raise DomainError("partial_completion_not_allowed", "装配工单必须一次完成剩余数量")
@@ -368,7 +368,7 @@ def resubmit_assembly_rework_batch(
         if quantity <= 0 or quantity > available:
             raise DomainError("qc_rework_quantity_exceeded", "返工送检数量超过待返工数量")
         if user_department not in {"sys", "assembly"}:
-            raise DomainError("department_access_denied", "只有装配部门可以提交返工送检", status_code=403)
+            raise DomainError("department_access_denied", "只有装配部可以提交返工送检", status_code=403)
 
         output_item = load_production_item(session, order.production_item_id)
         if output_item is None:

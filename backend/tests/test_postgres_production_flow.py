@@ -11,6 +11,60 @@ pytestmark = pytest.mark.skipif(
     reason="set RUN_DATABASE_TESTS=1 on a disposable PostgreSQL database",
 )
 
+EXPECTED_PRODUCTION_WORKSHOPS = {
+    "stamp": {
+        "激光开料车间",
+        "热锻车间",
+        "冷锻车间",
+        "冲床车间",
+        "回火车间",
+        "除油车间",
+        "水磨车间",
+        "溜磨车间",
+    },
+    "cnc": {"CNC车间", "NC车间", "钻床车间", "激光焊接车间"},
+    "polish": {
+        "手磨车间",
+        "砂机车间",
+        "自动平磨车间",
+        "双面水磨车间",
+        "酸洗车间",
+        "电抛车间",
+        "振机车间",
+        "干滚车间",
+        "清光车间",
+    },
+    "assembly": {"装包车间"},
+    "warehouse": {"成品车间"},
+}
+
+
+def test_production_department_workshops_match_catalog():
+    from sqlalchemy import select
+
+    from database import SessionLocal
+    from modules.organization.persistence import Department, Workshop
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            select(
+                Department.department_code,
+                Workshop.workshop_name,
+            )
+            .join(Workshop, Workshop.department_id == Department.id)
+            .where(
+                Department.department_code.in_(
+                    EXPECTED_PRODUCTION_WORKSHOPS
+                )
+            )
+        ).all()
+
+    actual = {
+        code: {workshop for row_code, workshop in rows if row_code == code}
+        for code in EXPECTED_PRODUCTION_WORKSHOPS
+    }
+    assert actual == EXPECTED_PRODUCTION_WORKSHOPS
+
 
 def _seed_context():
     from sqlalchemy import select
@@ -34,7 +88,7 @@ def _seed_context():
             .join(Workshop, Workshop.id == Procedure.workshop_id)
             .where(
                 Procedure.procedure_name == "粗光",
-                Workshop.workshop_name == "手磨1车间",
+                Workshop.workshop_name == "手磨车间",
             )
         )
         tag_names = list(

@@ -25,7 +25,7 @@ class AssemblyDepartmentApi(
 API = AssemblyDepartmentApi(
     DepartmentDescriptor(
         code="assembly",
-        name="装配部门",
+        name="装配部",
         execution_module="assembly",
         capabilities=frozenset(
             {

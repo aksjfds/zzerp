@@ -22,10 +22,10 @@ type EditablePart = Omit<ProcedureTagPricePart, 'procedures'> & {
 }
 
 const departmentNames: Record<string, string> = {
-  stamp: '冲压部门',
-  cnc: '机加部门',
-  polish: '表面处理部门',
-  warehouse: '仓库部门',
+  stamp: '冲压部',
+  cnc: '机加部',
+  polish: '表面处理部',
+  warehouse: '成品部',
 }
 const route = useRoute()
 const authStore = useAuthStore()

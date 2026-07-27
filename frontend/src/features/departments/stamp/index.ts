@@ -4,7 +4,7 @@ import type { DepartmentModule } from '../contracts'
 
 export const stampDepartment: DepartmentModule = {
   code: 'stamp',
-  name: '冲压部门',
+  name: '冲压部',
   routePath: '/stamp',
   routeName: 'stamp-department',
   requiredPermission: PRODUCTION_PERMISSIONS.view,

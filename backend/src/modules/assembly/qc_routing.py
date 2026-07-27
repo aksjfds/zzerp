@@ -51,5 +51,5 @@ def route_rework(
         {"assembly"},
     ).get("assembly")
     if assembly_department_id is None:
-        raise DomainError("department_not_found", "装配部门不存在")
+        raise DomainError("department_not_found", "装配部不存在")
     return assembly_department_id

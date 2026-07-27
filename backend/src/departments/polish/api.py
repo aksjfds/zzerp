@@ -28,7 +28,7 @@ class PolishDepartmentApi(
 API = PolishDepartmentApi(
     DepartmentDescriptor(
         code="polish",
-        name="表面处理部门",
+        name="表面处理部",
         execution_module="standard_execution",
         capabilities=frozenset(
             {

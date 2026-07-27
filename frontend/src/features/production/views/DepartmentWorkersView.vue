@@ -12,12 +12,12 @@ const departmentCode = String(
   route.params.departmentCode || route.meta.departmentCode || '',
 )
 const departmentNames: Record<string, string> = {
-  stamp: '冲压部门',
-  cnc: '机加部门',
-  polish: '表面处理部门',
+  stamp: '冲压部',
+  cnc: '机加部',
+  polish: '表面处理部',
   qc: 'QC部门',
-  assembly: '装配部门',
-  warehouse: '仓库部门',
+  assembly: '装配部',
+  warehouse: '成品部',
 }
 const controller = useDepartmentWorkers(departmentCode)
 const departmentName = computed(() => (
