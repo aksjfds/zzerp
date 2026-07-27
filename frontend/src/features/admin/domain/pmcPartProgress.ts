@@ -29,8 +29,16 @@ export type PmcPartProgressRow = {
   departments: Record<string, PmcPartDepartmentProgress>
 }
 
+export type PmcOrderPartProgress = {
+  customer_order_id: number
+  customer_order_no: string
+  customer_name: string
+  order_status: string
+  parts: PmcPartProgressRow[]
+}
+
 export type PmcPartProgressResult = {
-  data: PmcPartProgressRow[]
+  data: PmcOrderPartProgress[]
   total: number
   departments: PmcProgressDepartment[]
 }

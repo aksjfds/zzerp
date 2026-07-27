@@ -81,6 +81,16 @@ async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete'
 }
 
 async function openOrder(order: CustomerOrder) {
+  if (props.readOnly) {
+    await router.push({
+      path: '/pmc',
+      query: {
+        tab: 'parts',
+        orderId: String(order.id),
+      },
+    })
+    return
+  }
   if (order.status === 'draft' && !props.readOnly) {
     await router.push(`/business/orders/${order.id}`)
     return

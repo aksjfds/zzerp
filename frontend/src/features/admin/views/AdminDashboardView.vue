@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import CustomerOrdersView from '@/features/customer-orders/views/CustomerOrdersView.vue'
 import { useAuthStore } from '@/stores/auth'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
@@ -9,10 +9,19 @@ import { useAdminWorkers } from '../composables/useAdminWorkers'
 import PmcPartProgressView from './PmcPartProgressView.vue'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const props = withDefaults(defineProps<{ mode?: 'admin' | 'pmc' }>(), { mode: 'admin' })
 const isPmc = computed(() => props.mode === 'pmc')
-const activeTab = ref<'orders' | 'parts' | 'workers'>('orders')
+type DashboardTab = 'orders' | 'parts' | 'workers'
+const routeTab = (): DashboardTab => (
+  isPmc.value && route.query.tab === 'parts'
+    ? 'parts'
+    : route.query.tab === 'workers'
+      ? 'workers'
+      : 'orders'
+)
+const activeTab = ref<DashboardTab>(routeTab())
 const workers = useAdminWorkers()
 const partProgressView = ref<{ load: () => Promise<void> }>()
 
@@ -28,6 +37,29 @@ async function logout() {
   await authStore.logout()
   router.replace('/login')
 }
+
+watch(
+  () => route.query.tab,
+  () => {
+    activeTab.value = routeTab()
+  },
+)
+watch(activeTab, (tab) => {
+  const query = { ...route.query }
+  if (tab === 'orders') {
+    delete query.tab
+    delete query.orderId
+  } else {
+    query.tab = tab
+    if (tab !== 'parts') delete query.orderId
+  }
+  if (
+    route.query.tab !== query.tab
+    || route.query.orderId !== query.orderId
+  ) {
+    void router.replace({ query })
+  }
+})
 
 onMounted(workers.loadWorkers)
 </script>

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from modules.assembly import work_orders as assembly_work_orders
+from modules.planning.part_progress import _group_rows_by_order
 from modules.workforce import workers
 
 
@@ -96,3 +97,36 @@ def test_worker_pay_starts_from_monthly_qualified_batches(monkeypatch):
     }
     assert result["qualified_quantity"] == 0
     assert result["items"] == []
+
+
+def test_pmc_part_progress_groups_rows_without_splitting_orders():
+    rows = [
+        {
+            "customer_order_id": 7,
+            "customer_order_no": "SO-007",
+            "customer_name": "客户甲",
+            "order_status": "planned",
+            "production_item_id": 101,
+        },
+        {
+            "customer_order_id": 8,
+            "customer_order_no": "SO-008",
+            "customer_name": "客户乙",
+            "order_status": "confirmed",
+            "production_item_id": 201,
+        },
+        {
+            "customer_order_id": 7,
+            "customer_order_no": "SO-007",
+            "customer_name": "客户甲",
+            "order_status": "planned",
+            "production_item_id": 102,
+        },
+    ]
+
+    grouped = _group_rows_by_order(rows)
+
+    assert [item["customer_order_id"] for item in grouped] == [7, 8]
+    assert [
+        row["production_item_id"] for row in grouped[0]["parts"]
+    ] == [101, 102]

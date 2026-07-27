@@ -33,6 +33,7 @@ def list_part_progress(
     page: int,
     page_size: int,
     keyword: str | None,
+    customer_order_id: int | None,
     order_status: str | None,
     department_code: str | None,
     only_exception: bool,
@@ -70,6 +71,8 @@ def list_part_progress(
         )
         if order_status:
             statement = statement.where(CustomerOrder.status == order_status)
+        if customer_order_id is not None:
+            statement = statement.where(CustomerOrder.id == customer_order_id)
         production_items = list(session.scalars(statement).all())
         if not production_items:
             return [], 0, [_department(item) for item in ordered_departments]
@@ -202,10 +205,11 @@ def list_part_progress(
             row.pop("search_text", None)
             rows.append(row)
 
-        total = len(rows)
+        orders = _group_rows_by_order(rows)
+        total = len(orders)
         offset = (page - 1) * page_size
         return (
-            rows[offset:offset + page_size],
+            orders[offset:offset + page_size],
             total,
             [_department(item) for item in ordered_departments],
         )
@@ -474,3 +478,21 @@ def _group(items, attribute: str) -> dict:
     for item in items:
         grouped[getattr(item, attribute)].append(item)
     return grouped
+
+
+def _group_rows_by_order(rows: list[dict]) -> list[dict]:
+    orders: dict[int, dict] = {}
+    for row in rows:
+        order_id = row["customer_order_id"]
+        group = orders.setdefault(
+            order_id,
+            {
+                "customer_order_id": order_id,
+                "customer_order_no": row["customer_order_no"],
+                "customer_name": row["customer_name"],
+                "order_status": row["order_status"],
+                "parts": [],
+            },
+        )
+        group["parts"].append(row)
+    return list(orders.values())

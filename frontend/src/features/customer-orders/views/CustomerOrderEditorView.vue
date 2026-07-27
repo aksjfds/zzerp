@@ -3,10 +3,9 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
-import ProductionFlowViewer from '../components/ProductionFlowViewer.vue'
 import { queryOrderProduct, queryOrderProducts, type OrderProduct } from '../api/orderProducts'
-import { createCustomerOrder, queryCustomerOrder, queryCustomerOrderProduction, updateCustomerOrder } from '../api/customerOrders'
-import type { CustomerOrderItem, CustomerOrderPayload, CustomerOrderProduction } from '../domain/types'
+import { createCustomerOrder, queryCustomerOrder, updateCustomerOrder } from '../api/customerOrders'
+import type { CustomerOrderItem, CustomerOrderPayload } from '../domain/types'
 import { queryCustomers, type Customer } from '@/features/customers/api/customers'
 import { useAuthStore } from '@/stores/auth'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
@@ -25,7 +24,6 @@ const productLoading = ref(false)
 let productSearchSequence = 0
 const status = ref('draft')
 const revision = ref<number | null>(null)
-const production = ref<CustomerOrderProduction>()
 const form = reactive({
   customer_order_no: '', customer_id: null as number | null, remark: '', items: [] as CustomerOrderItem[],
 })
@@ -115,7 +113,6 @@ onMounted(async () => {
   }
   if (effectiveOrderId.value) {
     const order = await queryCustomerOrder(effectiveOrderId.value)
-    production.value = await queryCustomerOrderProduction(effectiveOrderId.value)
     status.value = order.status
     revision.value = order.revision
     Object.assign(form, {
@@ -177,23 +174,6 @@ onMounted(async () => {
         <ElTableColumn v-if="!readOnly" label="操作" width="80"><template #default="{ $index }"><ElButton link type="danger" @click="form.items.splice($index, 1)">删除</ElButton></template></ElTableColumn>
       </ElTable>
     </section>
-    <section v-if="effectiveOrderId && production" class="card">
-      <div class="heading"><h2>生产情况</h2></div>
-      <div class="product-status-list">
-        <section
-          v-for="productStatus in production.products"
-          :key="productStatus.customer_order_item_id"
-          class="product-status-section"
-        >
-          <h3>{{ productStatus.factory_code }} · {{ productStatus.product_name }} · 订单数量 {{ productStatus.order_quantity }}</h3>
-          <ProductionFlowViewer
-            :flow="productStatus.process_flow"
-            :stats="productStatus.node_stats"
-            :edge-stats="productStatus.edge_stats"
-          />
-        </section>
-      </div>
-    </section>
   </main>
 </template>
 
@@ -211,8 +191,6 @@ header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: 
 .heading h2 { margin: 0; font-size: 18px; }
 .readonly-value { color: var(--md-on-surface); line-height: 1.5; overflow-wrap: anywhere; }
 .readonly-number { font-variant-numeric: tabular-nums; }
-.product-status-section { margin-top: 14px; padding: 14px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
-.product-status-section h3 { margin: 0 0 12px; }
 @media (max-width: 760px) {
   .editor-page:not(.embedded) { padding: 16px; }
   header { align-items: flex-start; flex-direction: column; gap: 16px; padding: 16px; }
