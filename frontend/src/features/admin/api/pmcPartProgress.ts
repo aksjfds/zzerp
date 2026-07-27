@@ -6,6 +6,7 @@ export type PmcPartProgressQuery = {
   page_size: number
   keyword?: string
   customer_order_id?: number
+  focus_order_id?: number
   order_status?: string
   department_code?: string
   only_exception?: boolean

@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import '@logicflow/core/es/index.css'
-import '@logicflow/extension/lib/style/index.css'
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import LogicFlow, { PolylineEdge, PolylineEdgeModel } from '@logicflow/core'
-import { Control } from '@logicflow/extension'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
 import { materialColors } from '@/shared/material/tokens'
 import { toLogicFlowData } from '@/shared/process-flow/adapter'
@@ -174,10 +172,9 @@ onMounted(async () => {
     isSilentMode: true,
     grid: false,
     edgeType: 'polyline',
-    stopZoomGraph: false,
-    stopScrollGraph: false,
+    stopZoomGraph: true,
+    stopScrollGraph: true,
     stopMoveGraph: true,
-    plugins: [Control],
   })
   registerProcessNodes(instance)
   instance.batchRegister([

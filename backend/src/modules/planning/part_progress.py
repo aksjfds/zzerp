@@ -34,6 +34,7 @@ def list_part_progress(
     page_size: int,
     keyword: str | None,
     customer_order_id: int | None,
+    focus_order_id: int | None,
     order_status: str | None,
     department_code: str | None,
     only_exception: bool,
@@ -205,7 +206,7 @@ def list_part_progress(
             row.pop("search_text", None)
             rows.append(row)
 
-        orders = _group_rows_by_order(rows)
+        orders = _group_rows_by_order(rows, focus_order_id)
         total = len(orders)
         offset = (page - 1) * page_size
         return (
@@ -480,7 +481,10 @@ def _group(items, attribute: str) -> dict:
     return grouped
 
 
-def _group_rows_by_order(rows: list[dict]) -> list[dict]:
+def _group_rows_by_order(
+    rows: list[dict],
+    focus_order_id: int | None = None,
+) -> list[dict]:
     orders: dict[int, dict] = {}
     for row in rows:
         order_id = row["customer_order_id"]
@@ -495,4 +499,9 @@ def _group_rows_by_order(rows: list[dict]) -> list[dict]:
             },
         )
         group["parts"].append(row)
-    return list(orders.values())
+    grouped = list(orders.values())
+    if focus_order_id is not None:
+        grouped.sort(
+            key=lambda item: item["customer_order_id"] != focus_order_id
+        )
+    return grouped

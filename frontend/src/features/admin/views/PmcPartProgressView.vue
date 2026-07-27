@@ -88,7 +88,7 @@ async function load() {
       page: page.value,
       page_size: pageSize,
       keyword: filters.keyword.trim() || undefined,
-      customer_order_id: focusedOrderId.value,
+      focus_order_id: focusedOrderId.value,
       order_status: filters.orderStatus || undefined,
       department_code: filters.departmentCode || undefined,
       only_exception: filters.onlyException || undefined,
@@ -155,11 +155,6 @@ defineExpose({ load })
 
 <template>
   <section class="pmc-part-progress">
-    <div v-if="focusedOrderId" class="focused-order-tip">
-      <span>正在查看指定订单的配件进度</span>
-      <ElButton link type="primary" @click="clear">返回全部订单</ElButton>
-    </div>
-
     <div class="progress-filters">
       <ElInput
         v-model="filters.keyword"
@@ -310,16 +305,6 @@ defineExpose({ load })
   border-radius: var(--erp-radius-lg);
   background: var(--md-surface-container-lowest);
   box-shadow: var(--erp-shadow-sm);
-}
-.focused-order-tip {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 14px;
-  padding: 10px 14px;
-  border-radius: var(--erp-radius);
-  color: var(--erp-primary);
-  background: var(--md-primary-container);
 }
 .progress-filters {
   display: grid;

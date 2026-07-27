@@ -130,3 +130,26 @@ def test_pmc_part_progress_groups_rows_without_splitting_orders():
     assert [
         row["production_item_id"] for row in grouped[0]["parts"]
     ] == [101, 102]
+
+
+def test_pmc_part_progress_focuses_order_without_hiding_others():
+    rows = [
+        {
+            "customer_order_id": 7,
+            "customer_order_no": "SO-007",
+            "customer_name": "客户甲",
+            "order_status": "planned",
+            "production_item_id": 101,
+        },
+        {
+            "customer_order_id": 8,
+            "customer_order_no": "SO-008",
+            "customer_name": "客户乙",
+            "order_status": "confirmed",
+            "production_item_id": 201,
+        },
+    ]
+
+    grouped = _group_rows_by_order(rows, focus_order_id=8)
+
+    assert [item["customer_order_id"] for item in grouped] == [8, 7]
