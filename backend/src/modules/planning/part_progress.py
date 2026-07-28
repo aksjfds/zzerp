@@ -259,7 +259,7 @@ def list_department_production_progress(
         {
             "production_item_id": part["production_item_id"],
             "part_no": part["part_no"],
-            "part_name": part["part_name"],
+            "part_name": f'{part["product_name"]}-{part["part_name"]}',
             "customer_order_no": part["customer_order_no"],
             "order_date": part["order_date"],
             "order_quantity": part["target_quantity"],

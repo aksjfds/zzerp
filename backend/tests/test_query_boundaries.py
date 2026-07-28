@@ -169,6 +169,7 @@ def test_department_production_progress_exposes_requested_columns(
                         {
                             "production_item_id": 101,
                             "part_no": "P-001",
+                            "product_name": "示例产品",
                             "part_name": "主体",
                             "customer_order_no": "SO-007",
                             "order_date": "2026-07-28",
@@ -181,6 +182,7 @@ def test_department_production_progress_exposes_requested_columns(
                         {
                             "production_item_id": 102,
                             "part_no": "P-002",
+                            "product_name": "示例产品",
                             "part_name": "弹簧",
                             "customer_order_no": "SO-007",
                             "order_date": "2026-07-28",
@@ -210,7 +212,7 @@ def test_department_production_progress_exposes_requested_columns(
         {
             "production_item_id": 102,
             "part_no": "P-002",
-            "part_name": "弹簧",
+            "part_name": "示例产品-弹簧",
             "customer_order_no": "SO-007",
             "order_date": "2026-07-28",
             "order_quantity": 200,
