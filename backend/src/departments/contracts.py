@@ -9,6 +9,7 @@ CAP_PURCHASING = "purchasing"
 CAP_ASSEMBLY = "assembly"
 CAP_QUALITY = "quality"
 CAP_SPECIAL_PRINTING = "special_printing"
+CAP_PRODUCTION_PROGRESS = "production_progress"
 
 CAPABILITY_METHODS = {
     CAP_REPOSITORIES: ("list_repositories",),
@@ -25,6 +26,7 @@ CAPABILITY_METHODS = {
     CAP_ASSEMBLY: ("create_assembly_work_order",),
     CAP_QUALITY: ("list_qc_batches", "inspect_qc_batch", "dispatch_qc_batch"),
     CAP_SPECIAL_PRINTING: ("printing_profile",),
+    CAP_PRODUCTION_PROGRESS: ("list_production_progress",),
 }
 
 

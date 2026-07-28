@@ -19,10 +19,12 @@ from modules.quality.model_api import WorkOrderBatch
 from modules.standard_execution.model_api import ProcedureTagStock
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.production_core.operational_api import load_production_flow
+from modules.production_core.operational_api import load_product_flow
 from modules.production_core.operational_api import production_item_name
 from modules.production_core.operational_api import (
     calculate_work_order_progress,
     order_remaining_quantity,
+    terminal_unit_quantity,
 )
 
 
@@ -141,6 +143,25 @@ def list_part_progress(
                 reserved_repository[material.repository_id] += material.quantity
         batches_by_order = _group(batches, "work_order_id")
         movements_by_item = _group(movements, "production_item_id")
+        production_items_by_order_item = _group(
+            production_items,
+            "customer_order_item_id",
+        )
+        shipping_by_order_item = {}
+        for order_item_id, order_production_items in (
+            production_items_by_order_item.items()
+        ):
+            order_item = session.get(CustomerOrderItem, order_item_id)
+            order_movements = [
+                movement
+                for item in order_production_items
+                for movement in movements_by_item.get(item.id, [])
+            ]
+            shipping_by_order_item[order_item_id] = _shipping_summary(
+                session,
+                order_item,
+                order_movements,
+            )
         movements_by_batch = _group(
             [item for item in movements if item.work_order_batch_id is not None],
             "work_order_batch_id",
@@ -181,6 +202,7 @@ def list_part_progress(
                 reserved_repository,
                 reserved_stock,
                 assembly_processing_by_item.get(production_item.id, 0),
+                shipping_by_order_item[production_item.customer_order_item_id],
             )
             if normalized_keyword and normalized_keyword not in row["search_text"]:
                 continue
@@ -216,6 +238,44 @@ def list_part_progress(
         )
 
 
+def list_department_production_progress(
+    department_code: str,
+    page: int,
+    page_size: int,
+    keyword: str | None,
+) -> tuple[list[dict], int]:
+    orders, _, _ = list_part_progress(
+        page=1,
+        page_size=1_000_000,
+        keyword=keyword,
+        customer_order_id=None,
+        focus_order_id=None,
+        order_status=None,
+        department_code=department_code,
+        only_exception=False,
+        only_unfinished=False,
+    )
+    rows = [
+        {
+            "production_item_id": part["production_item_id"],
+            "part_no": part["part_no"],
+            "part_name": part["part_name"],
+            "customer_order_no": part["customer_order_no"],
+            "order_date": part["order_date"],
+            "order_quantity": part["target_quantity"],
+            "shipped_quantity": part["shipped_quantity"],
+            "outstanding_quantity": part["outstanding_quantity"],
+            "completion_date": part["completion_date"],
+            "remark": part["remark"],
+        }
+        for order in orders
+        for part in order["parts"]
+    ]
+    total = len(rows)
+    offset = (page - 1) * page_size
+    return rows[offset:offset + page_size], total
+
+
 def _serialize_item(
     session,
     production_item,
@@ -233,6 +293,7 @@ def _serialize_item(
     reserved_repository,
     reserved_stock,
     assembly_processing_quantity,
+    shipping_summary,
 ) -> dict:
     order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
     order = session.get(CustomerOrder, order_item.customer_order_id)
@@ -251,6 +312,35 @@ def _serialize_item(
             production_item,
             work_orders,
         )
+    )
+    item_shipping_summary = _production_item_shipping_summary(
+        context,
+        movements,
+        target_quantity,
+    )
+    if bom_item:
+        unit_quantity = max(target_quantity // order_item.quantity, 1)
+        shipped_quantity = min(
+            shipping_summary["shipped_quantity"] * unit_quantity,
+            target_quantity,
+        )
+        completion_date = shipping_summary["completion_date"]
+    else:
+        shipped_quantity = item_shipping_summary["shipped_quantity"]
+        completion_date = item_shipping_summary["completion_date"]
+    remarks = [
+        value.strip()
+        for value in (order_item.remark, order.remark)
+        if value and value.strip()
+    ]
+    part_no = (
+        bom_item.part_no
+        if bom_item
+        else context.nodes.get(
+            production_item.origin_flow_node_id,
+            {},
+        ).get("part_no")
+        or product.factory_code
     )
     cells = {
         item.department_code: _empty_cell()
@@ -383,9 +473,19 @@ def _serialize_item(
         "order_status": order.status,
         "factory_code": product.factory_code,
         "product_name": product.product_name,
+        "part_no": part_no,
         "part_name": part_name,
         "part_display_name": f"{product.factory_code}-{product.product_name}-{part_name}",
         "target_quantity": target_quantity,
+        "order_date": order.created_at.date().isoformat(),
+        "shipped_quantity": shipped_quantity,
+        "outstanding_quantity": max(target_quantity - shipped_quantity, 0),
+        "completion_date": (
+            completion_date
+            if shipped_quantity >= target_quantity
+            else None
+        ),
+        "remark": "；".join(dict.fromkeys(remarks)),
         "delivery_date": order_item.delivery_date.isoformat(),
         "departments": cells,
         "search_text": " ".join((
@@ -393,8 +493,95 @@ def _serialize_item(
             customer.customer_name,
             product.factory_code,
             product.product_name,
+            part_no,
             part_name,
         )).lower(),
+    }
+
+
+def _shipping_summary(session, order_item, movements: list) -> dict:
+    flow, nodes = load_product_flow(
+        session,
+        order_item.product_id,
+        order_item.product_version,
+    )
+    shipping_nodes = [
+        node for node in nodes.values() if node.get("type") == "shipping"
+    ]
+    if len(shipping_nodes) != 1:
+        return {"shipped_quantity": 0, "completion_date": None}
+    shipping_node = shipping_nodes[0]
+    unit_quantity = terminal_unit_quantity(
+        session,
+        flow,
+        nodes,
+        shipping_node["id"],
+    )
+    if not unit_quantity:
+        return {"shipped_quantity": 0, "completion_date": None}
+    shipments = sorted(
+        (
+            movement
+            for movement in movements
+            if movement.movement_type == "qc_dispatch"
+            and movement.target_flow_node_id == shipping_node["id"]
+        ),
+        key=lambda movement: (movement.created_at, movement.id),
+    )
+    shipped_material = sum(movement.quantity for movement in shipments)
+    shipped_quantity = min(
+        shipped_material // unit_quantity,
+        order_item.quantity,
+    )
+    completion_date = None
+    if shipped_quantity >= order_item.quantity:
+        cumulative = 0
+        target = order_item.quantity * unit_quantity
+        for movement in shipments:
+            cumulative += movement.quantity
+            if cumulative >= target:
+                completion_date = movement.created_at.date().isoformat()
+                break
+    return {
+        "shipped_quantity": shipped_quantity,
+        "completion_date": completion_date,
+    }
+
+
+def _production_item_shipping_summary(
+    context,
+    movements: list,
+    target_quantity: int,
+) -> dict:
+    shipping_node_ids = {
+        node["id"]
+        for node in context.nodes.values()
+        if node.get("type") == "shipping"
+    }
+    shipments = sorted(
+        (
+            movement
+            for movement in movements
+            if movement.movement_type == "qc_dispatch"
+            and movement.target_flow_node_id in shipping_node_ids
+        ),
+        key=lambda movement: (movement.created_at, movement.id),
+    )
+    shipped_quantity = min(
+        sum(movement.quantity for movement in shipments),
+        target_quantity,
+    )
+    completion_date = None
+    if target_quantity and shipped_quantity >= target_quantity:
+        cumulative = 0
+        for movement in shipments:
+            cumulative += movement.quantity
+            if cumulative >= target_quantity:
+                completion_date = movement.created_at.date().isoformat()
+                break
+    return {
+        "shipped_quantity": shipped_quantity,
+        "completion_date": completion_date,
     }
 
 

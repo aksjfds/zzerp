@@ -74,17 +74,17 @@
 `backend/src/departments/<code>/api.py` 是每个部门的独立公开门面。
 `departments/contracts.py` 定义能力名称与每项能力必须提供的方法，
 `departments/base.py` 只保存部门描述并执行能力守卫，
-`departments/capabilities/` 为库存、工单、人员、标准工艺、采购、装配、质检和
-打印分别实现可组合能力，
+`departments/capabilities/` 为库存、工单、人员、生产进度、标准工艺、采购、
+装配、质检和打印分别实现可组合能力，
 `departments/registry.py` 是唯一注册和解析入口。
 
 | 部门 | 执行模块 | 能力 |
 | --- | --- | --- |
-| `stamp` | `standard_execution` | 库存、工单、工人、标准执行 |
-| `cnc` | `standard_execution` | 库存、工单、工人、标准执行 |
-| `polish` | `standard_execution` | 标准能力和专用打印 |
-| `warehouse` | `purchasing` | 成品库存、工单、工人、外购 |
-| `assembly` | `assembly` | 库存、工单、工人、装配 |
+| `stamp` | `standard_execution` | 库存、工单、工人、标准执行、生产进度 |
+| `cnc` | `standard_execution` | 库存、工单、工人、标准执行、生产进度 |
+| `polish` | `standard_execution` | 标准能力、专用打印、生产进度 |
+| `warehouse` | `purchasing` | 成品库存、工单、工人、外购、生产进度 |
+| `assembly` | `assembly` | 库存、工单、工人、装配、生产进度 |
 | `qc` | `quality` | 工人、检验和放行 |
 
 `GET /department-modules` 暴露当前部门、执行模块和能力清单。后端架构测试会

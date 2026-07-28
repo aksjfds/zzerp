@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from modules.assembly import work_orders as assembly_work_orders
+from modules.planning import part_progress
 from modules.planning.part_progress import _group_rows_by_order
 from modules.workforce import workers
 
@@ -153,3 +154,69 @@ def test_pmc_part_progress_focuses_order_without_hiding_others():
     grouped = _group_rows_by_order(rows, focus_order_id=8)
 
     assert [item["customer_order_id"] for item in grouped] == [8, 7]
+
+
+def test_department_production_progress_exposes_requested_columns(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        part_progress,
+        "list_part_progress",
+        lambda **_kwargs: (
+            [
+                {
+                    "parts": [
+                        {
+                            "production_item_id": 101,
+                            "part_no": "P-001",
+                            "part_name": "主体",
+                            "customer_order_no": "SO-007",
+                            "order_date": "2026-07-28",
+                            "target_quantity": 100,
+                            "shipped_quantity": 40,
+                            "outstanding_quantity": 60,
+                            "completion_date": None,
+                            "remark": "加急",
+                        },
+                        {
+                            "production_item_id": 102,
+                            "part_no": "P-002",
+                            "part_name": "弹簧",
+                            "customer_order_no": "SO-007",
+                            "order_date": "2026-07-28",
+                            "target_quantity": 200,
+                            "shipped_quantity": 80,
+                            "outstanding_quantity": 120,
+                            "completion_date": None,
+                            "remark": "",
+                        },
+                    ],
+                }
+            ],
+            1,
+            [],
+        ),
+    )
+
+    rows, total = part_progress.list_department_production_progress(
+        "stamp",
+        page=2,
+        page_size=1,
+        keyword=None,
+    )
+
+    assert total == 2
+    assert rows == [
+        {
+            "production_item_id": 102,
+            "part_no": "P-002",
+            "part_name": "弹簧",
+            "customer_order_no": "SO-007",
+            "order_date": "2026-07-28",
+            "order_quantity": 200,
+            "shipped_quantity": 80,
+            "outstanding_quantity": 120,
+            "completion_date": None,
+            "remark": "",
+        }
+    ]

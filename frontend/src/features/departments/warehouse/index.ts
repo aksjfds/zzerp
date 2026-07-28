@@ -9,5 +9,5 @@ export const warehouseDepartment: DepartmentModule = {
   routeName: 'warehouse-department',
   requiredPermission: PRODUCTION_PERMISSIONS.view,
   component: () => import('@/features/production/views/WarehouseDepartmentView.vue'),
-  capabilities: ['repositories', 'work_orders', 'workers', 'purchasing'],
+  capabilities: ['repositories', 'work_orders', 'workers', 'purchasing', 'production_progress'],
 }

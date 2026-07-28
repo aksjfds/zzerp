@@ -72,5 +72,18 @@ export const departmentSupportRoutes: RouteRecordRaw[] = departmentModules.flatM
       },
     })
   }
+  if (module.capabilities.includes('production_progress')) {
+    routes.push({
+      path: `/production/${module.code}/progress`,
+      name: `${module.code}-production-progress`,
+      component: () => import('@/features/production/views/DepartmentProductionProgressView.vue'),
+      meta: {
+        requiresAuth: true,
+        permissions: [module.requiredPermission],
+        departmentCode: module.code,
+        requiredDepartmentCapability: 'production_progress',
+      },
+    })
+  }
   return routes
 })

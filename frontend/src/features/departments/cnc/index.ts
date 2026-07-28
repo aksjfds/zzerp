@@ -9,5 +9,5 @@ export const cncDepartment: DepartmentModule = {
   routeName: 'cnc-department',
   requiredPermission: PRODUCTION_PERMISSIONS.view,
   component: () => import('@/features/production/views/CncDepartmentView.vue'),
-  capabilities: ['repositories', 'work_orders', 'workers', 'standard_execution'],
+  capabilities: ['repositories', 'work_orders', 'workers', 'standard_execution', 'production_progress'],
 }

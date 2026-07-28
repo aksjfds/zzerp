@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from authorization import ensure_department_access, require_any_permission
 from departments.contracts import (
+    CAP_PRODUCTION_PROGRESS,
     CAP_REPOSITORIES,
     CAP_STANDARD_EXECUTION,
     CAP_WORKERS,
@@ -11,6 +12,7 @@ from departments.contracts import (
 from departments.registry import department_api
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from schemas.production import (
+    DepartmentProductionProgressEnvelope,
     DepartmentWorkerCreate,
     DepartmentWorkerEnvelope,
     DepartmentWorkerHistoryEnvelope,
@@ -23,6 +25,25 @@ from schemas.production import (
 
 
 router = APIRouter(tags=["production"])
+
+
+@router.get(
+    "/departments/{department_code}/production-progress",
+    response_model=DepartmentProductionProgressEnvelope,
+)
+def department_production_progress(
+    department_code: str,
+    page: int = Query(default=1, gt=0),
+    page_size: int = Query(default=50, gt=0, le=200),
+    keyword: str | None = Query(default=None, max_length=200),
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, department_code)
+    data, total = department_api(
+        department_code,
+        CAP_PRODUCTION_PROGRESS,
+    ).list_production_progress(page, page_size, keyword)
+    return {"data": data, "total": total}
 
 
 @router.get(

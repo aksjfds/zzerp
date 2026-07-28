@@ -15,6 +15,32 @@ def test_department_manifest_exposes_execution_modules_and_capabilities():
     assert manifests["qc"]["execution_module"] == "quality"
     assert "quality" in manifests["qc"]["capabilities"]
     assert "special_printing" in manifests["polish"]["capabilities"]
+    assert "production_progress" in manifests["stamp"]["capabilities"]
+    assert "production_progress" in manifests["cnc"]["capabilities"]
+    assert "production_progress" in manifests["polish"]["capabilities"]
+    assert "production_progress" in manifests["assembly"]["capabilities"]
+    assert "production_progress" in manifests["warehouse"]["capabilities"]
+    assert "production_progress" not in manifests["qc"]["capabilities"]
+
+
+def test_department_production_progress_forwards_department_context(
+    monkeypatch,
+):
+    seen = {}
+    monkeypatch.setattr(
+        "departments.capabilities.production_progress.planning"
+        ".list_department_production_progress",
+        lambda *args: seen.update(args=args) or ([{"part_no": "P-001"}], 1),
+    )
+
+    result = department_api("stamp").list_production_progress(
+        2,
+        50,
+        "P-001",
+    )
+
+    assert result == ([{"part_no": "P-001"}], 1)
+    assert seen["args"] == ("stamp", 2, 50, "P-001")
 
 
 def test_assembly_department_forwards_actor_context(monkeypatch):

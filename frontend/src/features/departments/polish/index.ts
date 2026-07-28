@@ -15,5 +15,6 @@ export const polishDepartment: DepartmentModule = {
     'workers',
     'standard_execution',
     'special_printing',
+    'production_progress',
   ],
 }

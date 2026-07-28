@@ -9,6 +9,7 @@ export type DepartmentCapability =
   | 'assembly'
   | 'quality'
   | 'special_printing'
+  | 'production_progress'
 
 export type DepartmentModule = {
   code: string

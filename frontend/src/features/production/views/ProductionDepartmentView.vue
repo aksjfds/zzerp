@@ -52,6 +52,7 @@ onMounted(load)
       :department-name="departmentName"
       :description="description"
       :workers-path="`/production/${departmentCode}/workers`"
+      :progress-path="`/production/${departmentCode}/progress`"
       :tag-config-path="supportsTagConfiguration ? `/production/${departmentCode}/tag-prices` : undefined"
       @refresh="refresh"
     />

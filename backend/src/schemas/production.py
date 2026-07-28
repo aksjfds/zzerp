@@ -55,6 +55,24 @@ class RepositoryListEnvelope(ProductionModel):
     total: int
 
 
+class DepartmentProductionProgressResponse(ProductionModel):
+    production_item_id: int
+    part_no: str
+    part_name: str
+    customer_order_no: str
+    order_date: date
+    order_quantity: int
+    shipped_quantity: int
+    outstanding_quantity: int
+    completion_date: date | None
+    remark: str
+
+
+class DepartmentProductionProgressEnvelope(ProductionModel):
+    data: list[DepartmentProductionProgressResponse]
+    total: int
+
+
 class WorkerResponse(ProductionModel):
     id: int
     worker_name: str
