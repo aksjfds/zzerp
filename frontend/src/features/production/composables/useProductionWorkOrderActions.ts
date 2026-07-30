@@ -15,6 +15,11 @@ import {
 export function useProductionWorkOrderActions(
   onChanged: () => Promise<void>,
 ): WorkOrderActions {
+  function batchSequence(item: WorkOrder, batch: WorkOrderBatch) {
+    const index = item.batches.findIndex(candidate => candidate.id === batch.id)
+    return index >= 0 ? index + 1 : '—'
+  }
+
   async function submitQc(item: WorkOrder) {
     try {
       const initialRemaining = Math.max(item.quantity - item.submitted_quantity, 0)
@@ -47,7 +52,7 @@ export function useProductionWorkOrderActions(
     try {
       const { value } = await ElMessageBox.prompt(
         '请输入本次返工送检数量',
-        `工单 ${item.work_order_no} · 批次 ${batch.id}`,
+        `工单 ${item.work_order_no} · 第 ${batchSequence(item, batch)} 批`,
         {
           inputValue: String(batch.rework_pending_quantity),
           inputPattern: /^[1-9]\d*$/,

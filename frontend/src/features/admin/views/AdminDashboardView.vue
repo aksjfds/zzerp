@@ -23,15 +23,6 @@ const routeTab = (): DashboardTab => (
 )
 const activeTab = ref<DashboardTab>(routeTab())
 const workers = useAdminWorkers()
-const partProgressView = ref<{ load: () => Promise<void> }>()
-
-function refresh() {
-  if (isPmc.value && activeTab.value === 'parts') {
-    void partProgressView.value?.load()
-    return
-  }
-  void workers.loadWorkers()
-}
 
 async function logout() {
   await authStore.logout()
@@ -69,7 +60,6 @@ onMounted(workers.loadWorkers)
     <AdminPageHeader
       :account-label="isPmc ? 'PMC 生产计划与物料控制' : 'admin 管理员'"
       :title="isPmc ? 'PMC 看板' : '管理看板'"
-      @refresh="refresh"
       @logout="logout"
     />
     <ElTabs v-model="activeTab" class="admin-tabs">
@@ -83,9 +73,7 @@ onMounted(workers.loadWorkers)
         </section>
       </ElTabPane>
       <ElTabPane v-if="isPmc" label="配件生产进度" name="parts">
-        <PmcPartProgressView
-          ref="partProgressView"
-        />
+        <PmcPartProgressView />
       </ElTabPane>
       <ElTabPane label="工人总览" name="workers">
         <WorkerOverview

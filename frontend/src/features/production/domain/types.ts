@@ -81,8 +81,7 @@ export type ProductionOverviewSummary = {
 
 export type RepositoryFilters = {
   keyword: string
-  arrived_from: string | null
-  arrived_to: string | null
+  workshop_name: string | null
   work_status: 'all' | 'unprocessed' | 'processing' | 'completed'
 }
 

@@ -50,7 +50,10 @@ export const departmentSupportRoutes: RouteRecordRaw[] = departmentModules.flatM
     routes.push({
       path: `/production/${module.code}/workers`,
       name: `${module.code}-workers`,
-      component: () => import('@/features/production/views/DepartmentWorkersView.vue'),
+      redirect: {
+        path: module.routePath,
+        query: { tab: 'workers' },
+      },
       meta: {
         requiresAuth: true,
         permissions: [module.requiredPermission],
@@ -63,7 +66,10 @@ export const departmentSupportRoutes: RouteRecordRaw[] = departmentModules.flatM
     routes.push({
       path: `/production/${module.code}/tag-prices`,
       name: `${module.code}-tag-prices`,
-      component: () => import('@/features/production/views/ProcedureTagPriceView.vue'),
+      redirect: {
+        path: module.routePath,
+        query: { tab: 'tag-prices' },
+      },
       meta: {
         requiresAuth: true,
         permissions: [module.requiredPermission],
@@ -76,7 +82,10 @@ export const departmentSupportRoutes: RouteRecordRaw[] = departmentModules.flatM
     routes.push({
       path: `/production/${module.code}/progress`,
       name: `${module.code}-production-progress`,
-      component: () => import('@/features/production/views/DepartmentProductionProgressView.vue'),
+      redirect: {
+        path: module.routePath,
+        query: { tab: 'progress' },
+      },
       meta: {
         requiresAuth: true,
         permissions: [module.requiredPermission],

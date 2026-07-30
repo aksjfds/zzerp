@@ -84,6 +84,8 @@ function money(value: MoneyValue | null | undefined) {
         </div>
         <ElDatePicker
           v-model="selectedMonth"
+          placement="top-start"
+          :fallback-placements="['top-start', 'top-end']"
           type="month"
           value-format="YYYY-MM"
           format="YYYY年MM月"

@@ -90,7 +90,7 @@ export function useQcDepartment() {
     try {
       const { value } = await ElMessageBox.prompt(
         `请输入出货到${batch.target_node_label || '下一节点'}的数量`,
-        `QC批次 ${batch.id} 出货`,
+        `工单 ${batch.work_order_no} QC 出货`,
         {
           inputValue: String(batch.dispatchable_quantity),
           inputPattern: /^[1-9]\d*$/,

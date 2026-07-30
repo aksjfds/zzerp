@@ -12,6 +12,13 @@ import {
   type ProcedureTagPricePart,
 } from '../api/procedureTagPrices'
 
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  departmentCode?: string
+}>(), {
+  embedded: false,
+  departmentCode: '',
+})
 type EditableProcedure = ProcedureTagPricePart['procedures'][number] & {
   tagNames: string[]
   prices: Record<string, number | null>
@@ -30,7 +37,7 @@ const departmentNames: Record<string, string> = {
 const route = useRoute()
 const authStore = useAuthStore()
 const departmentCode = computed(() => String(
-  route.params.departmentCode || route.meta.departmentCode || '',
+  props.departmentCode || route.params.departmentCode || route.meta.departmentCode || '',
 ))
 const departmentName = computed(() => departmentNames[departmentCode.value] || departmentCode.value)
 const canManage = computed(() => authStore.hasPermission(PRODUCTION_PERMISSIONS.manage))
@@ -40,6 +47,81 @@ const keyword = ref('')
 const page = ref(1)
 const pageSize = 20
 const total = ref(0)
+const configVisible = ref(false)
+const configuringPart = ref<EditablePart>()
+const configuringProcedure = ref<EditableProcedure>()
+const draftTagNames = ref<string[]>([])
+const draftPrices = ref<Record<string, number | null>>({})
+
+function partTitle(part: EditablePart) {
+  return [part.factory_code, part.product_name, part.part_name]
+    .filter(Boolean)
+    .join('-')
+}
+
+type PriceTableRow = {
+  key: string
+  part: EditablePart
+  procedure: EditableProcedure
+  tagName: string
+  price: number | null
+  groupSize: number
+  firstInGroup: boolean
+}
+
+const tableRows = computed<PriceTableRow[]>(() => items.value.flatMap(part => (
+  part.procedures.flatMap(procedure => {
+    const tagNames = procedure.tagNames.length ? procedure.tagNames : ['']
+    return tagNames.map((tagName, index) => ({
+      key: [
+        part.product_id,
+        part.product_version,
+        part.origin_flow_node_id,
+        procedure.procedure_id,
+        tagName || 'empty',
+      ].join(':'),
+      part,
+      procedure,
+      tagName,
+      price: tagName ? procedure.prices[tagName] ?? null : null,
+      groupSize: tagNames.length,
+      firstInGroup: index === 0,
+    }))
+  })
+)))
+
+function tableSpan({
+  row,
+  columnIndex,
+}: {
+  row: PriceTableRow
+  columnIndex: number
+}) {
+  if (![0, 3].includes(columnIndex)) return [1, 1]
+  return row.firstInGroup ? [row.groupSize, 1] : [0, 0]
+}
+
+function openConfiguration(part: EditablePart, procedure: EditableProcedure) {
+  configuringPart.value = part
+  configuringProcedure.value = procedure
+  draftTagNames.value = [...procedure.tagNames]
+  draftPrices.value = { ...procedure.prices }
+  configVisible.value = true
+}
+
+async function saveConfiguration() {
+  const part = configuringPart.value
+  const procedure = configuringProcedure.value
+  if (!part || !procedure) return
+  const names = [...new Set(draftTagNames.value
+    .map(name => name.trim())
+    .filter(Boolean))]
+  procedure.tagNames = names
+  procedure.prices = Object.fromEntries(
+    names.map(name => [name, draftPrices.value[name] ?? null]),
+  )
+  if (await save(part, procedure)) configVisible.value = false
+}
 
 function editableParts(data: ProcedureTagPricePart[]): EditablePart[] {
   return data.map(part => ({
@@ -98,8 +180,10 @@ async function save(part: EditablePart, procedure: EditableProcedure) {
     )
     ElMessage.success(`${part.part_name} · ${procedure.procedure_name}配置已保存`)
     await load()
+    return true
   } catch (error) {
     ElMessage.error(getApiErrorDetail(error)?.message || '配置保存失败')
+    return false
   } finally {
     procedure.saving = false
   }
@@ -109,11 +193,12 @@ onMounted(load)
 </script>
 
 <template>
-  <main class="tag-price-page">
+  <component :is="embedded ? 'section' : 'main'" :class="{ 'tag-price-page': !embedded }">
     <DepartmentPageHeader
+      v-if="!embedded"
       :department-name="departmentName"
+      page-title="标记与单价配置"
       description="按配件维护当前部门工艺的标记与计件单价。"
-      :back-path="`/${departmentCode}`"
       @refresh="load"
     />
     <section class="filter-bar">
@@ -126,67 +211,43 @@ onMounted(load)
       />
       <ElButton type="primary" @click="search">查询</ElButton>
     </section>
-    <section v-loading="loading" class="part-list">
-      <article v-for="part in items" :key="`${part.product_id}:${part.product_version}:${part.origin_flow_node_id}`" class="part-card">
-        <header>
-          <div>
-            <strong>{{ part.part_no === part.part_name ? part.part_name : `${part.part_no} - ${part.part_name}` }}</strong>
-            <span>{{ part.product_name }} · {{ part.factory_code }} · V{{ part.product_version }}</span>
+    <ElTable
+      v-loading="loading"
+      class="price-table"
+      :data="tableRows"
+      :span-method="tableSpan"
+      border
+      stripe
+      empty-text="暂无可配置配件"
+      row-key="key"
+    >
+      <ElTableColumn label="配件" min-width="280">
+        <template #default="{ row }">
+          <div class="part-title">
+            <strong>{{ partTitle(row.part) }}</strong>
+            <span>
+              {{ row.procedure.procedure_name }} · V{{ row.part.product_version }}
+              <template v-if="row.procedure.tags_locked"> · 标记已锁定</template>
+            </span>
           </div>
-        </header>
-        <div
-          v-for="procedure in part.procedures"
-          :key="procedure.procedure_id"
-          class="procedure-config"
-        >
-          <h3>{{ procedure.procedure_name }}</h3>
-          <ElSelect
-            v-model="procedure.tagNames"
-            placement="top-start"
-            :fallback-placements="['top-start', 'top-end']"
-            tag-type="danger"
-            tag-effect="dark"
-            multiple
-            filterable
-            allow-create
-            default-first-option
-            clearable
-            :disabled="!canManage || procedure.tags_locked"
-            placeholder="选择或输入该配件必做标记"
-          >
-            <ElOption
-              v-for="tag in procedure.available_tags"
-              :key="tag.id"
-              :label="tag.tag_name"
-              :value="tag.tag_name"
-            />
-          </ElSelect>
-          <p v-if="procedure.tags_locked" class="locked-hint">已开过工单，必做标记已锁定，仅可修改单价。</p>
-          <div v-if="procedure.tagNames.length" class="price-list">
-            <div v-for="tagName in procedure.tagNames" :key="tagName" class="price-row">
-              <span>{{ tagName }}</span>
-              <ElInputNumber
-                v-model="procedure.prices[tagName]"
-                :disabled="!canManage"
-                :min="0"
-                :precision="2"
-                :step="0.1"
-                placeholder="未配置单价"
-              />
-              <em>元 / 件</em>
-            </div>
-          </div>
-          <ElEmpty v-else description="暂未配置标记" :image-size="48" />
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="标记" min-width="160">
+        <template #default="{ row }">{{ row.tagName || '暂未配置标记' }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="单价" width="120" align="right">
+        <template #default="{ row }">{{ row.price ?? '—' }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="配置" width="90" align="center">
+        <template #default="{ row }">
           <ElButton
-            v-if="canManage"
-            type="primary"
-            :loading="procedure.saving"
-            @click="save(part, procedure)"
-          >保存此工艺</ElButton>
-        </div>
-      </article>
-      <ElEmpty v-if="!loading && !items.length" description="暂无可配置配件" />
-    </section>
+            size="small"
+            :disabled="!canManage"
+            @click="openConfiguration(row.part, row.procedure)"
+          >配置</ElButton>
+        </template>
+      </ElTableColumn>
+    </ElTable>
     <ElPagination
       v-model:current-page="page"
       class="pagination"
@@ -195,32 +256,94 @@ onMounted(load)
       :total="total"
       @current-change="load"
     />
-  </main>
+
+    <ElDialog
+      v-model="configVisible"
+      append-to-body
+      width="min(640px, 92vw)"
+      title="配置标记与单价"
+    >
+      <div v-if="configuringPart && configuringProcedure" class="config-dialog">
+        <div class="config-title">
+          <strong>{{ partTitle(configuringPart) }}</strong>
+          <span>{{ configuringProcedure.procedure_name }}</span>
+        </div>
+        <ElForm label-position="top">
+          <ElFormItem label="标记">
+            <ElSelect
+              v-model="draftTagNames"
+              placement="top-start"
+              :fallback-placements="['top-start', 'top-end']"
+              tag-type="danger"
+              tag-effect="dark"
+              multiple
+              filterable
+              allow-create
+              default-first-option
+              clearable
+              :disabled="configuringProcedure.tags_locked"
+              placeholder="选择或输入标记"
+            >
+              <ElOption
+                v-for="tag in configuringProcedure.available_tags"
+                :key="tag.id"
+                :label="tag.tag_name"
+                :value="tag.tag_name"
+              />
+            </ElSelect>
+          </ElFormItem>
+        </ElForm>
+        <div v-if="draftTagNames.length" class="config-price-list">
+          <div v-for="tagName in draftTagNames" :key="tagName" class="config-price-row">
+            <span>{{ tagName }}</span>
+            <ElInputNumber
+              v-model="draftPrices[tagName]"
+              :min="0"
+              :precision="2"
+              :step="0.1"
+              placeholder="单价"
+            />
+            <em>元 / 件</em>
+          </div>
+        </div>
+        <ElEmpty v-else description="暂未配置标记" :image-size="48" />
+      </div>
+      <template #footer>
+        <ElButton @click="configVisible = false">取消</ElButton>
+        <ElButton
+          type="primary"
+          :disabled="!canManage"
+          :loading="configuringProcedure?.saving"
+          @click="saveConfiguration"
+        >保存</ElButton>
+      </template>
+    </ElDialog>
+  </component>
 </template>
 
 <style scoped>
 .tag-price-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .filter-bar { display: flex; gap: 10px; margin-bottom: 18px; }
 .filter-bar .el-input { max-width: 440px; }
-.part-list { display: grid; gap: 16px; min-height: 220px; }
-.part-card { padding: 20px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.part-card header div { display: grid; gap: 5px; }
-.part-card header strong { font-size: 17px; }
-.part-card header span { color: var(--el-text-color-secondary); font-size: 13px; }
-.procedure-config { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--erp-border); }
-.procedure-config h3 { margin: 0 0 12px; font-size: 15px; }
-.procedure-config > .el-select { width: min(680px, 100%); }
-.locked-hint { margin: 8px 0 0; color: var(--el-text-color-secondary); font-size: 12px; }
-.price-list { display: grid; gap: 8px; margin: 12px 0; }
-.price-row { display: grid; grid-template-columns: minmax(120px, 1fr) 180px 58px; gap: 10px; align-items: center; max-width: 680px; padding: 10px 12px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
-.price-row em { color: var(--el-text-color-secondary); font-size: 12px; font-style: normal; }
+.price-table { width: 100%; min-height: 220px; }
+.part-title { display: grid; gap: 2px; min-width: 0; }
+.part-title strong { overflow: hidden; font-size: 14px; text-overflow: ellipsis; white-space: nowrap; }
+.part-title span { color: var(--el-text-color-secondary); font-size: 12px; }
+.config-dialog { display: grid; gap: 16px; }
+.config-title { display: grid; gap: 4px; }
+.config-title span { color: var(--el-text-color-secondary); font-size: 13px; }
+.config-dialog :deep(.el-select) { width: 100%; }
+.config-price-list { display: grid; gap: 8px; }
+.config-price-row { display: grid; grid-template-columns: minmax(120px, 1fr) 180px 58px; gap: 10px; align-items: center; padding: 8px 10px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
+.config-price-row em { color: var(--el-text-color-secondary); font-size: 12px; font-style: normal; }
 .pagination { justify-content: flex-end; margin-top: 18px; }
 @media (max-width: 700px) {
   .tag-price-page { padding: 16px; }
   .filter-bar { align-items: stretch; flex-direction: column; }
   .filter-bar .el-input, .filter-bar :deep(.el-button) { width: 100%; max-width: none; }
-  .part-card { padding: 16px; }
-  .price-row { grid-template-columns: 1fr; }
+  .config-price-row { grid-template-columns: 1fr; }
 }
-@media (max-width: 480px) { .tag-price-page { padding: 12px; } .part-card { padding: 12px; border-radius: var(--erp-radius); } }
+@media (max-width: 480px) {
+  .tag-price-page { padding: 12px; }
+}
 </style>

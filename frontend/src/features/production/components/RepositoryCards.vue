@@ -26,7 +26,7 @@ const emit = defineEmits<{
       @keydown.enter="emit('select', item)"
     >
       <div class="card-heading">
-        <strong>{{ item.part_no === item.part_name ? item.part_name : `${item.part_no} - ${item.part_name}` }}</strong>
+        <strong>{{ `${item.factory_code} - ${item.product_name} - ${item.part_name}` }}</strong>
         <ElTag :type="item.work_status === 'completed' ? 'success' : item.work_status === 'processing' ? 'warning' : 'info'" size="small">
           {{ item.work_status === 'processing'
             ? (props.mode === 'purchase' ? '采购中' : '加工中')
@@ -36,11 +36,8 @@ const emit = defineEmits<{
         </ElTag>
       </div>
       <dl>
-        <div><dt>产品</dt><dd>{{ item.factory_code }} · {{ item.product_name }}</dd></div>
         <div><dt>订单编号</dt><dd>{{ item.customer_order_no }}</dd></div>
         <div><dt>当前工艺</dt><dd>{{ item.procedure_name }}</dd></div>
-        <div v-if="props.mode === 'production'"><dt>标记状态</dt><dd>{{ item.current_tag_set_name || '未打标记' }}</dd></div>
-        <div><dt>来源节点</dt><dd>{{ item.source_node_label }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求数量' : '当前数量' }}</dt><dd>{{ item.quantity }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求时间' : '到达时间' }}</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
       </dl>
@@ -60,10 +57,10 @@ const emit = defineEmits<{
 
 <style scoped>
 .repository-cards { display: grid; grid-template-columns: 1fr; gap: 12px; min-height: 150px; }
-.repository-card { padding: 14px; border: 1px solid transparent; border-radius: var(--erp-radius); background: var(--md-surface-container-low); cursor: pointer; transition: background-color .16s, border-color .16s, box-shadow .16s; }
+.repository-card { padding: 14px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-low); cursor: pointer; transition: background-color .16s, border-color .16s, box-shadow .16s; box-shadow: var(--erp-shadow-sm); }
 .repository-card:hover, .repository-card:focus-visible { border-color: var(--erp-primary); outline: none; }
 .repository-card:hover { background: var(--md-surface-container); }
-.repository-card.selected { border-color: var(--md-primary); background: var(--md-primary-container); box-shadow: none; }
+.repository-card.selected { border-color: var(--md-primary); background: var(--md-primary-container); box-shadow: 0 0 0 1px var(--md-primary); }
 .card-heading { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
 .card-heading strong { min-width: 0; color: var(--md-on-surface); font-size: 14px; line-height: 1.45; }
 dl { margin: 13px 0 0; }

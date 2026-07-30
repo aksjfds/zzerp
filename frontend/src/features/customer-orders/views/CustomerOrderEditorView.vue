@@ -169,7 +169,7 @@ onMounted(async () => {
         </ElTableColumn>
         <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.product_version ?? product(row.product_id)?.version ?? '-' }}</template></ElTableColumn>
         <ElTableColumn label="数量" width="140"><template #default="{ row }"><span v-if="readOnly" class="readonly-value readonly-number">{{ row.quantity }}</span><ElInputNumber v-else v-model="row.quantity" :min="1" /></template></ElTableColumn>
-        <ElTableColumn label="交期" width="170"><template #default="{ row }"><span v-if="readOnly" class="readonly-value">{{ row.delivery_date || '-' }}</span><ElDatePicker v-else v-model="row.delivery_date" value-format="YYYY-MM-DD" /></template></ElTableColumn>
+        <ElTableColumn label="交期" width="170"><template #default="{ row }"><span v-if="readOnly" class="readonly-value">{{ row.delivery_date || '-' }}</span><ElDatePicker v-else v-model="row.delivery_date" placement="top-start" :fallback-placements="['top-start', 'top-end']" value-format="YYYY-MM-DD" /></template></ElTableColumn>
         <ElTableColumn label="备注" min-width="180"><template #default="{ row }"><span v-if="readOnly" class="readonly-value">{{ row.remark || '-' }}</span><ElInput v-else v-model="row.remark" /></template></ElTableColumn>
         <ElTableColumn v-if="!readOnly" label="操作" width="80"><template #default="{ $index }"><ElButton link type="danger" @click="form.items.splice($index, 1)">删除</ElButton></template></ElTableColumn>
       </ElTable>

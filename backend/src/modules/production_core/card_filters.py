@@ -1,7 +1,4 @@
 from collections import defaultdict
-from datetime import date, datetime, time, timedelta
-
-from domain.time import BUSINESS_TIMEZONE
 
 
 def filter_and_paginate_cards(
@@ -9,14 +6,18 @@ def filter_and_paginate_cards(
     page: int,
     page_size: int,
     keyword: str | None,
-    arrived_from: date | None,
-    arrived_to: date | None,
+    workshop_name: str | None,
     work_status: str,
 ) -> tuple[list[dict], int]:
     filtered = [
         item
         for item in cards
-        if matches_filters(item, keyword, arrived_from, arrived_to, work_status)
+        if matches_filters(
+            item,
+            keyword,
+            workshop_name,
+            work_status,
+        )
     ]
     filtered.sort(
         key=lambda item: (item["arrived_at"] or "", item["card_key"]),
@@ -32,8 +33,7 @@ def filter_and_paginate_assembly_groups(
     page: int,
     page_size: int,
     keyword: str | None,
-    arrived_from: date | None,
-    arrived_to: date | None,
+    workshop_name: str | None,
     work_status: str,
 ) -> tuple[list[dict], int]:
     groups: dict[tuple[str, int, str], list[dict]] = defaultdict(list)
@@ -65,7 +65,10 @@ def filter_and_paginate_assembly_groups(
             "part_no": " ".join(item["part_no"] for item in group),
         }
         if not matches_filters(
-            representative, keyword, arrived_from, arrived_to, work_status
+            representative,
+            keyword,
+            workshop_name,
+            work_status,
         ):
             continue
         for item in group:
@@ -95,24 +98,12 @@ def filter_and_paginate_assembly_groups(
 def matches_filters(
     item: dict,
     keyword: str | None,
-    arrived_from: date | None,
-    arrived_to: date | None,
+    workshop_name: str | None,
     work_status: str,
 ) -> bool:
     if work_status != "all" and item["work_status"] != work_status:
         return False
-    arrived_at = datetime.fromisoformat(item["arrived_at"]) if item["arrived_at"] else None
-    if arrived_from and (
-        arrived_at is None
-        or arrived_at < datetime.combine(arrived_from, time.min, BUSINESS_TIMEZONE)
-    ):
-        return False
-    if arrived_to and (
-        arrived_at is None
-        or arrived_at >= datetime.combine(
-            arrived_to + timedelta(days=1), time.min, BUSINESS_TIMEZONE
-        )
-    ):
+    if workshop_name and item["workshop_name"] != workshop_name:
         return False
     value = (keyword or "").strip().lower()
     if not value:

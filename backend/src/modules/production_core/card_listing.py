@@ -1,5 +1,3 @@
-from datetime import date
-
 from sqlalchemy import select
 
 from database import SessionLocal
@@ -40,8 +38,7 @@ def list_production_cards(
     page: int,
     page_size: int,
     keyword: str | None = None,
-    arrived_from: date | None = None,
-    arrived_to: date | None = None,
+    workshop_name: str | None = None,
     work_status: str = "all",
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
@@ -62,8 +59,8 @@ def list_production_cards(
                         department,
                         _current_positions(session, department),
                         keyword,
-                        arrived_from,
-                        arrived_to,
+                        None,
+                        None,
                     )
                 )
             else:
@@ -81,8 +78,8 @@ def list_production_cards(
                     department,
                     _current_positions(session, department),
                     keyword,
-                    arrived_from,
-                    arrived_to,
+                    None,
+                    None,
                 )
             )
         if department_code == "assembly":
@@ -91,8 +88,7 @@ def list_production_cards(
                 page,
                 page_size,
                 keyword,
-                arrived_from,
-                arrived_to,
+                workshop_name,
                 work_status,
             )
         return filter_and_paginate_cards(
@@ -100,8 +96,7 @@ def list_production_cards(
             page,
             page_size,
             keyword,
-            arrived_from,
-            arrived_to,
+            workshop_name,
             work_status,
         )
 

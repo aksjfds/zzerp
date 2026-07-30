@@ -3,6 +3,10 @@ from types import SimpleNamespace
 from modules.assembly import work_orders as assembly_work_orders
 from modules.planning import part_progress
 from modules.planning.part_progress import _group_rows_by_order
+from modules.production_core.order_status_view import (
+    _process_node_totals,
+    _qc_node_totals,
+)
 from modules.workforce import workers
 
 
@@ -12,6 +16,63 @@ class _Rows:
 
     def all(self):
         return self._rows
+
+
+def test_process_flow_totals_do_not_repeat_internal_qc_returns():
+    entered, transferred = _process_node_totals(
+        recorded_entered=1000,
+        internal_returned=500,
+        current=0,
+        abnormal=0,
+    )
+
+    assert entered == 500
+    assert transferred == 500
+
+
+def test_process_flow_totals_exclude_qc_losses_from_transferred_quantity():
+    entered, transferred = _process_node_totals(
+        recorded_entered=900,
+        internal_returned=400,
+        current=400,
+        abnormal=100,
+    )
+
+    assert entered == 500
+    assert transferred == 0
+
+
+def test_qc_flow_totals_use_unique_upstream_process_output():
+    entered, transferred = _qc_node_totals(
+        incoming_quantities=[500],
+        current=0,
+        abnormal=0,
+    )
+
+    assert entered == 500
+    assert transferred == 500
+
+
+def test_qc_flow_totals_keep_held_quantity_at_qc():
+    entered, transferred = _qc_node_totals(
+        incoming_quantities=[500],
+        current=500,
+        abnormal=0,
+    )
+
+    assert entered == 500
+    assert transferred == 0
+
+
+def test_qc_flow_totals_combine_unique_outputs_from_multiple_sources():
+    entered, transferred = _qc_node_totals(
+        incoming_quantities=[300, 200],
+        current=0,
+        abnormal=0,
+    )
+
+    assert entered == 500
+    assert transferred == 500
 
 
 def test_assembly_allocation_batches_reservation_queries(monkeypatch):

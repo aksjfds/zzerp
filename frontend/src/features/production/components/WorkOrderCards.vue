@@ -36,6 +36,11 @@ function openPrint(item: WorkOrder) {
   printVisible.value = true
 }
 
+function batchSequence(item: WorkOrder, batchId: number) {
+  const index = item.batches.findIndex(batch => batch.id === batchId)
+  return index >= 0 ? index + 1 : '—'
+}
+
 function qcResultText(batch: WorkOrderBatch) {
   const hasRework = Boolean(batch.rework_quantity)
   const hasLoss = Boolean(batch.scrap_quantity || batch.lost_quantity)
@@ -74,11 +79,11 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
       </dl>
       <div v-if="policy.showBatches && item.batches.length" class="batches">
         <h4>{{ policy.batchTitle }}</h4>
-        <div v-for="batch in item.batches" :key="batch.id" class="batch-row">
+        <div v-for="(batch, batchIndex) in item.batches" :key="batch.id" class="batch-row">
           <div class="batch-heading">
             <strong>
-              第 {{ batch.id }} 批 ·
-              {{ batch.rework_source_batch_id ? `批次 ${batch.rework_source_batch_id} 返工复检` : '首次送检' }}
+              第 {{ batchIndex + 1 }} 批 ·
+              {{ batch.rework_source_batch_id ? `第 ${batchSequence(item, batch.rework_source_batch_id)} 批返工复检` : '首次送检' }}
               {{ batch.submitted_quantity }}
             </strong>
             <ElTag v-if="!batch.recorded_at" type="warning" size="small">等待 QC</ElTag>

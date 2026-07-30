@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
-import ProcedureTagFilterBar from '../components/ProcedureTagFilterBar.vue'
 import TagProductionOverview from '../components/TagProductionOverview.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
@@ -23,22 +23,18 @@ const controller = useProductionDepartment(props.departmentCode, props.mode)
 const { workspace, workOrderList, workOrderActions } = controller
 const {
   items, loading, pageSize,
-  repositoryPage, repositoryTotal, selectedRepository, selectedCardKey, workers,
+  repositoryPage, repositoryTotal, selectedRepository, selectedCardKey, workers, workshops,
 } = workspace
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
 const {
   activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails,
   openWorkOrder, refresh, saveWorkOrder, selectRepository,
-  existingTagIds, applyingTagIds, setExistingTagFilter, setApplyingTagFilter,
   tagItems, tagLoading, submitting,
 } = controller
 const showSelectedWorkOrders = computed(() => Boolean(selectedRepository.value))
 const nonTagOverview = computed(() => workOrderProductionOverview(
   workOrders.value,
   selectedRepository.value?.available_quantity ?? 0,
-))
-const supportsTagConfiguration = computed(() => (
-  departmentSupports(props.departmentCode, 'standard_execution')
 ))
 const supportsSpecialPrinting = computed(() => (
   departmentSupports(props.departmentCode, 'special_printing')
@@ -51,24 +47,13 @@ onMounted(load)
     <DepartmentPageHeader
       :department-name="departmentName"
       :description="description"
-      :workers-path="`/production/${departmentCode}/workers`"
-      :progress-path="`/production/${departmentCode}/progress`"
-      :tag-config-path="supportsTagConfiguration ? `/production/${departmentCode}/tag-prices` : undefined"
       @refresh="refresh"
     />
-    <div class="repository-filter-row">
-      <RepositoryFilterBar @search="applyFilters" />
-      <ProcedureTagFilterBar
-        v-if="mode === 'production'"
-        :tags="selectedRepository?.available_tags || []"
-        :loading="tagLoading"
-        :disabled="!selectedRepository"
-        :existing-tag-ids="existingTagIds"
-        :applying-tag-ids="applyingTagIds"
-        @update:existing-tag-ids="setExistingTagFilter"
-        @update:applying-tag-ids="setApplyingTagFilter"
-      />
-    </div>
+    <DepartmentSectionTabs :department-code="departmentCode">
+    <RepositoryFilterBar
+      :workshops="workshops"
+      @search="applyFilters"
+    />
     <section class="production-workspace">
       <div class="production-card">
         <RepositoryCards
@@ -138,38 +123,6 @@ onMounted(load)
       :submitting="submitting"
       @submit="saveWorkOrder"
     />
+    </DepartmentSectionTabs>
   </main>
 </template>
-
-<style scoped>
-.repository-filter-row {
-  display: flex;
-  gap: 12px;
-  align-items: stretch;
-  margin-bottom: 18px;
-}
-
-.repository-filter-row :deep(.repository-filter-bar) {
-  min-width: 0;
-  flex: 1;
-  margin-bottom: 0;
-}
-
-@media (max-width: 1280px) {
-  .repository-filter-row {
-    flex-wrap: wrap;
-  }
-  .repository-filter-row :deep(.repository-filter-bar),
-  .repository-filter-row :deep(.procedure-tag-filters) {
-    width: 100%;
-    max-width: none;
-  }
-}
-
-@media (max-width: 760px) {
-  .repository-filter-row {
-    display: grid;
-    grid-template-columns: 1fr;
-  }
-}
-</style>

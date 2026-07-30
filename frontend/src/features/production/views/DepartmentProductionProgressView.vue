@@ -11,9 +11,16 @@ import {
 } from '../api/productionProgress'
 import '../styles/workspace.css'
 
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  departmentCode?: string
+}>(), {
+  embedded: false,
+  departmentCode: '',
+})
 const route = useRoute()
 const departmentCode = computed(
-  () => String(route.meta.departmentCode || ''),
+  () => String(props.departmentCode || route.meta.departmentCode || ''),
 )
 const department = computed(() => getDepartmentModule(departmentCode.value))
 const items = ref<DepartmentProductionProgressItem[]>([])
@@ -58,12 +65,12 @@ onMounted(load)
 </script>
 
 <template>
-  <main class="production-page">
+  <component :is="embedded ? 'section' : 'main'" :class="{ 'production-page': !embedded }">
     <DepartmentPageHeader
+      v-if="!embedded"
       :department-name="department?.name || '生产部门'"
       page-title="生产进度"
       description="按配件查看订单需求、累计出货和欠交情况。"
-      :back-path="department?.routePath"
       @refresh="load"
     />
 
@@ -117,7 +124,7 @@ onMounted(load)
         @current-change="load"
       />
     </section>
-  </main>
+  </component>
 </template>
 
 <style scoped>

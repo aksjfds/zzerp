@@ -1,17 +1,23 @@
 import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { queryDepartmentRepositories, queryDepartmentWorkers } from '../api/departmentRepositories'
+import {
+  queryDepartmentRepositories,
+  queryDepartmentRepositoryWorkshops,
+  queryDepartmentWorkers,
+} from '../api/departmentRepositories'
+import type { RepositoryWorkshop } from '../api/departmentRepositories'
 import type { RepositoryFilters, RepositoryItem, WorkerItem } from '../domain/types'
 import { departmentSupports } from '@/features/departments/registry'
 
 const EMPTY_FILTERS = (): RepositoryFilters => ({
-  keyword: '', arrived_from: null, arrived_to: null, work_status: 'all',
+  keyword: '', workshop_name: null, work_status: 'all',
 })
 
 export function useDepartmentWorkspace(departmentCode: string, loadWorkers = false) {
   const loading = ref(false)
   const items = ref<RepositoryItem[]>([])
   const workers = ref<WorkerItem[]>([])
+  const workshops = ref<RepositoryWorkshop[]>([])
   const filters = ref<RepositoryFilters>(EMPTY_FILTERS())
   const repositoryPage = ref(1)
   const repositoryTotal = ref(0)
@@ -85,7 +91,21 @@ export function useDepartmentWorkspace(departmentCode: string, loadWorkers = fal
     try { workers.value = await queryDepartmentWorkers(departmentCode) }
     catch { ElMessage.warning('工人列表加载失败') }
   }
-  async function load() { await Promise.all([loadRepositories(), loadDepartmentWorkers()]) }
+  async function loadDepartmentWorkshops() {
+    try {
+      workshops.value = await queryDepartmentRepositoryWorkshops(departmentCode)
+    } catch {
+      workshops.value = []
+      ElMessage.warning('车间列表加载失败')
+    }
+  }
+  async function load() {
+    await Promise.all([
+      loadRepositories(),
+      loadDepartmentWorkers(),
+      loadDepartmentWorkshops(),
+    ])
+  }
   function clearSelection() {
     selectedCardKey.value = null
     selectedProductionItemId.value = null
@@ -114,6 +134,6 @@ export function useDepartmentWorkspace(departmentCode: string, loadWorkers = fal
   return {
     changePage, filters, items, load, loadRepositories, loading, pageSize, refresh, repositoryPage,
     repositoryTotal, search, selectRepository, selectedCardKey, selectedProductionItemId,
-    selectedRepository, workers,
+    selectedRepository, workers, workshops,
   }
 }

@@ -6,32 +6,22 @@ defineProps<{
   departmentName: string
   description: string
   pageTitle?: string
-  tagConfigPath?: string
-  workersPath?: string
-  progressPath?: string
-  backPath?: string
 }>()
 defineEmits<{ refresh: [] }>()
 const router = useRouter()
 const authStore = useAuthStore()
+
 async function logout() {
   await authStore.logout()
   router.replace('/login')
 }
 
-function navigate(path: string) {
-  void router.push(path)
-}
 </script>
 
 <template>
   <header class="page-header">
     <div><span>{{ departmentName }}</span><h1>{{ pageTitle || `${departmentName}工作台` }}</h1><p>{{ description }}</p></div>
     <div class="actions">
-      <ElButton v-if="backPath" @click="navigate(backPath)">返回工作台</ElButton>
-      <ElButton v-if="workersPath" type="primary" plain @click="navigate(workersPath)">工人管理</ElButton>
-      <ElButton v-if="progressPath" type="primary" plain @click="navigate(progressPath)">查看生产进度</ElButton>
-      <ElButton v-if="tagConfigPath" type="primary" plain @click="navigate(tagConfigPath)">标记与单价配置</ElButton>
       <ElButton @click="$emit('refresh')">刷新</ElButton>
       <ElButton @click="logout">退出登录</ElButton>
     </div>

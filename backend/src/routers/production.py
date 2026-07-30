@@ -1,5 +1,3 @@
-from datetime import date
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from authorization import ensure_department_access, require_any_permission
@@ -11,6 +9,7 @@ from departments.contracts import (
 )
 from departments.registry import department_api
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
+from modules.organization.api import list_workshops_by_department_code
 from schemas.production import (
     DepartmentProductionProgressEnvelope,
     DepartmentWorkerCreate,
@@ -22,9 +21,22 @@ from schemas.production import (
     TagCardListEnvelope,
     WorkerListEnvelope,
 )
+from schemas.organization import WorkshopResponse
 
 
 router = APIRouter(tags=["production"])
+
+
+@router.get(
+    "/departments/{department_code}/repository-workshops",
+    response_model=list[WorkshopResponse],
+)
+def department_repository_workshops(
+    department_code: str,
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, department_code)
+    return list_workshops_by_department_code(department_code)
 
 
 @router.get(
@@ -55,20 +67,21 @@ def department_repositories(
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=10000),
     keyword: str | None = Query(default=None, max_length=200),
-    arrived_from: date | None = None,
-    arrived_to: date | None = None,
+    workshop_name: str | None = Query(default=None, max_length=200),
     work_status: str = Query(default="all", pattern="^(all|unprocessed|processing|completed)$"),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     if user["department"] not in {"sys", department_code}:
         raise HTTPException(status_code=403, detail="无权访问该部门")
-    if arrived_from and arrived_to and arrived_from > arrived_to:
-        raise HTTPException(status_code=422, detail="开始日期不能晚于结束日期")
     data, total = department_api(
         department_code,
         CAP_REPOSITORIES,
     ).list_repositories(
-        page, page_size, keyword, arrived_from, arrived_to, work_status
+        page,
+        page_size,
+        keyword,
+        workshop_name,
+        work_status,
     )
     return {"data": data, "total": total}
 

@@ -188,11 +188,24 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
     transferred_by_edge: dict[str, int] = defaultdict(int)
     abnormal_by_node: dict[str, int] = defaultdict(int)
     assembly_output_by_node: dict[str, int] = defaultdict(int)
+    internal_process_returns: dict[str, int] = defaultdict(int)
+    process_abnormal_by_node: dict[str, int] = defaultdict(int)
+    work_order_by_id = {order.id: order for order in work_orders}
     edge_id_by_nodes = {
         (edge["source_node_id"], edge["target_node_id"]): edge["id"]
         for edge in flow.get("edges", [])
     }
     for movement in movements:
+        movement_order = work_order_by_id.get(movement.work_order_id)
+        if (
+            movement.target_flow_node_id
+            and movement.movement_type in {"qc_qualified", "qc_rework"}
+            and movement_order is not None
+            and movement_order.flow_node_id == movement.target_flow_node_id
+        ):
+            internal_process_returns[
+                movement.target_flow_node_id
+            ] += movement.quantity
         if (
             movement.target_flow_node_id
             and movement.target_flow_node_id != movement.source_flow_node_id
@@ -214,6 +227,10 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             transferred_by_node[movement.source_flow_node_id] += movement.quantity
         if movement.source_flow_node_id and movement.movement_type in {"scrap", "lost"}:
             abnormal_by_node[movement.source_flow_node_id] += movement.quantity
+            if movement_order is not None:
+                process_abnormal_by_node[
+                    movement_order.flow_node_id
+                ] += movement.quantity
         edge_id = edge_id_by_nodes.get(
             (movement.source_flow_node_id, movement.target_flow_node_id)
         )
@@ -235,6 +252,39 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         source_name = production_item_name(session, production_item, set()) if production_item else "未知来源"
         material_inputs[movement.source_flow_node_id][source_name] += movement.quantity
 
+    process_totals_by_node = {
+        node["id"]: _process_node_totals(
+            entered_by_node[node["id"]],
+            internal_process_returns[node["id"]],
+            current_by_node[node["id"]],
+            process_abnormal_by_node[node["id"]],
+        )
+        for node in flow.get("nodes", [])
+        if node.get("type") == "process"
+    }
+    node_type_by_id = {
+        node["id"]: node.get("type")
+        for node in flow.get("nodes", [])
+    }
+    qc_totals_by_node = {
+        node["id"]: _qc_node_totals(
+            [
+                (
+                    process_totals_by_node[source_id][1]
+                    if node_type_by_id.get(source_id) == "process"
+                    else transferred_by_edge[edge["id"]]
+                )
+                for edge in flow.get("edges", [])
+                if edge["target_node_id"] == node["id"]
+                for source_id in [edge["source_node_id"]]
+            ],
+            current_by_node[node["id"]],
+            abnormal_by_node[node["id"]],
+        )
+        for node in flow.get("nodes", [])
+        if node.get("type") == "qc"
+    }
+
     stats = []
     for node in flow.get("nodes", []):
         node_id = node["id"]
@@ -250,6 +300,11 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             entered = order_item.quantity * bom_item.pcs if bom_item else 0
             transferred = transferred_by_node[node_id]
             current = max(entered - transferred, 0)
+        elif node_type == "process":
+            abnormal = process_abnormal_by_node[node_id]
+            entered, transferred = process_totals_by_node[node_id]
+        elif node_type == "qc":
+            entered, transferred = qc_totals_by_node[node_id]
         elif node_type == "assembly":
             input_details = dict(current_inputs[node_id])
             for name, quantity in material_inputs[node_id].items():
@@ -308,10 +363,17 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
                 "input_details": input_details,
             }
         )
+    transferred_by_node_id = {
+        item["flow_node_id"]: item["transferred_quantity"]
+        for item in stats
+    }
     edge_stats = [
         {
             "flow_edge_id": edge["id"],
-            "transferred_quantity": transferred_by_edge[edge["id"]],
+            "transferred_quantity": transferred_by_node_id.get(
+                edge["source_node_id"],
+                transferred_by_edge[edge["id"]],
+            ),
         }
         for edge in flow.get("edges", [])
     ]
@@ -325,3 +387,24 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         "node_stats": stats,
         "edge_stats": edge_stats,
     }
+
+
+def _process_node_totals(
+    recorded_entered: int,
+    internal_returned: int,
+    current: int,
+    abnormal: int,
+) -> tuple[int, int]:
+    entered = max(recorded_entered - internal_returned, 0)
+    transferred = max(entered - current - abnormal, 0)
+    return entered, transferred
+
+
+def _qc_node_totals(
+    incoming_quantities: list[int],
+    current: int,
+    abnormal: int,
+) -> tuple[int, int]:
+    entered = sum(incoming_quantities)
+    transferred = max(entered - current - abnormal, 0)
+    return entered, transferred

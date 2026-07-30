@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import AssemblyGroupCards from '../components/AssemblyGroupCards.vue'
 import TagProductionOverview from '../components/TagProductionOverview.vue'
@@ -14,7 +15,7 @@ const controller = useAssemblyDepartment()
 const { workspace, assembly, workOrderList, workOrderActions } = controller
 const {
   items, loading, pageSize,
-  repositoryPage, repositoryTotal, selectedRepository, workers,
+  repositoryPage, repositoryTotal, selectedRepository, workers, workshops,
 } = workspace
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
 const {
@@ -30,8 +31,12 @@ onMounted(load)
 
 <template>
   <main class="production-page">
-    <DepartmentPageHeader department-name="装配部" description="到达装配节点的配件资料与装配工单。" workers-path="/production/assembly/workers" progress-path="/production/assembly/progress" @refresh="refresh" />
-    <RepositoryFilterBar @search="applyFilters" />
+    <DepartmentPageHeader department-name="装配部" description="到达装配节点的配件资料与装配工单。" @refresh="refresh" />
+    <DepartmentSectionTabs department-code="assembly">
+    <RepositoryFilterBar
+      :workshops="workshops"
+      @search="applyFilters"
+    />
     <section class="production-workspace">
       <div class="production-card">
         <AssemblyGroupCards :groups="assembly.groups.value" :loading="loading" :selected-key="selectedGroupKey"
@@ -62,5 +67,6 @@ onMounted(load)
       :workers="workers"
       :submitting="submitting"
       @submit="saveWorkOrder" />
+    </DepartmentSectionTabs>
   </main>
 </template>

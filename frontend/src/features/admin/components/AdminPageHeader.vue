@@ -2,13 +2,11 @@
 withDefaults(defineProps<{
   accountLabel?: string
   title?: string
-  refreshLabel?: string
 }>(), {
   accountLabel: 'admin 管理员',
   title: '管理看板',
-  refreshLabel: '刷新工人总览',
 })
-defineEmits<{ refresh: []; logout: [] }>()
+defineEmits<{ logout: [] }>()
 </script>
 
 <template>
@@ -18,7 +16,6 @@ defineEmits<{ refresh: []; logout: [] }>()
       <h1>{{ title }}</h1>
     </div>
     <div>
-      <ElButton @click="$emit('refresh')">{{ refreshLabel }}</ElButton>
       <ElButton @click="$emit('logout')">退出登录</ElButton>
     </div>
   </header>

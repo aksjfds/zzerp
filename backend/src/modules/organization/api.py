@@ -19,6 +19,17 @@ def list_workshops(department_id: int):
         return get_workshop_views(session, department_ids={department_id})
 
 
+def list_workshops_by_department_code(department_code: str):
+    with SessionLocal() as session:
+        departments = get_department_views_by_codes(session, {department_code})
+        if not departments:
+            return []
+        return get_workshop_views(
+            session,
+            department_ids={departments[0].id},
+        )
+
+
 def list_procedures():
     with SessionLocal() as session:
         return get_procedure_views(session)
@@ -34,4 +45,5 @@ __all__ = [
     "list_procedure_tags",
     "list_procedures",
     "list_workshops",
+    "list_workshops_by_department_code",
 ]

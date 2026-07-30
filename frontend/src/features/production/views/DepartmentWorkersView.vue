@@ -7,9 +7,16 @@ import CreateWorkerDialog from '../components/CreateWorkerDialog.vue'
 import { useDepartmentWorkers } from '../composables/useDepartmentWorkers'
 import '../styles/workspace.css'
 
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+  departmentCode?: string
+}>(), {
+  embedded: false,
+  departmentCode: '',
+})
 const route = useRoute()
 const departmentCode = String(
-  route.params.departmentCode || route.meta.departmentCode || '',
+  props.departmentCode || route.params.departmentCode || route.meta.departmentCode || '',
 )
 const departmentNames: Record<string, string> = {
   stamp: '冲压部',
@@ -30,12 +37,12 @@ onMounted(controller.loadWorkers)
 </script>
 
 <template>
-  <main class="production-page">
+  <component :is="embedded ? 'section' : 'main'" :class="{ 'production-page': !embedded }">
     <DepartmentPageHeader
+      v-if="!embedded"
       :department-name="departmentName"
       :page-title="`${departmentName}工人管理`"
       description="查看本部门工人及其工作情况，并录入新工人。"
-      :back-path="`/${departmentCode}`"
       @refresh="controller.loadWorkers"
     />
     <WorkerOverview
@@ -63,5 +70,5 @@ onMounted(controller.loadWorkers)
       :submitting="controller.submitting.value"
       @submit="controller.saveWorker"
     />
-  </main>
+  </component>
 </template>

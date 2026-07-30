@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
 import QcBatchCards from '../components/QcBatchCards.vue'
 import QcInspectionDialog from '../components/QcInspectionDialog.vue'
 import TagProductionOverview from '../components/TagProductionOverview.vue'
@@ -66,9 +67,9 @@ function applySearch() {
     <DepartmentPageHeader
       department-name="QC部门"
       description="录入工单批次质检结果，并将最终合格数量出货到后续流程。"
-      workers-path="/production/qc/workers"
       @refresh="refresh"
     />
+    <DepartmentSectionTabs department-code="qc">
     <section class="qc-filter-bar">
       <ElInput
         v-model="searchText"
@@ -117,6 +118,7 @@ function applySearch() {
       :submitting="submitting"
       @submit="saveInspection"
     />
+    </DepartmentSectionTabs>
   </main>
 </template>
 

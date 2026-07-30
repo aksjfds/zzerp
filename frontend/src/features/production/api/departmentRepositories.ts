@@ -11,6 +11,21 @@ export type DepartmentRepositoryQuery = RepositoryFilters & {
   page_size: number
 }
 
+export type RepositoryWorkshop = {
+  id: number
+  department_id: number
+  workshop_name: string
+}
+
+export async function queryDepartmentRepositoryWorkshops(
+  departmentCode: string,
+) {
+  const response = await service.get<RepositoryWorkshop[]>(
+    `/departments/${departmentCode}/repository-workshops`,
+  )
+  return response.data
+}
+
 export async function queryDepartmentRepositories(
   departmentCode: string,
   params: DepartmentRepositoryQuery,

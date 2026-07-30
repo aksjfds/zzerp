@@ -1,5 +1,3 @@
-from datetime import date
-
 from departments.contracts import CAP_REPOSITORIES
 from modules.production_core import api as production
 
@@ -10,8 +8,7 @@ class RepositoryCapability:
         page: int,
         page_size: int,
         keyword: str | None,
-        arrived_from: date | None,
-        arrived_to: date | None,
+        workshop_name: str | None,
         work_status: str,
     ) -> tuple[list[dict], int]:
         self.require_capability(CAP_REPOSITORIES)
@@ -20,7 +17,6 @@ class RepositoryCapability:
             page,
             page_size,
             keyword,
-            arrived_from,
-            arrived_to,
+            workshop_name,
             work_status,
         )

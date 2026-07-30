@@ -16,4 +16,4 @@ def business_now() -> datetime:
 def business_iso(value: datetime | None) -> str | None:
     if value is None:
         return None
-    return value.astimezone(BUSINESS_TIMEZONE).isoformat(timespec="minutes")
+    return value.astimezone(BUSINESS_TIMEZONE).strftime("%Y-%m-%d %H:%M")
