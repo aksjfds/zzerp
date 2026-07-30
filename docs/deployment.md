@@ -31,13 +31,26 @@ ALLOW_DATABASE_RESET=yes python scripts/reset_database.py
 仓库根目录的 `render.yaml` 已配置：
 
 - Python 3.12
+- Render Root Directory 为 `backend`
 - 新加坡区域
-- 安装 `backend/requirements.txt`
-- 启动 `uvicorn main:app`
+- 安装 `requirements.txt`
+- 从 `backend/src` 启动 `uvicorn main:app`
 - 使用 `/health` 作为 Render 健康检查
 
 在 Render 创建 Blueprint，并设置 `DATABASE_URL` 为 Neon 提供的完整连接串。
 不要将数据库连接串写入仓库。
+
+如果不是通过 Blueprint 创建，而是在 Render 控制台手动创建服务，请填写：
+
+```text
+Root Directory: backend
+Build Command: pip install --no-cache-dir -r requirements.txt
+Start Command: cd src && uvicorn main:app --host 0.0.0.0 --port $PORT
+PYTHON_VERSION: 3.12.10
+```
+
+如果日志仍显示 Python 3.14，先确认部署提交中存在 `backend/.python-version`，然后
+清除 Render 构建缓存并重新部署。
 
 部署成功后记录 Render 地址，例如：
 
