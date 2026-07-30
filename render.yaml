@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: zzerp-api-v5
+    runtime: python
+    region: singapore
+    plan: free
+    buildCommand: pip install --no-cache-dir -r backend/requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: ALLOWED_ORIGINS
+        value: ""
+      - key: ALLOWED_ORIGIN_REGEX
+        value: '^https://[a-z0-9-]+\.netlify\.app$'
+      - key: COOKIE_SECURE
+        value: "true"
+      - key: COOKIE_SAMESITE
+        value: lax
+      - key: SESSION_EXPIRE_HOURS
+        value: "12"

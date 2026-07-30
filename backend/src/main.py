@@ -5,9 +5,11 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError, ResponseValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
 from config import get_settings
+from database import engine
 from domain.errors import DomainViolation
 from routers import (
     admin,
@@ -198,6 +200,28 @@ def root():
     return {"message": "zzerp backend running"}
 
 
-@app.head("/health")
-def health_head():
-    return
+@app.get("/health", include_in_schema=False)
+@app.head("/health", include_in_schema=False)
+def health():
+    return {"status": "ok"}
+
+
+@app.get("/ready", include_in_schema=False)
+def readiness():
+    try:
+        with engine.connect() as connection:
+            schema_ready = connection.scalar(
+                text("SELECT to_regclass('public.users') IS NOT NULL")
+            )
+    except Exception:
+        logger.exception("Database readiness check failed")
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "database": "unreachable"},
+        )
+    if not schema_ready:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "unavailable", "database": "schema_missing"},
+        )
+    return {"status": "ready", "database": "ready"}
