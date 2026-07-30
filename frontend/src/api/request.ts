@@ -2,10 +2,10 @@ import axios from 'axios'
 import type { ApiErrorDetail } from './types'
 
 const configuredApiBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
-const apiBaseUrl = configuredApiBaseUrl
-  || (import.meta.env.PROD
-    ? '/api'
-    : `${window.location.protocol}//${window.location.hostname}:8000`)
+const apiBaseUrl = import.meta.env.PROD
+  ? '/api'
+  : configuredApiBaseUrl
+    || `${window.location.protocol}//${window.location.hostname}:8000`
 
 export const service = axios.create({
   baseURL: apiBaseUrl,

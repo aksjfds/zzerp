@@ -6,7 +6,7 @@ export function setupRouterGuard(router: Router) {
   router.beforeEach(async (to) => {
     const authStore = useAuthStore()
 
-    if (!authStore.initialized) {
+    if (!authStore.initialized && to.path !== '/login') {
       await authStore.refreshUser()
     }
 

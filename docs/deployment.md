@@ -73,6 +73,9 @@ https://your-render-service.onrender.com
 RENDER_API_URL=https://your-render-service.onrender.com
 ```
 
+如果已经设置了 `VITE_API_BASE_URL`，也可以保留；构建脚本会把它作为 Render
+地址使用。两个变量同时存在时优先使用 `RENDER_API_URL`。
+
 不要在地址末尾添加路径。构建脚本会生成以下代理：
 
 ```text
@@ -80,8 +83,7 @@ RENDER_API_URL=https://your-render-service.onrender.com
 /*      -> /index.html
 ```
 
-前端生产环境默认请求 `/api`。一般不需要设置 `VITE_API_BASE_URL`；设置它会绕过
-Netlify 同源代理。
+前端生产环境固定请求 `/api`，不会绕过 Netlify 同源代理。
 
 ## 4. Render 来源与 Cookie
 
