@@ -99,26 +99,13 @@ def _completed_quantity(session, total: int, flow: dict, nodes: dict, movements:
     unit_quantity = terminal_unit_quantity(session, flow, nodes, shipping_node["id"])
     if not unit_quantity:
         return 0
-    final_qc_node_ids = {
-        edge.get("source_node_id")
-        for edge in flow.get("edges", [])
-        if edge.get("target_node_id") == shipping_node["id"]
-        and nodes.get(edge.get("source_node_id"), {}).get("type") == "qc"
-    }
-    qualified = sum(
-        movement.quantity
-        for movement in movements
-        if movement.movement_type == "qc_qualified"
-        and movement.source_flow_node_id in final_qc_node_ids
-        and movement.target_flow_node_id == movement.source_flow_node_id
-    )
     shipped = sum(
         movement.quantity
         for movement in movements
-        if movement.movement_type == "qc_dispatch"
+        if movement.movement_type == "customer_shipment"
         and movement.target_flow_node_id == shipping_node["id"]
     )
-    return min(max(qualified, shipped) // unit_quantity, total)
+    return min(shipped // unit_quantity, total)
 
 
 def _abnormal_quantities(session, flow: dict, nodes: dict, movements: list) -> tuple[int, int]:

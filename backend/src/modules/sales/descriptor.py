@@ -8,6 +8,7 @@ MODULE = ModuleDescriptor(
     collaborates_with=(
         "engineering",
         "organization",
+        "planning",
         "production_core",
         "quality",
         "standard_execution",

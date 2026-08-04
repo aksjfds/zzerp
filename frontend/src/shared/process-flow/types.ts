@@ -11,7 +11,14 @@ export type FlowNode =
     })
   | (FlowNodeBase & { type: 'qc' })
   | (FlowNodeBase & { type: 'shipping' })
-  | (FlowNodeBase & { type: 'assembly'; output_name: string; output_pcs: number })
+  | (FlowNodeBase & {
+      type: 'assembly'
+      output_name: string
+      output_pcs: number
+      assembly_sequence?: number
+      assembly_code?: string
+      assembly_name?: string
+    })
 export type FlowEdge = {
   id: string
   edge_type: string

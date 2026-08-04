@@ -8,6 +8,7 @@ class SalesModel(BaseModel):
 
 
 class CustomerOrderItemInput(SalesModel):
+    id: int | None = Field(default=None, gt=0)
     product_id: int = Field(gt=0)
     quantity: int = Field(gt=0)
     delivery_date: date
@@ -72,3 +73,76 @@ class CustomerOrderEnvelope(SalesModel):
 class CustomerOrderListEnvelope(SalesModel):
     data: list[CustomerOrderResponse]
     total: int
+
+
+class ProductionPlanQuantityInput(SalesModel):
+    id: int = Field(gt=0)
+    planned_production_quantity: int = Field(ge=0)
+
+
+class ProductionPlanUpdate(SalesModel):
+    expected_revision: int = Field(gt=0)
+    items: list[ProductionPlanQuantityInput] = Field(min_length=1, max_length=5000)
+
+
+class ProductionPlanItemResponse(SalesModel):
+    id: int
+    customer_order_item_id: int
+    item_type: str
+    product_id: int
+    product_version: int
+    product_bom_id: int | None
+    flow_node_id: str
+    item_code: str
+    item_name: str
+    unit_requirement: int
+    gross_required_quantity: int
+    estimated_inventory_quantity: int
+    available_inventory_quantity: int
+    net_required_quantity: int
+    planned_production_quantity: int
+    reserved_inventory_quantity: int
+    issued_inventory_quantity: int
+
+
+class ProductionPlanProductSummary(SalesModel):
+    customer_order_item_id: int
+    product_id: int
+    product_version: int
+    product_code: str
+    product_name: str
+    order_quantity: int
+    planned_finished_quantity: int
+
+
+class ProductionPlanInventoryItem(SalesModel):
+    id: int
+    customer_order_item_id: int
+    item_type: str
+    product_id: int
+    product_version: int
+    product_bom_id: int | None
+    flow_node_id: str
+    item_code: str
+    item_name: str
+    current_inventory_quantity: int
+    reserved_inventory_quantity: int
+    issued_inventory_quantity: int
+
+
+class ProductionPlanResponse(SalesModel):
+    id: int
+    customer_order_id: int
+    status: str
+    revision: int
+    product_summaries: list[ProductionPlanProductSummary]
+    items: list[ProductionPlanItemResponse]
+    inventory_items: list[ProductionPlanInventoryItem]
+    confirmed_at: str | None
+    confirmed_by: str | None
+    created_at: str
+    updated_at: str
+
+
+class ProductionPlanEnvelope(SalesModel):
+    data: ProductionPlanResponse

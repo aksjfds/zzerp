@@ -8,8 +8,17 @@ from modules.production_core.repositories import provision_order_repositories
 from modules.production_core.work_order_progress import order_has_submissions
 
 
-def initialize_order_production(session, order: CustomerOrder) -> None:
-    provision_order_repositories(session, order)
+def initialize_order_production(
+    session,
+    order: CustomerOrder,
+    *,
+    part_quantities: dict[tuple[int, int], int] | None = None,
+) -> None:
+    provision_order_repositories(
+        session,
+        order,
+        part_quantities=part_quantities,
+    )
 
 
 def cancel_order_production(session, order: CustomerOrder) -> None:

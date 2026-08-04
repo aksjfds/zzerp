@@ -8,22 +8,33 @@ class CustomerOrderRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def list(self, offset: int = 0, limit: int = 50) -> list[CustomerOrder]:
+    def list(
+        self,
+        offset: int = 0,
+        limit: int = 50,
+        statuses: set[str] | None = None,
+    ) -> list[CustomerOrder]:
+        statement = (
+            select(CustomerOrder)
+            .options(
+                selectinload(CustomerOrder.items),
+                selectinload(CustomerOrder.customer),
+            )
+            .order_by(CustomerOrder.updated_at.desc(), CustomerOrder.id.desc())
+        )
+        if statuses:
+            statement = statement.where(CustomerOrder.status.in_(statuses))
         return list(
             self.session.scalars(
-                select(CustomerOrder)
-                .options(
-                    selectinload(CustomerOrder.items),
-                    selectinload(CustomerOrder.customer),
-                )
-                .order_by(CustomerOrder.updated_at.desc(), CustomerOrder.id.desc())
-                .offset(offset)
-                .limit(limit)
+                statement.offset(offset).limit(limit)
             ).all()
         )
 
-    def count(self) -> int:
-        return self.session.scalar(select(func.count(CustomerOrder.id))) or 0
+    def count(self, statuses: set[str] | None = None) -> int:
+        statement = select(func.count(CustomerOrder.id))
+        if statuses:
+            statement = statement.where(CustomerOrder.status.in_(statuses))
+        return self.session.scalar(statement) or 0
 
     def get(self, order_id: int) -> CustomerOrder | None:
         return self.session.scalar(

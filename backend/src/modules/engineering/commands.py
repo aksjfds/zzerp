@@ -66,13 +66,13 @@ def _validate_qc_routes(session, flow: ProcessFlowPayload) -> None:
     procedures = get_procedure_routes(session, procedure_ids)
     department_ids = get_department_ids_by_codes(
         session,
-        {"assembly", "warehouse", "qc"},
+        {"assembly", "finished", "qc"},
     )
     required_department_codes = {
         code
         for code, node_type in (
             ("assembly", "assembly"),
-            ("warehouse", "shipping"),
+            ("finished", "shipping"),
             ("qc", "qc"),
         )
         if any(node.type == node_type for node in flow.nodes)
@@ -82,7 +82,7 @@ def _validate_qc_routes(session, flow: ProcessFlowPayload) -> None:
         missing_code = sorted(missing_department_codes)[0]
         missing_type = {
             "assembly": "assembly",
-            "warehouse": "shipping",
+            "finished": "shipping",
             "qc": "qc",
         }[missing_code]
         invalid_node = next(
@@ -103,7 +103,7 @@ def _validate_qc_routes(session, flow: ProcessFlowPayload) -> None:
         if node.type == "assembly":
             return department_ids.get("assembly")
         if node.type == "shipping":
-            return department_ids.get("warehouse")
+            return department_ids.get("finished")
         return None
 
     for node in flow.nodes:
@@ -197,6 +197,23 @@ def update_product_info(product_id: int, payload: UpdateProductPayload) -> dict:
             if unchanged:
                 return command_result(repository, product)
             ensure_base_info_editable(session, product.id)
+            if product.factory_code != payload.factory_code:
+                for flow_record in product.process_flows:
+                    version_bom = {
+                        item.id: (item.part_name, item.part_no)
+                        for item in product.bom_items
+                        if item.product_version == flow_record.product_version
+                    }
+                    synchronized = synchronize_part_metadata(
+                        ProcessFlowPayload.model_validate(flow_record.flow_json),
+                        version_bom,
+                        payload.factory_code,
+                    )
+                    repository.set_process_flow(
+                        product,
+                        flow_record.product_version,
+                        synchronized.model_dump(exclude_none=True),
+                    )
             product.customer_id = customer.id
             product.product_name = payload.product_name
             product.factory_code = payload.factory_code
@@ -254,6 +271,7 @@ def replace_product_bom(
                 synchronized = synchronize_part_metadata(
                     current_flow,
                     {item.id: (item.part_name, item.part_no) for item in saved_items},
+                    product.factory_code,
                 )
                 repository.set_process_flow(
                     product,
@@ -292,6 +310,7 @@ def update_product_process_flow(
                     for item in product.bom_items
                     if item.product_version == product_version
                 },
+                product.factory_code,
             )
             validated = validated_flow(
                 flow,

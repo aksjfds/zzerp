@@ -10,7 +10,12 @@ from modules.production_core.movements import record_movement
 from modules.production_core.work_order_support import target_department_id
 
 
-def provision_order_repositories(session, order: CustomerOrder) -> None:
+def provision_order_repositories(
+    session,
+    order: CustomerOrder,
+    *,
+    part_quantities: dict[tuple[int, int], int] | None = None,
+) -> None:
     for order_item in order.items:
         bom_items = session.scalars(
             select(ProductBom)
@@ -73,6 +78,13 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
                 department_id = target_department_id(session, first_node)
             except DomainError:
                 _invalid_first_node(bom_item.part_name, "首节点没有有效生产部门")
+            quantity = (
+                part_quantities.get((order_item.id, bom_item.id), 0)
+                if part_quantities is not None
+                else order_item.quantity * bom_item.pcs
+            )
+            if quantity <= 0:
+                continue
             production_item = ProductionItem(
                 customer_order_item_id=order_item.id,
                 product_id=order_item.product_id,
@@ -82,7 +94,6 @@ def provision_order_repositories(session, order: CustomerOrder) -> None:
             )
             session.add(production_item)
             session.flush()
-            quantity = order_item.quantity * bom_item.pcs
             session.add(Repository(
                 production_item_id=production_item.id,
                 flow_node_id=first_node["id"],

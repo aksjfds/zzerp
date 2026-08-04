@@ -55,6 +55,8 @@ def filter_and_paginate_assembly_groups(
         }
         present_sources = {item["source_flow_node_id"] for item in group}
         group_complete = bool(required_sources) and required_sources == present_sources
+        if group_key[0] == "current" and not group_complete:
+            continue
         status = _group_status(group)
         arrived_at = max((item["arrived_at"] or "" for item in group), default="") or None
         representative = {

@@ -1,10 +1,23 @@
 import { service } from '@/api/request'
-import type { CustomerOrder, CustomerOrderPayload, CustomerOrderProduction } from '../domain/types'
+import type {
+  CustomerOrder,
+  CustomerOrderPayload,
+  CustomerOrderProduction,
+  ProductionPlan,
+} from '../domain/types'
 
 export async function queryCustomerOrders(page = 1, pageSize = 50, includeProgress = false) {
   const response = await service.get<{ data: CustomerOrder[]; total: number }>('/customer-orders', {
     params: { page, page_size: pageSize, include_progress: includeProgress || undefined },
   })
+  return { items: response.data.data, total: response.data.total }
+}
+
+export async function queryProductionPlanOrders(page = 1, pageSize = 50) {
+  const response = await service.get<{ data: CustomerOrder[]; total: number }>(
+    '/customer-orders/production-plans',
+    { params: { page, page_size: pageSize } },
+  )
   return { items: response.data.data, total: response.data.total }
 }
 
@@ -30,10 +43,52 @@ export async function updateCustomerOrder(orderId: number, payload: CustomerOrde
   return response.data.data
 }
 
-export async function confirmCustomerOrder(orderId: number, expectedRevision: number) {
+export async function queryProductionPlan(orderId: number) {
+  const response = await service.get<{ data: ProductionPlan }>(
+    `/customer-orders/${orderId}/production-plan`,
+  )
+  return response.data.data
+}
+
+export async function updateProductionPlan(plan: ProductionPlan) {
+  const response = await service.put<{ data: ProductionPlan }>(
+    `/customer-orders/${plan.customer_order_id}/production-plan`,
+    {
+      expected_revision: plan.revision,
+      items: plan.items.filter(item => item.item_type === 'part').map(item => ({
+        id: item.id,
+        planned_production_quantity: item.planned_production_quantity,
+      })),
+    },
+  )
+  return response.data.data
+}
+
+export async function confirmCustomerOrder(
+  orderId: number,
+  expectedRevision: number,
+) {
   const response = await service.post<{ data: CustomerOrder }>(`/customer-orders/${orderId}/confirm`, null, {
     params: { expected_revision: expectedRevision },
   })
+  return response.data.data
+}
+
+export async function confirmProductionPlan(
+  orderId: number,
+  expectedRevision: number,
+  planExpectedRevision: number,
+) {
+  const response = await service.post<{ data: CustomerOrder }>(
+    `/customer-orders/${orderId}/production-plan/confirm`,
+    null,
+    {
+      params: {
+        expected_revision: expectedRevision,
+        plan_expected_revision: planExpectedRevision,
+      },
+    },
+  )
   return response.data.data
 }
 

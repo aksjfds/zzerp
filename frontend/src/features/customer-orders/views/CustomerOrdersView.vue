@@ -69,7 +69,9 @@ async function loadOrders() {
 async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete') {
   try {
     await ElMessageBox.confirm('确认执行该操作？', '客户订单', { type: 'warning' })
-    if (action === 'confirm') await confirmCustomerOrder(order.id, order.revision)
+    if (action === 'confirm') {
+      await confirmCustomerOrder(order.id, order.revision)
+    }
     else if (action === 'cancel') await cancelCustomerOrder(order.id, order.revision)
     else await deleteCustomerOrder(order.id, order.revision)
     await loadOrders()
@@ -105,6 +107,7 @@ async function logout() {
 }
 
 onMounted(loadOrders)
+defineExpose({ load: loadOrders })
 </script>
 
 <template>
@@ -145,7 +148,7 @@ onMounted(loadOrders)
           <template #default="{ row }">
             <ElButton link @click="openOrder(row)">{{ props.readOnly ? '查看' : row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
             <template v-if="!props.readOnly">
-              <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.confirm" link type="primary" @click="act(row, 'confirm')">确认</ElButton>
+              <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.confirm" link type="primary" @click="act(row, 'confirm')">确认订单</ElButton>
               <ElButton v-if="['draft', 'confirmed', 'planned'].includes(row.status)" v-permission="ORDER_PERMISSIONS.cancel" link type="warning" @click="act(row, 'cancel')">取消</ElButton>
               <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.edit" link type="danger" @click="act(row, 'delete')">删除</ElButton>
             </template>

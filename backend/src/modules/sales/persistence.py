@@ -74,6 +74,12 @@ class CustomerOrderItem(Base):
             "product_version",
             name="uq_customer_order_item_id_version",
         ),
+        UniqueConstraint(
+            "customer_order_id",
+            "product_id",
+            "product_version",
+            name="uq_customer_order_item_product_version",
+        ),
         Index("idx_customer_order_item_product_version", "product_id", "product_version"),
         Index("idx_customer_order_item_order", "customer_order_id"),
         CheckConstraint("product_version > 0", name="ck_order_item_version"),

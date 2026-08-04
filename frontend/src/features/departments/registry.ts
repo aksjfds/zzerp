@@ -2,6 +2,7 @@ import type { RouteRecordRaw } from 'vue-router'
 import type { DepartmentCapability, DepartmentModule } from './contracts'
 import { assemblyDepartment } from './assembly'
 import { cncDepartment } from './cnc'
+import { finishedDepartment } from './finished'
 import { polishDepartment } from './polish'
 import { qcDepartment } from './qc'
 import { stampDepartment } from './stamp'
@@ -14,6 +15,7 @@ export const departmentModules = [
   polishDepartment,
   qcDepartment,
   assemblyDepartment,
+  finishedDepartment,
   warehouseDepartment,
 ] as const satisfies readonly DepartmentModule[]
 

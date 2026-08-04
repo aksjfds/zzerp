@@ -28,7 +28,7 @@ const {
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
 const {
   activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails,
-  openWorkOrder, refresh, saveWorkOrder, selectRepository,
+  openWorkOrder, reloadWorkspace, refresh, saveWorkOrder, selectRepository,
   tagItems, tagLoading, submitting,
 } = controller
 const showSelectedWorkOrders = computed(() => Boolean(selectedRepository.value))
@@ -49,7 +49,10 @@ onMounted(load)
       :description="description"
       @refresh="refresh"
     />
-    <DepartmentSectionTabs :department-code="departmentCode">
+    <DepartmentSectionTabs
+      :department-code="departmentCode"
+      @configuration-saved="reloadWorkspace"
+    >
     <RepositoryFilterBar
       :workshops="workshops"
       @search="applyFilters"

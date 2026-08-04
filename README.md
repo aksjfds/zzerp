@@ -1,6 +1,6 @@
-# zzerp v5
+# zzerp v6
 
-zzerp v5 是基于 FastAPI、PostgreSQL 和 Vue 的模块化 ERP。后端采用模块化
+zzerp v6 是基于 FastAPI、PostgreSQL 和 Vue 的模块化 ERP。后端采用模块化
 单体：业务模块拥有各自的数据和规则，通过公开 API 协作；生产部门通过独立
 部门门面暴露能力，但共享一套生产库存、流转和工单状态机。
 
@@ -11,6 +11,15 @@ python3 -m pip install -r backend/requirements-dev.txt
 pnpm --dir frontend install
 pnpm run check
 ```
+
+完成涉及生产计划、跨订单库存或订单结单的改动后，可在开发数据库执行破坏性重建和全流程验证：
+
+```bash
+pnpm run b:reset-db
+pnpm run b:validate-flow
+```
+
+全流程验证会依次检查生产计划、库存占用、仓库/成品部出库、成品入库、客户发货、自动结单和结余结转；仅可用于允许清空和写入验证数据的开发数据库。
 
 后端测试默认使用内存数据库配置完成架构与单元验证，不需要本机 PostgreSQL。
 设置 `RUN_DATABASE_TESTS=1` 和 `DATABASE_URL` 后，还会验证实际 PostgreSQL

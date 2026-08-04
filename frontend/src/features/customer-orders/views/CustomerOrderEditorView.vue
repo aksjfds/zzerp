@@ -90,13 +90,19 @@ async function save() {
       customer_order_no: form.customer_order_no,
       customer_id: form.customer_id,
       remark: form.remark,
-      items: form.items.map(({ product_id, quantity, delivery_date, remark }) => ({
-        product_id, quantity, delivery_date, remark,
+      items: form.items.map(({ id, product_id, quantity, delivery_date, remark }) => ({
+        id, product_id, quantity, delivery_date, remark,
       })),
       expected_revision: revision.value ?? undefined,
     }
-    if (effectiveOrderId.value) await updateCustomerOrder(effectiveOrderId.value, payload)
-    else await createCustomerOrder(payload)
+    if (effectiveOrderId.value) {
+      await updateCustomerOrder(effectiveOrderId.value, payload)
+    } else {
+      await createCustomerOrder(payload)
+      ElMessage.success('客户订单已创建，请确认订单')
+      await router.push('/business/orders')
+      return
+    }
     ElMessage.success('客户订单已保存')
     router.push('/business/orders')
   } catch (error) {
@@ -164,7 +170,7 @@ onMounted(async () => {
         <ElTableColumn label="产品" min-width="220">
           <template #default="{ row }">
             <span v-if="readOnly" class="readonly-value">{{ productLabel(row.product_id) }}</span>
-            <ElSelect v-else v-model="row.product_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" :disabled="!form.customer_id" filterable remote :remote-method="searchProducts" :loading="productLoading" placeholder="选择该客户的产品"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" /></ElSelect>
+            <ElSelect v-else v-model="row.product_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" :disabled="!form.customer_id" filterable remote :remote-method="searchProducts" :loading="productLoading" placeholder="选择该客户的产品"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" :disabled="form.items.some(other => other !== row && other.product_id === item.id)" /></ElSelect>
           </template>
         </ElTableColumn>
         <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.product_version ?? product(row.product_id)?.version ?? '-' }}</template></ElTableColumn>

@@ -70,7 +70,7 @@ def dispatch_qc_batch(
     user_department: str,
 ) -> dict:
     if user_department not in {"sys", "qc"}:
-        raise DomainError("qc_access_denied", "只有QC可以出货合格数量", status_code=403)
+        raise DomainError("qc_access_denied", "只有QC可以放行合格数量", status_code=403)
     with SessionLocal.begin() as session:
         batch = session.get(WorkOrderBatch, batch_id, with_for_update=True)
         if batch is None:
@@ -84,9 +84,9 @@ def dispatch_qc_batch(
             raise DomainError("work_order_not_found", "QC批次所属工单不存在", status_code=404)
         release = qc_release_context(session, batch, order)
         if release is None:
-            raise DomainError("qc_batch_not_dispatchable", "当前批次不是可出货的最终工艺批次")
+            raise DomainError("qc_batch_not_dispatchable", "当前批次不是可放行的最终工艺批次")
         if quantity <= 0 or quantity > release["dispatchable_quantity"]:
-            raise DomainError("qc_dispatch_quantity_exceeded", "出货数量超过合格待出货数量")
+            raise DomainError("qc_dispatch_quantity_exceeded", "放行数量超过合格待放行数量")
         target = release["target"]
         if target is None:
             raise DomainError("qc_target_missing", "QC节点没有有效后续流程节点")

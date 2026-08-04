@@ -5,9 +5,10 @@ from domain.time import utc_now
 from modules.engineering.product_reference_api import get_product_references
 from modules.sales.persistence import Customer
 from modules.sales.persistence import CustomerOrder
-from modules.production_core.api import (
-    cancel_order_production,
-    initialize_order_production,
+from modules.planning.api import (
+    cancel_order_plan,
+    confirm_order_plan,
+    rebuild_order_plan,
 )
 from modules.sales.order_support import (
     ensure_expected_revision,
@@ -27,10 +28,11 @@ def list_orders(
     page_size: int,
     *,
     include_progress: bool = False,
+    statuses: set[str] | None = None,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         repository = CustomerOrderRepository(session)
-        orders = repository.list((page - 1) * page_size, page_size)
+        orders = repository.list((page - 1) * page_size, page_size, statuses)
         product_ids = {item.product_id for order in orders for item in order.items}
         products = get_product_references(session, product_ids)
         return [
@@ -41,7 +43,7 @@ def list_orders(
                 include_progress=include_progress,
             )
             for item in orders
-        ], repository.count()
+        ], repository.count(statuses)
 
 
 def get_order(order_id: int) -> dict:
@@ -102,7 +104,13 @@ def update_order(order_id: int, payload: CustomerOrderUpdate) -> dict:
         raise_order_integrity_error(exc)
 
 
-def change_status(order_id: int, target: str, expected_revision: int) -> dict:
+def change_status(
+    order_id: int,
+    target: str,
+    expected_revision: int,
+    *,
+    actor_username: str,
+) -> dict:
     with SessionLocal.begin() as session:
         repository = CustomerOrderRepository(session)
         order = repository.get_for_update(order_id)
@@ -112,15 +120,45 @@ def change_status(order_id: int, target: str, expected_revision: int) -> dict:
         if target == "confirmed":
             if order.status != "draft":
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许确认")
-            initialize_order_production(session, order)
+            rebuild_order_plan(session, order)
         elif target == "cancelled":
             if order.status not in {"draft", "confirmed", "planned"}:
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许取消")
-            if order.status != "draft":
-                cancel_order_production(session, order)
+            cancel_order_plan(session, order, actor_username)
         else:
             raise DomainError("invalid_customer_order_status", "不支持的订单状态操作")
         order.status = target
+        order.updated_at = utc_now()
+        order.revision += 1
+        session.flush()
+        return serialize_order(session, order)
+
+
+def confirm_production_plan(
+    order_id: int,
+    expected_revision: int,
+    plan_expected_revision: int,
+    *,
+    actor_username: str,
+) -> dict:
+    with SessionLocal.begin() as session:
+        repository = CustomerOrderRepository(session)
+        order = repository.get_for_update(order_id)
+        if order is None:
+            raise order_not_found()
+        ensure_expected_revision(order, expected_revision)
+        if order.status != "confirmed":
+            raise DomainError(
+                "production_plan_order_not_confirmed",
+                "只有已确认客户订单的生产计划允许确认",
+            )
+        confirm_order_plan(
+            session,
+            order,
+            expected_revision=plan_expected_revision,
+            actor_username=actor_username,
+        )
+        order.status = "planned"
         order.updated_at = utc_now()
         order.revision += 1
         session.flush()

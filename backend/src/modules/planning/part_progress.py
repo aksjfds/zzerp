@@ -28,7 +28,7 @@ from modules.production_core.operational_api import (
 )
 
 
-DEPARTMENT_ORDER = ("stamp", "cnc", "polish", "qc", "assembly", "warehouse")
+DEPARTMENT_ORDER = ("stamp", "cnc", "polish", "qc", "assembly", "finished")
 
 
 def list_part_progress(
@@ -460,10 +460,10 @@ def _serialize_item(
                 cell["completed_quantity"] += movement.quantity
         target_node = context.nodes.get(movement.target_flow_node_id or "", {})
         if target_node.get("type") == "shipping":
-            warehouse = cells.get("warehouse")
-            if warehouse:
-                warehouse["in_route"] = True
-                warehouse["completed_quantity"] += movement.quantity
+            finished = cells.get("finished")
+            if finished:
+                finished["in_route"] = True
+                finished["completed_quantity"] += movement.quantity
 
     return {
         "production_item_id": production_item.id,
@@ -523,7 +523,7 @@ def _shipping_summary(session, order_item, movements: list) -> dict:
         (
             movement
             for movement in movements
-            if movement.movement_type == "qc_dispatch"
+            if movement.movement_type == "customer_shipment"
             and movement.target_flow_node_id == shipping_node["id"]
         ),
         key=lambda movement: (movement.created_at, movement.id),
@@ -562,7 +562,7 @@ def _production_item_shipping_summary(
         (
             movement
             for movement in movements
-            if movement.movement_type == "qc_dispatch"
+            if movement.movement_type == "customer_shipment"
             and movement.target_flow_node_id in shipping_node_ids
         ),
         key=lambda movement: (movement.created_at, movement.id),
@@ -619,7 +619,7 @@ def _node_department(node, department_by_code, workshops, procedures):
     code = {
         "qc": "qc",
         "assembly": "assembly",
-        "shipping": "warehouse",
+        "shipping": "finished",
     }.get(node_type)
     return department_by_code.get(code) if code else None
 

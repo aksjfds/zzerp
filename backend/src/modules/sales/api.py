@@ -3,6 +3,7 @@
 from modules.sales.customers import list_customers
 from modules.sales.orders import (
     change_status,
+    confirm_production_plan,
     create_order,
     delete_order,
     get_order,
@@ -14,6 +15,7 @@ from modules.production_core.sales_api import get_customer_order_production
 
 __all__ = [
     "change_status",
+    "confirm_production_plan",
     "create_order",
     "delete_order",
     "get_customer_order_production",

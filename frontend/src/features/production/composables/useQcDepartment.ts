@@ -89,8 +89,8 @@ export function useQcDepartment() {
   async function dispatch(batch: PendingQcBatch) {
     try {
       const { value } = await ElMessageBox.prompt(
-        `请输入出货到${batch.target_node_label || '下一节点'}的数量`,
-        `工单 ${batch.work_order_no} QC 出货`,
+        `请输入放行到${batch.target_node_label || '下一节点'}的数量`,
+        `工单 ${batch.work_order_no} QC 放行`,
         {
           inputValue: String(batch.dispatchable_quantity),
           inputPattern: /^[1-9]\d*$/,
@@ -99,16 +99,16 @@ export function useQcDepartment() {
       )
       const quantity = Number(value)
       if (quantity < 1 || quantity > batch.dispatchable_quantity) {
-        ElMessage.warning('出货数量不能超过合格待出货数量')
+        ElMessage.warning('放行数量不能超过合格待放行数量')
         return
       }
       submitting.value = true
       await dispatchQcBatch(batch.id, quantity)
       await loadBatches()
-      ElMessage.success(`已向${batch.target_node_label || '下一节点'}出货 ${quantity} 件`)
+      ElMessage.success(`已向${batch.target_node_label || '下一节点'}放行 ${quantity} 件`)
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
-        ElMessage.error(getApiErrorDetail(error)?.message || 'QC出货失败')
+        ElMessage.error(getApiErrorDetail(error)?.message || 'QC放行失败')
       }
     } finally {
       submitting.value = false

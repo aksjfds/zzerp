@@ -55,7 +55,7 @@ def target_department_id(session, node: dict) -> int:
             raise DomainError("procedure_department_missing", "目标工艺没有有效部门")
         return workshop.department_id
     if node_type == "shipping":
-        department_code = "warehouse"
+        department_code = "finished"
     elif node_type == "assembly":
         department_code = "assembly"
     else:
@@ -80,6 +80,13 @@ def move_to_node(
     session.get(ProductionItem, production_item.id, with_for_update=True)
     department_id = target_department_id(session, node)
     if node.get("type") == "shipping":
+        from modules.inventory.finished_goods_api import register_pending_finished_goods
+        register_pending_finished_goods(
+            session,
+            production_item=production_item,
+            shipping_node_id=node["id"],
+            quantity=quantity,
+        )
         return department_id
     target = session.scalar(
         select(Repository)
@@ -147,7 +154,14 @@ def mark_order_planned(session, production_item: ProductionItem) -> None:
         customer_order.updated_at = utc_now()
 
 
-def refresh_order_closed(session, production_item: ProductionItem) -> None:
+def refresh_order_closed(
+    session,
+    production_item: ProductionItem,
+    actor_username: str = "system",
+) -> None:
+    from modules.inventory.finished_goods_api import has_pending_finished_goods
+    from modules.production_core.surplus import create_order_surplus_receipts
+
     order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
     customer_order = session.get(CustomerOrder, order_item.customer_order_id)
     session.refresh(customer_order, with_for_update=True)
@@ -220,11 +234,28 @@ def refresh_order_closed(session, production_item: ProductionItem) -> None:
             )
         )
     )
+    pending_finished_goods = has_pending_finished_goods(session, customer_order.id)
+    if (
+        not tag_stock_count
+        and not open_order_count
+        and not pending_qc_count
+        and not pending_finished_goods
+        and int(held_qc_qualified) <= int(dispatched_qc)
+        and shipping_complete
+    ):
+        create_order_surplus_receipts(session, customer_order, actor_username)
+        repository_count = session.scalar(
+            select(func.count(Repository.id))
+            .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
+            .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
+            .where(CustomerOrderItem.customer_order_id == customer_order.id)
+        )
     if (
         not repository_count
         and not tag_stock_count
         and not open_order_count
         and not pending_qc_count
+        and not pending_finished_goods
         and int(held_qc_qualified) <= int(dispatched_qc)
         and shipping_complete
     ):
@@ -251,7 +282,7 @@ def _order_item_shipping_complete(session, order_item: CustomerOrderItem) -> boo
         .join(ProductionItem, ProductionItem.id == ProductionMovement.production_item_id)
         .where(
             ProductionItem.customer_order_item_id == order_item.id,
-            ProductionMovement.movement_type == "qc_dispatch",
+            ProductionMovement.movement_type == "customer_shipment",
             ProductionMovement.target_flow_node_id == shipping_node["id"],
         )
     ) or 0

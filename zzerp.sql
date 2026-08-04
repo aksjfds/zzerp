@@ -239,7 +239,189 @@ CREATE TABLE customer_order_item (
         FOREIGN KEY (product_id, product_version)
         REFERENCES product_version(product_id, version),
     CONSTRAINT uq_customer_order_item_id_version
-        UNIQUE (id, product_id, product_version)
+        UNIQUE (id, product_id, product_version),
+    CONSTRAINT uq_customer_order_item_product_version
+        UNIQUE (customer_order_id, product_id, product_version)
+);
+
+-- production_plan：客户订单确认后自动生成、由业务部另行填写和确认的生产计划。
+CREATE TABLE production_plan (
+    id BIGSERIAL PRIMARY KEY,
+    customer_order_id BIGINT NOT NULL UNIQUE
+        REFERENCES customer_order(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'draft'
+        CHECK (status IN ('draft', 'confirmed', 'cancelled')),
+    revision INT NOT NULL DEFAULT 1 CHECK (revision > 0),
+    confirmed_at TIMESTAMPTZ,
+    confirmed_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (
+        (status = 'confirmed' AND confirmed_at IS NOT NULL AND confirmed_by IS NOT NULL)
+        OR (status <> 'confirmed')
+    )
+);
+
+-- production_plan_item：内部保留成品、装配体和普通配件节点；业务部只填写普通配件数量。
+CREATE TABLE production_plan_item (
+    id BIGSERIAL PRIMARY KEY,
+    production_plan_id BIGINT NOT NULL
+        REFERENCES production_plan(id) ON DELETE CASCADE,
+    customer_order_item_id BIGINT NOT NULL
+        REFERENCES customer_order_item(id) ON DELETE CASCADE,
+    identity_key TEXT NOT NULL,
+    item_type TEXT NOT NULL
+        CHECK (item_type IN ('part', 'assembly', 'finished_product')),
+    product_id BIGINT NOT NULL,
+    product_version INT NOT NULL CHECK (product_version > 0),
+    product_bom_id BIGINT,
+    flow_node_id TEXT NOT NULL,
+    item_code TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    unit_requirement INT NOT NULL CHECK (unit_requirement > 0),
+    gross_required_quantity INT NOT NULL CHECK (gross_required_quantity >= 0),
+    estimated_inventory_quantity INT NOT NULL DEFAULT 0
+        CHECK (estimated_inventory_quantity >= 0),
+    net_required_quantity INT NOT NULL CHECK (net_required_quantity >= 0),
+    planned_production_quantity INT NOT NULL
+        CHECK (planned_production_quantity >= 0),
+    reserved_inventory_quantity INT NOT NULL DEFAULT 0
+        CHECK (reserved_inventory_quantity >= 0),
+    issued_inventory_quantity INT NOT NULL DEFAULT 0
+        CHECK (issued_inventory_quantity >= 0),
+    sort_order INT NOT NULL,
+    UNIQUE (production_plan_id, customer_order_item_id, identity_key)
+);
+
+-- inventory_stock：跨订单复用的仓库配件、装配体和成品部最终成品库存。
+CREATE TABLE inventory_stock (
+    id BIGSERIAL PRIMARY KEY,
+    identity_key TEXT NOT NULL UNIQUE,
+    department_code TEXT NOT NULL
+        CHECK (department_code IN ('warehouse', 'finished')),
+    item_type TEXT NOT NULL
+        CHECK (item_type IN ('part', 'assembly', 'finished_product')),
+    product_id BIGINT NOT NULL,
+    product_version INT NOT NULL CHECK (product_version > 0),
+    product_bom_id BIGINT,
+    flow_node_id TEXT NOT NULL,
+    item_code TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    reserved_quantity INT NOT NULL DEFAULT 0
+        CHECK (reserved_quantity >= 0 AND reserved_quantity <= quantity),
+    revision INT NOT NULL DEFAULT 1 CHECK (revision > 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CHECK (
+        (department_code = 'finished' AND item_type = 'finished_product')
+        OR (department_code = 'warehouse' AND item_type IN ('part', 'assembly'))
+    )
+);
+
+-- inventory_reservation：生产计划确认时对实物库存的占用和出库状态。
+CREATE TABLE inventory_reservation (
+    id BIGSERIAL PRIMARY KEY,
+    production_plan_id BIGINT NOT NULL
+        REFERENCES production_plan(id) ON DELETE CASCADE,
+    production_plan_item_id BIGINT NOT NULL
+        REFERENCES production_plan_item(id) ON DELETE CASCADE,
+    inventory_stock_id BIGINT NOT NULL REFERENCES inventory_stock(id),
+    reserved_quantity INT NOT NULL CHECK (reserved_quantity > 0),
+    issued_quantity INT NOT NULL DEFAULT 0
+        CHECK (issued_quantity >= 0 AND issued_quantity <= reserved_quantity),
+    status TEXT NOT NULL DEFAULT 'reserved'
+        CHECK (status IN ('reserved', 'issued', 'released')),
+    reserved_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    issued_at TIMESTAMPTZ,
+    issued_by TEXT,
+    released_at TIMESTAMPTZ,
+    CHECK (
+        (status = 'reserved' AND issued_quantity = 0 AND issued_at IS NULL AND released_at IS NULL)
+        OR (status = 'issued' AND issued_quantity > 0 AND issued_at IS NOT NULL AND released_at IS NULL)
+        OR (status = 'released' AND issued_quantity = 0 AND released_at IS NOT NULL)
+    )
+);
+
+-- inventory_receipt：生产结余进入仓库或成品部之前的待确认入库任务。
+CREATE TABLE inventory_receipt (
+    id BIGSERIAL PRIMARY KEY,
+    source_customer_order_id BIGINT,
+    source_production_item_id BIGINT,
+    identity_key TEXT NOT NULL,
+    department_code TEXT NOT NULL
+        CHECK (department_code IN ('warehouse', 'finished')),
+    item_type TEXT NOT NULL
+        CHECK (item_type IN ('part', 'assembly', 'finished_product')),
+    product_id BIGINT NOT NULL,
+    product_version INT NOT NULL CHECK (product_version > 0),
+    product_bom_id BIGINT,
+    flow_node_id TEXT NOT NULL,
+    item_code TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    quantity INT NOT NULL CHECK (quantity > 0),
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'confirmed', 'cancelled')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    confirmed_at TIMESTAMPTZ,
+    confirmed_by TEXT,
+    CHECK (
+        (status = 'confirmed' AND confirmed_at IS NOT NULL AND confirmed_by IS NOT NULL)
+        OR (status <> 'confirmed' AND confirmed_at IS NULL AND confirmed_by IS NULL)
+    ),
+    CHECK (
+        (department_code = 'finished' AND item_type = 'finished_product')
+        OR (department_code = 'warehouse' AND item_type IN ('part', 'assembly'))
+    )
+);
+
+-- inventory_transaction：记录入库、占用、释放、出库和调整的不可变流水。
+CREATE TABLE inventory_transaction (
+    id BIGSERIAL PRIMARY KEY,
+    inventory_stock_id BIGINT NOT NULL REFERENCES inventory_stock(id),
+    production_plan_id BIGINT,
+    production_plan_item_id BIGINT,
+    inventory_reservation_id BIGINT,
+    inventory_receipt_id BIGINT,
+    transaction_type TEXT NOT NULL CHECK (
+        transaction_type IN ('receipt', 'reserve', 'release', 'issue', 'adjust_in', 'adjust_out')
+    ),
+    quantity INT NOT NULL CHECK (quantity > 0),
+    quantity_before INT NOT NULL CHECK (quantity_before >= 0),
+    quantity_after INT NOT NULL CHECK (quantity_after >= 0),
+    reserved_before INT NOT NULL CHECK (reserved_before >= 0),
+    reserved_after INT NOT NULL CHECK (reserved_after >= 0),
+    actor_username TEXT NOT NULL,
+    reason TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- finished_order_stock：订单专属成品暂存，区分待入库、可发货、已发货和结余结转。
+CREATE TABLE finished_order_stock (
+    id BIGSERIAL PRIMARY KEY,
+    customer_order_id BIGINT NOT NULL
+        REFERENCES customer_order(id) ON DELETE CASCADE,
+    customer_order_item_id BIGINT NOT NULL
+        REFERENCES customer_order_item(id) ON DELETE CASCADE,
+    production_item_id BIGINT NOT NULL,
+    product_id BIGINT NOT NULL,
+    product_version INT NOT NULL CHECK (product_version > 0),
+    flow_node_id TEXT NOT NULL,
+    item_code TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    unit_quantity INT NOT NULL CHECK (unit_quantity > 0),
+    pending_quantity INT NOT NULL DEFAULT 0 CHECK (pending_quantity >= 0),
+    available_quantity INT NOT NULL DEFAULT 0 CHECK (available_quantity >= 0),
+    shipped_quantity INT NOT NULL DEFAULT 0 CHECK (shipped_quantity >= 0),
+    transferred_quantity INT NOT NULL DEFAULT 0 CHECK (transferred_quantity >= 0),
+    revision INT NOT NULL DEFAULT 1 CHECK (revision > 0),
+    received_at TIMESTAMPTZ,
+    received_by TEXT,
+    last_shipped_at TIMESTAMPTZ,
+    last_shipped_by TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE (production_item_id, flow_node_id)
 );
 
 -- ------------------------------------------------------------
@@ -261,6 +443,10 @@ CREATE TABLE production_item (
         FOREIGN KEY (product_bom_id, product_id, product_version)
         REFERENCES product_bom(id, product_id, product_version)
 );
+
+ALTER TABLE finished_order_stock
+    ADD CONSTRAINT fk_finished_order_stock_production_item
+    FOREIGN KEY (production_item_id) REFERENCES production_item(id) ON DELETE CASCADE;
 
 -- repository：保存生产对象在流程节点中的未打标记可用数量。
 CREATE TABLE repository (
@@ -439,7 +625,8 @@ CREATE TABLE production_movement (
     movement_type TEXT NOT NULL CHECK (
         movement_type IN (
             'initial', 'process', 'purchase_receipt', 'assembly_input', 'assembly_output',
-            'qc_qualified', 'qc_rework', 'qc_dispatch', 'scrap', 'lost'
+            'qc_qualified', 'qc_rework', 'qc_dispatch', 'inventory_issue',
+            'finished_receipt', 'customer_shipment', 'scrap', 'lost'
         )
     ),
     work_order_id BIGINT REFERENCES work_order(id),
@@ -453,6 +640,20 @@ CREATE TABLE production_movement (
             AND source_flow_node_id IS NOT NULL
             AND target_flow_node_id IS NOT NULL
             AND source_department_id IS NULL
+            AND target_department_id IS NOT NULL
+            AND work_order_id IS NULL
+            AND work_order_batch_id IS NULL)
+        OR (movement_type = 'inventory_issue'
+            AND source_flow_node_id IS NOT NULL
+            AND target_flow_node_id IS NOT NULL
+            AND source_department_id IS NOT NULL
+            AND target_department_id IS NOT NULL
+            AND work_order_id IS NULL
+            AND work_order_batch_id IS NULL)
+        OR (movement_type IN ('finished_receipt', 'customer_shipment')
+            AND source_flow_node_id IS NOT NULL
+            AND target_flow_node_id IS NOT NULL
+            AND source_department_id IS NOT NULL
             AND target_department_id IS NOT NULL
             AND work_order_id IS NULL
             AND work_order_batch_id IS NULL)
@@ -1169,6 +1370,13 @@ $$ LANGUAGE plpgsql;
 -- 触发器
 -- ============================================================
 
+CREATE FUNCTION protect_inventory_transaction_history() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'inventory transaction history is immutable'
+        USING ERRCODE = '23514';
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TRIGGER trg_production_movement_context
 BEFORE INSERT
 ON production_movement
@@ -1211,6 +1419,10 @@ CREATE TRIGGER trg_production_movement_history
 BEFORE UPDATE OR DELETE ON production_movement
 FOR EACH ROW EXECUTE FUNCTION protect_production_movement_history();
 
+CREATE TRIGGER trg_inventory_transaction_history
+BEFORE UPDATE OR DELETE ON inventory_transaction
+FOR EACH ROW EXECUTE FUNCTION protect_inventory_transaction_history();
+
 CREATE TRIGGER trg_product_updated_at
 BEFORE UPDATE ON product
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -1233,6 +1445,18 @@ FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER trg_customer_order_updated_at
 BEFORE UPDATE ON customer_order
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_production_plan_updated_at
+BEFORE UPDATE ON production_plan
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_inventory_stock_updated_at
+BEFORE UPDATE ON inventory_stock
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_finished_order_stock_updated_at
+BEFORE UPDATE ON finished_order_stock
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ============================================================
@@ -1259,6 +1483,31 @@ CREATE INDEX idx_customer_order_customer ON customer_order(customer_id);
 CREATE INDEX idx_customer_order_updated ON customer_order(updated_at DESC, id DESC);
 CREATE INDEX idx_customer_order_item_product_version
     ON customer_order_item(product_id, product_version);
+CREATE INDEX idx_production_plan_status ON production_plan(status, id);
+CREATE INDEX idx_production_plan_item_plan
+    ON production_plan_item(production_plan_id, sort_order);
+CREATE INDEX idx_production_plan_item_order_item
+    ON production_plan_item(customer_order_item_id);
+CREATE INDEX idx_inventory_stock_lookup
+    ON inventory_stock(product_id, product_version, item_type);
+CREATE INDEX idx_inventory_stock_department
+    ON inventory_stock(department_code, item_type);
+CREATE INDEX idx_inventory_reservation_plan
+    ON inventory_reservation(production_plan_id, status);
+CREATE INDEX idx_inventory_reservation_item
+    ON inventory_reservation(production_plan_item_id);
+CREATE INDEX idx_inventory_reservation_stock
+    ON inventory_reservation(inventory_stock_id, status);
+CREATE INDEX idx_inventory_receipt_status
+    ON inventory_receipt(department_code, status, id);
+CREATE INDEX idx_inventory_transaction_stock
+    ON inventory_transaction(inventory_stock_id, id);
+CREATE INDEX idx_inventory_transaction_plan
+    ON inventory_transaction(production_plan_id, id);
+CREATE INDEX idx_finished_order_stock_order
+    ON finished_order_stock(customer_order_id, id);
+CREATE INDEX idx_finished_order_stock_order_item
+    ON finished_order_stock(customer_order_item_id, id);
 CREATE INDEX idx_production_movement_item_created
     ON production_movement(production_item_id, created_at);
 CREATE INDEX idx_production_movement_target_department_created
@@ -1400,6 +1649,9 @@ INSERT INTO users (username, password, department, role, permissions) VALUES
     'assembly', '1', 'assembly', 'operator', 'production:view,production:manage'
 ),
 (
+    'finished', '1', 'finished', 'operator', 'production:view,production:manage'
+),
+(
     'warehouse', '1', 'warehouse', 'operator', 'production:view,production:manage'
 );
 
@@ -1412,7 +1664,8 @@ INSERT INTO department (department_name, department_code) VALUES
 ('表面处理部', 'polish'),
 ('QC部门', 'qc'),
 ('装配部', 'assembly'),
-('成品部', 'warehouse');
+('成品部', 'finished'),
+('仓库', 'warehouse');
 
 INSERT INTO workshop (department_id, workshop_name)
 SELECT department.id, source.workshop_name
@@ -1439,8 +1692,7 @@ FROM (
         ('polish', '振机车间'),
         ('polish', '干滚车间'),
         ('polish', '清光车间'),
-        ('assembly', '装包车间'),
-        ('warehouse', '成品车间')
+        ('assembly', '装包车间')
 ) AS source(department_code, workshop_name)
 JOIN department
     ON department.department_code = source.department_code;
@@ -1470,8 +1722,7 @@ FROM (
         ('polish', '振机车间', '振机', 'standard'),
         ('polish', '干滚车间', '干滚', 'standard'),
         ('polish', '清光车间', '清光', 'standard'),
-        ('assembly', '装包车间', '装包', 'standard'),
-        ('warehouse', '成品车间', '外购入库', 'purchase_receipt')
+        ('assembly', '装包车间', '装包', 'standard')
 ) AS source(department_code, workshop_name, procedure_name, procedure_type)
 JOIN department
     ON department.department_code = source.department_code
@@ -1640,6 +1891,9 @@ SELECT
                 'label', '主体与弹簧装配',
                 'x', 680,
                 'y', 210,
+                'assembly_sequence', 81,
+                'assembly_code', 'DEMO-001-81',
+                'assembly_name', '主体-弹簧装配体',
                 'output_name', '主体-弹簧装配体',
                 'output_pcs', 1
             ),
@@ -1749,11 +2003,5 @@ SELECT '装配示例工人', department.id, workshop.id
 FROM department
 JOIN workshop ON workshop.department_id = department.id
 WHERE department.department_code = 'assembly' AND workshop.workshop_name = '装包车间';
-
-INSERT INTO worker (worker_name, department_id, workshop_id)
-SELECT '成品示例员工', department.id, workshop.id
-FROM department
-JOIN workshop ON workshop.department_id = department.id
-WHERE department.department_code = 'warehouse' AND workshop.workshop_name = '成品车间';
 
 COMMIT;

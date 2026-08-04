@@ -36,7 +36,7 @@ const router = createRouter({
     {
       path: '/business/orders',
       name: 'customer-orders',
-      component: () => import('@/features/customer-orders/views/CustomerOrdersView.vue'),
+      component: () => import('@/features/customer-orders/views/BusinessDepartmentView.vue'),
       meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view] },
     },
     {

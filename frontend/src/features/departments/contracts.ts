@@ -10,6 +10,8 @@ export type DepartmentCapability =
   | 'quality'
   | 'special_printing'
   | 'production_progress'
+  | 'inventory'
+  | 'finished_goods'
 
 export type DepartmentModule = {
   code: string

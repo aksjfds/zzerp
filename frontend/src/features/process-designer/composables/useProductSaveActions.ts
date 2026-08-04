@@ -6,7 +6,7 @@ import type { ApiErrorDetail } from '@/api/types'
 import type { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import {
   synchronizeFlowPartMetadata,
-  synchronizeAssemblyNames,
+  synchronizeAssemblyIdentity,
   type BomItem,
   type EngineeringProduct,
   type ProcessFlow,
@@ -80,7 +80,11 @@ export function useProductSaveActions(options: Options) {
       form.version = product.version
       form.revision = product.revision
       form.bom_items = product.bom_items.map((item) => ({ ...item }))
-      form.process_flow = synchronizeFlowPartMetadata(localFlow, form.bom_items)
+      form.process_flow = synchronizeFlowPartMetadata(
+        localFlow,
+        form.bom_items,
+        form.factory_code,
+      )
       flowEditor.value?.reload(form.process_flow)
       bomSnapshot.value = JSON.stringify(form.bom_items)
       flowSnapshot.value = JSON.stringify(product.process_flow)
@@ -107,7 +111,10 @@ export function useProductSaveActions(options: Options) {
         customer_code: product.customer_code,
         revision: product.revision,
       })
-      markSaved(['base'])
+      form.process_flow = product.process_flow
+      flowEditor.value?.reload(product.process_flow)
+      flowSnapshot.value = JSON.stringify(product.process_flow)
+      markSaved(['base', 'flow'])
       ElMessage.success('产品基础信息已保存')
     } catch (error) {
       showSaveError(error, '产品基础信息保存失败')
@@ -117,7 +124,10 @@ export function useProductSaveActions(options: Options) {
   async function saveFlow() {
     if (!productId.value || form.revision === null || form.version === null || !flowEditor.value) return
     flowSaveError.value = null
-    form.process_flow = synchronizeAssemblyNames(flowEditor.value.getGraphData())
+    form.process_flow = synchronizeAssemblyIdentity(
+      flowEditor.value.getGraphData(),
+      form.factory_code,
+    )
     try {
       const product = await store.saveProcessFlow(
         productId.value,

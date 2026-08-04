@@ -101,6 +101,11 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
     type: 'assembly',
     output_name: stringValue(properties.outputName),
     output_pcs: requiredNumber(properties.outputPcs ?? 1, 'outputPcs'),
+    assembly_sequence: typeof properties.assemblySequence === 'number'
+      ? properties.assemblySequence
+      : undefined,
+    assembly_code: stringValue(properties.assemblyCode) || undefined,
+    assembly_name: stringValue(properties.assemblyName) || undefined,
   }
 }
 
@@ -132,7 +137,13 @@ function nodeProperties(node: FlowNode): Record<string, unknown> {
   if (node.type === 'qc') return {}
   if (node.type === 'shipping') return {}
   if (node.type === 'assembly') {
-    return { outputName: node.output_name, outputPcs: node.output_pcs }
+    return {
+      outputName: node.output_name,
+      outputPcs: node.output_pcs,
+      assemblySequence: node.assembly_sequence,
+      assemblyCode: node.assembly_code,
+      assemblyName: node.assembly_name,
+    }
   }
   return {}
 }

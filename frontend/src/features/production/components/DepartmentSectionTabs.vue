@@ -9,6 +9,9 @@ import ProcedureTagPriceView from '../views/ProcedureTagPriceView.vue'
 const props = defineProps<{
   departmentCode: string
 }>()
+const emit = defineEmits<{
+  configurationSaved: []
+}>()
 
 type DepartmentTab = 'workspace' | 'workers' | 'progress' | 'tag-prices'
 
@@ -56,7 +59,11 @@ const activeTab = computed<DepartmentTab>({
       name="tag-prices"
       lazy
     >
-      <ProcedureTagPriceView embedded :department-code="departmentCode" />
+      <ProcedureTagPriceView
+        embedded
+        :department-code="departmentCode"
+        @saved="emit('configurationSaved')"
+      />
     </ElTabPane>
     <ElTabPane
       v-if="availableTabs.includes('workers')"

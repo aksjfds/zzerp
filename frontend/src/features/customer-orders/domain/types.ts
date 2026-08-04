@@ -44,8 +44,63 @@ export type CustomerOrderPayload = {
   customer_order_no: string
   customer_id: number
   remark: string
-  items: Array<Pick<CustomerOrderItem, 'product_id' | 'quantity' | 'delivery_date' | 'remark'>>
+  items: Array<Pick<CustomerOrderItem, 'id' | 'product_id' | 'quantity' | 'delivery_date' | 'remark'>>
   expected_revision?: number
+}
+
+export type ProductionPlanItem = {
+  id: number
+  customer_order_item_id: number
+  item_type: 'finished_product' | 'assembly' | 'part'
+  product_id: number
+  product_version: number
+  product_bom_id: number | null
+  flow_node_id: string
+  item_code: string
+  item_name: string
+  unit_requirement: number
+  gross_required_quantity: number
+  estimated_inventory_quantity: number
+  available_inventory_quantity: number
+  net_required_quantity: number
+  planned_production_quantity: number
+  reserved_inventory_quantity: number
+  issued_inventory_quantity: number
+}
+
+export type ProductionPlan = {
+  id: number
+  customer_order_id: number
+  status: 'draft' | 'confirmed' | 'cancelled'
+  revision: number
+  product_summaries: Array<{
+    customer_order_item_id: number
+    product_id: number
+    product_version: number
+    product_code: string
+    product_name: string
+    order_quantity: number
+    planned_finished_quantity: number
+  }>
+  items: ProductionPlanItem[]
+  inventory_items: Array<{
+    id: number
+    customer_order_item_id: number
+    item_type: 'finished_product' | 'assembly' | 'part'
+    product_id: number
+    product_version: number
+    product_bom_id: number | null
+    flow_node_id: string
+    item_code: string
+    item_name: string
+    current_inventory_quantity: number
+    reserved_inventory_quantity: number
+    issued_inventory_quantity: number
+  }>
+  confirmed_at: string | null
+  confirmed_by: string | null
+  created_at: string
+  updated_at: string
 }
 
 export type ProductionNodeStat = {

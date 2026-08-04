@@ -44,8 +44,11 @@ class ShippingNodePayload(FlowNodeBase):
 
 class AssemblyNodePayload(FlowNodeBase):
     type: Literal["assembly"]
-    output_name: str = Field(min_length=1, max_length=200)
+    output_name: str = Field(min_length=1, max_length=500)
     output_pcs: int = Field(default=1, gt=0)
+    assembly_sequence: int | None = Field(default=None, ge=81)
+    assembly_code: str | None = Field(default=None, min_length=1, max_length=250)
+    assembly_name: str | None = Field(default=None, min_length=1, max_length=500)
 
 
 FlowNodePayload = Annotated[

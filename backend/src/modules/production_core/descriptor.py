@@ -21,10 +21,12 @@ MODULE = ModuleDescriptor(
         "assembly",
         "quality",
         "workforce",
+        "inventory",
     ),
     collaboration_apis=(
         "modules.production_core.assembly_api",
         "modules.production_core.context_api",
+        "modules.production_core.inventory_api",
         "modules.production_core.model_api",
         "modules.production_core.operational_api",
         "modules.production_core.ownership_api",

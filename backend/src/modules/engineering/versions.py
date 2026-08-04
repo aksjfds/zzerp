@@ -17,8 +17,10 @@ from modules.engineering.support import (
     raise_integrity_error,
     raise_stale_data_error,
 )
+from modules.engineering.flow_mapping import synchronize_part_metadata
 from modules.errors import DomainError, product_not_found
 from modules.standard_execution.pricing_api import copy_product_version_prices
+from schemas.engineering import ProcessFlowPayload
 
 
 def create_product_version(
@@ -86,6 +88,14 @@ def create_product_version(
                             element_id=node.get("id"),
                         )
                     node["bom_item_id"] = id_map[source_bom_id]
+            copied_flow = synchronize_part_metadata(
+                ProcessFlowPayload.model_validate(copied_flow),
+                {
+                    item.id: (item.part_name, item.part_no)
+                    for item in copied_items
+                },
+                product.factory_code,
+            ).model_dump(exclude_none=True)
             repository.set_process_flow(product, next_version, copied_flow)
             copy_product_version_prices(
                 session,

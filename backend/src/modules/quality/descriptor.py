@@ -12,6 +12,7 @@ MODULE = ModuleDescriptor(
         "assembly",
         "organization",
         "workforce",
+        "inventory",
     ),
     collaboration_apis=(
         "modules.quality.context_api",

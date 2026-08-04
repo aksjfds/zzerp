@@ -7,7 +7,7 @@ const props = defineProps<{ progress: CustomerOrderProductProgress }>()
 const segments = computed(() => {
   const total = Math.max(props.progress.total_quantity, 1)
   return [
-    { key: 'completed', title: '完工', value: props.progress.completed_quantity, width: props.progress.completed_quantity / total * 100 },
+    { key: 'completed', title: '已发货', value: props.progress.completed_quantity, width: props.progress.completed_quantity / total * 100 },
     { key: 'scrap', title: '报废', value: props.progress.scrap_quantity, width: props.progress.scrap_quantity / total * 100 },
     { key: 'lost', title: '遗失', value: props.progress.lost_quantity, width: props.progress.lost_quantity / total * 100 },
     { key: 'unfinished', title: '未完工', value: props.progress.unfinished_quantity, width: props.progress.unfinished_quantity / total * 100 },
@@ -35,7 +35,7 @@ const segments = computed(() => {
     </div>
     <div class="progress-values">
       <span>总数 <b>{{ progress.total_quantity }}</b></span>
-      <span class="completed">完工 <b>{{ progress.completed_quantity }}</b></span>
+      <span class="completed">已发货 <b>{{ progress.completed_quantity }}</b></span>
       <span class="scrap">报废 <b>{{ progress.scrap_quantity }}</b></span>
       <span class="lost">遗失 <b>{{ progress.lost_quantity }}</b></span>
       <span>未完工 <b>{{ progress.unfinished_quantity }}</b></span>

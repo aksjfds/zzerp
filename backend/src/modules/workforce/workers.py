@@ -42,7 +42,6 @@ PRODUCTION_DEPARTMENT_CODES = (
     "polish",
     "qc",
     "assembly",
-    "warehouse",
 )
 
 

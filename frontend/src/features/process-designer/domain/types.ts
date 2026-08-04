@@ -31,6 +31,9 @@ export type AssemblyFlowNode = FlowNodeBase & {
   type: 'assembly'
   output_name: string
   output_pcs: number
+  assembly_sequence?: number
+  assembly_code?: string
+  assembly_name?: string
 }
 
 export type FlowNode = PartFlowNode | ProcessFlowNode | QcFlowNode | ShippingFlowNode | AssemblyFlowNode
@@ -111,7 +114,11 @@ export const EMPTY_FLOW = (): ProcessFlow => ({
   edges: [],
 })
 
-export function synchronizeFlowPartMetadata(flow: ProcessFlow, bomItems: BomItem[]): ProcessFlow {
+export function synchronizeFlowPartMetadata(
+  flow: ProcessFlow,
+  bomItems: BomItem[],
+  factoryCode = '',
+): ProcessFlow {
   const metadata = new Map(
     bomItems.flatMap((item) => item.id ? [[item.id, item] as const] : []),
   )
@@ -123,16 +130,23 @@ export function synchronizeFlowPartMetadata(flow: ProcessFlow, bomItems: BomItem
       return item ? { ...node, label: item.part_name, part_no: item.part_no } : node
     }),
   }
-  return synchronizeAssemblyNames(synchronized)
+  return synchronizeAssemblyIdentity(synchronized, factoryCode)
 }
 
-export function synchronizeAssemblyNames(flow: ProcessFlow): ProcessFlow {
+export function synchronizeAssemblyIdentity(flow: ProcessFlow, factoryCode = ''): ProcessFlow {
   const nodes = flow.nodes.map(node => ({ ...node }))
   const byId = new Map(nodes.map(node => [node.id, node]))
   const incoming = new Map<string, string[]>()
   flow.edges.forEach((edge) => {
     incoming.set(edge.target_node_id, [...(incoming.get(edge.target_node_id) || []), edge.source_node_id])
   })
+  incoming.forEach(sourceIds => sourceIds.sort((left, right) => {
+    const a = byId.get(left)
+    const b = byId.get(right)
+    return (a?.x ?? 0) - (b?.x ?? 0)
+      || (a?.y ?? 0) - (b?.y ?? 0)
+      || left.localeCompare(right)
+  }))
   const cache = new Map<string, string[]>()
   function names(nodeId: string, visiting = new Set<string>()): string[] {
     if (cache.has(nodeId)) return cache.get(nodeId)!
@@ -146,9 +160,21 @@ export function synchronizeAssemblyNames(flow: ProcessFlow): ProcessFlow {
       for (const name of names(sourceId, nextVisiting)) if (!result.includes(name)) result.push(name)
     }
     cache.set(nodeId, result)
-    if (node.type === 'assembly' && result.length) node.output_name = `${result.join('-')}装配体`
+    if (node.type === 'assembly' && result.length) {
+      node.assembly_name = `${result.join('-')}装配体`
+      node.output_name = node.assembly_name
+    }
     return result
   }
   nodes.forEach(node => names(node.id))
+  nodes
+    .filter((node): node is AssemblyFlowNode => node.type === 'assembly')
+    .sort((a, b) => a.x - b.x || a.y - b.y || a.id.localeCompare(b.id))
+    .forEach((node, index) => {
+      node.assembly_sequence = 81 + index
+      node.assembly_code = factoryCode ? `${factoryCode}-${node.assembly_sequence}` : undefined
+      node.assembly_name ||= node.output_name || '装配体'
+      node.output_name = node.assembly_name
+    })
   return { ...flow, nodes }
 }

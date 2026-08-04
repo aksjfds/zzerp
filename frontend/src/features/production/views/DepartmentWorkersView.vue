@@ -24,7 +24,6 @@ const departmentNames: Record<string, string> = {
   polish: '表面处理部',
   qc: 'QC部门',
   assembly: '装配部',
-  warehouse: '成品部',
 }
 const controller = useDepartmentWorkers(departmentCode)
 const departmentName = computed(() => (

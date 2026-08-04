@@ -1,6 +1,7 @@
 from modules.assembly.descriptor import MODULE as ASSEMBLY
 from modules.engineering.descriptor import MODULE as ENGINEERING
 from modules.identity.descriptor import MODULE as IDENTITY
+from modules.inventory.descriptor import MODULE as INVENTORY
 from modules.organization.descriptor import MODULE as ORGANIZATION
 from modules.planning.descriptor import MODULE as PLANNING
 from modules.production_core.descriptor import MODULE as PRODUCTION_CORE
@@ -15,6 +16,7 @@ MODULES = {
     module.name: module
     for module in (
         IDENTITY,
+        INVENTORY,
         ORGANIZATION,
         ENGINEERING,
         SALES,

@@ -235,7 +235,8 @@ class ProductionMovement(Base):
         CheckConstraint(
             "movement_type IN ('initial', 'process', 'assembly_input', "
             "'assembly_output', 'purchase_receipt', 'qc_qualified', 'qc_rework', "
-            "'qc_dispatch', 'scrap', 'lost')",
+            "'qc_dispatch', 'inventory_issue', 'finished_receipt', "
+            "'customer_shipment', 'scrap', 'lost')",
             name="ck_production_movement_type",
         ),
         CheckConstraint(
@@ -243,6 +244,14 @@ class ProductionMovement(Base):
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NULL "
             "AND target_department_id IS NOT NULL AND work_order_id IS NULL "
             "AND work_order_batch_id IS NULL) OR "
+            "(movement_type = 'inventory_issue' AND source_flow_node_id IS NOT NULL "
+            "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
+            "AND target_department_id IS NOT NULL AND work_order_id IS NULL "
+            "AND work_order_batch_id IS NULL) OR "
+            "(movement_type IN ('finished_receipt', 'customer_shipment') "
+            "AND source_flow_node_id IS NOT NULL AND target_flow_node_id IS NOT NULL "
+            "AND source_department_id IS NOT NULL AND target_department_id IS NOT NULL "
+            "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
             "(movement_type IN ('process', 'purchase_receipt', 'assembly_output') "
             "AND source_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "

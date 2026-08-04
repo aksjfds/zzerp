@@ -68,7 +68,7 @@ def qc_batch_dispatch(
     user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
 ):
     if user["department"] not in {"sys", "qc"}:
-        raise HTTPException(status_code=403, detail="只有 QC 可以出货合格数量")
+        raise HTTPException(status_code=403, detail="只有 QC 可以放行合格数量")
     return {
         "data": qc_department.dispatch_qc_batch(
             batch_id,

@@ -35,6 +35,13 @@ TABLE_OWNERS = {
     "work_order_batch": "quality",
     "production_movement": "production_core",
     "production_operation_undo": "production_core",
+    "production_plan": "planning",
+    "production_plan_item": "planning",
+    "inventory_stock": "inventory",
+    "inventory_reservation": "inventory",
+    "inventory_receipt": "inventory",
+    "inventory_transaction": "inventory",
+    "finished_order_stock": "inventory",
 }
 
 

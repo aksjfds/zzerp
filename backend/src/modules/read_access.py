@@ -18,6 +18,7 @@ READ_MODEL_ACCESS = {
             "procedure_tag_stock",
             "product",
             "product_bom",
+            "product_process_flow",
             "production_item",
             "production_movement",
             "repository",
@@ -45,6 +46,19 @@ READ_MODEL_ACCESS = {
         }
     ),
     "standard_execution": frozenset(),
+    "inventory": frozenset(
+        {
+            "customer_order",
+            "customer_order_item",
+            "department",
+            "product",
+            "product_process_flow",
+            "production_plan",
+            "production_plan_item",
+            "production_item",
+            "production_movement",
+        }
+    ),
 }
 
 

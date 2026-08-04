@@ -19,7 +19,7 @@ const state = computed(() => {
   if (item.processing_quantity) return { label: '加工中', type: 'warning' as const }
   if (item.waiting_quantity) {
     return {
-      label: props.departmentCode === 'qc' ? '合格待出货' : '待处理',
+      label: props.departmentCode === 'qc' ? '合格待放行' : '待处理',
       type: 'primary' as const,
     }
   }

@@ -66,7 +66,7 @@ function applySearch() {
   <main class="production-page">
     <DepartmentPageHeader
       department-name="QC部门"
-      description="录入工单批次质检结果，并将最终合格数量出货到后续流程。"
+      description="录入工单批次质检结果，并将最终合格数量放行到后续流程。"
       @refresh="refresh"
     />
     <DepartmentSectionTabs department-code="qc">
@@ -86,7 +86,7 @@ function applySearch() {
       subtitle="按当前质检列表统计"
       pending-label="待质检"
       processing-label="待录入结果"
-      pending-qc-label="合格待出货"
+      pending-qc-label="合格待放行"
       completed-label="已检合格"
     />
     <section class="production-card qc-workspace">

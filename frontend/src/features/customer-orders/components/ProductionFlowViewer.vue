@@ -174,7 +174,7 @@ onMounted(async () => {
     edgeType: 'polyline',
     stopZoomGraph: true,
     stopScrollGraph: true,
-    stopMoveGraph: true,
+    stopMoveGraph: false,
   })
   registerProcessNodes(instance)
   instance.batchRegister([
@@ -256,7 +256,9 @@ onBeforeUnmount(() => {
   border: 1px solid var(--md-outline-variant);
   border-radius: var(--erp-radius);
   background: var(--md-surface-container-lowest);
+  cursor: grab;
 }
+.production-flow-viewer:active { cursor: grabbing; }
 @media (max-width: 760px) {
   .production-flow-legend { gap: 8px 12px; }
   .production-flow-viewer { height: clamp(420px, 65vh, 560px); }

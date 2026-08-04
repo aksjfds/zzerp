@@ -16,6 +16,7 @@ from routers import (
     auth,
     customer_orders,
     customers,
+    inventory,
     organization,
     pmc,
     procedure_tag_prices,
@@ -188,6 +189,7 @@ app.include_router(products.router)
 app.include_router(organization.router)
 app.include_router(customers.router)
 app.include_router(customer_orders.router)
+app.include_router(inventory.router)
 app.include_router(pmc.router)
 app.include_router(production.router)
 app.include_router(procedure_tag_prices.router)

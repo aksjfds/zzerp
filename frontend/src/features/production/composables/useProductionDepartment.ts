@@ -214,6 +214,7 @@ export function useProductionDepartment(
     load,
     loadDetails,
     openWorkOrder,
+    reloadWorkspace,
     refresh,
     saveWorkOrder,
     selectRepository,

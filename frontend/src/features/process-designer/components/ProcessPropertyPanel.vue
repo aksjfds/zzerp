@@ -46,7 +46,7 @@ const emit = defineEmits<{
     </template>
     <template v-else-if="node?.type === 'shipping'">
       <h3>发货节点</h3>
-      <p>流程终点。产品经QC出货后离开生产系统。</p>
+      <p>流程终点。产品经QC放行后进入成品部，确认入库后再按客户订单发货。</p>
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>
@@ -54,6 +54,8 @@ const emit = defineEmits<{
       <ElInput :model-value="node.label" :disabled="readonly" @change="emit('updateAssembly', $event, node.output_name, node.output_pcs)" />
       <label>装配体名称</label>
       <ElInput :model-value="node.output_name" disabled placeholder="根据输入配件自动生成" />
+      <label>系统编号</label>
+      <ElInput :model-value="node.assembly_code || '保存流程后生成'" disabled />
       <label>每件产品所需装配体数量</label>
       <ElInputNumber :model-value="node.output_pcs" :disabled="readonly" :min="1" @change="emit('updateAssembly', node.label, node.output_name, $event || 1)" />
     </template>

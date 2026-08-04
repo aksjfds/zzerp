@@ -19,6 +19,9 @@ const props = withDefaults(defineProps<{
   embedded: false,
   departmentCode: '',
 })
+const emit = defineEmits<{
+  saved: []
+}>()
 type EditableProcedure = ProcedureTagPricePart['procedures'][number] & {
   tagNames: string[]
   prices: Record<string, number | null>
@@ -32,7 +35,6 @@ const departmentNames: Record<string, string> = {
   stamp: '冲压部',
   cnc: '机加部',
   polish: '表面处理部',
-  warehouse: '成品部',
 }
 const route = useRoute()
 const authStore = useAuthStore()
@@ -180,6 +182,7 @@ async function save(part: EditablePart, procedure: EditableProcedure) {
     )
     ElMessage.success(`${part.part_name} · ${procedure.procedure_name}配置已保存`)
     await load()
+    emit('saved')
     return true
   } catch (error) {
     ElMessage.error(getApiErrorDetail(error)?.message || '配置保存失败')
