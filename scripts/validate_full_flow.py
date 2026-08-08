@@ -27,7 +27,6 @@ from sqlalchemy import func, select  # noqa: E402
 
 from database import SessionLocal  # noqa: E402
 from modules.inventory.api import (  # noqa: E402
-    confirm_receipt,
     issue_outbound_plan,
     list_outbound_plans,
 )
@@ -42,12 +41,17 @@ from modules.inventory.model_api import (  # noqa: E402
     InventoryReceipt,
     InventoryStock,
 )
-from modules.inventory.ownership_api import create_receipt  # noqa: E402
+from modules.inventory.ownership_api import confirm_receipt, create_receipt  # noqa: E402
 from modules.planning.api import get_order_plan, update_order_plan  # noqa: E402
 from modules.production_core.model_api import (  # noqa: E402
     ProductionItem,
     ProductionMovement,
     Repository,
+)
+from modules.organization.model_api import Department  # noqa: E402
+from modules.production_core.warehouse_storage import (  # noqa: E402
+    list_closed_surplus_positions,
+    store_position_in_warehouse,
 )
 from modules.sales.model_api import Customer, CustomerOrder, CustomerOrderItem  # noqa: E402
 from modules.sales.orders import (  # noqa: E402
@@ -152,11 +156,17 @@ def main() -> None:
                 ProductionItem.customer_order_item_id == order_item.id
             )
         ))
-        for repository in session.scalars(
+        repositories = list(session.scalars(
             select(Repository).where(
                 Repository.production_item_id.in_([item.id for item in production_items])
             )
-        ):
+        ))
+        kept_repository = repositories[0]
+        kept_repository.quantity = 2
+        kept_department_code = session.scalar(select(Department.department_code).where(
+            Department.id == kept_repository.department_id
+        ))
+        for repository in repositories[1:]:
             session.delete(repository)
         finished_item = ProductionItem(
             customer_order_item_id=order_item.id,
@@ -177,18 +187,36 @@ def main() -> None:
     shipment = ship_finished_order_item(order_a["items"][0]["id"], 5, ACTOR)
     require(shipment["shipped_quantity"] == 5, "订单 A 发货数量不正确")
     assert_order_closed(order_a["id"])
+    surplus_positions = list_closed_surplus_positions(kept_department_code)
+    part_surplus = next(
+        item for item in surplus_positions if item["customer_order_no"] == "FLOW-A"
+    )
+    require(part_surplus["quantity"] == 2, "结单后的生产节点结余未进入部门库存")
+    store_position_in_warehouse(
+        kept_department_code,
+        part_surplus["production_item_id"],
+        part_surplus["flow_node_id"],
+        part_surplus["source_flow_node_id"],
+        2,
+        ACTOR,
+    )
+    require(
+        not any(
+            item["customer_order_no"] == "FLOW-A"
+            for item in list_closed_surplus_positions(kept_department_code)
+        ),
+        "生产节点结余入仓后仍显示在部门库存",
+    )
     with SessionLocal() as session:
         surplus_receipt = session.scalar(select(InventoryReceipt).where(
             InventoryReceipt.source_customer_order_id == order_a["id"],
             InventoryReceipt.department_code == "finished",
-            InventoryReceipt.status == "pending",
+            InventoryReceipt.status == "confirmed",
         ))
         require(
             surplus_receipt is not None and surplus_receipt.quantity == 2,
-            "订单 A 的 2 件成品结余未转为待入库库存",
+            "订单 A 的 2 件成品结余未自动转入成品库存",
         )
-        surplus_receipt_id = surplus_receipt.id
-    confirm_receipt(surplus_receipt_id, ACTOR, "finished")
 
     # B：下一订单完全使用 2 件跨订单成品库存；库存出库后仍需成品部确认发货。
     order_b = create_planned_order("FLOW-B", 2)
@@ -223,6 +251,7 @@ def main() -> None:
                 product_version=1,
                 product_bom_id=None,
                 flow_node_id="demo-assembly-body-spring",
+                completed_flow_node_id="demo-assembly-body-spring",
             ),
             department_code="warehouse",
             item_type="assembly",
@@ -230,12 +259,14 @@ def main() -> None:
             product_version=1,
             product_bom_id=None,
             flow_node_id="demo-assembly-body-spring",
+            completed_flow_node_id="demo-assembly-body-spring",
             item_code="DEMO-001-81",
             item_name="主体-弹簧装配体",
             quantity=1,
         )
         receipt_id = receipt.id
-    confirm_receipt(receipt_id, ACTOR, "warehouse")
+    with SessionLocal.begin() as session:
+        confirm_receipt(session, receipt_id, ACTOR, "验证装配体入库")
     order_c = create_planned_order("FLOW-C", 1)
     plan_c = outbound_plan("warehouse", order_c["id"])
     issue_outbound_plan(
@@ -258,7 +289,7 @@ def main() -> None:
             ProductionMovement.movement_type == "customer_shipment"
         ))
         require(shipment_count == 3, "客户发货流水数量不正确")
-    print("v6 full-flow validation passed: planning, reservation, issue, receipt, shipment, close, surplus")
+    print("v6 full-flow validation passed: close, department surplus, warehouse receipt, reservation, issue, shipment")
 
 
 if __name__ == "__main__":

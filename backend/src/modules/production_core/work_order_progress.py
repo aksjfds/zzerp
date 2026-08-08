@@ -15,6 +15,8 @@ from modules.production_core.persistence import WorkOrder
 @dataclass(frozen=True)
 class WorkOrderProgress:
     submitted_quantity: int
+    processed_quantity: int
+    ready_for_qc_quantity: int
     initial_processing_quantity: int
     processing_quantity: int
     pending_qc_quantity: int
@@ -37,7 +39,7 @@ def order_remaining_quantity(order: WorkOrder) -> int:
 
 
 def order_has_submissions(order: WorkOrder) -> bool:
-    return order.completed_quantity > 0
+    return order.completed_quantity > 0 or order.processed_quantity > 0
 
 
 def order_remaining_expression():
@@ -96,7 +98,8 @@ def calculate_work_order_progress(
         rework_pending_quantities(batch_list) if track_rework else {}
     )
     rework_pending = sum(rework_pending_by_batch.values())
-    initial_processing = order_remaining_quantity(order)
+    initial_processing = max(order.quantity - order.processed_quantity, 0)
+    ready_for_qc = max(order.processed_quantity - order.completed_quantity, 0)
     direct_quantity = max(
         order.completed_quantity
         - sum(batch.submitted_quantity for batch in initial_batches),
@@ -104,6 +107,8 @@ def calculate_work_order_progress(
     )
     return WorkOrderProgress(
         submitted_quantity=order.completed_quantity,
+        processed_quantity=order.processed_quantity,
+        ready_for_qc_quantity=ready_for_qc,
         initial_processing_quantity=initial_processing,
         processing_quantity=initial_processing + rework_pending,
         pending_qc_quantity=sum(batch.submitted_quantity for batch in pending_batches),

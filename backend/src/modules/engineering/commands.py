@@ -117,15 +117,6 @@ def _validate_qc_routes(session, flow: ProcessFlowPayload) -> None:
                     path="process_flow.nodes",
                     element_id=node.id,
                 )
-            if procedure.procedure_type == "standard" and (
-                target is None or target.type != "qc"
-            ):
-                raise DomainError(
-                    "standard_process_qc_required",
-                    f"工艺“{node.label}”的下一节点必须是QC，请删除原连线后连接QC节点",
-                    path="process_flow.edges",
-                    element_id=node.id,
-                )
         if node.type not in {"process", "assembly"} or target is None:
             continue
         if target.type == "qc":

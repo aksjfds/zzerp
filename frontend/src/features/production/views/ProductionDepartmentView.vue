@@ -39,6 +39,13 @@ const nonTagOverview = computed(() => workOrderProductionOverview(
 const supportsSpecialPrinting = computed(() => (
   departmentSupports(props.departmentCode, 'special_printing')
 ))
+const workOrderWorkers = computed(() => {
+  const workshop = workshops.value.find(
+    item => item.workshop_name === activeRepository.value?.workshop_name,
+  )
+  if (!workshop) return workers.value
+  return workers.value.filter(item => item.workshop_id === workshop.id)
+})
 onMounted(load)
 </script>
 
@@ -89,6 +96,7 @@ onMounted(load)
           :special-printing="supportsSpecialPrinting"
           @submit="workOrderActions.submit"
           @submit-qc="workOrderActions.submitQc"
+          @submit-direct-result="workOrderActions.submitDirectResult"
           @resubmit-qc="workOrderActions.resubmitQc"
           @cancel="workOrderActions.cancel"
           @undo="workOrderActions.undo"
@@ -114,7 +122,7 @@ onMounted(load)
       v-model="dialogVisible"
       :item="activeRepository"
       :sources="tagItems"
-      :workers="workers"
+      :workers="workOrderWorkers"
       :submitting="submitting"
       @submit="saveWorkOrder"
     />

@@ -80,6 +80,14 @@ export async function submitWorkOrder(
   return response.data.data
 }
 
+export async function completeWorkOrderProcessing(workOrderId: number, quantity: number) {
+  const response = await service.post<{ data: WorkOrder }>(
+    `/work-orders/${workOrderId}/processing-completions`,
+    { quantity },
+  )
+  return response.data.data
+}
+
 export async function resubmitReworkBatch(batchId: number, quantity: number) {
   const response = await service.post<{ data: WorkOrder['batches'][number] }>(
     `/work-order-batches/${batchId}/rework-submissions`,

@@ -2,7 +2,11 @@ import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { queryDepartmentWorkers } from '../api/departmentRepositories'
-import { dispatchQcBatch, inspectQcBatch, queryPendingQcBatches } from '../api/qc'
+import {
+  dispatchQcBatch,
+  inspectQcBatch,
+  queryPendingQcBatches,
+} from '../api/qc'
 import type {
   PendingQcBatch,
   QcInspectionPayload,
@@ -114,6 +118,7 @@ export function useQcDepartment() {
       submitting.value = false
     }
   }
+
 
   async function refresh() {
     page.value = 1

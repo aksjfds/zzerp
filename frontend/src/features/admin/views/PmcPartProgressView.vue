@@ -227,6 +227,7 @@ defineExpose({ load })
         <ElTable
           :data="order.parts"
           border
+          table-layout="auto"
           class="progress-matrix"
           empty-text="该订单暂无符合条件的配件"
         >

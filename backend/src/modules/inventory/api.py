@@ -22,7 +22,7 @@ def list_stocks(department_code: str | None = None) -> list[dict]:
         statement = select(InventoryStock).order_by(InventoryStock.item_code, InventoryStock.id)
         if department_code:
             statement = statement.where(InventoryStock.department_code == department_code)
-        return [_serialize_stock(item) for item in session.scalars(statement)]
+        return [_serialize_stock(session, item) for item in session.scalars(statement)]
 
 
 def list_transactions(
@@ -56,6 +56,7 @@ def list_transactions(
                 "item_code": stock.item_code,
                 "item_name": stock.item_name,
                 "customer_order_no": "",
+                "completed_node_label": _completed_node_label(session, stock),
             }
             for item, stock in session.execute(
                 statement.add_columns(InventoryStock)
@@ -173,6 +174,7 @@ def list_outbound_plans(department_code: str) -> list[dict]:
                 "reserved_quantity": reservation.reserved_quantity,
                 "issued_quantity": reservation.issued_quantity,
                 "remaining_quantity": reservation.reserved_quantity - reservation.issued_quantity,
+                "completed_node_label": _completed_node_label(session, stock),
             })
         return list(plans.values())
 
@@ -204,7 +206,13 @@ def issue_outbound_plan(
     )
 
 
-def _serialize_stock(item: InventoryStock) -> dict:
+def _completed_node_label(session: Session, item: InventoryStock) -> str:
+    from modules.production_core.flow import load_product_flow
+    _flow, nodes = load_product_flow(session, item.product_id, item.product_version)
+    return nodes.get(item.completed_flow_node_id, {}).get("label", item.completed_flow_node_id)
+
+
+def _serialize_stock(session: Session, item: InventoryStock) -> dict:
     return {
         "id": item.id,
         "department_code": item.department_code,
@@ -213,6 +221,8 @@ def _serialize_stock(item: InventoryStock) -> dict:
         "product_version": item.product_version,
         "product_bom_id": item.product_bom_id,
         "flow_node_id": item.flow_node_id,
+        "completed_flow_node_id": item.completed_flow_node_id,
+        "completed_node_label": _completed_node_label(session, item),
         "item_code": item.item_code,
         "item_name": item.item_name,
         "quantity": item.quantity,

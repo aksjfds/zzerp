@@ -25,7 +25,9 @@ from modules.errors import DomainError
 from modules.standard_execution.tags import (
     configured_tag_suggestions,
     get_or_create_tag_set,
+    is_final_tag_set,
     procedure_department_id,
+    route_tag_output,
     tag_set_tags,
     target_tag_set,
 )
@@ -35,9 +37,17 @@ from modules.production_core.operational_api import (
     consume_order_source,
     create_order_record,
 )
-from modules.production_core.operational_api import serialize_batch, serialize_work_order
+from modules.production_core.operational_api import (
+    refresh_qc_work_order_closed,
+    serialize_batch,
+    serialize_work_order,
+)
 from modules.production_core.operational_api import order_remaining_quantity, rework_pending_quantities
-from modules.production_core.operational_api import node_context, refresh_order_closed
+from modules.production_core.operational_api import (
+    move_to_node,
+    node_context,
+    refresh_order_closed,
+)
 from modules.production_core.operational_api import process_qc_node
 from modules.production_core.operational_api import (
     capture_operation_state,
@@ -155,47 +165,77 @@ def submit_tag_order(
     completion_action: str,
 ) -> dict:
     validate_tag_order(session, order, source, procedure)
-    if completion_action != "qc":
-        raise DomainError(
-            "tag_work_order_qc_required",
-            "打完标记后必须送检",
-        )
     remaining = order_remaining_quantity(order)
     if quantity <= 0 or quantity > remaining or quantity > source.quantity:
         raise DomainError("submission_quantity_exceeded", "提交数量超过工单剩余数量")
-    batch = create_inspection_batch(
-        session,
-        work_order_id=order.id,
-        submitted_quantity=quantity,
-        source_flow_node_id=order.source_flow_node_id,
-    )
     context, _ = node_context(session, production_item, node["id"])
     qc_node = process_qc_node(context.flow, context.nodes, node["id"])
-    if qc_node is None:
-        raise DomainError("work_order_qc_not_configured", "标记工艺后必须配置QC节点")
-    qc_department_id = get_department_ids_by_codes(
-        session,
-        {"qc"},
-    ).get("qc")
-    if qc_department_id is None:
-        raise DomainError("department_not_found", "QC部门不存在")
+    batch = None
+    if completion_action == "qc":
+        if qc_node is None:
+            raise DomainError("work_order_qc_not_configured", "当前工艺未配置QC节点")
+        batch = create_inspection_batch(
+            session,
+            work_order_id=order.id,
+            submitted_quantity=quantity,
+            source_flow_node_id=order.source_flow_node_id,
+        )
+        target_flow_node_id = qc_node["id"]
+        target_department_id = get_department_ids_by_codes(
+            session,
+            {"qc"},
+        ).get("qc")
+        if target_department_id is None:
+            raise DomainError("department_not_found", "QC部门不存在")
+    else:
+        if qc_node is not None:
+            raise DomainError("work_order_qc_required", "当前工艺配置了QC，必须送检")
+        if is_final_tag_set(
+            session,
+            production_item,
+            procedure.id,
+            order.target_tag_set_id,
+        ):
+            target = context.normal_target(node["id"])
+            target_department_id = move_to_node(
+                session,
+                production_item,
+                target,
+                quantity,
+                node["id"],
+            )
+            target_flow_node_id = target.get("id") if target else None
+        else:
+            route_tag_output(
+                session,
+                production_item=production_item,
+                flow_node_id=node["id"],
+                source_flow_node_id=order.source_flow_node_id,
+                procedure=procedure,
+                target_tag_set_id=order.target_tag_set_id,
+                quantity=quantity,
+            )
+            target_flow_node_id = node["id"]
+            target_department_id = procedure_department_id(session, procedure)
     record_movement(
         session,
         production_item=production_item,
         quantity=quantity,
         movement_type="process",
         source_flow_node_id=node["id"],
-        target_flow_node_id=qc_node["id"],
+        target_flow_node_id=target_flow_node_id,
         source_tag_set_id=order.source_tag_set_id,
         target_tag_set_id=order.target_tag_set_id,
         source_department_id=source.department_id,
-        target_department_id=qc_department_id,
+        target_department_id=target_department_id,
         work_order_id=order.id,
-        work_order_batch_id=batch.id,
+        work_order_batch_id=batch.id if batch else None,
     )
     session.flush()
     order.completed_quantity += quantity
     consume_order_source(session, order, source, quantity)
+    session.flush()
+    refresh_qc_work_order_closed(session, order)
     session.flush()
     refresh_order_closed(session, production_item)
     return serialize_work_order(session, order)

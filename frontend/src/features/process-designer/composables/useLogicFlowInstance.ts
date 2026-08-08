@@ -3,6 +3,7 @@ import LogicFlow from '@logicflow/core'
 import { Control, Menu } from '@logicflow/extension'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
 import { fromLogicFlowData, toLogicFlowData } from '@/shared/process-flow/adapter'
+import { updateProcessNodeTextScale } from '@/shared/process-flow/nodeTextScale'
 import type { FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 
 type Callbacks = {
@@ -46,11 +47,11 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       edgeTextDraggable: !readonly,
       edgeTextEdit: !readonly,
       hideAnchors: readonly,
-      nodeTextDraggable: !readonly,
+      nodeTextDraggable: false,
       nodeTextEdit: !readonly,
       stopMoveGraph: false,
-      stopScrollGraph: readonly,
-      stopZoomGraph: readonly,
+      stopScrollGraph: true,
+      stopZoomGraph: true,
       textDraggable: !readonly,
       textEdit: !readonly,
     })
@@ -87,6 +88,9 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       grid: { size: 20, visible: true },
       edgeType: 'polyline',
       keyboard: { enabled: true },
+      stopMoveGraph: false,
+      stopScrollGraph: true,
+      stopZoomGraph: true,
       guards: {
         beforeClone: () => !(callbacks.readonly?.() ?? false),
         beforeDelete: () => !(callbacks.readonly?.() ?? false),
@@ -119,6 +123,9 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     )
     lf.on('connection:not-allowed', ({ msg }) => {
       callbacks.onConnectionError(msg || '该连线不符合流程规则')
+    })
+    lf.on('graph:transform', ({ transform }) => {
+      if (container.value) updateProcessNodeTextScale(container.value, transform.SCALE_X)
     })
     renderFlow(callbacks.initialFlow())
     resizeObserver = new ResizeObserver(fitToContainer)

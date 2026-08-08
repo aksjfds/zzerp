@@ -40,6 +40,8 @@ PRODUCTION_DEPARTMENT_CODES = (
     "stamp",
     "cnc",
     "polish",
+    "outsource",
+    "purchasing",
     "qc",
     "assembly",
 )

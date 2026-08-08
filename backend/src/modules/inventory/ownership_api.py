@@ -22,6 +22,7 @@ def create_receipt(
     product_version: int,
     product_bom_id: int | None,
     flow_node_id: str,
+    completed_flow_node_id: str,
     item_code: str,
     item_name: str,
     quantity: int,
@@ -44,6 +45,7 @@ def create_receipt(
         product_version=product_version,
         product_bom_id=product_bom_id,
         flow_node_id=flow_node_id,
+        completed_flow_node_id=completed_flow_node_id,
         item_code=item_code,
         item_name=item_name,
         quantity=quantity,
@@ -59,6 +61,7 @@ def confirm_receipt(
     session: Session,
     receipt_id: int,
     actor_username: str,
+    reason: str,
 ) -> InventoryStock:
     receipt = session.get(InventoryReceipt, receipt_id, with_for_update=True)
     if receipt is None:
@@ -79,6 +82,7 @@ def confirm_receipt(
             product_version=receipt.product_version,
             product_bom_id=receipt.product_bom_id,
             flow_node_id=receipt.flow_node_id,
+            completed_flow_node_id=receipt.completed_flow_node_id,
             item_code=receipt.item_code,
             item_name=receipt.item_name,
             quantity=0,
@@ -103,7 +107,7 @@ def confirm_receipt(
         reserved_before=stock.reserved_quantity,
         reserved_after=stock.reserved_quantity,
         actor_username=actor_username,
-        reason="确认生产结余入库",
+        reason=reason,
     ))
     return stock
 

@@ -21,6 +21,7 @@ class WorkOrderActivity:
     work_order_name: str
     worker_id: int | None
     quantity: int
+    processed_quantity: int
     completed_quantity: int
     status: str
     created_at: datetime
@@ -44,6 +45,7 @@ def _work_order_activity(order: WorkOrder) -> WorkOrderActivity:
         work_order_name=order.work_order_name,
         worker_id=order.worker_id,
         quantity=order.quantity,
+        processed_quantity=order.processed_quantity,
         completed_quantity=order.completed_quantity,
         status=order.status,
         created_at=order.created_at,

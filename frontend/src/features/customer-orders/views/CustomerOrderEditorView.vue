@@ -166,7 +166,7 @@ onMounted(async () => {
     </section>
     <section class="card" :class="{ readonly: readOnly }">
       <div class="heading"><h2>产品明细</h2><ElButton v-if="!readOnly" :disabled="!form.customer_id" @click="addItem">新增产品</ElButton></div>
-      <ElTable :data="form.items" border>
+      <ElTable :data="form.items" border table-layout="auto">
         <ElTableColumn label="产品" min-width="220">
           <template #default="{ row }">
             <span v-if="readOnly" class="readonly-value">{{ productLabel(row.product_id) }}</span>

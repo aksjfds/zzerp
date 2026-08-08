@@ -80,6 +80,9 @@ class WorkOrderContext(Protocol):
     def completed_quantity(self) -> int: ...
 
     @property
+    def processed_quantity(self) -> int: ...
+
+    @property
     def quantity(self) -> int: ...
 
     @property

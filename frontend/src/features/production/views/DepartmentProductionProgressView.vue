@@ -70,7 +70,7 @@ onMounted(load)
       v-if="!embedded"
       :department-name="department?.name || '生产部门'"
       page-title="生产进度"
-      description="按配件查看订单需求、累计出货和欠交情况。"
+      description="生产计划创建后即可查看本部门需要生产的配件或装配体。"
       @refresh="load"
     />
 
@@ -79,7 +79,7 @@ onMounted(load)
         <ElInput
           v-model="keyword"
           clearable
-          placeholder="搜索配件编号、配件名称或订单号"
+          placeholder="搜索物料编号、物料名称或订单号"
           @clear="search"
           @keyup.enter="search"
         />
@@ -92,13 +92,14 @@ onMounted(load)
         :data="items"
         border
         stripe
+        table-layout="auto"
         empty-text="暂无生产进度"
       >
-        <ElTableColumn prop="part_no" label="配件编号" min-width="150" />
-        <ElTableColumn prop="part_name" label="配件名称" min-width="180" />
+        <ElTableColumn prop="part_no" label="物料编号" min-width="150" />
+        <ElTableColumn prop="part_name" label="配件/装配体" min-width="180" />
         <ElTableColumn prop="customer_order_no" label="订单号" min-width="160" />
         <ElTableColumn prop="order_date" label="订单日期" width="120" />
-        <ElTableColumn prop="order_quantity" label="订单数量" width="110" align="right" />
+        <ElTableColumn prop="order_quantity" label="需求数量" width="110" align="right" />
         <ElTableColumn prop="shipped_quantity" label="累计出货数量" width="140" align="right" />
         <ElTableColumn prop="outstanding_quantity" label="欠交数量" width="110" align="right">
           <template #default="{ row }">

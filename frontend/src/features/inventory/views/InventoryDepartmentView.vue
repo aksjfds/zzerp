@@ -154,18 +154,21 @@ defineExpose({ load })
               </ElButton>
             </div>
           </div>
-          <ElTable :data="plan.items" border>
+          <ElTable :data="plan.items" border table-layout="auto">
             <ElTableColumn prop="item_code" label="编号" min-width="130" />
             <ElTableColumn prop="item_name" label="名称" min-width="180" />
-            <ElTableColumn prop="reserved_quantity" label="占用" width="90" />
+            <ElTableColumn prop="completed_node_label" label="完成状态" min-width="120"><template #default="{ row }">{{ `${row.completed_node_label}完` }}</template></ElTableColumn>
+            <ElTableColumn prop="reserved_quantity" label="占用" width="90" align="right" />
             <ElTableColumn
               prop="issued_quantity"
               :label="departmentCode === 'finished' ? '已转入' : '已出库'"
               width="90"
+              align="right"
             />
             <ElTableColumn
               :label="departmentCode === 'finished' ? '本次转入' : '本次出库'"
               width="150"
+              align="right"
             >
               <template #default="{ row }"><ElInputNumber v-model="row.issue_quantity" :min="0" :max="row.remaining_quantity" :controls="false" /></template>
             </ElTableColumn>
@@ -173,10 +176,28 @@ defineExpose({ load })
         </section>
       </ElTabPane>
       <ElTabPane :label="stockTabLabel">
-        <ElTable :data="stocks" border stripe><ElTableColumn label="类型" width="100"><template #default="{ row }">{{ itemTypeLabels[row.item_type as keyof typeof itemTypeLabels] }}</template></ElTableColumn><ElTableColumn prop="item_code" label="编号" /><ElTableColumn prop="item_name" label="名称" /><ElTableColumn prop="product_version" label="版本" width="80" /><ElTableColumn prop="quantity" label="现存" width="90" /><ElTableColumn prop="reserved_quantity" label="占用" width="90" /><ElTableColumn prop="available_quantity" label="可用" width="90" /></ElTable>
+        <ElTable :data="stocks" border stripe table-layout="auto">
+          <ElTableColumn label="类型" width="100"><template #default="{ row }">{{ itemTypeLabels[row.item_type as keyof typeof itemTypeLabels] }}</template></ElTableColumn>
+          <ElTableColumn prop="item_code" label="编号" min-width="150" />
+          <ElTableColumn prop="item_name" label="名称" min-width="180" />
+          <ElTableColumn prop="product_version" label="版本" width="80" />
+          <ElTableColumn prop="completed_node_label" label="完成状态" min-width="130"><template #default="{ row }">{{ `${row.completed_node_label}完` }}</template></ElTableColumn>
+          <ElTableColumn prop="quantity" label="现存" width="90" align="right" />
+          <ElTableColumn prop="reserved_quantity" label="占用" width="90" align="right" />
+          <ElTableColumn prop="available_quantity" label="可用" width="90" align="right" />
+        </ElTable>
       </ElTabPane>
       <ElTabPane label="库存流水">
-        <ElTable :data="transactions" border stripe><ElTableColumn prop="created_at" label="时间" min-width="180" /><ElTableColumn label="类型" width="115"><template #default="{ row }">{{ transactionLabels[row.transaction_type] || row.transaction_type }}</template></ElTableColumn><ElTableColumn label="对象" min-width="210"><template #default="{ row }"><div>{{ row.item_code }} · {{ row.item_name }}</div><small v-if="row.customer_order_no">订单 {{ row.customer_order_no }}</small></template></ElTableColumn><ElTableColumn prop="quantity" label="数量" width="80" /><ElTableColumn prop="quantity_after" label="结存" width="80" /><ElTableColumn prop="reserved_after" label="占用后" width="90" /><ElTableColumn prop="actor_username" label="操作人" width="110" /><ElTableColumn prop="reason" label="说明" min-width="150" /></ElTable>
+        <ElTable :data="transactions" border stripe table-layout="auto">
+          <ElTableColumn prop="created_at" label="时间" min-width="180" />
+          <ElTableColumn label="类型" min-width="120"><template #default="{ row }">{{ transactionLabels[row.transaction_type] || row.transaction_type }}</template></ElTableColumn>
+          <ElTableColumn label="对象" min-width="240"><template #default="{ row }"><div>{{ row.item_code }} · {{ row.item_name }}</div><small v-if="row.completed_node_label">{{ row.completed_node_label }}完</small><small v-if="row.customer_order_no">订单 {{ row.customer_order_no }}</small></template></ElTableColumn>
+          <ElTableColumn prop="quantity" label="数量" width="90" align="right" />
+          <ElTableColumn prop="quantity_after" label="结存" width="90" align="right" />
+          <ElTableColumn prop="reserved_after" label="占用后" width="100" align="right" />
+          <ElTableColumn prop="actor_username" label="操作人" min-width="110" />
+          <ElTableColumn prop="reason" label="说明" min-width="180" show-overflow-tooltip />
+        </ElTable>
       </ElTabPane>
     </ElTabs>
   </section>

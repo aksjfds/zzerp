@@ -13,6 +13,8 @@ class InventoryStockResponse(InventoryModel):
     product_version: int
     product_bom_id: int | None
     flow_node_id: str
+    completed_flow_node_id: str
+    completed_node_label: str
     item_code: str
     item_name: str
     quantity: int
@@ -41,6 +43,7 @@ class InventoryTransactionResponse(InventoryModel):
     item_code: str = ""
     item_name: str = ""
     customer_order_no: str = ""
+    completed_node_label: str = ""
 
 
 class InventoryTransactionEnvelope(InventoryModel):
@@ -64,6 +67,7 @@ class InventoryOutboundItemResponse(InventoryModel):
     reserved_quantity: int
     issued_quantity: int
     remaining_quantity: int
+    completed_node_label: str
 
 
 class InventoryOutboundPlanResponse(InventoryModel):
@@ -81,6 +85,7 @@ class InventoryOutboundPlanEnvelope(InventoryModel):
 class FinishedOrderStockResponse(InventoryModel):
     customer_order_id: int
     customer_order_no: str
+    order_status: str
     customer_order_item_id: int
     item_code: str
     item_name: str

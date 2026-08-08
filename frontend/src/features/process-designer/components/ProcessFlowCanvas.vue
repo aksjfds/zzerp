@@ -102,6 +102,7 @@ defineExpose({
 
 <style scoped>
 .flow-canvas { min-width: 0; height: 560px; background: var(--md-surface-container-lowest); }
+.flow-canvas :deep(.lf-node-content text) { transform: scale(var(--process-node-text-scale, 1)); transform-box: fill-box; transform-origin: center; }
 .flow-canvas.is-readonly { cursor: grab; }
 .flow-canvas.is-readonly:active { cursor: grabbing; }
 @media (max-width: 600px) { .flow-canvas { height: 480px; } }

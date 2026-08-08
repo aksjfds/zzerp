@@ -5,6 +5,7 @@ from sqlalchemy import and_, case, func, or_, select, tuple_
 from domain.time import BUSINESS_TIMEZONE, business_iso
 from modules.engineering.model_api import Product, ProductBom
 from modules.organization.model_api import Department, Procedure, Workshop
+from modules.planning.model_api import ProductionPlan
 from modules.standard_execution.model_api import ProcedureTagSet
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.quality.model_api import WorkOrderBatch
@@ -92,6 +93,7 @@ def _current_cards(
         .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
         .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
         .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
+        .join(ProductionPlan, ProductionPlan.customer_order_id == CustomerOrder.id)
         .join(Product, Product.id == CustomerOrderItem.product_id)
         .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
         .outerjoin(
@@ -103,7 +105,10 @@ def _current_cards(
                 == Repository.source_flow_node_id,
             ),
         )
-        .where(Repository.department_id == department.id)
+        .where(
+            Repository.department_id == department.id,
+            ProductionPlan.status == "confirmed",
+        )
     )
     # Assembly filters are applied only after complete material groups are built.
     if department.department_code != "assembly":
@@ -217,6 +222,7 @@ def _tag_stock_cards(
             CustomerOrderItem.id == ProductionItem.customer_order_item_id,
         )
         .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
+        .join(ProductionPlan, ProductionPlan.customer_order_id == CustomerOrder.id)
         .join(Product, Product.id == CustomerOrderItem.product_id)
         .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
         .outerjoin(
@@ -230,7 +236,10 @@ def _tag_stock_cards(
                 latest_arrivals.c.tag_set_id == ProcedureTagStock.tag_set_id,
             ),
         )
-        .where(ProcedureTagStock.department_id == department.id)
+        .where(
+            ProcedureTagStock.department_id == department.id,
+            ProductionPlan.status == "confirmed",
+        )
     )
     statement = _apply_current_source_filters(
         statement,

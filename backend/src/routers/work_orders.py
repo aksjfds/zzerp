@@ -9,6 +9,7 @@ from schemas.production import (
     WorkOrderBatchEnvelope,
     WorkOrderEnvelope,
     WorkOrderListEnvelope,
+    WorkOrderProcessingCompletion,
     WorkOrderSubmission,
 )
 from departments.contracts import (
@@ -20,6 +21,7 @@ from departments.contracts import (
 from departments.registry import department_api, department_api_for_any
 from modules.production_core.api import (
     cancel_work_order,
+    complete_work_order_processing,
     create_work_order,
     resubmit_work_order_rework_batch,
     submit_work_order,
@@ -130,6 +132,25 @@ def work_order_submit(
             work_order_id,
             payload.quantity,
             payload.completion_action,
+            user["department"],
+            user["username"],
+        )
+    }
+
+
+@router.post(
+    "/work-orders/{work_order_id}/processing-completions",
+    response_model=WorkOrderEnvelope,
+)
+def work_order_processing_complete(
+    work_order_id: int,
+    payload: WorkOrderProcessingCompletion,
+    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
+):
+    return {
+        "data": complete_work_order_processing(
+            work_order_id,
+            payload.quantity,
             user["department"],
             user["username"],
         )

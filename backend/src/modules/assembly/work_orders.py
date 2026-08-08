@@ -36,6 +36,7 @@ from modules.production_core.operational_api import (
 )
 from modules.production_core.operational_api import (
     consume_repository,
+    ensure_production_plan_active,
     mark_order_planned,
     move_to_node,
     node_context,
@@ -80,6 +81,7 @@ def create_assembly_work_order(
             input_items_by_id[repository.production_item_id]
             for repository in repositories
         ]
+        ensure_production_plan_active(session, input_items[0])
         order_item_ids = {item.customer_order_item_id for item in input_items}
         node_ids = {item.flow_node_id for item in repositories}
         if len(order_item_ids) != 1 or len(node_ids) != 1:
@@ -208,10 +210,14 @@ def submit_assembly_work_order(
     user_department: str,
 ) -> dict:
     if user_department not in {"sys", "assembly"}:
-            raise DomainError("department_access_denied", "只有装配部可以操作装配工单", status_code=403)
+        raise DomainError(
+            "department_access_denied",
+            "只有装配部可以操作装配工单",
+            status_code=403,
+        )
     remaining = order_remaining_quantity(order)
-    if quantity != remaining:
-        raise DomainError("partial_completion_not_allowed", "装配工单必须一次完成剩余数量")
+    if quantity <= 0 or quantity > remaining:
+        raise DomainError("submission_quantity_exceeded", "提交数量超过工单剩余数量")
 
     input_item = load_production_item(
         session,
@@ -238,36 +244,50 @@ def submit_assembly_work_order(
             for_update=True,
         )
         repository = repositories[0] if repositories else None
-        if repository is None or repository.quantity < material.quantity:
-            raise DomainError("assembly_material_insufficient", "装配输入库存不足")
         material_item = load_production_item(
             session,
             material.production_item_id,
         )
+        material_quantity = required_material_quantity(
+            quantity,
+            assembly_item_unit_quantity(session, material_item),
+        )
+        previously_consumed = required_material_quantity(
+            order.completed_quantity,
+            assembly_item_unit_quantity(session, material_item),
+        )
+        if material_quantity > material.quantity - previously_consumed:
+            raise DomainError("assembly_material_allocation_invalid", "装配工单物料占用不足")
+        if repository is None or repository.quantity < material_quantity:
+            raise DomainError("assembly_material_insufficient", "装配输入库存不足")
         record_movement(
             session,
             production_item=material_item,
-            quantity=material.quantity,
+            quantity=material_quantity,
             movement_type="assembly_input",
             source_flow_node_id=repository.flow_node_id,
             target_flow_node_id=None,
             source_department_id=repository.department_id,
             work_order_id=order.id,
         )
-        if repository.quantity == material.quantity:
+        if repository.quantity == material_quantity:
             material.repository_id = None
             # Release the composite repository reference before deleting an
             # exhausted repository row.
             session.flush()
-        consume_repository(session, repository, material.quantity)
+        consume_repository(session, repository, material_quantity)
 
-    output_item = create_production_item(
-        session,
-        customer_order_item_id=context.order_item.id,
-        product_id=context.order_item.product_id,
-        product_version=context.order_item.product_version,
-        product_bom_id=None,
-        origin_flow_node_id=assembly_node["id"],
+    output_item = (
+        load_production_item(session, order.production_item_id)
+        if order.completed_quantity > 0
+        else create_production_item(
+            session,
+            customer_order_item_id=context.order_item.id,
+            product_id=context.order_item.product_id,
+            product_version=context.order_item.product_version,
+            product_bom_id=None,
+            origin_flow_node_id=assembly_node["id"],
+        )
     )
     record_assembly_output(
         order,
@@ -330,7 +350,7 @@ def submit_assembly_work_order(
         order,
         production_item_id=output_item.id,
         completed_quantity=quantity,
-        close_order=True,
+        close_order=order.completed_quantity + quantity >= order.quantity,
     )
     session.flush()
     refresh_order_closed(session, output_item)

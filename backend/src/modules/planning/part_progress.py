@@ -7,6 +7,7 @@ from sqlalchemy import select
 from database import SessionLocal
 from modules.sales.model_api import Customer
 from modules.engineering.model_api import Product, ProductBom
+from modules.planning.persistence import ProductionPlan, ProductionPlanItem
 from modules.organization.model_api import Department, Procedure, Workshop
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.production_core.model_api import (
@@ -28,7 +29,16 @@ from modules.production_core.operational_api import (
 )
 
 
-DEPARTMENT_ORDER = ("stamp", "cnc", "polish", "qc", "assembly", "finished")
+DEPARTMENT_ORDER = (
+    "stamp",
+    "cnc",
+    "polish",
+    "outsource",
+    "purchasing",
+    "qc",
+    "assembly",
+    "finished",
+)
 
 
 def list_part_progress(
@@ -271,9 +281,184 @@ def list_department_production_progress(
         for order in orders
         for part in order["parts"]
     ]
+    rows.extend(
+        _list_planned_department_progress(
+            department_code,
+            keyword,
+        )
+    )
+    rows.sort(
+        key=lambda item: (
+            item["order_date"],
+            item["customer_order_no"],
+            item["part_no"],
+        ),
+        reverse=True,
+    )
     total = len(rows)
     offset = (page - 1) * page_size
     return rows[offset:offset + page_size], total
+
+
+def _list_planned_department_progress(
+    department_code: str,
+    keyword: str | None,
+) -> list[dict]:
+    """Return plan items which do not have a runtime production item yet."""
+    with SessionLocal() as session:
+        plan_items = list(session.scalars(
+            select(ProductionPlanItem)
+            .join(
+                ProductionPlan,
+                ProductionPlan.id == ProductionPlanItem.production_plan_id,
+            )
+            .join(
+                CustomerOrder,
+                CustomerOrder.id == ProductionPlan.customer_order_id,
+            )
+            .where(
+                ProductionPlan.status.in_(("draft", "confirmed")),
+                CustomerOrder.status != "cancelled",
+                ProductionPlanItem.item_type.in_(("part", "assembly")),
+                ProductionPlanItem.planned_production_quantity > 0,
+            )
+            .order_by(ProductionPlan.id.desc(), ProductionPlanItem.sort_order)
+        ).all())
+        if not plan_items:
+            return []
+
+        order_item_ids = {item.customer_order_item_id for item in plan_items}
+        runtime_keys = {
+            (
+                item.customer_order_item_id,
+                item.product_id,
+                item.product_version,
+                item.product_bom_id,
+                item.origin_flow_node_id,
+            )
+            for item in session.scalars(
+                select(ProductionItem).where(
+                    ProductionItem.customer_order_item_id.in_(order_item_ids)
+                )
+            ).all()
+        }
+        plans = {
+            item.id: item
+            for item in session.scalars(
+                select(ProductionPlan).where(
+                    ProductionPlan.id.in_(
+                        {item.production_plan_id for item in plan_items}
+                    )
+                )
+            ).all()
+        }
+        order_items = {
+            item.id: item
+            for item in session.scalars(
+                select(CustomerOrderItem).where(
+                    CustomerOrderItem.id.in_(order_item_ids)
+                )
+            ).all()
+        }
+        orders = {
+            item.id: item
+            for item in session.scalars(
+                select(CustomerOrder).where(
+                    CustomerOrder.id.in_(
+                        {plan.customer_order_id for plan in plans.values()}
+                    )
+                )
+            ).all()
+        }
+        products = {
+            item.id: item
+            for item in session.scalars(
+                select(Product).where(
+                    Product.id.in_({item.product_id for item in plan_items})
+                )
+            ).all()
+        }
+        departments = list(session.scalars(select(Department)).all())
+        department_by_code = {
+            item.department_code: item for item in departments
+        }
+        workshops = {
+            item.id: item for item in session.scalars(select(Workshop)).all()
+        }
+        procedures = {
+            item.id: item for item in session.scalars(select(Procedure)).all()
+        }
+        normalized_keyword = (keyword or "").strip().lower()
+        rows = []
+        for item in plan_items:
+            runtime_key = (
+                item.customer_order_item_id,
+                item.product_id,
+                item.product_version,
+                item.product_bom_id,
+                item.flow_node_id,
+            )
+            if runtime_key in runtime_keys:
+                continue
+            flow, nodes = load_product_flow(
+                session,
+                item.product_id,
+                item.product_version,
+            )
+            route_nodes = _physical_route_nodes(flow, nodes, item.flow_node_id)
+            belongs_to_department = any(
+                node.get("type") != "assembly"
+                or node.get("id") == item.flow_node_id
+                for node in route_nodes
+                if (
+                    (department := _node_department(
+                        node,
+                        department_by_code,
+                        workshops,
+                        procedures,
+                    ))
+                    and department.department_code == department_code
+                )
+            )
+            if not belongs_to_department:
+                continue
+            plan = plans[item.production_plan_id]
+            order_item = order_items[item.customer_order_item_id]
+            order = orders[plan.customer_order_id]
+            product = products[item.product_id]
+            search_text = " ".join((
+                item.item_code,
+                item.item_name,
+                product.factory_code,
+                product.product_name,
+                order.customer_order_no,
+            )).lower()
+            if normalized_keyword and normalized_keyword not in search_text:
+                continue
+            remarks = [
+                value.strip()
+                for value in (order_item.remark, order.remark)
+                if value and value.strip()
+            ]
+            remarks.append(
+                "生产计划待确认"
+                if plan.status == "draft"
+                else "等待前序生产"
+            )
+            quantity = item.planned_production_quantity
+            rows.append({
+                "production_item_id": None,
+                "part_no": item.item_code,
+                "part_name": f"{product.product_name}-{item.item_name}",
+                "customer_order_no": order.customer_order_no,
+                "order_date": order.created_at.date().isoformat(),
+                "order_quantity": quantity,
+                "shipped_quantity": 0,
+                "outstanding_quantity": quantity,
+                "completion_date": None,
+                "remark": "；".join(dict.fromkeys(remarks)),
+            })
+        return rows
 
 
 def _serialize_item(
@@ -586,19 +771,45 @@ def _production_item_shipping_summary(
 
 
 def _physical_route(context, origin_node_id: str) -> list[dict]:
+    return _physical_route_nodes(
+        context.flow,
+        context.nodes,
+        origin_node_id,
+    )
+
+
+def _physical_route_nodes(
+    flow: dict,
+    nodes: dict[str, dict],
+    origin_node_id: str,
+) -> list[dict]:
     route = []
-    origin = context.nodes.get(origin_node_id)
+    origin = nodes.get(origin_node_id)
     if origin and origin.get("type") == "assembly":
         route.append(origin)
-    current = context.normal_target(origin_node_id)
+    current = _normal_target(flow, nodes, origin_node_id)
     visited = set()
     while current and current["id"] not in visited:
         visited.add(current["id"])
         route.append(current)
         if current.get("type") == "assembly":
             break
-        current = context.normal_target(current["id"])
+        current = _normal_target(flow, nodes, current["id"])
     return route
+
+
+def _normal_target(
+    flow: dict,
+    nodes: dict[str, dict],
+    node_id: str,
+) -> dict | None:
+    targets = [
+        nodes.get(edge.get("target_node_id"))
+        for edge in flow.get("edges", [])
+        if edge.get("source_node_id") == node_id
+    ]
+    targets = [item for item in targets if item is not None]
+    return targets[0] if len(targets) == 1 else None
 
 
 def _node_department(node, department_by_code, workshops, procedures):

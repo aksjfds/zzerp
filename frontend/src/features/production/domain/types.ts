@@ -43,6 +43,27 @@ export type RepositoryItem = {
   can_create_work_order: boolean
 }
 
+export type DepartmentSurplusInventoryItem = {
+  key: string
+  source_kind: 'production' | 'qc'
+  batch_id: number | null
+  production_item_id: number
+  customer_order_no: string
+  product_code: string
+  product_name: string
+  product_version: number
+  item_type: 'part' | 'assembly'
+  item_code: string
+  item_name: string
+  department_code: string
+  flow_node_id: string
+  source_flow_node_id: string
+  current_node_label: string
+  completed_flow_node_id: string
+  completed_node_label: string
+  quantity: number
+}
+
 export type TagCard = {
   card_key: string
   production_item_id: number
@@ -128,7 +149,9 @@ export type WorkOrder = {
   worker_id: number | null
   worker_name: string | null
   quantity: number
+  processed_quantity: number
   submitted_quantity: number
+  ready_for_qc_quantity: number
   processing_quantity: number
   pending_qc_quantity: number
   qualified_quantity: number
@@ -142,7 +165,7 @@ export type WorkOrder = {
   undo_operation: {
     id: number
     work_order_batch_id: number | null
-    operation_type: 'submission' | 'rework_submission'
+    operation_type: 'processing_completion' | 'submission' | 'rework_submission'
     operation_label: string
     actor_username: string
     created_at: string

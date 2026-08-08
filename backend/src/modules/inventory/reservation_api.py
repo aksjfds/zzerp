@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
 from domain.time import utc_now
@@ -14,24 +14,44 @@ from modules.inventory.persistence import (
 )
 
 
-def available_quantity(session: Session, identity_key: str) -> int:
-    stock = session.scalar(
-        select(InventoryStock).where(InventoryStock.identity_key == identity_key)
-    )
-    return max((stock.quantity - stock.reserved_quantity) if stock else 0, 0)
+def _matches_plan_item(stock: InventoryStock, item) -> bool:
+    if (
+        stock.product_id != item.product_id
+        or stock.product_version != item.product_version
+        or stock.item_type != item.item_type
+    ):
+        return False
+    if item.item_type == "part":
+        return stock.product_bom_id == item.product_bom_id
+    return stock.flow_node_id == item.flow_node_id
 
 
-def available_quantities(
-    session: Session,
-    identity_keys: Iterable[str],
-) -> dict[str, int]:
-    keys = set(identity_keys)
-    if not keys:
+def plan_item_stocks(session: Session, items: Iterable) -> dict[str, list[InventoryStock]]:
+    item_list = list(items)
+    if not item_list:
         return {}
+    product_keys = {(item.product_id, item.product_version) for item in item_list}
+    stocks = list(session.scalars(select(InventoryStock).where(
+        tuple_(InventoryStock.product_id, InventoryStock.product_version).in_(list(product_keys))
+    )))
     return {
-        stock.identity_key: max(stock.quantity - stock.reserved_quantity, 0)
-        for stock in session.scalars(
-            select(InventoryStock).where(InventoryStock.identity_key.in_(keys))
+        item.identity_key: [stock for stock in stocks if _matches_plan_item(stock, item)]
+        for item in item_list
+    }
+
+
+def available_plan_item_quantities(session: Session, items: Iterable) -> dict[str, int]:
+    """Return stock by stable component identity, across all completion states."""
+    item_list = list(items)
+    stock_groups = plan_item_stocks(session, item_list)
+    return {
+        item.identity_key: sum(
+            max(stock.quantity - stock.reserved_quantity, 0)
+            for stock in stocks
+        )
+        for item, stocks in (
+            (item, stock_groups.get(item.identity_key, []))
+            for item in item_list
         )
     }
 
@@ -41,52 +61,62 @@ def reserve_plan_item(
     *,
     production_plan_id: int,
     production_plan_item_id: int,
-    identity_key: str,
+    plan_item,
     requested_quantity: int,
     actor_username: str,
 ) -> int:
     if requested_quantity <= 0:
         return 0
-    stock = session.scalar(
+    candidates = list(session.scalars(
         select(InventoryStock)
-        .where(InventoryStock.identity_key == identity_key)
+        .where(
+            InventoryStock.product_id == plan_item.product_id,
+            InventoryStock.product_version == plan_item.product_version,
+            InventoryStock.item_type == plan_item.item_type,
+        )
+        .order_by(InventoryStock.id)
         .with_for_update()
-    )
-    if stock is None:
-        return 0
-    allocatable = min(
-        requested_quantity,
-        max(stock.quantity - stock.reserved_quantity, 0),
-    )
-    if allocatable <= 0:
-        return 0
-    before_reserved = stock.reserved_quantity
-    stock.reserved_quantity += allocatable
-    stock.revision += 1
-    stock.updated_at = utc_now()
-    reservation = InventoryReservation(
-        production_plan_id=production_plan_id,
-        production_plan_item_id=production_plan_item_id,
-        inventory_stock_id=stock.id,
-        reserved_quantity=allocatable,
-    )
-    session.add(reservation)
-    session.flush()
-    session.add(InventoryTransaction(
-        inventory_stock_id=stock.id,
-        production_plan_id=production_plan_id,
-        production_plan_item_id=production_plan_item_id,
-        inventory_reservation_id=reservation.id,
-        transaction_type="reserve",
-        quantity=allocatable,
-        quantity_before=stock.quantity,
-        quantity_after=stock.quantity,
-        reserved_before=before_reserved,
-        reserved_after=stock.reserved_quantity,
-        actor_username=actor_username,
-        reason="生产计划确认自动占用",
     ))
-    return allocatable
+    allocated = 0
+    for stock in candidates:
+        if not _matches_plan_item(stock, plan_item):
+            continue
+        quantity = min(
+            requested_quantity - allocated,
+            max(stock.quantity - stock.reserved_quantity, 0),
+        )
+        if quantity <= 0:
+            continue
+        before_reserved = stock.reserved_quantity
+        stock.reserved_quantity += quantity
+        stock.revision += 1
+        stock.updated_at = utc_now()
+        reservation = InventoryReservation(
+            production_plan_id=production_plan_id,
+            production_plan_item_id=production_plan_item_id,
+            inventory_stock_id=stock.id,
+            reserved_quantity=quantity,
+        )
+        session.add(reservation)
+        session.flush()
+        session.add(InventoryTransaction(
+            inventory_stock_id=stock.id,
+            production_plan_id=production_plan_id,
+            production_plan_item_id=production_plan_item_id,
+            inventory_reservation_id=reservation.id,
+            transaction_type="reserve",
+            quantity=quantity,
+            quantity_before=stock.quantity,
+            quantity_after=stock.quantity,
+            reserved_before=before_reserved,
+            reserved_after=stock.reserved_quantity,
+            actor_username=actor_username,
+            reason="生产计划确认自动占用",
+        ))
+        allocated += quantity
+        if allocated >= requested_quantity:
+            break
+    return allocated
 
 
 def release_plan_reservations(
@@ -213,7 +243,7 @@ def issue_plan_reservations(
         reservation.status = "issued"
         plan_item.issued_inventory_quantity += quantity
         from modules.production_core.inventory_api import accept_issued_inventory
-        accept_issued_inventory(session, plan_item, quantity, actor_username)
+        accept_issued_inventory(session, plan_item, stock, quantity, actor_username)
         session.add(InventoryTransaction(
             inventory_stock_id=stock.id,
             production_plan_id=production_plan_id,
@@ -231,10 +261,10 @@ def issue_plan_reservations(
 
 
 __all__ = [
-    "available_quantities",
-    "available_quantity",
+    "available_plan_item_quantities",
     "issue_plan_reservations",
     "plan_has_issued_inventory",
+    "plan_item_stocks",
     "release_plan_reservations",
     "reserve_plan_item",
 ]

@@ -5,6 +5,7 @@ import { getDepartmentModule } from '@/features/departments/registry'
 import DepartmentWorkersView from '../views/DepartmentWorkersView.vue'
 import DepartmentProductionProgressView from '../views/DepartmentProductionProgressView.vue'
 import ProcedureTagPriceView from '../views/ProcedureTagPriceView.vue'
+import DepartmentSurplusInventoryView from '../views/DepartmentSurplusInventoryView.vue'
 
 const props = defineProps<{
   departmentCode: string
@@ -13,7 +14,7 @@ const emit = defineEmits<{
   configurationSaved: []
 }>()
 
-type DepartmentTab = 'workspace' | 'workers' | 'progress' | 'tag-prices'
+type DepartmentTab = 'workspace' | 'inventory' | 'workers' | 'progress' | 'tag-prices'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +22,9 @@ const department = computed(() => getDepartmentModule(props.departmentCode))
 const availableTabs = computed<DepartmentTab[]>(() => {
   const tabs: DepartmentTab[] = ['workspace']
   const capabilities = department.value?.capabilities
+  if (props.departmentCode === 'qc' || capabilities?.includes('repositories')) {
+    tabs.push('inventory')
+  }
   if (capabilities?.includes('production_progress')) tabs.push('progress')
   if (capabilities?.includes('standard_execution')) tabs.push('tag-prices')
   if (capabilities?.includes('workers')) tabs.push('workers')
@@ -44,6 +48,14 @@ const activeTab = computed<DepartmentTab>({
   <ElTabs v-model="activeTab" class="department-section-tabs">
     <ElTabPane label="生产工作台" name="workspace" lazy>
       <slot />
+    </ElTabPane>
+    <ElTabPane
+      v-if="availableTabs.includes('inventory')"
+      label="库存"
+      name="inventory"
+      lazy
+    >
+      <DepartmentSurplusInventoryView :department-code="departmentCode" />
     </ElTabPane>
     <ElTabPane
       v-if="availableTabs.includes('progress')"

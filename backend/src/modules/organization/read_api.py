@@ -27,6 +27,8 @@ class WorkshopView:
 class ProcedureView:
     id: int
     workshop_id: int
+    department_name: str
+    department_code: str
     procedure_name: str
     procedure_type: str
 
@@ -134,14 +136,21 @@ def get_procedure_views(session: Session) -> list[ProcedureView]:
         select(
             Procedure.id,
             Procedure.workshop_id,
+            Department.department_name,
+            Department.department_code,
             Procedure.procedure_name,
             Procedure.procedure_type,
-        ).order_by(Procedure.id)
+        )
+        .join(Workshop, Workshop.id == Procedure.workshop_id)
+        .join(Department, Department.id == Workshop.department_id)
+        .order_by(Department.id, Procedure.id)
     )
     return [
         ProcedureView(
             id=row.id,
             workshop_id=row.workshop_id,
+            department_name=row.department_name,
+            department_code=row.department_code,
             procedure_name=row.procedure_name,
             procedure_type=row.procedure_type,
         )

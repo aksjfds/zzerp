@@ -8,6 +8,7 @@ from schemas.production import (
     QcDispatchEnvelope,
     QcInspection,
     WorkOrderBatchEnvelope,
+    WarehouseStorageResponse,
 )
 from departments.contracts import CAP_QUALITY
 from departments.registry import department_api
@@ -76,3 +77,23 @@ def qc_batch_dispatch(
             user["department"],
         )
     }
+
+
+@router.post(
+    "/work-order-batches/{batch_id}/warehouse-storage",
+    response_model=WarehouseStorageResponse,
+)
+def qc_batch_warehouse_storage(
+    batch_id: int,
+    payload: QcDispatchCreate,
+    user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
+):
+    if user["department"] not in {"sys", "qc"}:
+        raise HTTPException(status_code=403, detail="只有 QC 可以将合格物料存入仓库")
+    from modules.quality.dispatches import store_qc_batch_in_warehouse
+    return store_qc_batch_in_warehouse(
+        batch_id,
+        payload.quantity,
+        user["department"],
+        user["username"],
+    )

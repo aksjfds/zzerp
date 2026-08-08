@@ -221,6 +221,7 @@ onMounted(load)
       :span-method="tableSpan"
       border
       stripe
+      table-layout="auto"
       empty-text="暂无可配置配件"
       row-key="key"
     >

@@ -1,9 +1,10 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import { resubmitReworkBatch, submitWorkOrder } from '../api/workOrders'
+import { completeWorkOrderProcessing, resubmitReworkBatch, submitWorkOrder } from '../api/workOrders'
 import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 import {
   createCancelWorkOrderAction,
+  createDirectResultAction,
   createUndoProductionOperationAction,
   type WorkOrderActions,
 } from './workOrderActionSupport'
@@ -18,14 +19,28 @@ export function useAssemblyWorkOrderActions(
 
   async function submit(item: WorkOrder) {
     try {
-      await ElMessageBox.confirm(
-        `确认完成剩余 ${item.processing_quantity} 件并结单？`,
+      const remaining = Math.max(item.quantity - item.processed_quantity, 0)
+      const { value } = await ElMessageBox.prompt(
+        `装配中 ${remaining} 件，请输入本次装配完成数量`,
         '装配完成',
-        { type: 'warning' },
+        {
+          inputValue: String(remaining),
+          inputPattern: /^[1-9]\d*$/,
+          inputErrorMessage: '请输入正整数',
+        },
       )
-      await submitWorkOrder(item.id, item.processing_quantity, 'direct')
+      const quantity = Number(value)
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > remaining) {
+        ElMessage.warning('装配完成数量不能超过装配中数量')
+        return
+      }
+      await completeWorkOrderProcessing(item.id, quantity)
       await onChanged()
-      ElMessage.success('装配结果已结单')
+      ElMessage.success(
+        item.qc_required
+          ? '已登记装配完成，等待送检'
+          : '已登记装配完成，等待填写装配结果',
+      )
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
         ElMessage.error(getApiErrorDetail(error)?.message || '装配提交失败')
@@ -35,12 +50,21 @@ export function useAssemblyWorkOrderActions(
 
   async function submitQc(item: WorkOrder) {
     try {
-      const quantity = Math.max(item.quantity - item.submitted_quantity, 0)
-      await ElMessageBox.confirm(
-        `确认完成剩余 ${quantity} 件装配并送 QC？`,
+      const remaining = item.ready_for_qc_quantity
+      const { value } = await ElMessageBox.prompt(
+        `本工单剩余 ${remaining} 件，请输入本次送检数量`,
         '装配送检',
-        { type: 'warning' },
+        {
+          inputValue: String(remaining),
+          inputPattern: /^[1-9]\d*$/,
+          inputErrorMessage: '请输入正整数',
+        },
       )
+      const quantity = Number(value)
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > remaining) {
+        ElMessage.warning('送检数量不能超过工单剩余数量')
+        return
+      }
       await submitWorkOrder(item.id, quantity, 'qc')
       await onChanged()
       ElMessage.success('装配产出已送 QC')
@@ -83,6 +107,7 @@ export function useAssemblyWorkOrderActions(
     resubmitQc,
     submit,
     submitQc,
+    submitDirectResult: createDirectResultAction(onChanged, '装配'),
     undo: createUndoProductionOperationAction(onChanged),
   }
 }

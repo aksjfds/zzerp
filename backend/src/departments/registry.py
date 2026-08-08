@@ -1,7 +1,9 @@
 from departments.assembly.api import API as ASSEMBLY
 from departments.cnc.api import API as CNC
 from departments.finished.api import API as FINISHED
+from departments.outsource.api import API as OUTSOURCE
 from departments.polish.api import API as POLISH
+from departments.purchasing.api import API as PURCHASING
 from departments.qc.api import API as QC
 from departments.stamp.api import API as STAMP
 from departments.warehouse.api import API as WAREHOUSE
@@ -10,7 +12,17 @@ from modules.errors import DomainError
 
 DEPARTMENT_MODULES = {
     module.descriptor.code: module
-    for module in (STAMP, CNC, POLISH, FINISHED, WAREHOUSE, ASSEMBLY, QC)
+    for module in (
+        STAMP,
+        CNC,
+        POLISH,
+        OUTSOURCE,
+        PURCHASING,
+        FINISHED,
+        WAREHOUSE,
+        ASSEMBLY,
+        QC,
+    )
 }
 
 

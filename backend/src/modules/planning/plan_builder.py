@@ -9,8 +9,8 @@ from sqlalchemy.orm import Session
 from domain.time import utc_now
 from modules.engineering.model_api import Product, ProductBom, ProductProcessFlow
 from modules.errors import DomainError
-from modules.inventory.identity import inventory_identity_key
-from modules.inventory.reservation_api import available_quantities
+from modules.inventory.identity import component_identity_key
+from modules.inventory.reservation_api import available_plan_item_quantities
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
 
 
@@ -50,10 +50,7 @@ def rebuild_order_plan(session: Session, order) -> ProductionPlan:
     definitions: list[PlannedIdentity] = []
     for order_index, order_item in enumerate(order.items):
         definitions.extend(_order_item_definitions(session, order_item, order_index))
-    availability = available_quantities(
-        session,
-        (definition.identity_key for definition in definitions),
-    )
+    availability = available_plan_item_quantities(session, definitions)
     definitions = _apply_flow_inventory(session, definitions, availability)
     for definition in definitions:
         estimated = min(
@@ -78,10 +75,7 @@ def rebuild_order_plan(session: Session, order) -> ProductionPlan:
 
 
 def refresh_plan_availability(session: Session, plan: ProductionPlan) -> None:
-    availability = available_quantities(
-        session,
-        (item.identity_key for item in plan.items),
-    )
+    availability = available_plan_item_quantities(session, plan.items)
     groups: dict[int, list[ProductionPlanItem]] = {}
     for item in plan.items:
         groups.setdefault(item.customer_order_item_id, []).append(item)
@@ -190,7 +184,7 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
     finished_node = shipping_nodes[0]
     result = [PlannedIdentity(
         customer_order_item_id=order_item.id,
-        identity_key=inventory_identity_key(
+        identity_key=component_identity_key(
             department_code="finished",
             item_type="finished_product",
             product_id=product.id,
@@ -220,7 +214,7 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
         unit_requirement = max(int(node.get("output_pcs") or 1), 1)
         result.append(PlannedIdentity(
             customer_order_item_id=order_item.id,
-            identity_key=inventory_identity_key(
+            identity_key=component_identity_key(
                 department_code="warehouse",
                 item_type="assembly",
                 product_id=product.id,
@@ -254,7 +248,7 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
             )
         result.append(PlannedIdentity(
             customer_order_item_id=order_item.id,
-            identity_key=inventory_identity_key(
+            identity_key=component_identity_key(
                 department_code="warehouse",
                 item_type="part",
                 product_id=product.id,

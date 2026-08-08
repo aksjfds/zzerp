@@ -1,7 +1,7 @@
 import { service } from '@/api/request'
 
 export type DepartmentProductionProgressItem = {
-  production_item_id: number
+  production_item_id: number | null
   part_no: string
   part_name: string
   customer_order_no: string

@@ -12,6 +12,7 @@ from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from modules.organization.api import list_workshops_by_department_code
 from schemas.production import (
     DepartmentProductionProgressEnvelope,
+    DepartmentSurplusInventoryEnvelope,
     DepartmentWorkerCreate,
     DepartmentWorkerEnvelope,
     DepartmentWorkerHistoryEnvelope,
@@ -19,12 +20,51 @@ from schemas.production import (
     DepartmentWorkerPayEnvelope,
     RepositoryListEnvelope,
     TagCardListEnvelope,
+    WarehouseStorageInput,
+    WarehouseStorageResponse,
     WorkerListEnvelope,
 )
 from schemas.organization import WorkshopResponse
 
 
 router = APIRouter(tags=["production"])
+
+
+@router.get(
+    "/departments/{department_code}/surplus-inventory",
+    response_model=DepartmentSurplusInventoryEnvelope,
+)
+def department_surplus_inventory(
+    department_code: str,
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, department_code)
+    if department_code == "qc":
+        from modules.quality.dispatches import list_closed_qc_surplus
+        return {"data": list_closed_qc_surplus()}
+    from modules.production_core.warehouse_storage import list_closed_surplus_positions
+    return {"data": list_closed_surplus_positions(department_code)}
+
+
+@router.post(
+    "/departments/{department_code}/warehouse-storage",
+    response_model=WarehouseStorageResponse,
+)
+def department_warehouse_storage(
+    department_code: str,
+    payload: WarehouseStorageInput,
+    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
+):
+    ensure_department_access(user, department_code)
+    from modules.production_core.warehouse_storage import store_position_in_warehouse
+    return store_position_in_warehouse(
+        department_code,
+        payload.production_item_id,
+        payload.flow_node_id,
+        payload.source_flow_node_id,
+        payload.quantity,
+        user["username"],
+    )
 
 
 @router.get(

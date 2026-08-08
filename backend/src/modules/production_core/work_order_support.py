@@ -3,9 +3,8 @@ from sqlalchemy import func, select
 from modules.engineering.model_api import ProductBom
 from domain.time import utc_now
 from modules.organization.model_api import Department, Procedure, Workshop
+from modules.planning.model_api import ProductionPlan
 from modules.assembly.model_api import WorkOrderMaterial
-from modules.quality.model_api import WorkOrderBatch
-from modules.standard_execution.model_api import ProcedureTagStock
 from modules.production_core.persistence import (
     ProductionItem,
     ProductionMovement,
@@ -154,13 +153,28 @@ def mark_order_planned(session, production_item: ProductionItem) -> None:
         customer_order.updated_at = utc_now()
 
 
+def ensure_production_plan_active(session, production_item: ProductionItem) -> None:
+    order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
+    plan = session.scalar(
+        select(ProductionPlan.id).where(
+            ProductionPlan.customer_order_id == order_item.customer_order_id,
+            ProductionPlan.status == "confirmed",
+        )
+    ) if order_item is not None else None
+    if plan is None:
+        raise DomainError(
+            "production_plan_not_active",
+            "生产计划尚未确认或已经取消，不能开工单",
+            status_code=409,
+        )
+
+
 def refresh_order_closed(
     session,
     production_item: ProductionItem,
     actor_username: str = "system",
 ) -> None:
-    from modules.inventory.finished_goods_api import has_pending_finished_goods
-    from modules.production_core.surplus import create_order_surplus_receipts
+    from modules.inventory.finished_goods_api import transfer_order_finished_surplus
 
     order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
     customer_order = session.get(CustomerOrder, order_item.customer_order_id)
@@ -168,64 +182,6 @@ def refresh_order_closed(
     if customer_order.status != "planned":
         return
 
-    repository_count = session.scalar(
-        select(func.count(Repository.id))
-        .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
-        .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-        .where(CustomerOrderItem.customer_order_id == customer_order.id)
-    )
-    tag_stock_count = session.scalar(
-        select(func.count(ProcedureTagStock.id))
-        .join(
-            ProductionItem,
-            ProductionItem.id == ProcedureTagStock.production_item_id,
-        )
-        .join(
-            CustomerOrderItem,
-            CustomerOrderItem.id == ProductionItem.customer_order_item_id,
-        )
-        .where(CustomerOrderItem.customer_order_id == customer_order.id)
-    )
-    open_order_count = session.scalar(
-        select(func.count(WorkOrder.id))
-        .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
-        .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-        .where(
-            CustomerOrderItem.customer_order_id == customer_order.id,
-            WorkOrder.status == "open",
-        )
-    )
-    pending_qc_count = session.scalar(
-        select(func.count(WorkOrderBatch.id))
-        .join(WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id)
-        .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
-        .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-        .where(
-            CustomerOrderItem.customer_order_id == customer_order.id,
-            WorkOrderBatch.recorded_at.is_(None),
-        )
-    )
-    held_qc_qualified = session.scalar(
-        select(func.coalesce(func.sum(ProductionMovement.quantity), 0))
-        .join(ProductionItem, ProductionItem.id == ProductionMovement.production_item_id)
-        .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-        .where(
-            CustomerOrderItem.customer_order_id == customer_order.id,
-            ProductionMovement.movement_type == "qc_qualified",
-            ProductionMovement.source_flow_node_id == ProductionMovement.target_flow_node_id,
-            ProductionMovement.source_department_id
-            == ProductionMovement.target_department_id,
-        )
-    ) or 0
-    dispatched_qc = session.scalar(
-        select(func.coalesce(func.sum(ProductionMovement.quantity), 0))
-        .join(ProductionItem, ProductionItem.id == ProductionMovement.production_item_id)
-        .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-        .where(
-            CustomerOrderItem.customer_order_id == customer_order.id,
-            ProductionMovement.movement_type == "qc_dispatch",
-        )
-    ) or 0
     shipping_complete = all(
         _order_item_shipping_complete(session, item)
         for item in session.scalars(
@@ -234,31 +190,8 @@ def refresh_order_closed(
             )
         )
     )
-    pending_finished_goods = has_pending_finished_goods(session, customer_order.id)
-    if (
-        not tag_stock_count
-        and not open_order_count
-        and not pending_qc_count
-        and not pending_finished_goods
-        and int(held_qc_qualified) <= int(dispatched_qc)
-        and shipping_complete
-    ):
-        create_order_surplus_receipts(session, customer_order, actor_username)
-        repository_count = session.scalar(
-            select(func.count(Repository.id))
-            .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
-            .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-            .where(CustomerOrderItem.customer_order_id == customer_order.id)
-        )
-    if (
-        not repository_count
-        and not tag_stock_count
-        and not open_order_count
-        and not pending_qc_count
-        and not pending_finished_goods
-        and int(held_qc_qualified) <= int(dispatched_qc)
-        and shipping_complete
-    ):
+    if shipping_complete:
+        transfer_order_finished_surplus(session, customer_order, actor_username)
         customer_order.status = "closed"
         customer_order.revision += 1
         customer_order.updated_at = utc_now()

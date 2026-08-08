@@ -55,8 +55,47 @@ class RepositoryListEnvelope(ProductionModel):
     total: int
 
 
-class DepartmentProductionProgressResponse(ProductionModel):
+class WarehouseStorageInput(ProductionModel):
+    production_item_id: int = Field(gt=0)
+    flow_node_id: str = Field(min_length=1, max_length=200)
+    source_flow_node_id: str = Field(min_length=1, max_length=200)
+    quantity: int = Field(gt=0)
+
+
+class WarehouseStorageResponse(ProductionModel):
+    inventory_stock_id: int
+    quantity: int
+    completed_flow_node_id: str
+    completed_node_label: str
+
+
+class DepartmentSurplusInventoryItem(ProductionModel):
+    key: str
+    source_kind: Literal["production", "qc"]
+    batch_id: int | None
     production_item_id: int
+    customer_order_no: str
+    product_code: str
+    product_name: str
+    product_version: int
+    item_type: Literal["part", "assembly"]
+    item_code: str
+    item_name: str
+    department_code: str
+    flow_node_id: str
+    source_flow_node_id: str
+    current_node_label: str
+    completed_flow_node_id: str
+    completed_node_label: str
+    quantity: int
+
+
+class DepartmentSurplusInventoryEnvelope(ProductionModel):
+    data: list[DepartmentSurplusInventoryItem]
+
+
+class DepartmentProductionProgressResponse(ProductionModel):
+    production_item_id: int | None
     part_no: str
     part_name: str
     customer_order_no: str
@@ -185,6 +224,10 @@ class WorkOrderSubmission(ProductionModel):
     completion_action: Literal["direct", "qc"]
 
 
+class WorkOrderProcessingCompletion(ProductionModel):
+    quantity: int = Field(gt=0)
+
+
 class ReworkSubmission(ProductionModel):
     quantity: int = Field(gt=0)
 
@@ -218,7 +261,7 @@ class WorkOrderBatchResponse(ProductionModel):
 class ProductionUndoOperationResponse(ProductionModel):
     id: int
     work_order_batch_id: int | None
-    operation_type: Literal["submission", "rework_submission"]
+    operation_type: Literal["processing_completion", "submission", "rework_submission"]
     operation_label: str
     actor_username: str
     created_at: str
@@ -250,7 +293,9 @@ class WorkOrderResponse(ProductionModel):
     worker_id: int | None
     worker_name: str | None
     quantity: int
+    processed_quantity: int
     submitted_quantity: int
+    ready_for_qc_quantity: int
     processing_quantity: int
     pending_qc_quantity: int
     qualified_quantity: int

@@ -82,6 +82,7 @@ def capture_operation_state(
             "production_item_id": order.production_item_id,
             "repository_id": order.repository_id,
             "procedure_tag_stock_id": order.procedure_tag_stock_id,
+            "processed_quantity": order.processed_quantity,
             "completed_quantity": order.completed_quantity,
             "status": order.status,
             "closed_at": _iso(order.closed_at),
@@ -317,6 +318,7 @@ def _restore_state(session, order: WorkOrder, before: dict, after: dict) -> None
 
     order.repository_id = before["order"]["repository_id"]
     order.procedure_tag_stock_id = before["order"]["procedure_tag_stock_id"]
+    order.processed_quantity = before["order"]["processed_quantity"]
     order.completed_quantity = before["order"]["completed_quantity"]
     order.status = before["order"]["status"]
     order.closed_at = (

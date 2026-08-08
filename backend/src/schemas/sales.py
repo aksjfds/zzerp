@@ -125,6 +125,7 @@ class ProductionPlanInventoryItem(SalesModel):
     flow_node_id: str
     item_code: str
     item_name: str
+    completed_node_label: str
     current_inventory_quantity: int
     reserved_inventory_quantity: int
     issued_inventory_quantity: int

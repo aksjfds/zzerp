@@ -121,6 +121,7 @@ onMounted(load)
         :data="inventoryRows"
         border
         stripe
+        table-layout="auto"
         empty-text="暂无相关库存项目"
       >
         <ElTableColumn label="产品" min-width="190">
@@ -133,6 +134,9 @@ onMounted(load)
         </ElTableColumn>
         <ElTableColumn prop="item_code" label="编号" min-width="130" />
         <ElTableColumn prop="item_name" label="名称" min-width="170" />
+        <ElTableColumn prop="completed_node_label" label="完成状态" min-width="120">
+          <template #default="{ row }">{{ row.completed_node_label === '—' ? '—' : `${row.completed_node_label}完` }}</template>
+        </ElTableColumn>
         <ElTableColumn prop="current_inventory_quantity" label="当前可用库存" width="120" align="right" />
         <ElTableColumn prop="reserved_inventory_quantity" label="本计划占用" width="110" align="right" />
         <ElTableColumn prop="issued_inventory_quantity" label="本计划已出库" width="120" align="right" />
@@ -157,7 +161,7 @@ onMounted(load)
             BOM 最多可满足 {{ plannedFinishedQuantity(group) }} 件
           </ElTag>
         </div>
-        <ElTable v-loading="loading" :data="group.items" border stripe>
+        <ElTable v-loading="loading" :data="group.items" border stripe table-layout="auto">
           <ElTableColumn prop="item_code" label="编号" min-width="130" />
           <ElTableColumn prop="item_name" label="名称" min-width="180" />
           <ElTableColumn prop="unit_requirement" label="单件用量" width="95" align="right" />

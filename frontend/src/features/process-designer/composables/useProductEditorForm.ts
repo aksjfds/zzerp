@@ -52,13 +52,16 @@ export function useProductEditorForm() {
   }
 
   function normalizedBom(): BomItem[] {
-    return form.bom_items.map((item) => ({
-      ...item,
-      part_name: item.part_name.trim(),
-      part_no: item.part_no.trim(),
-      pcs: item.pcs,
-      remark: item.remark.trim(),
-    }))
+    return form.bom_items.map((item) => {
+      const payload: BomItem = {
+        part_name: item.part_name.trim(),
+        part_no: item.part_no.trim(),
+        pcs: item.pcs,
+        remark: item.remark.trim(),
+      }
+      if (item.id !== undefined) payload.id = item.id
+      return payload
+    })
   }
 
   function validateBom(): string | null {

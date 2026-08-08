@@ -38,6 +38,7 @@ class CustomerOrder(Base):
         ),
         CheckConstraint("revision > 0", name="ck_customer_order_revision"),
         Index("idx_customer_order_customer", "customer_id"),
+        Index("idx_customer_order_status", "status", "id"),
         Index("idx_customer_order_updated", text("updated_at DESC"), text("id DESC")),
     )
 

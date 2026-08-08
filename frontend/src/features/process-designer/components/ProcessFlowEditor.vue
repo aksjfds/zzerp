@@ -103,7 +103,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
     <div class="section-heading">
       <div>
         <h2>工序流程配置</h2>
-        <p>配件可直接进入工艺或装配；跨部门必须经过QC，打标工艺后必须连接QC，并以“发货”作为流程终点。</p>
+        <p>配件可直接进入生产工艺、采购部外购节点或装配；跨部门必须经过QC，有QC时必须送检，无QC时由生产部门填写加工结果，并以“发货”作为流程终点。</p>
       </div>
     </div>
     <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge, 'is-readonly': readonly }">

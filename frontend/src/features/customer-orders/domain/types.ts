@@ -93,6 +93,7 @@ export type ProductionPlan = {
     flow_node_id: string
     item_code: string
     item_name: string
+    completed_node_label: string
     current_inventory_quantity: number
     reserved_inventory_quantity: number
     issued_inventory_quantity: number

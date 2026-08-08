@@ -30,10 +30,11 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 @router.get("/finished-order-stocks", response_model=FinishedOrderStockEnvelope)
 def finished_order_stocks(
+    operation: str = Query(default="all", pattern="^(all|receipt|shipment)$"),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, "finished")
-    return {"data": list_finished_order_stocks()}
+    return {"data": list_finished_order_stocks(operation)}
 
 
 @router.post(

@@ -23,7 +23,7 @@ const rows = ref<FinishedOrderStock[]>([])
 const visibleRows = computed(() => rows.value.filter((row) => {
   if (props.mode === 'receipt') return row.pending_quantity > 0
   if (props.mode === 'shipment') {
-    return row.available_quantity > 0 && row.outstanding_quantity > 0
+    return row.order_status === 'planned' && row.available_quantity > 0 && row.outstanding_quantity > 0
   }
   return true
 }))
@@ -31,7 +31,7 @@ const visibleRows = computed(() => rows.value.filter((row) => {
 async function load() {
   loading.value = true
   try {
-    rows.value = await queryFinishedOrderStocks()
+    rows.value = await queryFinishedOrderStocks(props.mode)
   } catch (error) {
     ElMessage.error(getApiErrorDetail(error)?.message || '订单成品加载失败')
   } finally {
@@ -110,12 +110,13 @@ defineExpose({ load })
       :data="visibleRows"
       border
       stripe
+      table-layout="auto"
       :empty-text="mode === 'receipt' ? '暂无待入库成品' : mode === 'shipment' ? '暂无可发货订单' : '暂无订单成品'"
     >
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="150" />
       <ElTableColumn prop="item_code" label="成品编号" min-width="130" />
       <ElTableColumn prop="item_name" label="成品名称" min-width="160" />
-      <ElTableColumn prop="product_version" label="版本" width="75" />
+      <ElTableColumn prop="product_version" label="版本" width="80" align="center" />
       <ElTableColumn prop="required_quantity" label="订单需求" width="95" align="right" />
       <ElTableColumn v-if="mode !== 'shipment'" prop="pending_quantity" label="待入库" width="90" align="right" />
       <ElTableColumn v-if="mode !== 'receipt'" prop="available_quantity" label="可发货" width="90" align="right" />

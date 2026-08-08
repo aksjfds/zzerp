@@ -129,7 +129,7 @@ function submit() {
 <template>
   <ElDialog
     :model-value="modelValue"
-    title="开标记工单"
+    :title="`开${item?.procedure_name || '工艺'}工单`"
     width="500px"
     @update:model-value="emit('update:modelValue', $event)"
   >

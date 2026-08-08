@@ -176,7 +176,11 @@ export function useProductionDepartment(
       )
       dialogVisible.value = false
       await reloadWorkspace()
-      ElMessage.success(mode === 'purchase' ? '外购入库单已创建' : '标记工单已创建')
+      ElMessage.success(
+        mode === 'purchase'
+          ? '外购入库单已创建'
+          : `${activeRepository.value.procedure_name || '工艺'}工单已创建`,
+      )
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
     } finally {

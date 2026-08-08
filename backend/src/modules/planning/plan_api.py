@@ -10,7 +10,7 @@ from domain.time import business_iso, utc_now
 from modules.errors import DomainError
 from modules.engineering.model_api import ProductProcessFlow
 from modules.inventory.reservation_api import (
-    available_quantities,
+    plan_item_stocks,
     release_plan_reservations,
     reserve_plan_item,
 )
@@ -23,6 +23,7 @@ from modules.production_core.api import (
     cancel_order_production,
     initialize_order_production,
 )
+from modules.inventory.persistence import InventoryReservation
 
 
 def get_order_plan(order_id: int) -> dict:
@@ -140,10 +141,6 @@ def serialize_plan(session: Session, plan: ProductionPlan) -> dict:
     groups: dict[int, list[ProductionPlanItem]] = {}
     for item in plan.items:
         groups.setdefault(item.customer_order_item_id, []).append(item)
-    current_availability = available_quantities(
-        session,
-        (item.identity_key for item in plan.items),
-    )
     return {
         "id": plan.id,
         "customer_order_id": plan.customer_order_id,
@@ -188,27 +185,73 @@ def serialize_plan(session: Session, plan: ProductionPlan) -> dict:
             for item in plan.items
             if item.item_type == "part"
         ],
-        "inventory_items": [
-            {
-                "id": item.id,
-                "customer_order_item_id": item.customer_order_item_id,
-                "item_type": item.item_type,
-                "product_id": item.product_id,
-                "product_version": item.product_version,
-                "product_bom_id": item.product_bom_id,
-                "flow_node_id": item.flow_node_id,
-                "item_code": item.item_code,
-                "item_name": item.item_name,
-                "current_inventory_quantity": current_availability.get(item.identity_key, 0),
-                "reserved_inventory_quantity": item.reserved_inventory_quantity,
-                "issued_inventory_quantity": item.issued_inventory_quantity,
-            }
-            for item in plan.items
-        ],
+        "inventory_items": _serialize_inventory_items(session, plan),
         "confirmed_at": business_iso(plan.confirmed_at),
         "confirmed_by": plan.confirmed_by,
         "created_at": business_iso(plan.created_at),
         "updated_at": business_iso(plan.updated_at),
+    }
+
+
+def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[dict]:
+    from modules.production_core.flow import load_product_flow
+
+    stock_groups = plan_item_stocks(session, plan.items)
+    reservations = list(session.scalars(select(InventoryReservation).where(
+        InventoryReservation.production_plan_id == plan.id
+    )))
+    reservation_totals: dict[tuple[int, int], tuple[int, int]] = {}
+    for reservation in reservations:
+        key = (reservation.production_plan_item_id, reservation.inventory_stock_id)
+        reserved, issued = reservation_totals.get(key, (0, 0))
+        reservation_totals[key] = (
+            reserved + reservation.reserved_quantity,
+            issued + reservation.issued_quantity,
+        )
+    rows: list[dict] = []
+    for item in plan.items:
+        _flow, nodes = load_product_flow(session, item.product_id, item.product_version)
+        stocks = stock_groups.get(item.identity_key, [])
+        if not stocks:
+            rows.append(_inventory_item_row(item, None, "—", 0, 0, 0))
+            continue
+        for stock in stocks:
+            reserved, issued = reservation_totals.get((item.id, stock.id), (0, 0))
+            rows.append(_inventory_item_row(
+                item,
+                stock.id,
+                nodes.get(stock.completed_flow_node_id, {}).get(
+                    "label", stock.completed_flow_node_id
+                ),
+                max(stock.quantity - stock.reserved_quantity, 0),
+                reserved,
+                issued,
+            ))
+    return rows
+
+
+def _inventory_item_row(
+    item: ProductionPlanItem,
+    stock_id: int | None,
+    completed_node_label: str,
+    available: int,
+    reserved: int,
+    issued: int,
+) -> dict:
+    return {
+        "id": stock_id or -item.id,
+        "customer_order_item_id": item.customer_order_item_id,
+        "item_type": item.item_type,
+        "product_id": item.product_id,
+        "product_version": item.product_version,
+        "product_bom_id": item.product_bom_id,
+        "flow_node_id": item.flow_node_id,
+        "item_code": item.item_code,
+        "item_name": item.item_name,
+        "completed_node_label": completed_node_label,
+        "current_inventory_quantity": available,
+        "reserved_inventory_quantity": reserved,
+        "issued_inventory_quantity": issued,
     }
 
 
@@ -263,7 +306,7 @@ def _reserve_and_validate_plan_item(
         session,
         production_plan_id=plan.id,
         production_plan_item_id=item.id,
-        identity_key=item.identity_key,
+        plan_item=item,
         requested_quantity=item.gross_required_quantity,
         actor_username=actor_username,
     )

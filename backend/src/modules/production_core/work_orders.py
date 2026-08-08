@@ -4,7 +4,7 @@ from database import SessionLocal
 from domain.time import business_now, utc_now
 from modules.organization.model_api import Department, Procedure
 from modules.quality.model_api import WorkOrderBatch
-from modules.production_core.persistence import WorkOrder
+from modules.production_core.persistence import ProductionItem, WorkOrder
 from modules.assembly.api import (
     resubmit_assembly_rework_batch,
     submit_assembly_work_order,
@@ -27,7 +27,11 @@ from modules.production_core.work_order_commands import (
     validate_worker,
 )
 from modules.production_core.work_order_presenters import serialize_work_order
-from modules.production_core.work_order_support import mark_order_planned, node_context
+from modules.production_core.work_order_support import (
+    ensure_production_plan_active,
+    mark_order_planned,
+    node_context,
+)
 from modules.production_core.flow import process_qc_node
 from modules.production_core.operation_undo import (
     capture_operation_state,
@@ -52,6 +56,7 @@ def create_work_order(
             repository_id,
             procedure_tag_stock_id,
         )
+        ensure_production_plan_active(session, production_item)
         department = session.get(Department, source.department_id)
         if department is None or user_department not in {
             "sys",
@@ -111,6 +116,25 @@ def submit_work_order(
         if order.status != "open":
             raise DomainError("work_order_closed", "工单已经结单")
         before = capture_operation_state(session, order)
+        ready_quantity = order.processed_quantity - order.completed_quantity
+        if (
+            completion_action == "qc"
+            or order.work_order_type == "tag"
+            or (order.work_order_type == "assembly" and ready_quantity > 0)
+        ):
+            if quantity <= 0 or quantity > ready_quantity:
+                raise DomainError(
+                    "work_order_result_quantity_exceeded",
+                    "处理数量超过已加工完成待处理数量",
+                )
+        else:
+            processing_quantity = order.quantity - order.processed_quantity
+            if quantity <= 0 or quantity > processing_quantity:
+                raise DomainError(
+                    "work_order_completion_quantity_exceeded",
+                    "完成数量超过工单加工中数量",
+                )
+            order.processed_quantity += quantity
         if order.work_order_type == "assembly":
             submit_assembly_work_order(
                 session,
@@ -188,6 +212,61 @@ def submit_work_order(
                 else "撤回直接完成"
             ),
             department_code=department.department_code,
+            actor_username=actor_username,
+        )
+        return serialize_work_order(session, order)
+
+
+def complete_work_order_processing(
+    work_order_id: int,
+    quantity: int,
+    user_department: str,
+    actor_username: str,
+) -> dict:
+    with SessionLocal.begin() as session:
+        order = session.get(WorkOrder, work_order_id, with_for_update=True)
+        if order is None:
+            raise DomainError("work_order_not_found", "工单不存在", status_code=404)
+        if order.status != "open":
+            raise DomainError("work_order_closed", "工单已经结单")
+        before = capture_operation_state(session, order)
+        remaining = order.quantity - order.processed_quantity
+        if quantity <= 0 or quantity > remaining:
+            raise DomainError(
+                "work_order_processing_quantity_exceeded",
+                "加工完成数量超过工单加工中数量",
+            )
+        if order.work_order_type == "assembly":
+            if user_department not in {"sys", "assembly"}:
+                raise DomainError("department_access_denied", "只有装配部可以操作装配工单", status_code=403)
+            department_code = "assembly"
+            operation_label = "撤回装配完成"
+            production_item = session.get(ProductionItem, order.production_item_id)
+        else:
+            source, production_item = load_order_source(session, order)
+            department = session.get(Department, source.department_id)
+            if department is None or user_department not in {
+                "sys",
+                department.department_code,
+            }:
+                raise DomainError("department_access_denied", "无权操作该工单", status_code=403)
+            department_code = department.department_code
+            operation_label = (
+                "撤回到货登记"
+                if order.work_order_type == "purchase_receipt"
+                else "撤回加工完成"
+            )
+        if production_item is None:
+            raise DomainError("production_context_missing", "工单生产资料不存在", status_code=409)
+        order.processed_quantity += quantity
+        session.flush()
+        record_undoable_operation(
+            session,
+            order,
+            before,
+            operation_type="processing_completion",
+            operation_label=operation_label,
+            department_code=department_code,
             actor_username=actor_username,
         )
         return serialize_work_order(session, order)

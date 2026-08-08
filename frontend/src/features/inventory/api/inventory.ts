@@ -45,8 +45,10 @@ export async function queryTransactions(departmentCode: InventoryDepartment) {
   return response.data.data
 }
 
-export async function queryFinishedOrderStocks() {
-  const response = await service.get<{ data: FinishedOrderStock[] }>('/inventory/finished-order-stocks')
+export async function queryFinishedOrderStocks(operation: 'all' | 'receipt' | 'shipment') {
+  const response = await service.get<{ data: FinishedOrderStock[] }>('/inventory/finished-order-stocks', {
+    params: { operation },
+  })
   return response.data.data
 }
 

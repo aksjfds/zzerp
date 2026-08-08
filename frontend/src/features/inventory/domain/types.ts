@@ -7,6 +7,8 @@ export type InventoryStock = {
   item_code: string
   item_name: string
   product_version: number
+  completed_flow_node_id: string
+  completed_node_label: string
   quantity: number
   reserved_quantity: number
   available_quantity: number
@@ -19,6 +21,7 @@ export type InventoryOutboundItem = {
   reserved_quantity: number
   issued_quantity: number
   remaining_quantity: number
+  completed_node_label: string
   issue_quantity?: number
 }
 
@@ -44,11 +47,13 @@ export type InventoryTransaction = {
   item_code: string
   item_name: string
   customer_order_no: string
+  completed_node_label: string
 }
 
 export type FinishedOrderStock = {
   customer_order_id: number
   customer_order_no: string
+  order_status: 'planned' | 'closed'
   customer_order_item_id: number
   item_code: string
   item_name: string

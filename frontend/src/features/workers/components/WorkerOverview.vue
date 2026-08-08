@@ -100,15 +100,16 @@ function money(value: MoneyValue | null | undefined) {
             v-loading="historyLoading"
             :data="history"
             border
+            table-layout="auto"
           >
             <ElTableColumn prop="item_name" label="加工配件" min-width="140" />
             <ElTableColumn prop="procedure_name" label="加工工艺" width="130" />
-            <ElTableColumn prop="completed_quantity" label="加工数量" width="100" />
-            <ElTableColumn label="完成率" width="100">
+            <ElTableColumn prop="completed_quantity" label="加工数量" width="100" align="right" />
+            <ElTableColumn label="完成率" width="100" align="right">
               <template #default="{ row }">{{ Math.round(row.completion_rate * 100) }}%</template>
             </ElTableColumn>
-            <ElTableColumn prop="lost_quantity" label="遗失数" width="90" />
-            <ElTableColumn prop="scrap_quantity" label="报废数" width="90" />
+            <ElTableColumn prop="lost_quantity" label="遗失数" width="90" align="right" />
+            <ElTableColumn prop="scrap_quantity" label="报废数" width="90" align="right" />
             <ElTableColumn prop="completed_at" label="时间" width="170" />
           </ElTable>
         </ElTabPane>
@@ -134,20 +135,20 @@ function money(value: MoneyValue | null | undefined) {
               :closable="false"
               title="部分历史工单没有计件单价快照，未计入工资总额"
             />
-            <ElTable :data="paySummary?.items || []" border empty-text="本月暂无计件工资">
+            <ElTable :data="paySummary?.items || []" border table-layout="auto" empty-text="本月暂无计件工资">
               <ElTableColumn prop="item_name" label="加工配件" min-width="220" />
               <ElTableColumn label="标记" min-width="140">
                 <template #default="{ row }">
                   {{ row.tag_names.length ? row.tag_names.join('、') : '未配置' }}
                 </template>
               </ElTableColumn>
-              <ElTableColumn prop="qualified_quantity" label="合格数量" width="100" />
-              <ElTableColumn label="单件工资" width="110">
+              <ElTableColumn prop="qualified_quantity" label="合格数量" width="100" align="right" />
+              <ElTableColumn label="单件工资" width="110" align="right">
                 <template #default="{ row }">
                   {{ row.unit_price == null ? '未配置' : `¥ ${money(row.unit_price)}` }}
                 </template>
               </ElTableColumn>
-              <ElTableColumn label="小计" width="120">
+              <ElTableColumn label="小计" width="120" align="right">
                 <template #default="{ row }">
                   {{ row.pay_amount == null ? '—' : `¥ ${money(row.pay_amount)}` }}
                 </template>

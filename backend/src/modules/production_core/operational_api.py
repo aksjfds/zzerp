@@ -35,6 +35,7 @@ from modules.production_core.work_order_progress import (
 )
 from modules.production_core.work_order_support import (
     consume_repository,
+    ensure_production_plan_active,
     mark_order_planned,
     move_to_node,
     node_context,
@@ -50,6 +51,7 @@ __all__ = [
     "capture_operation_state",
     "consume_order_source",
     "consume_repository",
+    "ensure_production_plan_active",
     "create_order_record",
     "item_display",
     "load_product_flow",

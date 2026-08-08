@@ -41,7 +41,14 @@ class InventoryStock(Base):
             name="ck_inventory_stock_reserved_quantity",
         ),
         CheckConstraint("revision > 0", name="ck_inventory_stock_revision"),
-        Index("idx_inventory_stock_lookup", "product_id", "product_version", "item_type"),
+        Index(
+            "idx_inventory_stock_component",
+            "product_id",
+            "product_version",
+            "item_type",
+            "product_bom_id",
+            "flow_node_id",
+        ),
         Index("idx_inventory_stock_department", "department_code", "item_type"),
     )
 
@@ -53,6 +60,7 @@ class InventoryStock(Base):
     product_version: Mapped[int] = mapped_column(Integer, nullable=False)
     product_bom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    completed_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     item_code: Mapped[str] = mapped_column(Text, nullable=False)
     item_name: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -151,6 +159,7 @@ class InventoryReceipt(Base):
     product_version: Mapped[int] = mapped_column(Integer, nullable=False)
     product_bom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    completed_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     item_code: Mapped[str] = mapped_column(Text, nullable=False)
     item_name: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)

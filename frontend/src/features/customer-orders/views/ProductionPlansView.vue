@@ -30,12 +30,12 @@ const planInvalid = ref(true)
 const statusLabels: Record<string, string> = {
   confirmed: '计划待确认',
   planned: '生产中',
-  closed: '已结单',
+  closed: '订单已结单 · 计划继续生产',
 }
 const statusTypes = {
   confirmed: 'primary',
   planned: 'warning',
-  closed: 'success',
+  closed: 'warning',
 } as const
 
 async function load() {
@@ -101,11 +101,11 @@ defineExpose({ load })
     <div class="plans-heading">
       <div>
         <h2>生产计划</h2>
-        <p>客户订单确认后自动生成草稿计划；确认计划时才占用库存并开始生产。</p>
+        <p>客户订单确认后自动生成草稿计划；客户订单结单后，已确认生产计划仍会继续生产。</p>
       </div>
       <ElButton @click="load">刷新</ElButton>
     </div>
-    <ElTable v-loading="loading" :data="orders" border stripe>
+    <ElTable v-loading="loading" :data="orders" border stripe table-layout="auto">
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="150" />
       <ElTableColumn prop="customer_name" label="客户名称" min-width="150" />
       <ElTableColumn label="产品" min-width="260">
@@ -115,7 +115,7 @@ defineExpose({ load })
           </div>
         </template>
       </ElTableColumn>
-      <ElTableColumn label="状态" width="120">
+      <ElTableColumn label="状态" min-width="200">
         <template #default="{ row }">
           <ElTag :type="statusTypes[row.status as keyof typeof statusTypes]" effect="light">
             {{ statusLabels[row.status] || row.status }}

@@ -107,13 +107,36 @@ def allocate_issued_finished_goods(
     return lot
 
 
-def list_finished_order_stocks() -> list[dict]:
+def list_finished_order_stocks(operation: str) -> list[dict]:
     with SessionLocal() as session:
+        statement = select(FinishedOrderStock).join(
+            CustomerOrder,
+            CustomerOrder.id == FinishedOrderStock.customer_order_id,
+        )
+        if operation == "receipt":
+            statement = statement.where(
+                CustomerOrder.status.in_(("planned", "closed")),
+                FinishedOrderStock.pending_quantity > 0,
+            )
+        elif operation == "shipment":
+            statement = statement.where(
+                CustomerOrder.status == "planned",
+                FinishedOrderStock.available_quantity > 0,
+            )
+        else:
+            statement = statement.where(
+                (CustomerOrder.status == "planned")
+                | (
+                    (CustomerOrder.status == "closed")
+                    & (FinishedOrderStock.pending_quantity > 0)
+                )
+            )
         lots = list(session.scalars(
-            select(FinishedOrderStock)
-            .join(CustomerOrder, CustomerOrder.id == FinishedOrderStock.customer_order_id)
-            .where(CustomerOrder.status == "planned")
-            .order_by(FinishedOrderStock.customer_order_id, FinishedOrderStock.customer_order_item_id, FinishedOrderStock.id)
+            statement.order_by(
+                FinishedOrderStock.customer_order_id,
+                FinishedOrderStock.customer_order_item_id,
+                FinishedOrderStock.id,
+            )
         ))
         groups: dict[int, list[FinishedOrderStock]] = defaultdict(list)
         for lot in lots:
@@ -129,6 +152,7 @@ def list_finished_order_stocks() -> list[dict]:
             rows.append({
                 "customer_order_id": order.id,
                 "customer_order_no": order.customer_order_no,
+                "order_status": order.status,
                 "customer_order_item_id": order_item.id,
                 "item_code": item_lots[0].item_code,
                 "item_name": item_lots[0].item_name,
@@ -156,6 +180,9 @@ def confirm_finished_order_receipt(customer_order_item_id: int, actor_username: 
         ))
         if not lots:
             raise DomainError("finished_goods_pending_not_found", "没有待确认入库的成品", status_code=404)
+        customer_order = session.get(CustomerOrder, lots[0].customer_order_id, with_for_update=True)
+        if customer_order is None:
+            raise DomainError("customer_order_not_found", "客户订单不存在", status_code=409)
         finished_department_id = _finished_department_id(session)
         refresh_item = None
         for lot in lots:
@@ -183,6 +210,8 @@ def confirm_finished_order_receipt(customer_order_item_id: int, actor_username: 
         session.flush()
         if refresh_item is not None:
             refresh_order_closed(session, refresh_item, actor_username)
+        if customer_order.status == "closed":
+            transfer_order_finished_surplus(session, customer_order, actor_username)
         session.flush()
         result = _serialize_order_item(session, customer_order_item_id)
     return result
@@ -260,17 +289,6 @@ def ship_finished_order_item(
     return result
 
 
-def has_pending_finished_goods(session: Session, customer_order_id: int) -> bool:
-    return session.scalar(
-        select(FinishedOrderStock.id)
-        .where(
-            FinishedOrderStock.customer_order_id == customer_order_id,
-            FinishedOrderStock.pending_quantity > 0,
-        )
-        .limit(1)
-    ) is not None
-
-
 def transfer_order_finished_surplus(
     session: Session,
     customer_order,
@@ -300,6 +318,7 @@ def transfer_order_finished_surplus(
                 product_version=lot.product_version,
                 product_bom_id=None,
                 flow_node_id=lot.flow_node_id,
+                completed_flow_node_id=lot.flow_node_id,
             ),
             department_code="finished",
             item_type="finished_product",
@@ -307,13 +326,14 @@ def transfer_order_finished_surplus(
             product_version=lot.product_version,
             product_bom_id=None,
             flow_node_id=lot.flow_node_id,
+            completed_flow_node_id=lot.flow_node_id,
             item_code=lot.item_code,
             item_name=lot.item_name,
             quantity=product_quantity,
             source_customer_order_id=customer_order.id,
             source_production_item_id=lot.production_item_id,
         )
-        confirm_receipt(session, receipt.id, actor_username)
+        confirm_receipt(session, receipt.id, actor_username, "订单成品结余自动入库")
         lot.transferred_quantity += lot.available_quantity
         lot.available_quantity = 0
         lot.revision += 1
@@ -335,6 +355,7 @@ def _serialize_order_item(session: Session, customer_order_item_id: int) -> dict
     return {
         "customer_order_id": order.id,
         "customer_order_no": order.customer_order_no,
+        "order_status": order.status,
         "customer_order_item_id": order_item.id,
         "item_code": lots[0].item_code,
         "item_name": lots[0].item_name,
@@ -369,7 +390,6 @@ def _finished_department_id(session: Session) -> int:
 __all__ = [
     "allocate_issued_finished_goods",
     "confirm_finished_order_receipt",
-    "has_pending_finished_goods",
     "list_finished_order_stocks",
     "register_pending_finished_goods",
     "ship_finished_order_item",

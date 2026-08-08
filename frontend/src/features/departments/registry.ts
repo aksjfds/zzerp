@@ -3,7 +3,9 @@ import type { DepartmentCapability, DepartmentModule } from './contracts'
 import { assemblyDepartment } from './assembly'
 import { cncDepartment } from './cnc'
 import { finishedDepartment } from './finished'
+import { outsourceDepartment } from './outsource'
 import { polishDepartment } from './polish'
+import { purchasingDepartment } from './purchasing'
 import { qcDepartment } from './qc'
 import { stampDepartment } from './stamp'
 import { warehouseDepartment } from './warehouse'
@@ -13,6 +15,8 @@ export const departmentModules = [
   stampDepartment,
   cncDepartment,
   polishDepartment,
+  outsourceDepartment,
+  purchasingDepartment,
   qcDepartment,
   assemblyDepartment,
   finishedDepartment,

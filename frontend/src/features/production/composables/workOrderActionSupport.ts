@@ -1,11 +1,12 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import { cancelWorkOrder, undoProductionOperation } from '../api/workOrders'
+import { cancelWorkOrder, submitWorkOrder, undoProductionOperation } from '../api/workOrders'
 import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 
 export interface WorkOrderActions {
   submit: (item: WorkOrder) => Promise<void>
   submitQc: (item: WorkOrder) => Promise<void>
+  submitDirectResult: (item: WorkOrder) => Promise<void>
   resubmitQc: (item: WorkOrder, batch: WorkOrderBatch) => Promise<void>
   cancel: (item: WorkOrder) => Promise<void>
   undo: (item: WorkOrder) => Promise<void>
@@ -42,6 +43,41 @@ export function createCancelWorkOrderAction(onChanged: () => Promise<void>) {
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
         ElMessage.error(getApiErrorDetail(error)?.message || '取消工单失败')
+      }
+    }
+  }
+}
+
+export function createDirectResultAction(
+  onChanged: () => Promise<void>,
+  resultName = '加工',
+) {
+  return async function submitDirectResult(item: WorkOrder) {
+    const available = item.ready_for_qc_quantity
+    if (available < 1 || item.qc_required) return
+    try {
+      const { value } = await ElMessageBox.prompt(
+        `已完成${resultName} ${available} 件，请输入本次确认合格数量`,
+        `工单 ${item.work_order_no} · 填写${resultName}结果`,
+        {
+          inputValue: String(available),
+          inputPattern: /^[1-9]\d*$/,
+          inputErrorMessage: '请输入正整数',
+          confirmButtonText: '确认结果',
+          cancelButtonText: '取消',
+        },
+      )
+      const quantity = Number(value)
+      if (!Number.isInteger(quantity) || quantity < 1 || quantity > available) {
+        ElMessage.warning(`合格数量不能超过已完成${resultName}数量`)
+        return
+      }
+      await submitWorkOrder(item.id, quantity, 'direct')
+      await onChanged()
+      ElMessage.success(`${resultName}结果已确认并流转`)
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(getApiErrorDetail(error)?.message || `${resultName}结果提交失败`)
       }
     }
   }

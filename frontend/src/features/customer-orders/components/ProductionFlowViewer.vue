@@ -5,6 +5,7 @@ import LogicFlow, { PolylineEdge, PolylineEdgeModel } from '@logicflow/core'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
 import { materialColors } from '@/shared/material/tokens'
 import { toLogicFlowData } from '@/shared/process-flow/adapter'
+import { updateProcessNodeTextScale } from '@/shared/process-flow/nodeTextScale'
 import type { FlowEdge, ProcessFlow } from '@/shared/process-flow/types'
 import type { ProductionEdgeStat, ProductionNodeStat } from '../domain/types'
 
@@ -177,6 +178,9 @@ onMounted(async () => {
     stopMoveGraph: false,
   })
   registerProcessNodes(instance)
+  instance.on('graph:transform', ({ transform }) => {
+    if (container.value) updateProcessNodeTextScale(container.value, transform.SCALE_X)
+  })
   instance.batchRegister([
     { type: 'production-polyline', view: PolylineEdge, model: ProductionPolylineEdgeModel },
   ])
@@ -258,6 +262,7 @@ onBeforeUnmount(() => {
   background: var(--md-surface-container-lowest);
   cursor: grab;
 }
+.production-flow-viewer :deep(.lf-node-content text) { transform: scale(var(--process-node-text-scale, 1)); transform-box: fill-box; transform-origin: center; }
 .production-flow-viewer:active { cursor: grabbing; }
 @media (max-width: 760px) {
   .production-flow-legend { gap: 8px 12px; }

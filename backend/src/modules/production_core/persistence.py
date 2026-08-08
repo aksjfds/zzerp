@@ -105,6 +105,10 @@ class WorkOrder(Base):
             name="ck_work_order_completed_quantity",
         ),
         CheckConstraint(
+            "processed_quantity >= completed_quantity AND processed_quantity <= quantity",
+            name="ck_work_order_processed_quantity",
+        ),
+        CheckConstraint(
             "status IN ('open', 'closed', 'cancelled')",
             name="ck_work_order_status",
         ),
@@ -118,7 +122,7 @@ class WorkOrder(Base):
             name="ck_work_order_closed_quantity",
         ),
         CheckConstraint(
-            "status <> 'cancelled' OR completed_quantity = 0",
+            "status <> 'cancelled' OR (completed_quantity = 0 AND processed_quantity = 0)",
             name="ck_work_order_cancelled_quantity",
         ),
         CheckConstraint(
@@ -220,6 +224,7 @@ class WorkOrder(Base):
         BigInteger, ForeignKey("worker.id"), nullable=True
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    processed_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
     created_at: Mapped[datetime] = mapped_column(
@@ -373,7 +378,7 @@ class ProductionOperationUndo(Base):
     __tablename__ = "production_operation_undo"
     __table_args__ = (
         CheckConstraint(
-            "operation_type IN ('submission', 'rework_submission')",
+            "operation_type IN ('processing_completion', 'submission', 'rework_submission')",
             name="ck_production_operation_undo_type",
         ),
         CheckConstraint(

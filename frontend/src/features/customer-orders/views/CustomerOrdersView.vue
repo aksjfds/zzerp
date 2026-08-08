@@ -121,9 +121,9 @@ defineExpose({ load: loadOrders })
     </header>
     <section class="content-card" :class="{ embedded: props.embedded }">
       <ElInput v-model="keyword" clearable placeholder="搜索当前页的订单编号或客户" class="search" />
-      <ElTable v-loading="loading" :data="filteredOrders" border>
-        <ElTableColumn prop="customer_name" label="客户名称" />
-        <ElTableColumn prop="customer_order_no" label="订单编号"/>
+      <ElTable v-loading="loading" :data="filteredOrders" border table-layout="auto">
+        <ElTableColumn prop="customer_name" label="客户名称" min-width="150" />
+        <ElTableColumn prop="customer_order_no" label="订单编号" min-width="160" />
         <ElTableColumn label="产品明细" min-width="260">
           <template #default="{ row }"><div v-for="item in row.items" :key="item.id">{{ item.factory_code }}-{{ item.product_name }}-{{ item.quantity }}个</div></template>
         </ElTableColumn>
@@ -144,7 +144,7 @@ defineExpose({ load: loadOrders })
           </template>
         </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" width="170" />
-        <ElTableColumn label="操作" :width="props.readOnly ? 90 : 240" fixed="right">
+        <ElTableColumn label="操作" :width="props.readOnly ? 90 : 260" fixed="right">
           <template #default="{ row }">
             <ElButton link @click="openOrder(row)">{{ props.readOnly ? '查看' : row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
             <template v-if="!props.readOnly">

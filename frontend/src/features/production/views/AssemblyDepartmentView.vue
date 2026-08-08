@@ -55,7 +55,7 @@ onMounted(load)
           completed-label="已装配（累计合格）"
         />
         <WorkOrderCards :items="workOrders" :loading="detailLoading" mode="assembly" @submit="workOrderActions.submit"
-          @submit-qc="workOrderActions.submitQc" @resubmit-qc="workOrderActions.resubmitQc"
+          @submit-qc="workOrderActions.submitQc" @submit-direct-result="workOrderActions.submitDirectResult" @resubmit-qc="workOrderActions.resubmitQc"
           @cancel="workOrderActions.cancel" @undo="workOrderActions.undo" />
         <ElPagination v-model:current-page="historyPage" class="production-pagination" layout="prev, pager, next, total"
           :page-size="pageSize" :total="historyTotal" @current-change="loadDetails" />

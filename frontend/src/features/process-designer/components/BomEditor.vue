@@ -50,7 +50,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
       </div>
       <ElButton v-if="!readonly" type="primary" plain @click="addRow">新增 BOM 行</ElButton>
     </div>
-    <ElTable :data="modelValue" border empty-text="请新增至少一条 BOM 明细">
+    <ElTable :data="modelValue" border table-layout="auto" empty-text="请新增至少一条 BOM 明细">
       <ElTableColumn type="index" label="#" width="54" />
       <ElTableColumn label="配件名称" min-width="170">
         <template #default="{ row, $index }">

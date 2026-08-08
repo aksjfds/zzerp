@@ -293,7 +293,7 @@ CREATE TABLE production_plan_item (
     UNIQUE (production_plan_id, customer_order_item_id, identity_key)
 );
 
--- inventory_stock：跨订单复用的仓库配件、装配体和成品部最终成品库存。
+-- inventory_stock：按产品、版本、物料节点和系统推导的完成节点保存跨订单库存。
 CREATE TABLE inventory_stock (
     id BIGSERIAL PRIMARY KEY,
     identity_key TEXT NOT NULL UNIQUE,
@@ -305,6 +305,7 @@ CREATE TABLE inventory_stock (
     product_version INT NOT NULL CHECK (product_version > 0),
     product_bom_id BIGINT,
     flow_node_id TEXT NOT NULL,
+    completed_flow_node_id TEXT NOT NULL,
     item_code TEXT NOT NULL,
     item_name TEXT NOT NULL,
     quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
@@ -343,7 +344,7 @@ CREATE TABLE inventory_reservation (
     )
 );
 
--- inventory_receipt：生产结余进入仓库或成品部之前的待确认入库任务。
+-- inventory_receipt：保存生产节点入库及订单成品结余入库的来源快照。
 CREATE TABLE inventory_receipt (
     id BIGSERIAL PRIMARY KEY,
     source_customer_order_id BIGINT,
@@ -357,6 +358,7 @@ CREATE TABLE inventory_receipt (
     product_version INT NOT NULL CHECK (product_version > 0),
     product_bom_id BIGINT,
     flow_node_id TEXT NOT NULL,
+    completed_flow_node_id TEXT NOT NULL,
     item_code TEXT NOT NULL,
     item_name TEXT NOT NULL,
     quantity INT NOT NULL CHECK (quantity > 0),
@@ -502,8 +504,13 @@ CREATE TABLE work_order (
     remark TEXT,
     worker_id BIGINT REFERENCES worker(id),
     quantity INT NOT NULL CHECK (quantity > 0),
+    processed_quantity INT NOT NULL DEFAULT 0,
     completed_quantity INT NOT NULL DEFAULT 0
         CHECK (completed_quantity >= 0 AND completed_quantity <= quantity),
+    CHECK (
+        processed_quantity >= completed_quantity
+        AND processed_quantity <= quantity
+    ),
     status TEXT NOT NULL DEFAULT 'open'
         CHECK (status IN ('open', 'closed', 'cancelled')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -513,7 +520,10 @@ CREATE TABLE work_order (
         OR (status IN ('closed', 'cancelled') AND closed_at IS NOT NULL)
     ),
     CHECK (status <> 'closed' OR completed_quantity = quantity),
-    CHECK (status <> 'cancelled' OR completed_quantity = 0),
+    CHECK (
+        status <> 'cancelled'
+        OR (completed_quantity = 0 AND processed_quantity = 0)
+    ),
     CHECK (
         (work_order_type = 'assembly'
             AND procedure_id IS NULL
@@ -707,7 +717,7 @@ CREATE TABLE production_operation_undo (
     -- 批次删除后仍保留原编号作为撤回审计信息，因此不设置外键。
     work_order_batch_id BIGINT,
     operation_type TEXT NOT NULL
-        CHECK (operation_type IN ('submission', 'rework_submission')),
+        CHECK (operation_type IN ('processing_completion', 'submission', 'rework_submission')),
     operation_label TEXT NOT NULL,
     department_code TEXT NOT NULL,
     actor_username TEXT NOT NULL,
@@ -947,6 +957,7 @@ DECLARE
     order_source_tag_set_id BIGINT;
     order_target_tag_set_id BIGINT;
     material_quantity INT;
+    material_consumed BIGINT;
     batch_source_flow_node_id TEXT;
     batch_submitted_quantity INT;
     batch_recorded_at TIMESTAMPTZ;
@@ -1005,8 +1016,14 @@ BEGIN
                     RAISE EXCEPTION 'assembly input must belong to the work order materials'
                         USING ERRCODE = '23514';
                 END IF;
-                IF NEW.quantity <> material_quantity THEN
-                    RAISE EXCEPTION 'assembly input quantity must match its material allocation'
+                SELECT COALESCE(SUM(quantity), 0)
+                INTO material_consumed
+                FROM production_movement
+                WHERE work_order_id = NEW.work_order_id
+                  AND production_item_id = NEW.production_item_id
+                  AND movement_type = 'assembly_input';
+                IF material_consumed + NEW.quantity > material_quantity THEN
+                    RAISE EXCEPTION 'assembly input quantity exceeds its remaining material allocation'
                         USING ERRCODE = '23514';
                 END IF;
             ELSE
@@ -1167,7 +1184,7 @@ DECLARE
     order_type TEXT;
     order_status TEXT;
     order_source_flow_node_id TEXT;
-    order_remaining_quantity INT;
+    order_ready_quantity INT;
     submission_count INT;
     submission_quantity BIGINT;
     moved_qualified BIGINT;
@@ -1183,12 +1200,12 @@ BEGIN
             work_order.work_order_type,
             work_order.status,
             work_order.source_flow_node_id,
-            work_order.quantity - work_order.completed_quantity
+            work_order.processed_quantity - work_order.completed_quantity
         INTO
             order_type,
             order_status,
             order_source_flow_node_id,
-            order_remaining_quantity
+            order_ready_quantity
         FROM work_order
         WHERE work_order.id = NEW.work_order_id
         FOR UPDATE OF work_order;
@@ -1212,17 +1229,8 @@ BEGIN
         END IF;
         IF NEW.rework_source_batch_id IS NULL THEN
             IF order_type <> 'assembly'
-                AND NEW.submitted_quantity > order_remaining_quantity THEN
-                RAISE EXCEPTION 'QC batch quantity exceeds the work order remaining quantity'
-                    USING ERRCODE = '23514';
-            END IF;
-            IF order_type = 'assembly' AND EXISTS (
-                SELECT 1
-                FROM work_order_batch
-                WHERE work_order_id = NEW.work_order_id
-                  AND rework_source_batch_id IS NULL
-            ) THEN
-                RAISE EXCEPTION 'assembly work order can only have one initial QC batch'
+                AND NEW.submitted_quantity > order_ready_quantity THEN
+                RAISE EXCEPTION 'QC batch quantity exceeds the processed quantity awaiting inspection'
                     USING ERRCODE = '23514';
             END IF;
         ELSE
@@ -1480,6 +1488,7 @@ CREATE INDEX idx_product_updated ON product(updated_at DESC, id DESC);
 CREATE INDEX idx_product_bom_product ON product_bom(product_id, sort_order);
 CREATE INDEX idx_customer_order_item_order ON customer_order_item(customer_order_id);
 CREATE INDEX idx_customer_order_customer ON customer_order(customer_id);
+CREATE INDEX idx_customer_order_status ON customer_order(status, id);
 CREATE INDEX idx_customer_order_updated ON customer_order(updated_at DESC, id DESC);
 CREATE INDEX idx_customer_order_item_product_version
     ON customer_order_item(product_id, product_version);
@@ -1488,8 +1497,10 @@ CREATE INDEX idx_production_plan_item_plan
     ON production_plan_item(production_plan_id, sort_order);
 CREATE INDEX idx_production_plan_item_order_item
     ON production_plan_item(customer_order_item_id);
-CREATE INDEX idx_inventory_stock_lookup
-    ON inventory_stock(product_id, product_version, item_type);
+CREATE INDEX idx_inventory_stock_component
+    ON inventory_stock(
+        product_id, product_version, item_type, product_bom_id, flow_node_id
+    );
 CREATE INDEX idx_inventory_stock_department
     ON inventory_stock(department_code, item_type);
 CREATE INDEX idx_inventory_reservation_plan
@@ -1643,6 +1654,12 @@ INSERT INTO users (username, password, department, role, permissions) VALUES
     'polish', '1', 'polish', 'operator', 'production:view,production:manage'
 ),
 (
+    'outsource', '1', 'outsource', 'operator', 'production:view,production:manage'
+),
+(
+    'purchasing', '1', 'purchasing', 'operator', 'production:view,production:manage'
+),
+(
     'qc', '1', 'qc', 'operator', 'production:view,qc:inspect'
 ),
 (
@@ -1662,6 +1679,8 @@ INSERT INTO department (department_name, department_code) VALUES
 ('冲压部', 'stamp'),
 ('机加部', 'cnc'),
 ('表面处理部', 'polish'),
+('外协部', 'outsource'),
+('采购部', 'purchasing'),
 ('QC部门', 'qc'),
 ('装配部', 'assembly'),
 ('成品部', 'finished'),
@@ -1692,7 +1711,11 @@ FROM (
         ('polish', '振机车间'),
         ('polish', '干滚车间'),
         ('polish', '清光车间'),
-        ('assembly', '装包车间')
+        ('outsource', '蚀字外协'),
+        ('outsource', '电镀外协'),
+        ('purchasing', '采购组'),
+        ('assembly', '装包车间'),
+        ('assembly', '焊接车间')
 ) AS source(department_code, workshop_name)
 JOIN department
     ON department.department_code = source.department_code;
@@ -1722,7 +1745,11 @@ FROM (
         ('polish', '振机车间', '振机', 'standard'),
         ('polish', '干滚车间', '干滚', 'standard'),
         ('polish', '清光车间', '清光', 'standard'),
-        ('assembly', '装包车间', '装包', 'standard')
+        ('outsource', '蚀字外协', '蚀字', 'standard'),
+        ('outsource', '电镀外协', '电镀', 'standard'),
+        ('purchasing', '采购组', '外购', 'purchase_receipt'),
+        ('assembly', '装包车间', '装包', 'standard'),
+        ('assembly', '焊接车间', '焊接', 'standard')
 ) AS source(department_code, workshop_name, procedure_name, procedure_type)
 JOIN department
     ON department.department_code = source.department_code
@@ -1757,7 +1784,10 @@ WHERE procedure_name IN (
     '电抛',
     '振机',
     '清光',
-    '装包'
+    '蚀字',
+    '电镀',
+    '装包',
+    '焊接'
 );
 
 INSERT INTO procedure_tag (
@@ -1970,6 +2000,113 @@ JOIN department AS polish_department
     AND polish_department.department_code = 'polish'
 WHERE product.factory_code = 'DEMO-001';
 
+-- Celine 产品：CH-L43 双C锁扣。生产流程图由工程部后续配置。
+INSERT INTO customer (customer_name) VALUES ('Celine');
+
+INSERT INTO product (
+    customer_id,
+    product_name,
+    factory_code,
+    customer_code,
+    version
+)
+SELECT
+    customer.id,
+    'CH-L43 双C锁扣',
+    'Z8735',
+    'CH-L43',
+    1
+FROM customer
+WHERE customer.customer_name = 'Celine';
+
+INSERT INTO product_version (product_id, version)
+SELECT id, 1
+FROM product
+WHERE factory_code = 'Z8735';
+
+INSERT INTO product_bom (
+    product_id,
+    product_version,
+    part_name,
+    part_no,
+    pcs,
+    remark,
+    sort_order
+)
+SELECT
+    product.id,
+    1,
+    component.part_name,
+    component.part_no,
+    1,
+    NULL,
+    component.sort_order
+FROM product
+CROSS JOIN (
+    VALUES
+        ('配件',     'Z8735-01', 1),
+        ('母件',     'Z8735-02', 2),
+        ('右按件',   'Z8735-03', 3),
+        ('固定按的', 'Z8735-04', 4),
+        ('中心控件', 'Z8735-05', 5),
+        ('钩扣',     'Z8735-06', 6),
+        ('母件盖板', 'Z8735-07', 7),
+        ('铝底板',   'Z8735-08', 8),
+        ('公件盖板', 'Z8735-09', 9)
+) AS component(part_name, part_no, sort_order)
+WHERE product.factory_code = 'Z8735';
+
+INSERT INTO product_process_flow (
+    product_id,
+    product_version,
+    flow_json
+)
+SELECT
+    product.id,
+    1,
+    '{"schema_version": 3, "nodes": [], "edges": []}'::jsonb
+FROM product
+WHERE product.factory_code = 'Z8735';
+
+-- 示例客户订单：订购 500 个示例产品；由业务部确认后生成草稿生产计划。
+INSERT INTO customer_order (
+    customer_order_no,
+    customer_id,
+    status,
+    remark
+)
+SELECT
+    'DEMO-ORDER-001',
+    customer.id,
+    'draft',
+    '500个示例产品的客户订单'
+FROM customer
+WHERE customer.customer_name = '示例客户';
+
+INSERT INTO customer_order_item (
+    customer_order_id,
+    product_id,
+    product_version,
+    quantity,
+    delivery_date,
+    remark
+)
+SELECT
+    customer_order.id,
+    product.id,
+    1,
+    500,
+    CURRENT_DATE + 30,
+    '示例订单明细'
+FROM customer_order
+JOIN customer
+    ON customer.id = customer_order.customer_id
+    AND customer.customer_name = '示例客户'
+JOIN product
+    ON product.customer_id = customer.id
+    AND product.factory_code = 'DEMO-001'
+WHERE customer_order.customer_order_no = 'DEMO-ORDER-001';
+
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT '工程示例员工', id, NULL FROM department WHERE department_code = 'engineering';
@@ -1996,6 +2133,21 @@ JOIN workshop ON workshop.department_id = department.id
 WHERE department.department_code = 'cnc' AND workshop.workshop_name = 'CNC车间';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
+SELECT '新南伟', department.id, workshop.id
+FROM department
+JOIN workshop ON workshop.department_id = department.id
+WHERE department.department_code = 'outsource' AND workshop.workshop_name = '蚀字外协';
+
+INSERT INTO worker (worker_name, department_id, workshop_id)
+SELECT company.company_name, department.id, workshop.id
+FROM department
+JOIN workshop ON workshop.department_id = department.id
+CROSS JOIN (
+    VALUES ('智诚'), ('未来')
+) AS company(company_name)
+WHERE department.department_code = 'outsource' AND workshop.workshop_name = '电镀外协';
+
+INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT 'QC示例工人', id, NULL FROM department WHERE department_code = 'qc';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
@@ -2003,5 +2155,11 @@ SELECT '装配示例工人', department.id, workshop.id
 FROM department
 JOIN workshop ON workshop.department_id = department.id
 WHERE department.department_code = 'assembly' AND workshop.workshop_name = '装包车间';
+
+INSERT INTO worker (worker_name, department_id, workshop_id)
+SELECT '焊接示例工人', department.id, workshop.id
+FROM department
+JOIN workshop ON workshop.department_id = department.id
+WHERE department.department_code = 'assembly' AND workshop.workshop_name = '焊接车间';
 
 COMMIT;
