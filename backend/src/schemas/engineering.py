@@ -44,6 +44,7 @@ class ShippingNodePayload(FlowNodeBase):
 
 class AssemblyNodePayload(FlowNodeBase):
     type: Literal["assembly"]
+    procedure_id: int | None = Field(default=None, gt=0)
     output_name: str = Field(min_length=1, max_length=500)
     output_pcs: int = Field(default=1, gt=0)
     assembly_sequence: int | None = Field(default=None, ge=81)

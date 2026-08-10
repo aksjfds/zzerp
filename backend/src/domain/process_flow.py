@@ -128,9 +128,7 @@ def validate_process_flow(
                 _fail("qc_target_invalid", f"QC节点“{node.label}”后只能连接工艺、装配或发货节点", path, node.id)
         elif node.type == "shipping":
             if normal_incoming[node.id] != 1:
-                _fail("shipping_input_count", f"发货节点“{node.label}”必须且只能连接一个上游QC", path, node.id)
-            if node_map[normal_sources[node.id][0]].type != "qc":
-                _fail("shipping_source_invalid", f"发货节点“{node.label}”的上游必须是QC节点", path, node.id)
+                _fail("shipping_input_count", f"发货节点“{node.label}”必须且只能连接一个上游节点", path, node.id)
             if normal_outgoing[node.id] != 0:
                 _fail("shipping_has_output", f"发货节点“{node.label}”必须是流程终点，不能再连接后续节点", path, node.id)
         else:

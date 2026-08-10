@@ -53,10 +53,16 @@ class ProcessNodeModel extends RectNodeModel {
   }
 
   getNodeStyle() {
+    const departmentCode = this.properties.departmentCode
+    const colors = departmentCode === 'outsource'
+      ? [materialColors.flowOutsourceContainer, materialColors.flowOutsource]
+      : departmentCode === 'purchasing'
+        ? [materialColors.flowPurchasingContainer, materialColors.flowPurchasing]
+        : [materialColors.flowProductionContainer, materialColors.flowProduction]
     return {
       ...super.getNodeStyle(),
-      fill: materialColors.successContainer,
-      stroke: materialColors.success,
+      fill: colors[0],
+      stroke: colors[1],
       strokeWidth: 2,
     }
   }
@@ -66,18 +72,17 @@ class ProcessNodeModel extends RectNodeModel {
   }
 }
 
-class QcNodeModel extends RectNodeModel {
+class QcNodeModel extends DiamondNodeModel {
   setAttributes() {
-    this.width = 120
-    this.height = 56
-    this.radius = 12
+    this.rx = 68
+    this.ry = 42
   }
 
   getNodeStyle() {
     return {
       ...super.getNodeStyle(),
-      fill: materialColors.tertiaryContainer,
-      stroke: materialColors.tertiary,
+      fill: materialColors.flowQcContainer,
+      stroke: materialColors.flowQc,
       strokeWidth: 2,
     }
   }
@@ -97,8 +102,8 @@ class ShippingNodeModel extends RectNodeModel {
   getNodeStyle() {
     return {
       ...super.getNodeStyle(),
-      fill: materialColors.secondaryContainer,
-      stroke: materialColors.secondary,
+      fill: materialColors.flowFinishedContainer,
+      stroke: materialColors.flowFinished,
       strokeWidth: 2,
     }
   }
@@ -108,17 +113,18 @@ class ShippingNodeModel extends RectNodeModel {
   }
 }
 
-class AssemblyNodeModel extends DiamondNodeModel {
+class AssemblyNodeModel extends RectNodeModel {
   setAttributes() {
-    this.rx = 88
-    this.ry = 54
+    this.width = 160
+    this.height = 56
+    this.radius = 12
   }
 
   getNodeStyle() {
     return {
       ...super.getNodeStyle(),
-      fill: materialColors.warningContainer,
-      stroke: materialColors.warning,
+      fill: materialColors.flowAssemblyContainer,
+      stroke: materialColors.flowAssembly,
       strokeWidth: 2,
     }
   }
@@ -132,8 +138,8 @@ export function registerProcessNodes(lf: LogicFlow) {
   lf.batchRegister([
     { type: 'part', view: RectNode, model: PartNodeModel },
     { type: 'process', view: RectNode, model: ProcessNodeModel },
-    { type: 'qc', view: RectNode, model: QcNodeModel },
+    { type: 'qc', view: DiamondNode, model: QcNodeModel },
     { type: 'shipping', view: RectNode, model: ShippingNodeModel },
-    { type: 'assembly', view: DiamondNode, model: AssemblyNodeModel },
+    { type: 'assembly', view: RectNode, model: AssemblyNodeModel },
   ])
 }

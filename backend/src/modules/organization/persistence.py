@@ -48,6 +48,10 @@ class Procedure(Base):
             "procedure_type IN ('standard', 'purchase_receipt')",
             name="ck_procedure_type",
         ),
+        CheckConstraint(
+            "input_mode IN ('single', 'multiple')",
+            name="ck_procedure_input_mode",
+        ),
         UniqueConstraint("id", "procedure_type", name="uq_procedure_id_type"),
         UniqueConstraint("workshop_id", "procedure_name"),
     )
@@ -58,3 +62,4 @@ class Procedure(Base):
     )
     procedure_name: Mapped[str] = mapped_column(Text, nullable=False)
     procedure_type: Mapped[str] = mapped_column(Text, nullable=False, default="standard")
+    input_mode: Mapped[str] = mapped_column(Text, nullable=False, default="single")

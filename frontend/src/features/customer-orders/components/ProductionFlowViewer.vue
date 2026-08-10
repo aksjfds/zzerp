@@ -5,7 +5,8 @@ import LogicFlow, { PolylineEdge, PolylineEdgeModel } from '@logicflow/core'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
 import { materialColors } from '@/shared/material/tokens'
 import { toLogicFlowData } from '@/shared/process-flow/adapter'
-import { updateProcessNodeTextScale } from '@/shared/process-flow/nodeTextScale'
+import { updateProcessCanvasScale } from '@/shared/process-flow/nodeTextScale'
+import { queryProcedures } from '@/api/organization'
 import type { FlowEdge, ProcessFlow } from '@/shared/process-flow/types'
 import type { ProductionEdgeStat, ProductionNodeStat } from '../domain/types'
 
@@ -18,6 +19,7 @@ const container = ref<HTMLDivElement>()
 let instance: LogicFlow | null = null
 let resizeObserver: ResizeObserver | null = null
 let resizeFrame: number | null = null
+let processDepartments = new Map<number, string>()
 type ProductionEdgeState = 'pending' | 'active' | 'done'
 
 const EDGE_STYLE: Record<ProductionEdgeState, Record<string, unknown>> = {
@@ -145,29 +147,43 @@ function render() {
   const status = new Map(props.stats.map(node => [node.flow_node_id, node]))
   const edgeStatus = new Map(props.edgeStats.map(edge => [edge.flow_edge_id, edge]))
   instance.renderRawData(withProductionEdgeStyle(
-    toLogicFlowData(productionFlow(status)),
+    toLogicFlowData(productionFlow(status), {
+      processDepartmentCode: procedureId => processDepartments.get(procedureId),
+    }),
     status,
     edgeStatus,
   ))
   requestAnimationFrame(() => {
+    if (container.value && instance) {
+      updateProcessCanvasScale(
+        container.value,
+        instance.graphModel.transformModel.SCALE_X,
+      )
+    }
     applyEdgeAnimation(status, edgeStatus)
-    instance?.fitView(24, 24)
   })
 }
 
-function fitToContainer() {
+function resizeCanvas() {
   if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
   resizeFrame = requestAnimationFrame(() => {
     resizeFrame = null
     if (!instance || !container.value) return
     instance.resize(container.value.clientWidth, container.value.clientHeight)
-    instance.fitView(24, 24)
   })
 }
 
 onMounted(async () => {
   await nextTick()
   if (!container.value) return
+  try {
+    const procedures = await queryProcedures()
+    processDepartments = new Map(procedures.map(
+      procedure => [procedure.id, procedure.department_code] as const,
+    ))
+  } catch {
+    processDepartments = new Map()
+  }
   instance = new LogicFlow({
     container: container.value,
     isSilentMode: true,
@@ -179,15 +195,17 @@ onMounted(async () => {
   })
   registerProcessNodes(instance)
   instance.on('graph:transform', ({ transform }) => {
-    if (container.value) updateProcessNodeTextScale(container.value, transform.SCALE_X)
+    if (container.value && instance) {
+      updateProcessCanvasScale(container.value, transform.SCALE_X)
+    }
   })
   instance.batchRegister([
     { type: 'production-polyline', view: PolylineEdge, model: ProductionPolylineEdgeModel },
   ])
   render()
-  resizeObserver = new ResizeObserver(fitToContainer)
+  resizeObserver = new ResizeObserver(resizeCanvas)
   resizeObserver.observe(container.value)
-  fitToContainer()
+  resizeCanvas()
 })
 
 watch(() => [props.flow, props.stats, props.edgeStats], render, { deep: true })
@@ -262,7 +280,7 @@ onBeforeUnmount(() => {
   background: var(--md-surface-container-lowest);
   cursor: grab;
 }
-.production-flow-viewer :deep(.lf-node-content text) { transform: scale(var(--process-node-text-scale, 1)); transform-box: fill-box; transform-origin: center; }
+.production-flow-viewer :deep(.lf-node-content text) { font-size: 13px; font-weight: 600; }
 .production-flow-viewer:active { cursor: grabbing; }
 @media (max-width: 760px) {
   .production-flow-legend { gap: 8px 12px; }

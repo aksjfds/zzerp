@@ -14,7 +14,7 @@ import type {
 import { queryProcedures, type ProcedureOption } from '@/api/organization'
 
 type NodeProperty = {
-  key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId'
+  key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId' | 'departmentCode'
   value: string | number | boolean
 } | null
 type CanvasApi = {
@@ -22,7 +22,12 @@ type CanvasApi = {
   dragAssembly: () => void
   dragQc: () => void
   dragShipping: () => void
-  dragProcess: (procedureId: number, procedureName: string) => void
+  dragProcess: (
+    procedureId: number,
+    procedureName: string,
+    inputMode: 'single' | 'multiple',
+    departmentCode: string,
+  ) => void
   focusElement: (elementId?: string) => void
   getGraphData: () => ProcessFlow
   renderFlow: (flow: ProcessFlow) => void
@@ -47,7 +52,12 @@ function updateFlow(flow: ProcessFlow) {
 
 function dragProcedure(procedure: ProcedureOption) {
   if (props.readonly) return
-  canvas.value?.dragProcess(procedure.id, procedure.procedure_name)
+  canvas.value?.dragProcess(
+    procedure.id,
+    procedure.procedure_name,
+    procedure.input_mode,
+    procedure.department_code,
+  )
 }
 
 function updateProcess(label: string, process_code: string) {
@@ -64,6 +74,11 @@ function updateProcedure(procedureId: number) {
     selectedNode.value.id,
     procedure.procedure_name,
     { key: 'procedureId', value: procedureId },
+  )
+  canvas.value?.updateNode(
+    selectedNode.value.id,
+    procedure.procedure_name,
+    { key: 'departmentCode', value: procedure.department_code },
   )
   selectedNode.value = {
     ...selectedNode.value,
@@ -103,7 +118,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
     <div class="section-heading">
       <div>
         <h2>工序流程配置</h2>
-        <p>配件可直接进入生产工艺、采购部外购节点或装配；跨部门必须经过QC，有QC时必须送检，无QC时由生产部门填写加工结果，并以“发货”作为流程终点。</p>
+        <p>配件可直接进入生产工艺、采购部外购节点或装配；不同部门之间可以直接流转，也可以按实际需要添加QC，并以“发货”作为流程终点。</p>
       </div>
     </div>
     <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge, 'is-readonly': readonly }">
@@ -120,6 +135,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
       <ProcessFlowCanvas
         ref="canvas"
         :model-value="modelValue"
+        :procedures="procedures"
         :readonly="readonly"
         @update:model-value="updateFlow"
         @select-node="selectedNode = $event"
@@ -143,8 +159,8 @@ onMounted(async () => { procedures.value = await queryProcedures() })
 .section-heading { margin-bottom: 14px; }
 h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
-.designer-shell { display: grid; grid-template-columns: 190px minmax(0, 1fr); min-height: 560px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); overflow: hidden; }
-.designer-shell.has-property { grid-template-columns: 190px minmax(0, 1fr) 220px; }
+.designer-shell { position: relative; display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 620px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); overflow: hidden; }
+.designer-shell.has-property { grid-template-columns: 236px minmax(0, 1fr) 220px; }
 .designer-shell.is-readonly { grid-template-columns: minmax(0, 1fr); }
 .designer-shell.is-readonly.has-property { grid-template-columns: minmax(0, 1fr) 220px; }
 @media (max-width: 900px) {

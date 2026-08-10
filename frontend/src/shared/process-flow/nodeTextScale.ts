@@ -1,6 +1,12 @@
-const NODE_TEXT_SCALE_PROPERTY = '--process-node-text-scale'
+const NODE_ANCHOR_SCALE_PROPERTY = '--process-node-anchor-scale'
 
-export function updateProcessNodeTextScale(container: HTMLElement, canvasScale: number) {
-  const textScale = canvasScale > 0 && canvasScale < 1 ? 1 / canvasScale : 1
-  container.style.setProperty(NODE_TEXT_SCALE_PROPERTY, String(textScale))
+export function updateProcessCanvasScale(
+  container: HTMLElement,
+  canvasScale: number,
+) {
+  const inverseScale = canvasScale > 0 && canvasScale < 1 ? 1 / canvasScale : 1
+  container.style.setProperty(
+    NODE_ANCHOR_SCALE_PROPERTY,
+    String(Math.min(inverseScale, 2)),
+  )
 }

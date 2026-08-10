@@ -35,16 +35,24 @@ from modules.sales.customer_api import resolve_customer
 
 def _ensure_procedures_exist(session, flow: ProcessFlowPayload) -> None:
     procedure_ids = {
-        node.procedure_id for node in flow.nodes if node.type == "process"
+        node.procedure_id
+        for node in flow.nodes
+        if node.type == "process"
+        or (node.type == "assembly" and node.procedure_id is not None)
     }
     if not procedure_ids:
         return
-    existing_ids = set(get_procedure_routes(session, procedure_ids))
+    procedures = get_procedure_routes(session, procedure_ids)
+    existing_ids = set(procedures)
     if existing_ids != procedure_ids:
         invalid_node = next(
             node
             for node in flow.nodes
-            if node.type == "process" and node.procedure_id not in existing_ids
+            if (
+                node.type == "process"
+                or (node.type == "assembly" and node.procedure_id is not None)
+            )
+            and node.procedure_id not in existing_ids
         )
         raise DomainError(
             "process_procedure_invalid",
@@ -52,16 +60,50 @@ def _ensure_procedures_exist(session, flow: ProcessFlowPayload) -> None:
             path="process_flow.nodes",
             element_id=invalid_node.id,
         )
+    invalid_multi_input = next(
+        (
+            node
+            for node in flow.nodes
+            if node.type == "assembly"
+            and node.procedure_id is not None
+            and procedures[node.procedure_id].input_mode != "multiple"
+        ),
+        None,
+    )
+    if invalid_multi_input is not None:
+        raise DomainError(
+            "assembly_procedure_input_mode_invalid",
+            f"装配节点“{invalid_multi_input.label}”关联的工艺不支持多路输入",
+            path="process_flow.nodes",
+            element_id=invalid_multi_input.id,
+        )
+    invalid_single_input = next(
+        (
+            node
+            for node in flow.nodes
+            if node.type == "process"
+            and procedures[node.procedure_id].input_mode != "single"
+        ),
+        None,
+    )
+    if invalid_single_input is not None:
+        raise DomainError(
+            "process_procedure_input_mode_invalid",
+            f"工艺“{invalid_single_input.label}”必须使用多路装配节点",
+            path="process_flow.nodes",
+            element_id=invalid_single_input.id,
+        )
 
 
-def _validate_qc_routes(session, flow: ProcessFlowPayload) -> None:
-    nodes = {node.id: node for node in flow.nodes}
-    targets = {
-        edge.source_node_id: nodes[edge.target_node_id]
-        for edge in flow.edges
-    }
+def _validate_flow_departments_and_procedures(
+    session,
+    flow: ProcessFlowPayload,
+) -> None:
     procedure_ids = {
-        node.procedure_id for node in flow.nodes if node.type == "process"
+        node.procedure_id
+        for node in flow.nodes
+        if node.type == "process"
+        or (node.type == "assembly" and node.procedure_id is not None)
     }
     procedures = get_procedure_routes(session, procedure_ids)
     department_ids = get_department_ids_by_codes(
@@ -96,18 +138,7 @@ def _validate_qc_routes(session, flow: ProcessFlowPayload) -> None:
             element_id=invalid_node.id if invalid_node else None,
         )
 
-    def node_department_id(node) -> int | None:
-        if node.type == "process":
-            procedure = procedures.get(node.procedure_id)
-            return procedure.department_id if procedure else None
-        if node.type == "assembly":
-            return department_ids.get("assembly")
-        if node.type == "shipping":
-            return department_ids.get("finished")
-        return None
-
     for node in flow.nodes:
-        target = targets.get(node.id)
         if node.type == "process":
             procedure = procedures.get(node.procedure_id)
             if procedure is None:
@@ -117,23 +148,18 @@ def _validate_qc_routes(session, flow: ProcessFlowPayload) -> None:
                     path="process_flow.nodes",
                     element_id=node.id,
                 )
-        if node.type not in {"process", "assembly"} or target is None:
-            continue
-        if target.type == "qc":
-            continue
-        source_department_id = node_department_id(node)
-        target_department = node_department_id(target)
-        if (
-            source_department_id is not None
-            and target_department is not None
-            and source_department_id != target_department
-        ):
-            raise DomainError(
-                "cross_department_qc_required",
-                f"“{node.label}”到“{target.label}”跨部门，必须经过QC节点",
-                path="process_flow.edges",
-                element_id=node.id,
-            )
+        if node.type == "assembly" and node.procedure_id is not None:
+            procedure = procedures.get(node.procedure_id)
+            if (
+                procedure is None
+                or procedure.department_id != department_ids.get("assembly")
+            ):
+                raise DomainError(
+                    "assembly_procedure_department_invalid",
+                    f"装配节点“{node.label}”关联的工艺不属于装配部",
+                    path="process_flow.nodes",
+                    element_id=node.id,
+                )
 
 
 def create_product(payload: CreateProductPayload) -> dict:
@@ -312,7 +338,7 @@ def update_product_process_flow(
                 },
             )
             _ensure_procedures_exist(session, flow)
-            _validate_qc_routes(session, flow)
+            _validate_flow_departments_and_procedures(session, flow)
             repository.set_process_flow(
                 product,
                 product_version,

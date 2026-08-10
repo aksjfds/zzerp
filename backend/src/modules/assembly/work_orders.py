@@ -7,6 +7,7 @@ from domain.time import business_now
 from domain.assembly import matches_assembly_sources, required_material_quantity
 from modules.assembly.persistence import WorkOrderMaterial
 from modules.errors import DomainError
+from modules.organization.model_api import Procedure, Workshop
 from modules.organization.read_api import get_department_ids_by_codes
 from modules.production_core.assembly_api import (
     assembly_item_unit_quantity,
@@ -92,6 +93,10 @@ def create_assembly_work_order(
         )
         if assembly_node.get("type") != "assembly":
             raise DomainError("assembly_node_invalid", "所选物料不在装配节点")
+        procedure_id = assembly_node.get("procedure_id")
+        procedure = session.get(Procedure, procedure_id) if procedure_id else None
+        if procedure_id and (procedure is None or procedure.input_mode != "multiple"):
+            raise DomainError("assembly_procedure_invalid", "装配节点关联的多路工艺无效")
         expected_sources = [
             edge.get("source_node_id")
             for edge in context.flow.get("edges", [])
@@ -101,12 +106,22 @@ def create_assembly_work_order(
         if not matches_assembly_sources(expected_sources, selected_sources):
             raise DomainError("assembly_inputs_incomplete", "必须选择装配节点的全部输入物料")
 
-        worker = get_worker_reference(session, worker_id) if worker_id else None
         assembly_department_id = get_department_ids_by_codes(
             session,
             {"assembly"},
         ).get("assembly")
-        if worker_id and (
+        worker = get_worker_reference(session, worker_id) if worker_id else None
+        if procedure is not None:
+            workshop = session.get(Workshop, procedure.workshop_id)
+            if workshop is None or workshop.department_id != assembly_department_id:
+                raise DomainError("assembly_procedure_invalid", "多路工艺不属于装配部")
+            if worker_id and (
+                worker is None
+                or worker.department_id != assembly_department_id
+                or worker.workshop_id != procedure.workshop_id
+            ):
+                raise DomainError("worker_invalid", "工人不属于当前装配工艺车间")
+        elif worker_id and (
             worker is None or worker.department_id != assembly_department_id
         ):
             raise DomainError("worker_invalid", "工人不属于装配部")
@@ -117,6 +132,7 @@ def create_assembly_work_order(
         order = create_assembly_work_order_record(
             session,
             production_item_id=input_items[0].id,
+            procedure_id=procedure.id if procedure else None,
             flow_node_id=assembly_node["id"],
             work_order_name=(
                 assembly_node.get("label")

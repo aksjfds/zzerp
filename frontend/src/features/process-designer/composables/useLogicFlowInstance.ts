@@ -3,7 +3,7 @@ import LogicFlow from '@logicflow/core'
 import { Control, Menu } from '@logicflow/extension'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
 import { fromLogicFlowData, toLogicFlowData } from '@/shared/process-flow/adapter'
-import { updateProcessNodeTextScale } from '@/shared/process-flow/nodeTextScale'
+import { updateProcessCanvasScale } from '@/shared/process-flow/nodeTextScale'
 import type { FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 
 type Callbacks = {
@@ -13,6 +13,7 @@ type Callbacks = {
   onConnectionError: (message: string) => void
   onSelectEdge: (edge: FlowEdge | null) => void
   onSelectNode: (node: FlowNode | null) => void
+  processDepartmentCode?: (procedureId: number) => string | undefined
 }
 
 export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>, callbacks: Callbacks) {
@@ -20,7 +21,17 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   let resizeObserver: ResizeObserver | null = null
   let resizeFrame: number | null = null
 
-  function fitToContainer() {
+  function refreshNodeReadability(lf: LogicFlow) {
+    requestAnimationFrame(() => {
+      if (!container.value || instance.value !== lf) return
+      updateProcessCanvasScale(
+        container.value,
+        lf.graphModel.transformModel.SCALE_X,
+      )
+    })
+  }
+
+  function resizeCanvas() {
     if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
     resizeFrame = requestAnimationFrame(() => {
       resizeFrame = null
@@ -28,7 +39,6 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       const lf = instance.value
       if (!element || !lf) return
       lf.resize(element.clientWidth, element.clientHeight)
-      if (currentFlow().nodes.length) lf.fitView(24, 24)
     })
   }
 
@@ -77,7 +87,11 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   }
 
   function renderFlow(flow: ProcessFlow) {
-    instance.value?.renderRawData(toLogicFlowData(flow))
+    const lf = instance.value
+    lf?.renderRawData(toLogicFlowData(flow, {
+      processDepartmentCode: callbacks.processDepartmentCode,
+    }))
+    if (lf) refreshNodeReadability(lf)
   }
 
   onMounted(async () => {
@@ -119,18 +133,21 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     })
     lf.on(
       'node:add,node:delete,edge:delete,node:drop,node:dragend,node:rotate,node:resize,node:properties-change,edge:adjust,edge:exchange-node,text:update',
-      emitChange,
+      () => {
+        emitChange()
+        refreshNodeReadability(lf)
+      },
     )
     lf.on('connection:not-allowed', ({ msg }) => {
       callbacks.onConnectionError(msg || '该连线不符合流程规则')
     })
     lf.on('graph:transform', ({ transform }) => {
-      if (container.value) updateProcessNodeTextScale(container.value, transform.SCALE_X)
+      if (container.value) updateProcessCanvasScale(container.value, transform.SCALE_X)
     })
     renderFlow(callbacks.initialFlow())
-    resizeObserver = new ResizeObserver(fitToContainer)
+    resizeObserver = new ResizeObserver(resizeCanvas)
     resizeObserver.observe(container.value)
-    fitToContainer()
+    resizeCanvas()
   })
 
   onBeforeUnmount(() => {
@@ -142,5 +159,11 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     instance.value = null
   })
 
-  return { currentFlow, emitChange, instance, renderFlow, setReadonly }
+  return {
+    currentFlow,
+    emitChange,
+    instance,
+    renderFlow,
+    setReadonly,
+  }
 }

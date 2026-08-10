@@ -29,6 +29,7 @@ export type ShippingFlowNode = FlowNodeBase & { type: 'shipping' }
 
 export type AssemblyFlowNode = FlowNodeBase & {
   type: 'assembly'
+  procedure_id?: number
   output_name: string
   output_pcs: number
   assembly_sequence?: number

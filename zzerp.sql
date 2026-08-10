@@ -139,13 +139,15 @@ CREATE TABLE workshop (
     UNIQUE (department_id, workshop_name)
 );
 
--- procedure：保存车间可执行的标准生产工艺或外购入库工艺。
+-- procedure：保存车间可执行的工艺；多路输入工艺按装配工单合并全部来源物料。
 CREATE TABLE procedure (
     id BIGSERIAL PRIMARY KEY,
     workshop_id BIGINT NOT NULL REFERENCES workshop(id),
     procedure_name TEXT NOT NULL,
     procedure_type TEXT NOT NULL DEFAULT 'standard'
         CHECK (procedure_type IN ('standard', 'purchase_receipt')),
+    input_mode TEXT NOT NULL DEFAULT 'single'
+        CHECK (input_mode IN ('single', 'multiple')),
     UNIQUE (id, procedure_type),
     UNIQUE (workshop_id, procedure_name)
 );
@@ -526,7 +528,6 @@ CREATE TABLE work_order (
     ),
     CHECK (
         (work_order_type = 'assembly'
-            AND procedure_id IS NULL
             AND applied_tag_set_id IS NULL
             AND source_tag_set_id IS NULL
             AND target_tag_set_id IS NULL
@@ -1757,6 +1758,14 @@ JOIN workshop
     ON workshop.department_id = department.id
     AND workshop.workshop_name = source.workshop_name;
 
+UPDATE procedure
+SET input_mode = 'multiple'
+FROM workshop, department
+WHERE procedure.workshop_id = workshop.id
+  AND workshop.department_id = department.id
+  AND department.department_code = 'assembly'
+  AND procedure.procedure_name = '焊接';
+
 -- 标记只作为开工单时的名称建议，不定义固定路线或先后顺序。
 INSERT INTO procedure_tag (
     procedure_id,
@@ -1823,201 +1832,16 @@ CROSS JOIN (
 ) AS tag(tag_name)
 WHERE procedure.procedure_name = '粗光';
 
--- 示例产品：基础信息、BOM，以及“主体粗光后与弹簧装配”的完整流程图。
-INSERT INTO customer (customer_name) VALUES ('示例客户');
 
-INSERT INTO product (
-    customer_id,
-    product_name,
-    factory_code,
-    customer_code,
-    version
-) SELECT
-    customer.id,
-    '示例狗扣',
-    'DEMO-001',
-    'CUSTOMER-DEMO-001',
-    1
-FROM customer WHERE customer_name = '示例客户';
 
-INSERT INTO product_version (product_id, version)
-SELECT id, 1 FROM product WHERE factory_code = 'DEMO-001';
 
-INSERT INTO product_bom (
-    product_id,
-    product_version,
-    part_name,
-    part_no,
-    pcs,
-    remark,
-    sort_order
-)
-SELECT id, 1, '主体', 'DEMO-001-01', 1, NULL, 1
-FROM product WHERE factory_code = 'DEMO-001';
 
-INSERT INTO product_bom (
-    product_id,
-    product_version,
-    part_name,
-    part_no,
-    pcs,
-    remark,
-    sort_order
-)
-SELECT id, 1, '弹簧', 'DEMO-001-02', 1, '外购', 2
-FROM product WHERE factory_code = 'DEMO-001';
 
--- 主体 -> 粗光 -> QC -> 装配 -> QC -> 出货
--- 弹簧 -----------------> 装配
--- BOM 与工艺均按业务键查找，不依赖数据库自增 ID。
-INSERT INTO product_process_flow (
-    product_id,
-    product_version,
-    flow_json
-)
-SELECT
-    product.id,
-    1,
-    jsonb_build_object(
-        'schema_version', 3,
-        'nodes', jsonb_build_array(
-            jsonb_build_object(
-                'id', 'demo-part-body',
-                'type', 'part',
-                'label', '主体',
-                'x', 80,
-                'y', 100,
-                'bom_item_id', body_bom.id,
-                'part_no', body_bom.part_no
-            ),
-            jsonb_build_object(
-                'id', 'demo-part-spring',
-                'type', 'part',
-                'label', '弹簧',
-                'x', 280,
-                'y', 320,
-                'bom_item_id', spring_bom.id,
-                'part_no', spring_bom.part_no
-            ),
-            jsonb_build_object(
-                'id', 'demo-process-polish',
-                'type', 'process',
-                'label', '粗光',
-                'x', 280,
-                'y', 100,
-                'process_code', 'procedure_' || polish_procedure.id,
-                'procedure_id', polish_procedure.id
-            ),
-            jsonb_build_object(
-                'id', 'demo-qc-polish',
-                'type', 'qc',
-                'label', '粗光 QC',
-                'x', 480,
-                'y', 100
-            ),
-            jsonb_build_object(
-                'id', 'demo-assembly-body-spring',
-                'type', 'assembly',
-                'label', '主体与弹簧装配',
-                'x', 680,
-                'y', 210,
-                'assembly_sequence', 81,
-                'assembly_code', 'DEMO-001-81',
-                'assembly_name', '主体-弹簧装配体',
-                'output_name', '主体-弹簧装配体',
-                'output_pcs', 1
-            ),
-            jsonb_build_object(
-                'id', 'demo-qc-final',
-                'type', 'qc',
-                'label', '装配 QC',
-                'x', 880,
-                'y', 210
-            ),
-            jsonb_build_object(
-                'id', 'demo-shipping',
-                'type', 'shipping',
-                'label', '出货',
-                'x', 1080,
-                'y', 210
-            )
-        ),
-        'edges', jsonb_build_array(
-            jsonb_build_object(
-                'id', 'demo-edge-body-polish',
-                'edge_type', 'polyline',
-                'source_node_id', 'demo-part-body',
-                'target_node_id', 'demo-process-polish'
-            ),
-            jsonb_build_object(
-                'id', 'demo-edge-polish-qc',
-                'edge_type', 'polyline',
-                'source_node_id', 'demo-process-polish',
-                'target_node_id', 'demo-qc-polish'
-            ),
-            jsonb_build_object(
-                'id', 'demo-edge-polish-qc-assembly',
-                'edge_type', 'polyline',
-                'source_node_id', 'demo-qc-polish',
-                'target_node_id', 'demo-assembly-body-spring'
-            ),
-            jsonb_build_object(
-                'id', 'demo-edge-spring-assembly',
-                'edge_type', 'polyline',
-                'source_node_id', 'demo-part-spring',
-                'target_node_id', 'demo-assembly-body-spring'
-            ),
-            jsonb_build_object(
-                'id', 'demo-edge-assembly-qc',
-                'edge_type', 'polyline',
-                'source_node_id', 'demo-assembly-body-spring',
-                'target_node_id', 'demo-qc-final'
-            ),
-            jsonb_build_object(
-                'id', 'demo-edge-qc-shipping',
-                'edge_type', 'polyline',
-                'source_node_id', 'demo-qc-final',
-                'target_node_id', 'demo-shipping'
-            )
-        )
-    )
-FROM product
-JOIN product_bom AS body_bom
-    ON body_bom.product_id = product.id
-    AND body_bom.product_version = 1
-    AND body_bom.part_no = 'DEMO-001-01'
-JOIN product_bom AS spring_bom
-    ON spring_bom.product_id = product.id
-    AND spring_bom.product_version = 1
-    AND spring_bom.part_no = 'DEMO-001-02'
-JOIN procedure AS polish_procedure
-    ON polish_procedure.procedure_name = '粗光'
-JOIN workshop AS polish_workshop
-    ON polish_workshop.id = polish_procedure.workshop_id
-    AND polish_workshop.workshop_name = '手磨车间'
-JOIN department AS polish_department
-    ON polish_department.id = polish_workshop.department_id
-    AND polish_department.department_code = 'polish'
-WHERE product.factory_code = 'DEMO-001';
 
--- Celine 产品：CH-L43 双C锁扣。生产流程图由工程部后续配置。
+
 INSERT INTO customer (customer_name) VALUES ('Celine');
 
-INSERT INTO product (
-    customer_id,
-    product_name,
-    factory_code,
-    customer_code,
-    version
-)
-SELECT
-    customer.id,
-    'CH-L43 双C锁扣',
-    'Z8735',
-    'CH-L43',
-    1
-FROM customer
-WHERE customer.customer_name = 'Celine';
+
 
 INSERT INTO product_version (product_id, version)
 SELECT id, 1
@@ -2067,6 +1891,81 @@ SELECT
     '{"schema_version": 3, "nodes": [], "edges": []}'::jsonb
 FROM product
 WHERE product.factory_code = 'Z8735';
+
+-- Celine 新产品；生产流程图由工程部后续配置。
+INSERT INTO product (
+    customer_id,
+    product_name,
+    factory_code,
+    customer_code,
+    version
+)
+SELECT
+    customer.id,
+    product_data.product_name,
+    product_data.factory_code,
+    product_data.customer_code,
+    1
+FROM customer
+CROSS JOIN (
+    VALUES
+        ('L24.4 椭圆搭扣',    'Z8737', 'FIG6850'),
+        ('W10.5 D圈',         'Z8739', 'AN00433'),
+        ('W46.1 马蹄扣',      'Z8740', 'FI01248'),
+        ('D10 磁力包扣',      'Z8711', 'CMG3H88'),
+        ('L15.1双C镂空件',    'Z8609', 'PAG4N04')
+) AS product_data(product_name, factory_code, customer_code)
+WHERE customer.customer_name = 'Celine';
+
+INSERT INTO product_version (product_id, version)
+SELECT product.id, 1
+FROM product
+WHERE product.factory_code IN ('Z8737', 'Z8739', 'Z8740', 'Z8711', 'Z8609');
+
+INSERT INTO product_bom (
+    product_id,
+    product_version,
+    part_name,
+    part_no,
+    pcs,
+    remark,
+    sort_order
+)
+SELECT
+    product.id,
+    1,
+    component.part_name,
+    component.part_no,
+    1,
+    component.remark,
+    component.sort_order
+FROM product
+JOIN (
+    VALUES
+        ('Z8737', '主体',            'Z8737-01', NULL,   1),
+        ('Z8737', '过桥',            'Z8737-02', NULL,   2),
+        ('Z8737', '利仔',            'Z8737-03', NULL,   3),
+        ('Z8739', '主体',            'Z8739-01', NULL,   1),
+        ('Z8740', '主体',            'Z8740-01', NULL,   1),
+        ('Z8740', '中针',            'Z8740-02', NULL,   2),
+        ('Z8711', 'logo件',          'Z8711-01', NULL,   1),
+        ('Z8711', '脚钉',            'Z8711-02', NULL,   2),
+        ('Z8711', '脚钉（外购）',    'Z8711-03', '外购', 3),
+        ('Z8609', 'L15.1双C镂空件',  'Z8609-01', NULL,   1)
+) AS component(factory_code, part_name, part_no, remark, sort_order)
+    ON component.factory_code = product.factory_code;
+
+INSERT INTO product_process_flow (
+    product_id,
+    product_version,
+    flow_json
+)
+SELECT
+    product.id,
+    1,
+    '{"schema_version": 3, "nodes": [], "edges": []}'::jsonb
+FROM product
+WHERE product.factory_code IN ('Z8737', 'Z8739', 'Z8740', 'Z8711', 'Z8609');
 
 -- 示例客户订单：订购 500 个示例产品；由业务部确认后生成草稿生产计划。
 INSERT INTO customer_order (

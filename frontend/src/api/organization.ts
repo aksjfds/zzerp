@@ -7,6 +7,7 @@ export type ProcedureOption = {
   department_code: string
   procedure_name: string
   procedure_type: 'standard' | 'purchase_receipt'
+  input_mode: 'single' | 'multiple'
 }
 
 export async function queryProcedures() {

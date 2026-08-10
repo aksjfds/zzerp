@@ -26,6 +26,13 @@ const productionOverview = computed(() => workOrderProductionOverview(
   workOrders.value,
   selectedGroup.value?.capacity ?? 0,
 ))
+const workOrderWorkers = computed(() => {
+  const workshop = workshops.value.find(
+    item => item.workshop_name === activeRepository.value?.workshop_name,
+  )
+  if (!workshop) return workers.value
+  return workers.value.filter(item => item.workshop_id === workshop.id)
+})
 onMounted(load)
 </script>
 
@@ -64,7 +71,7 @@ onMounted(load)
     <AssemblyWorkOrderDialog
       v-model="dialogVisible"
       :item="activeRepository"
-      :workers="workers"
+      :workers="workOrderWorkers"
       :submitting="submitting"
       @submit="saveWorkOrder" />
     </DepartmentSectionTabs>

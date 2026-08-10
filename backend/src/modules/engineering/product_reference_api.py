@@ -123,11 +123,30 @@ def _validate_order_engineering_data(
         node.procedure_id
         for node in validated.nodes
         if node.type == "process"
+        or (node.type == "assembly" and node.procedure_id is not None)
     }
-    if set(get_procedure_routes(session, procedure_ids)) != procedure_ids:
+    procedures = get_procedure_routes(session, procedure_ids)
+    if set(procedures) != procedure_ids:
         raise DomainError(
             "process_procedure_invalid",
             f"产品 {product.factory_code} 的流程包含失效工艺",
+            path="items",
+        )
+    if any(
+        (
+            node.type == "process"
+            and procedures[node.procedure_id].input_mode != "single"
+        )
+        or (
+            node.type == "assembly"
+            and node.procedure_id is not None
+            and procedures[node.procedure_id].input_mode != "multiple"
+        )
+        for node in validated.nodes
+    ):
+        raise DomainError(
+            "process_procedure_input_mode_invalid",
+            f"产品 {product.factory_code} 的工艺输入方式与流程节点不一致",
             path="items",
         )
 

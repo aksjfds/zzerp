@@ -33,7 +33,7 @@ const emit = defineEmits<{
         @update:model-value="emit('updateProcedure', $event)"
       >
         <ElOption
-          v-for="item in procedures"
+          v-for="item in procedures.filter(procedure => procedure.input_mode === 'single')"
           :key="item.id"
           :label="`${item.procedure_name}${item.procedure_type === 'purchase_receipt' ? '（外购）' : ''}`"
           :value="item.id"
@@ -50,6 +50,10 @@ const emit = defineEmits<{
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>
+      <template v-if="node.procedure_id">
+        <label>装配工艺</label>
+        <ElInput :model-value="procedures.find(item => item.id === node.procedure_id)?.procedure_name || node.label" disabled />
+      </template>
       <label>显示名称</label>
       <ElInput :model-value="node.label" :disabled="readonly" @change="emit('updateAssembly', $event, node.output_name, node.output_pcs)" />
       <label>装配体名称</label>

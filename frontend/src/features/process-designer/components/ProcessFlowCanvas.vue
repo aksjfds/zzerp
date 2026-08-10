@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import type { ProcedureOption } from '@/api/organization'
 import type { BomItem, FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 import { useLogicFlowInstance } from '../composables/useLogicFlowInstance'
 import {
@@ -12,23 +13,37 @@ import {
   updateNodeDefinition,
 } from '../logicflow/commands'
 
-const props = defineProps<{ modelValue: ProcessFlow; readonly?: boolean }>()
+const props = defineProps<{
+  modelValue: ProcessFlow
+  procedures: ProcedureOption[]
+  readonly?: boolean
+}>()
 const emit = defineEmits<{
   'update:modelValue': [flow: ProcessFlow]
   selectEdge: [edge: FlowEdge | null]
   selectNode: [node: FlowNode | null]
 }>()
 const containerRef = ref<HTMLDivElement>()
-const { currentFlow, emitChange, instance, renderFlow, setReadonly } = useLogicFlowInstance(containerRef, {
+const {
+  currentFlow,
+  emitChange,
+  instance,
+  renderFlow,
+  setReadonly,
+} = useLogicFlowInstance(containerRef, {
   initialFlow: () => props.modelValue,
   readonly: () => Boolean(props.readonly),
   onChange: (flow) => emit('update:modelValue', flow),
   onConnectionError: (message) => ElMessage.error(message),
   onSelectEdge: (edge) => emit('selectEdge', edge),
   onSelectNode: (node) => emit('selectNode', node),
+  processDepartmentCode: (procedureId) => props.procedures.find(
+    procedure => procedure.id === procedureId,
+  )?.department_code,
 })
 
 watch(() => props.readonly, value => setReadonly(Boolean(value)))
+watch(() => props.procedures, () => renderFlow(props.modelValue))
 
 watch(
   () => props.modelValue,
@@ -54,9 +69,20 @@ function dragPart(item: BomItem) {
   }
 }
 
-function dragProcess(procedureId: number, procedureName: string) {
+function dragProcess(
+  procedureId: number,
+  procedureName: string,
+  inputMode: 'single' | 'multiple',
+  departmentCode: string,
+) {
   if (props.readonly) return
-  withInstance((lf) => startProcessDrag(lf, procedureId, procedureName))
+  withInstance((lf) => startProcessDrag(
+    lf,
+    procedureId,
+    procedureName,
+    inputMode,
+    departmentCode,
+  ))
 }
 
 function dragAssembly() {
@@ -101,8 +127,14 @@ defineExpose({
 <template><div ref="containerRef" class="flow-canvas" :class="{ 'is-readonly': readonly }" /></template>
 
 <style scoped>
-.flow-canvas { min-width: 0; height: 560px; background: var(--md-surface-container-lowest); }
-.flow-canvas :deep(.lf-node-content text) { transform: scale(var(--process-node-text-scale, 1)); transform-box: fill-box; transform-origin: center; }
+.flow-canvas { min-width: 0; height: clamp(680px, calc(100vh - 180px), 960px); background: var(--md-surface-container-lowest); }
+.flow-canvas :deep(.lf-node-content text) { font-size: 13px; font-weight: 700; text-rendering: geometricPrecision; }
+.flow-canvas :deep(.lf-edge path),
+.flow-canvas :deep(.lf-node-content > g > rect),
+.flow-canvas :deep(.lf-node-content > g > polygon) { vector-effect: non-scaling-stroke; }
+.flow-canvas :deep(.lf-anchor) { pointer-events: all; transform: scale(var(--process-node-anchor-scale, 1)); transform-box: fill-box; transform-origin: center; }
+.flow-canvas :deep(.lf-node-anchor) { r: 6px; stroke-width: 2px; }
+.flow-canvas :deep(.lf-node-anchor-hover) { r: 9px; }
 .flow-canvas.is-readonly { cursor: grab; }
 .flow-canvas.is-readonly:active { cursor: grabbing; }
 @media (max-width: 600px) { .flow-canvas { height: 480px; } }

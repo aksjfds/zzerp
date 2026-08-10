@@ -49,6 +49,28 @@ const departmentGroups = computed<DepartmentGroup[]>(() => {
       - (rightIndex < 0 ? departmentOrder.length : rightIndex)
   })
 })
+
+function fixedNodeCount(departmentCode: string) {
+  return ['qc', 'assembly', 'finished'].includes(departmentCode) ? 1 : 0
+}
+
+function groupNodeCount(group: DepartmentGroup) {
+  return group.procedures.length + fixedNodeCount(group.departmentCode)
+}
+
+function procedureKind(procedure: ProcedureOption) {
+  if (procedure.procedure_type === 'purchase_receipt') return '外购'
+  if (procedure.input_mode === 'multiple') return '多路'
+  return '工艺'
+}
+
+function procedureColorClass(procedure: ProcedureOption) {
+  if (procedure.department_code === 'outsource') return 'outsource'
+  if (procedure.department_code === 'purchasing') return 'purchase'
+  if (procedure.department_code === 'assembly') return 'assembly'
+  return 'process'
+}
+
 const emit = defineEmits<{
   dragAssembly: []
   dragQc: []
@@ -60,49 +82,117 @@ const emit = defineEmits<{
 
 <template>
   <aside class="palette">
-    <h3>BOM 配件</h3>
-    <button
-      v-for="item in bomItems"
-      :key="item.id ?? item.part_no"
-      class="palette-item part"
-      type="button"
-      :disabled="!item.id"
-      @mousedown="emit('dragPart', item)"
+    <header class="palette-heading">
+      <strong>流程节点</strong>
+      <span>按住条目并拖到右侧画布</span>
+    </header>
+
+    <section class="palette-group part-group">
+      <div class="group-heading">
+        <div>
+          <span class="group-mark part-mark" />
+          <h3>BOM 配件</h3>
+        </div>
+        <span class="group-count">{{ bomItems.length }}</span>
+      </div>
+      <div class="group-items">
+        <button
+          v-for="item in bomItems"
+          :key="item.id ?? item.part_no"
+          class="palette-item part"
+          type="button"
+          :disabled="!item.id"
+          :title="item.id ? `拖动配件“${item.part_name}”到画布` : '请先保存 BOM 配件'"
+          @mousedown="emit('dragPart', item)"
+        >
+          <span class="drag-handle" aria-hidden="true">⠿</span>
+          <span class="item-content">
+            <strong>{{ item.part_name }}</strong>
+            <small>{{ item.part_no }}</small>
+          </span>
+          <span class="item-kind">配件</span>
+        </button>
+        <p v-if="!bomItems.length" class="empty-hint">暂无 BOM 配件</p>
+      </div>
+    </section>
+
+    <section
+      v-for="group in departmentGroups"
+      :key="group.departmentCode"
+      class="palette-group"
+      :class="`department-${group.departmentCode}`"
     >
-      <strong>{{ item.part_name }}</strong>
-      <span>{{ item.part_no }}</span>
-    </button>
-    <template v-for="group in departmentGroups" :key="group.departmentCode">
-      <h3>{{ group.departmentName }}</h3>
-      <button
-        v-for="procedure in group.procedures"
-        :key="procedure.id"
-        class="palette-item"
-        :class="procedure.procedure_type === 'purchase_receipt' ? 'purchase' : 'process'"
-        type="button"
-        @mousedown="emit('dragProcedure', procedure)"
-      >＋ {{ procedure.procedure_name }}</button>
-      <button v-if="group.departmentCode === 'qc'" class="palette-item qc" type="button" @mousedown="emit('dragQc')">QC</button>
-      <button v-if="group.departmentCode === 'assembly'" class="palette-item assembly" type="button" @mousedown="emit('dragAssembly')">装配</button>
-      <button v-if="group.departmentCode === 'finished'" class="palette-item shipping" type="button" @mousedown="emit('dragShipping')">发货</button>
-    </template>
+      <div class="group-heading">
+        <div>
+          <span class="group-mark" />
+          <h3>{{ group.departmentName }}</h3>
+        </div>
+        <span class="group-count">{{ groupNodeCount(group) }}</span>
+      </div>
+      <div class="group-items">
+        <button
+          v-for="procedure in group.procedures"
+          :key="procedure.id"
+          class="palette-item"
+          :class="procedureColorClass(procedure)"
+          type="button"
+          :title="`拖动“${procedure.procedure_name}”到画布`"
+          @mousedown="emit('dragProcedure', procedure)"
+        >
+          <span class="drag-handle" aria-hidden="true">⠿</span>
+          <span class="item-content"><strong>{{ procedure.procedure_name }}</strong></span>
+          <span class="item-kind">{{ procedureKind(procedure) }}</span>
+        </button>
+        <button v-if="group.departmentCode === 'qc'" class="palette-item qc" type="button" title="拖动 QC 到画布" @mousedown="emit('dragQc')">
+          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>QC</strong></span><span class="item-kind">QC</span>
+        </button>
+        <button v-if="group.departmentCode === 'assembly'" class="palette-item assembly" type="button" title="拖动装配节点到画布" @mousedown="emit('dragAssembly')">
+          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>装配</strong></span><span class="item-kind">装配</span>
+        </button>
+        <button v-if="group.departmentCode === 'finished'" class="palette-item shipping" type="button" title="拖动发货节点到画布" @mousedown="emit('dragShipping')">
+          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>发货</strong></span><span class="item-kind">发货</span>
+        </button>
+      </div>
+    </section>
   </aside>
 </template>
 
 <style scoped>
-.palette { box-sizing: border-box; height: 560px; min-height: 0; padding: 16px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-right: 1px solid var(--md-outline-variant); background: var(--md-surface-container-low); }
-h3 { margin: 0 0 10px; font-size: 14px; }
-.palette h3:not(:first-child) { margin-top: 22px; }
-.palette-item { display: flex; flex-direction: column; width: 100%; min-height: 48px; margin-bottom: 8px; padding: 9px 11px; border: 1px solid; border-radius: var(--erp-radius); background: var(--md-surface-container-lowest); color: var(--md-on-surface); text-align: left; cursor: grab; }
-.palette-item span { margin-top: 3px; color: var(--md-on-surface-variant); font-size: 11px; }
+.palette { box-sizing: border-box; height: clamp(620px, 72vh, 820px); min-height: 0; padding: 12px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-right: 1px solid var(--md-outline-variant); background: var(--md-surface-container-low); }
+.palette-heading { margin: 0 2px 12px; }
+.palette-heading strong { display: block; color: var(--md-on-surface); font-size: 15px; }
+.palette-heading span { display: block; margin-top: 3px; color: var(--md-on-surface-variant); font-size: 11px; line-height: 1.4; }
+.palette-group { margin-bottom: 12px; overflow: hidden; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-lowest); }
+.group-heading { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 9px; border-bottom: 1px solid var(--md-outline-variant); background: var(--md-surface-container); }
+.group-heading > div { display: flex; min-width: 0; align-items: center; gap: 7px; }
+.group-heading h3 { overflow: hidden; margin: 0; color: var(--md-on-surface); font-size: 12px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.group-mark { width: 4px; height: 14px; flex: 0 0 auto; border-radius: 999px; background: var(--flow-production); }
+.part-mark { background: var(--md-primary); }
+.department-outsource .group-mark { background: var(--flow-outsource); }
+.department-purchasing .group-mark { background: var(--flow-purchasing); }
+.department-qc .group-mark { background: var(--flow-qc); }
+.department-assembly .group-mark { background: var(--flow-assembly); }
+.department-finished .group-mark { background: var(--flow-finished); }
+.group-count { min-width: 20px; padding: 1px 5px; border-radius: 999px; background: var(--md-surface-container-high); color: var(--md-on-surface-variant); font-size: 10px; line-height: 16px; text-align: center; }
+.group-items { display: grid; gap: 6px; padding: 7px; }
+.palette-item { display: flex; width: 100%; min-height: 40px; align-items: center; gap: 7px; padding: 6px 7px; border: 1px solid; border-radius: calc(var(--erp-radius) - 2px); background: var(--md-surface-container-lowest); color: var(--md-on-surface); text-align: left; cursor: grab; transition: transform .12s ease, box-shadow .12s ease; }
+.palette-item:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 2px 6px rgb(0 0 0 / 10%); }
+.palette-item:active:not(:disabled) { cursor: grabbing; transform: translateY(0); box-shadow: none; }
+.drag-handle { flex: 0 0 auto; color: var(--md-on-surface-variant); font-size: 15px; line-height: 1; opacity: .65; }
+.item-content { display: flex; min-width: 0; flex: 1; flex-direction: column; }
+.item-content strong { overflow: hidden; font-size: 12px; font-weight: 600; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+.item-content small { overflow: hidden; margin-top: 1px; color: var(--md-on-surface-variant); font-size: 10px; line-height: 1.25; text-overflow: ellipsis; white-space: nowrap; }
+.item-kind { flex: 0 0 auto; padding: 2px 5px; border-radius: 4px; background: rgb(255 255 255 / 58%); color: var(--md-on-surface-variant); font-size: 9px; line-height: 1.4; }
+.empty-hint { margin: 6px; color: var(--md-on-surface-variant); font-size: 11px; text-align: center; }
 .palette-item.part { border-color: var(--md-primary); background: var(--md-primary-container); }
-.palette-item.process { border-color: var(--erp-success); background: var(--md-success-container); }
-.palette-item.purchase { border-color: var(--erp-warning); background: var(--md-warning-container); }
-.palette-item.qc { border-color: var(--md-tertiary); background: var(--md-tertiary-container); }
-.palette-item.shipping { border-color: var(--md-secondary); background: var(--md-secondary-container); }
-.palette-item.assembly { border-color: var(--erp-warning); background: var(--md-warning-container); }
+.palette-item.process { border-color: var(--flow-production); background: var(--flow-production-container); }
+.palette-item.outsource { border-color: var(--flow-outsource); background: var(--flow-outsource-container); }
+.palette-item.purchase { border-color: var(--flow-purchasing); background: var(--flow-purchasing-container); }
+.palette-item.qc { border-color: var(--flow-qc); background: var(--flow-qc-container); }
+.palette-item.shipping { border-color: var(--flow-finished); background: var(--flow-finished-container); }
+.palette-item.assembly { border-color: var(--flow-assembly); background: var(--flow-assembly-container); }
 .palette-item:disabled { cursor: not-allowed; opacity: .45; }
 @media (max-width: 900px) {
-  .palette { max-height: 240px; overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--md-outline-variant); }
+  .palette { height: auto; max-height: 280px; overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--md-outline-variant); }
 }
 </style>

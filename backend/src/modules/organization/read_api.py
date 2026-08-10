@@ -31,6 +31,7 @@ class ProcedureView:
     department_code: str
     procedure_name: str
     procedure_type: str
+    input_mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,6 +39,7 @@ class ProcedureRoute:
     procedure_id: int
     procedure_name: str
     procedure_type: str
+    input_mode: str
     workshop_id: int
     department_id: int
 
@@ -140,6 +142,7 @@ def get_procedure_views(session: Session) -> list[ProcedureView]:
             Department.department_code,
             Procedure.procedure_name,
             Procedure.procedure_type,
+            Procedure.input_mode,
         )
         .join(Workshop, Workshop.id == Procedure.workshop_id)
         .join(Department, Department.id == Workshop.department_id)
@@ -153,6 +156,7 @@ def get_procedure_views(session: Session) -> list[ProcedureView]:
             department_code=row.department_code,
             procedure_name=row.procedure_name,
             procedure_type=row.procedure_type,
+            input_mode=row.input_mode,
         )
         for row in rows
     ]
@@ -169,6 +173,7 @@ def get_procedure_routes(
             Procedure.id,
             Procedure.procedure_name,
             Procedure.procedure_type,
+            Procedure.input_mode,
             Procedure.workshop_id,
             Workshop.department_id,
         )
@@ -180,6 +185,7 @@ def get_procedure_routes(
             procedure_id=row.id,
             procedure_name=row.procedure_name,
             procedure_type=row.procedure_type,
+            input_mode=row.input_mode,
             workshop_id=row.workshop_id,
             department_id=row.department_id,
         )
@@ -198,6 +204,7 @@ def get_department_procedure_routes(
             Procedure.id,
             Procedure.procedure_name,
             Procedure.procedure_type,
+            Procedure.input_mode,
             Procedure.workshop_id,
             Workshop.department_id,
         )
@@ -214,6 +221,7 @@ def get_department_procedure_routes(
             procedure_id=row.id,
             procedure_name=row.procedure_name,
             procedure_type=row.procedure_type,
+            input_mode=row.input_mode,
             workshop_id=row.workshop_id,
             department_id=row.department_id,
         )

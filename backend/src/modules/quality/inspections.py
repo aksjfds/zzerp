@@ -81,14 +81,18 @@ def inspect_batch(
         if production_item is None:
             raise DomainError("production_context_missing", "送检工单的生产资料不完整")
         context, node = node_context(session, production_item, order.flow_node_id)
-        procedure_id = node.get("procedure_id") if node.get("type") == "process" else None
+        procedure_id = (
+            node.get("procedure_id")
+            if node.get("type") in {"process", "assembly"}
+            else None
+        )
         procedure = (
             get_procedure_routes(session, {procedure_id}).get(procedure_id)
             if procedure_id is not None
             else None
         )
-        if order.work_order_type != WORK_ORDER_ASSEMBLY and (
-            procedure is None or order.procedure_id != procedure.id
+        if order.procedure_id != procedure_id or (
+            procedure_id is not None and procedure is None
         ):
             raise DomainError("production_context_missing", "送检工单的工艺资料不完整")
         routing = {

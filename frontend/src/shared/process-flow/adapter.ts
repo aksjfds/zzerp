@@ -12,12 +12,19 @@ const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'qc', 'assembly', '
 const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }> = {
   part: { halfWidth: 75, halfHeight: 28 },
   process: { halfWidth: 75, halfHeight: 28 },
-  qc: { halfWidth: 60, halfHeight: 28 },
+  qc: { halfWidth: 68, halfHeight: 42 },
   shipping: { halfWidth: 75, halfHeight: 28 },
-  assembly: { halfWidth: 88, halfHeight: 54 },
+  assembly: { halfWidth: 80, halfHeight: 28 },
 }
 
-export function toLogicFlowData(flow: ProcessFlow): LogicFlow.GraphConfigData {
+type RenderOptions = {
+  processDepartmentCode?: (procedureId: number) => string | undefined
+}
+
+export function toLogicFlowData(
+  flow: ProcessFlow,
+  options: RenderOptions = {},
+): LogicFlow.GraphConfigData {
   const normalizedFlow = normalizeEdgeAnchors(flow)
   return {
     nodes: normalizedFlow.nodes.map((node) => ({
@@ -30,7 +37,7 @@ export function toLogicFlowData(flow: ProcessFlow): LogicFlow.GraphConfigData {
         : node.label,
       zIndex: node.z_index,
       rotate: node.rotation,
-      properties: nodeProperties(node),
+      properties: nodeProperties(node, options),
     })),
     edges: normalizedFlow.edges.map((edge) => ({
       id: edge.id,
@@ -99,6 +106,9 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
   return {
     ...base,
     type: 'assembly',
+    procedure_id: typeof properties.procedureId === 'number'
+      ? properties.procedureId
+      : undefined,
     output_name: stringValue(properties.outputName),
     output_pcs: requiredNumber(properties.outputPcs ?? 1, 'outputPcs'),
     assembly_sequence: typeof properties.assemblySequence === 'number'
@@ -126,18 +136,20 @@ function toBusinessEdge(edge: LogicFlow.EdgeData, nodes: FlowNode[]): FlowEdge {
   }, nodes)
 }
 
-function nodeProperties(node: FlowNode): Record<string, unknown> {
+function nodeProperties(node: FlowNode, options: RenderOptions): Record<string, unknown> {
   if (node.type === 'part') return { bomItemId: node.bom_item_id, partNo: node.part_no }
   if (node.type === 'process') {
     return {
       processCode: node.process_code,
       procedureId: node.procedure_id,
+      departmentCode: options.processDepartmentCode?.(node.procedure_id),
     }
   }
   if (node.type === 'qc') return {}
   if (node.type === 'shipping') return {}
   if (node.type === 'assembly') {
     return {
+      procedureId: node.procedure_id,
       outputName: node.output_name,
       outputPcs: node.output_pcs,
       assemblySequence: node.assembly_sequence,

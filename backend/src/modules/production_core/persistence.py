@@ -126,7 +126,7 @@ class WorkOrder(Base):
             name="ck_work_order_cancelled_quantity",
         ),
         CheckConstraint(
-            "(work_order_type = 'assembly' AND procedure_id IS NULL "
+            "(work_order_type = 'assembly' "
             "AND applied_tag_set_id IS NULL "
             "AND source_tag_set_id IS NULL AND target_tag_set_id IS NULL "
             "AND source_flow_node_id IS NOT NULL "

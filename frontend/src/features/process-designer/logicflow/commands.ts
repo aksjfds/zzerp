@@ -18,13 +18,28 @@ export function startProcessDrag(
   lf: LogicFlow,
   procedureId: number,
   procedureName: string,
+  inputMode: 'single' | 'multiple',
+  departmentCode: string,
 ) {
+  if (inputMode === 'multiple') {
+    lf.dnd.startDrag({
+      type: 'assembly',
+      text: procedureName,
+      properties: {
+        procedureId,
+        outputName: '装配体',
+        outputPcs: 1,
+      },
+    })
+    return
+  }
   lf.dnd.startDrag({
     type: 'process',
     text: procedureName,
     properties: {
       processCode: `procedure_${procedureId}`,
       procedureId,
+      departmentCode,
     },
   })
 }
@@ -50,7 +65,7 @@ export function updateNodeDefinition(
   nodeId: string,
   label: string,
   property: {
-    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId'
+    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId' | 'departmentCode'
     value: string | number | boolean
   } | null,
 ) {

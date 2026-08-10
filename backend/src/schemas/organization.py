@@ -26,6 +26,7 @@ class ProcedureResponse(OrganizationModel):
     department_code: str
     procedure_name: str
     procedure_type: Literal["standard", "purchase_receipt"]
+    input_mode: Literal["single", "multiple"]
 
 
 class ProcedureTagResponse(OrganizationModel):

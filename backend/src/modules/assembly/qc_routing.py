@@ -14,7 +14,10 @@ def validate_context(
     order: WorkOrderContext,
     procedure: ProcedureContext | None,
 ) -> None:
-    if order.work_order_type != "assembly" or order.procedure_id is not None:
+    if (
+        order.work_order_type != "assembly"
+        or order.procedure_id != (procedure.id if procedure else None)
+    ):
         raise DomainError("work_order_type_invalid", "装配送检工单资料无效")
 
 

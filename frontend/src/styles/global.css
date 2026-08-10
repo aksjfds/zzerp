@@ -20,6 +20,18 @@
   --md-on-success-container: #0c2004;
   --md-warning-container: #ffdea8;
   --md-on-warning-container: #291800;
+  --flow-production: #386a20;
+  --flow-production-container: #d8f9c8;
+  --flow-outsource: #6750a4;
+  --flow-outsource-container: #eaddff;
+  --flow-purchasing: #8b5000;
+  --flow-purchasing-container: #ffdcbe;
+  --flow-assembly: #00639a;
+  --flow-assembly-container: #cce5ff;
+  --flow-finished: #006a60;
+  --flow-finished-container: #9ef2e4;
+  --flow-qc: #904a4f;
+  --flow-qc-container: #ffdadb;
   --md-surface: #f9f9ff;
   --md-surface-dim: #d9d9e0;
   --md-surface-bright: #f9f9ff;
