@@ -120,6 +120,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
         <h2>工序流程配置</h2>
         <p>配件可直接进入生产工艺、采购部外购节点或装配；不同部门之间可以直接流转，也可以按实际需要添加QC，并以“发货”作为流程终点。</p>
       </div>
+      <div class="heading-actions"><slot name="actions" /></div>
     </div>
     <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge, 'is-readonly': readonly }">
       <ProcessNodePalette
@@ -156,7 +157,11 @@ onMounted(async () => { procedures.value = await queryProcedures() })
 </template>
 
 <style scoped>
-.section-heading { margin-bottom: 14px; }
+.section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
+.section-heading > div:first-child { min-width: 0; }
+.heading-actions { display: flex; align-items: center; flex: none; gap: 8px; }
+.heading-actions:empty { display: none; }
+.heading-actions :deep(.el-button + .el-button) { margin-left: 0; }
 h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
 .designer-shell { position: relative; display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 620px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); overflow: hidden; }
@@ -164,11 +169,15 @@ p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-heig
 .designer-shell.is-readonly { grid-template-columns: minmax(0, 1fr); }
 .designer-shell.is-readonly.has-property { grid-template-columns: minmax(0, 1fr) 220px; }
 @media (max-width: 900px) {
+  .section-heading { flex-direction: column; }
+  .heading-actions { width: 100%; justify-content: flex-end; }
   .designer-shell:not(.is-readonly), .designer-shell.has-property:not(.is-readonly) { grid-template-columns: minmax(0, 1fr); }
   .designer-shell.is-readonly, .designer-shell.is-readonly.has-property { grid-template-columns: minmax(0, 1fr); }
   .designer-shell :deep(.property-panel) { border-top: 1px solid var(--md-outline-variant); border-left: 0; }
 }
 @media (max-width: 600px) {
+  .heading-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .heading-actions :deep(.el-button) { width: 100%; margin: 0; }
   .designer-shell { min-height: 480px; border-radius: var(--erp-radius); }
 }
 </style>

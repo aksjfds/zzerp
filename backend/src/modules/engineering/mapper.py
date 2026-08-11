@@ -62,7 +62,14 @@ def serialize_product_detail(
         "factory_code": product.factory_code,
         "customer_code": product.customer_code,
         "bom_items": [serialize_bom(item) for item in bom_items],
-        "process_flow": process_flow.flow_json if process_flow else empty_flow,
+        "process_flow": (
+            process_flow.draft_flow_json
+            if process_flow and process_flow.draft_flow_json is not None
+            else process_flow.flow_json if process_flow else empty_flow
+        ),
+        "process_flow_is_draft": bool(
+            process_flow and process_flow.draft_flow_json is not None
+        ),
         "created_at": business_iso(product.created_at),
         "updated_at": business_iso(product.updated_at),
     }

@@ -42,12 +42,12 @@ onMounted(() => store.loadProducts(page.value, pageSize))
         <p>统一维护产品基础信息、BOM 和图形化工艺路线。</p>
       </div>
       <div class="header-actions">
-        <ElButton @click="logout">退出登录</ElButton>
         <ElButton
           v-permission="PRODUCT_PERMISSIONS.add"
           type="primary"
           @click="router.push('/products/new')"
         >录入新产品</ElButton>
+        <ElButton plain @click="logout">退出登录</ElButton>
       </div>
     </header>
     <section class="content-card">
@@ -64,17 +64,19 @@ onMounted(() => store.loadProducts(page.value, pageSize))
         <ElTableColumn prop="updated_at" label="更新时间" min-width="160" />
         <ElTableColumn label="操作" width="140" fixed="right">
           <template #default="{ row }">
-            <ElButton
-              v-permission="PRODUCT_PERMISSIONS.view"
-              link
-              type="primary"
-              @click="router.push({ path: `/products/${row.id}`, query: { mode: 'view'} })"
-            >查看</ElButton>
-            <ElButton
-              v-permission="PRODUCT_PERMISSIONS.edit"
-              link
-              @click="router.push({ path: `/products/${row.id}`, query: { mode: 'edit' } })"
-            >编辑</ElButton>
+            <div class="row-actions">
+              <ElButton
+                v-permission="PRODUCT_PERMISSIONS.view"
+                link
+                @click="router.push({ path: `/products/${row.id}`, query: { mode: 'view'} })"
+              >查看</ElButton>
+              <ElButton
+                v-permission="PRODUCT_PERMISSIONS.edit"
+                link
+                type="primary"
+                @click="router.push({ path: `/products/${row.id}`, query: { mode: 'edit' } })"
+              >编辑</ElButton>
+            </div>
           </template>
         </ElTableColumn>
       </ElTable>
@@ -97,7 +99,8 @@ onMounted(() => store.loadProducts(page.value, pageSize))
 .page-header h1 { margin: 5px 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 .page-header p { margin: 0; color: var(--el-text-color-secondary); }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-.header-actions { display: flex; align-items: center; }
+.header-actions, .row-actions { display: flex; align-items: center; gap: 8px; }
+.header-actions :deep(.el-button + .el-button), .row-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .content-card { padding: 20px; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 13px; }
 .toolbar .el-input { max-width: 360px; }
@@ -105,7 +108,8 @@ onMounted(() => store.loadProducts(page.value, pageSize))
 @media (max-width: 680px) {
   .page-shell { padding: 16px; }
   .page-header { align-items: flex-start; flex-direction: column; padding: 16px; }
-  .header-actions, .header-actions :deep(.el-button) { width: 100%; }
+  .header-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .header-actions :deep(.el-button) { width: 100%; margin: 0; }
   .content-card { padding: 16px; }
   .toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
   .toolbar .el-input { width: 100%; max-width: none; }

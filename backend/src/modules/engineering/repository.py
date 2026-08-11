@@ -125,17 +125,43 @@ class EngineeringProductRepository:
     def set_process_flow(
         self, product: Product, product_version: int, flow_json: dict
     ) -> None:
-        process_flow = next(
-            (
-                item
-                for item in product.process_flows
-                if item.product_version == product_version
-            ),
-            None,
-        )
+        process_flow = self._process_flow_for_update(product, product_version)
         if process_flow is None:
             product.process_flows.append(
                 ProductProcessFlow(product_version=product_version, flow_json=flow_json)
             )
         else:
             process_flow.flow_json = flow_json
+            process_flow.draft_flow_json = None
+
+    def set_process_flow_draft(
+        self, product: Product, product_version: int, flow_json: dict
+    ) -> None:
+        process_flow = self._process_flow_for_update(product, product_version)
+        if process_flow is None:
+            product.process_flows.append(
+                ProductProcessFlow(
+                    product_version=product_version,
+                    draft_flow_json=flow_json,
+                )
+            )
+        else:
+            process_flow.draft_flow_json = flow_json
+
+    def _process_flow_for_update(
+        self,
+        product: Product,
+        product_version: int,
+    ) -> ProductProcessFlow | None:
+        with self.session.no_autoflush:
+            stored = self.session.scalar(
+                select(ProductProcessFlow)
+                .where(
+                    ProductProcessFlow.product_id == product.id,
+                    ProductProcessFlow.product_version == product_version,
+                )
+                .with_for_update()
+            )
+        if stored is not None and stored not in product.process_flows:
+            product.process_flows.append(stored)
+        return stored

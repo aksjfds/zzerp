@@ -96,6 +96,7 @@ export type EngineeringProduct = ProductFields & {
   version_editable: boolean
   bom_items: BomItem[]
   process_flow: ProcessFlow
+  process_flow_is_draft: boolean
   created_at: string
   updated_at: string
 }
@@ -107,6 +108,7 @@ export type ProductForm = ProductFields & {
   revision: number | null
   bom_items: BomItem[]
   process_flow: ProcessFlow
+  process_flow_is_draft: boolean
 }
 
 export const EMPTY_FLOW = (): ProcessFlow => ({

@@ -103,6 +103,7 @@ CREATE TABLE product_process_flow (
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
     product_version INT NOT NULL CHECK (product_version > 0),
     flow_json JSONB NOT NULL DEFAULT '{"schema_version": 3, "nodes": [], "edges": []}'::jsonb,
+    draft_flow_json JSONB,
     CHECK (jsonb_typeof(flow_json) = 'object'),
     CHECK (flow_json ? 'schema_version'),
     CHECK (jsonb_typeof(flow_json->'schema_version') = 'number'),
@@ -113,6 +114,10 @@ CREATE TABLE product_process_flow (
     CHECK (jsonb_typeof(flow_json->'nodes') = 'array'),
     CHECK (flow_json ? 'edges'),
     CHECK (jsonb_typeof(flow_json->'edges') = 'array'),
+    CHECK (draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json) = 'object'),
+    CHECK (draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '3'),
+    CHECK (draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json->'nodes') = 'array'),
+    CHECK (draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json->'edges') = 'array'),
     CONSTRAINT fk_product_process_flow_version
         FOREIGN KEY (product_id, product_version)
         REFERENCES product_version(product_id, version) ON DELETE CASCADE,

@@ -22,6 +22,64 @@ class ProcessFlowLike(Protocol):
     edges: list
 
 
+def validate_process_flow_draft(
+    flow: ProcessFlowLike,
+    bom_ids: set[int],
+) -> ProcessFlowLike:
+    node_map = {}
+    part_node_by_bom: dict[int, str] = {}
+    for index, node in enumerate(flow.nodes):
+        if node.id in node_map:
+            _fail(
+                "duplicate_node_id",
+                f"流程节点 ID 重复：{node.id}",
+                f"process_flow.nodes.{index}.id",
+                node.id,
+            )
+        node_map[node.id] = node
+        if node.type == "part":
+            if node.bom_item_id not in bom_ids:
+                _fail(
+                    "invalid_bom_reference",
+                    "配件节点未引用当前产品的有效 BOM 行",
+                    f"process_flow.nodes.{index}.bom_item_id",
+                    node.id,
+                )
+            if node.bom_item_id in part_node_by_bom:
+                _fail(
+                    "duplicate_bom_part_node",
+                    "同一 BOM 行不能生成多个配件节点",
+                    f"process_flow.nodes.{index}.bom_item_id",
+                    node.id,
+                )
+            part_node_by_bom[node.bom_item_id] = node.id
+
+    edge_ids: set[str] = set()
+    edge_keys: set[tuple[str, str]] = set()
+    adjacency: dict[str, list[str]] = defaultdict(list)
+    indegree = {node_id: 0 for node_id in node_map}
+    for index, edge in enumerate(flow.edges):
+        path = f"process_flow.edges.{index}"
+        if edge.id in edge_ids:
+            _fail("duplicate_edge_id", f"流程连线 ID 重复：{edge.id}", f"{path}.id", edge.id)
+        edge_ids.add(edge.id)
+        source = node_map.get(edge.source_node_id)
+        target = node_map.get(edge.target_node_id)
+        if source is None or target is None:
+            _fail("edge_endpoint_missing", "连线引用了不存在的节点", path, edge.id)
+        if source.id == target.id:
+            _fail("self_loop_not_allowed", "不允许节点连接自身", path, edge.id)
+        edge_key = (source.id, target.id)
+        if edge_key in edge_keys:
+            _fail("duplicate_edge", "相同业务含义的连线不能重复", path, edge.id)
+        edge_keys.add(edge_key)
+        adjacency[source.id].append(target.id)
+        indegree[target.id] += 1
+    if node_map:
+        _validate_normal_dag(node_map, adjacency, indegree)
+    return flow
+
+
 def validate_process_flow(
     flow: ProcessFlowLike,
     bom_ids: set[int],

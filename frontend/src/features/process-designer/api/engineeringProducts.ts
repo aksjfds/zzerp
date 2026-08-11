@@ -83,6 +83,19 @@ export async function updateProductProcessFlow(
   return response.data.data
 }
 
+export async function saveProductProcessFlowDraft(
+  productId: number,
+  expectedRevision: number,
+  productVersion: number,
+  processFlow: ProcessFlow,
+) {
+  const response = await service.put<{ data: EngineeringProduct }>(
+    `/products/${productId}/process-flow/draft`,
+    { expected_revision: expectedRevision, product_version: productVersion, process_flow: processFlow },
+  )
+  return response.data.data
+}
+
 export async function deleteProduct(productId: number, expectedRevision: number) {
   await service.delete(`/products/${productId}`, {
     params: { expected_revision: expectedRevision },

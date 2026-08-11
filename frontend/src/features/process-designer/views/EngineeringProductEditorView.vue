@@ -24,6 +24,19 @@ const flowEditor = ref<FlowEditorApi>()
 const editorReady = ref(false)
 const customers = ref<Customer[]>([])
 const customerLoading = ref(false)
+const activeAction = ref<
+  'create' | 'base' | 'bom' | 'flow-draft' | 'flow' | 'version-create' | 'version-delete' | null
+>(null)
+
+async function performAction(action: NonNullable<typeof activeAction.value>, callback: () => Promise<unknown>) {
+  if (activeAction.value) return
+  activeAction.value = action
+  try {
+    await callback()
+  } finally {
+    activeAction.value = null
+  }
+}
 const {
   allDirty,
   applyProduct,
@@ -37,7 +50,6 @@ const {
   normalizedBom,
   normalizedFields,
   validateBom,
-  versionDirty: rawVersionDirty,
 } = useProductEditorForm()
 
 const productId = computed(() => {
@@ -91,6 +103,7 @@ const {
   flowSaveError,
   saveBom,
   saveFlow,
+  saveFlowDraft,
   saveProductInfo,
 } = useProductSaveActions({
   applyProduct,
@@ -130,7 +143,6 @@ const {
   versionDirty: allDirty,
 })
 const selectedVersion = computed(() => form.version || currentVersion.value)
-const versionDirty = computed(() => !loadingProduct.value && rawVersionDirty.value)
 const pageDirty = computed(() => !loadingProduct.value && allDirty.value)
 const baseReadOnly = computed(() => Boolean(
   mode.value === 'view'
@@ -200,48 +212,55 @@ onMounted(async () => {
         <h1>{{ productId ? form.product_name || (mode === 'view' ? '查看产品' : '编辑产品') : '录入新产品' }}</h1>
       </div>
       <div class="editor-actions">
-        <ElSelect
-          v-if="productId"
-          :model-value="form.version"
-          placement="top-start"
-          :fallback-placements="['top-start', 'top-end']"
-          style="width: 110px"
-          @change="switchVersion"
-        >
-          <ElOption v-for="version in versions" :key="version" :label="`V${version}`" :value="version" />
-        </ElSelect>
-        <ElButton
-          v-if="productId && mode === 'view' && canEditProduct"
-          type="primary"
-          plain
-          @click="enterEditMode"
-        >进入编辑</ElButton>
-        <ElButton
-          v-if="productId && mode === 'edit'"
-          plain
-          @click="returnViewMode"
-        >返回查看</ElButton>
-        <ElButton
-          type="primary"
-          v-if="productId && mode === 'edit' && canEditProduct"
-          :loading="store.saving"
-          @click="createVersion"
-        >基于此版本创建新版</ElButton>
-        <ElButton
-          v-if="productId && mode === 'edit'"
-          v-permission="PRODUCT_PERMISSIONS.delete"
-          type="danger"
-          plain
-          :loading="store.saving"
-          @click="deleteSelectedVersion"
-        >删除当前版本</ElButton>
-        <ElButton @click="router.push('/products')">返回列表</ElButton>
+        <div v-if="productId" class="version-selector">
+          <span>当前版本</span>
+          <ElSelect
+            :model-value="form.version"
+            :disabled="store.saving"
+            placement="top-start"
+            :fallback-placements="['top-start', 'top-end']"
+            @change="switchVersion"
+          >
+            <ElOption v-for="version in versions" :key="version" :label="`V${version}`" :value="version" />
+          </ElSelect>
+        </div>
+        <div class="action-group navigation-actions">
+          <ElButton :disabled="store.saving" @click="router.push('/products')">返回产品列表</ElButton>
+          <ElButton
+            v-if="productId && mode === 'view' && canEditProduct"
+            type="primary"
+            @click="enterEditMode"
+          >进入编辑</ElButton>
+          <ElButton
+            v-if="productId && mode === 'edit'"
+            :disabled="store.saving"
+            @click="returnViewMode"
+          >退出编辑</ElButton>
+        </div>
+        <div v-if="productId && mode === 'edit' && canEditProduct" class="action-group version-actions">
+          <ElButton
+            type="primary"
+            plain
+            :disabled="store.saving"
+            :loading="activeAction === 'version-create'"
+            @click="performAction('version-create', createVersion)"
+          >创建新版本</ElButton>
+          <ElButton
+            v-permission="PRODUCT_PERMISSIONS.delete"
+            type="danger"
+            plain
+            :disabled="store.saving"
+            :loading="activeAction === 'version-delete'"
+            @click="performAction('version-delete', deleteSelectedVersion)"
+          >删除此版本</ElButton>
+        </div>
         <ElButton
           v-if="!productId"
           type="primary"
-          :loading="store.saving"
-          @click="createProduct"
-        >保存并继续配置流程</ElButton>
+          :disabled="store.saving"
+          :loading="activeAction === 'create'"
+          @click="performAction('create', createProduct)"
+        >保存产品并配置流程</ElButton>
       </div>
     </header>
 
@@ -254,10 +273,9 @@ onMounted(async () => {
         <ElButton
           v-if="productId && mode === 'edit' && canEditProduct && baseInfoEditable"
           type="primary"
-          plain
-          :disabled="!baseDirty"
-          :loading="store.saving"
-          @click="saveProductInfo"
+          :disabled="!baseDirty || store.saving"
+          :loading="activeAction === 'base'"
+          @click="performAction('base', saveProductInfo)"
         >保存基础信息</ElButton>
       </div>
       <ElAlert
@@ -298,9 +316,6 @@ onMounted(async () => {
     </section>
 
     <section class="editor-card">
-      <div class="section-action">
-        <ElButton v-if="productId && !versionReadOnly" type="primary" plain :disabled="!bomDirty" :loading="store.saving" @click="saveBom">保存 BOM</ElButton>
-      </div>
       <ElAlert
         v-if="productId && mode === 'edit' && !versionEditable"
         class="section-alert"
@@ -308,7 +323,15 @@ onMounted(async () => {
         type="warning"
         :closable="false"
       />
-      <div><BomEditor :model-value="form.bom_items" :readonly="versionReadOnly" @update:model-value="updateBom" /></div>
+      <BomEditor
+        :model-value="form.bom_items"
+        :readonly="versionReadOnly"
+        :can-save="Boolean(productId && !versionReadOnly)"
+        :dirty="bomDirty"
+        :saving="activeAction === 'bom'"
+        @update:model-value="updateBom"
+        @save="performAction('bom', saveBom)"
+      />
     </section>
 
     <section class="editor-card">
@@ -321,14 +344,36 @@ onMounted(async () => {
           type="warning"
           :closable="false"
         />
-        <div v-if="!versionReadOnly" class="section-action"><ElButton type="primary" plain :disabled="!flowDirty" :loading="store.saving" @click="saveFlow">保存工序流程</ElButton></div>
+        <ElAlert
+          v-if="flowSaveError"
+          class="flow-error"
+          :title="flowSaveError.message"
+          type="error"
+          :closable="false"
+          show-icon
+        />
         <ProcessFlowEditor
           ref="flowEditor"
           v-model="form.process_flow"
           :bom-items="form.bom_items"
           :readonly="versionReadOnly"
           @update:model-value="clearFlowSaveError"
-        />
+        >
+          <template v-if="!versionReadOnly" #actions>
+            <ElButton
+              plain
+              :disabled="!flowDirty || store.saving"
+              :loading="activeAction === 'flow-draft'"
+              @click="performAction('flow-draft', saveFlowDraft)"
+            >保存草稿</ElButton>
+            <ElButton
+              type="primary"
+              :disabled="(!flowDirty && !form.process_flow_is_draft) || store.saving"
+              :loading="activeAction === 'flow'"
+              @click="performAction('flow', saveFlow)"
+            >确认并保存流程</ElButton>
+          </template>
+        </ProcessFlowEditor>
       </template>
       <div v-else v-loading="true" class="flow-loading">正在加载流程图</div>
     </section>
@@ -338,17 +383,20 @@ onMounted(async () => {
 <style scoped>
 .editor-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .editor-header, .editor-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.editor-header { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 18px; padding: 18px 22px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+.editor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 18px 22px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
 .editor-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
-.editor-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
-.editor-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.editor-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.action-group { display: flex; align-items: center; gap: 8px; }
+.action-group + .action-group { padding-left: 8px; border-left: 1px solid var(--md-outline-variant); }
+.editor-actions :deep(.el-button + .el-button), .action-group :deep(.el-button + .el-button) { margin-left: 0; }
+.version-selector { display: flex; align-items: center; gap: 7px; margin-right: 2px; color: var(--el-text-color-secondary); font-size: 12px; white-space: nowrap; }
+.version-selector :deep(.el-select) { width: 92px; }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
 .editor-card { margin-bottom: 18px; padding: 20px; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
 .section-heading > div { display: flex; align-items: baseline; gap: 12px; }
 .section-heading h2 { margin: 0; font-size: 18px; }
 .section-heading span { color: var(--el-text-color-secondary); font-size: 12px; }
-.section-action { display: flex; justify-content: flex-end; margin-bottom: 12px; }
 .flow-error { margin-bottom: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
 .basic-section :deep(.el-form-item) { margin-bottom: 12px; }
@@ -357,8 +405,12 @@ onMounted(async () => {
 @media (max-width: 680px) {
   .editor-page { padding: 16px; }
   .editor-header { align-items: flex-start; flex-direction: column; padding: 16px; }
-  .editor-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .editor-actions :deep(.el-button), .editor-actions :deep(.el-select) { width: 100% !important; margin: 0; }
+  .editor-actions { align-items: stretch; width: 100%; flex-direction: column; }
+  .version-selector { justify-content: space-between; margin: 0; }
+  .version-selector :deep(.el-select) { width: 120px; }
+  .action-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .action-group + .action-group { padding: 8px 0 0; border-top: 1px solid var(--md-outline-variant); border-left: 0; }
+  .editor-actions > :deep(.el-button), .action-group :deep(.el-button) { width: 100%; margin: 0; }
   .editor-card { padding: 16px; }
   .form-grid { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; }
@@ -366,7 +418,7 @@ onMounted(async () => {
 }
 @media (max-width: 440px) {
   .editor-page { padding: 12px; }
-  .editor-actions { grid-template-columns: 1fr; }
+  .action-group { grid-template-columns: 1fr; }
   .editor-card { padding: 12px; }
 }
 </style>

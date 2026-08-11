@@ -112,6 +112,7 @@ export function useProductSaveActions(options: Options) {
         revision: product.revision,
       })
       form.process_flow = product.process_flow
+      form.process_flow_is_draft = product.process_flow_is_draft
       flowEditor.value?.reload(product.process_flow)
       flowSnapshot.value = JSON.stringify(product.process_flow)
       markSaved(['base', 'flow'])
@@ -138,11 +139,38 @@ export function useProductSaveActions(options: Options) {
       form.version = product.version
       form.revision = product.revision
       form.process_flow = product.process_flow
+      form.process_flow_is_draft = product.process_flow_is_draft
       flowEditor.value.reload(product.process_flow)
       markSaved(['flow'])
       ElMessage.success('工序流程已保存')
     } catch (error) {
       showSaveError(error, '流程保存失败', true)
+    }
+  }
+
+  async function saveFlowDraft() {
+    if (!productId.value || form.revision === null || form.version === null || !flowEditor.value) return
+    flowSaveError.value = null
+    form.process_flow = synchronizeAssemblyIdentity(
+      flowEditor.value.getGraphData(),
+      form.factory_code,
+    )
+    try {
+      const product = await store.saveProcessFlowDraft(
+        productId.value,
+        form.revision,
+        form.version,
+        form.process_flow,
+      )
+      form.version = product.version
+      form.revision = product.revision
+      form.process_flow = product.process_flow
+      form.process_flow_is_draft = product.process_flow_is_draft
+      flowEditor.value.reload(product.process_flow)
+      markSaved(['flow'])
+      ElMessage.success('流程草稿已保存')
+    } catch (error) {
+      showSaveError(error, '流程暂存失败', true)
     }
   }
 
@@ -172,6 +200,7 @@ export function useProductSaveActions(options: Options) {
     flowSaveError,
     saveBom,
     saveFlow,
+    saveFlowDraft,
     saveProductInfo,
   }
 }

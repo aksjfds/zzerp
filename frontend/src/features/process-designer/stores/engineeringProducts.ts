@@ -8,6 +8,7 @@ import {
   queryProduct,
   queryProducts,
   replaceProductBom,
+  saveProductProcessFlowDraft,
   updateProductInfo,
   updateProductProcessFlow,
 } from '../api/engineeringProducts'
@@ -102,6 +103,24 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     })
   }
 
+  async function saveProcessFlowDraft(
+    productId: number,
+    revision: number,
+    productVersion: number,
+    flow: ProcessFlow,
+  ) {
+    return withSaving(async () => {
+      const product = await saveProductProcessFlowDraft(
+        productId,
+        revision,
+        productVersion,
+        flow,
+      )
+      commitActive(product)
+      return product
+    })
+  }
+
   async function removeProduct(productId: number, expectedRevision: number) {
     await deleteProductApi(productId, expectedRevision)
     if (activeProduct.value?.id === productId) activeProduct.value = null
@@ -186,6 +205,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     removeProduct,
     removeProductVersion,
     saveProcessFlow,
+    saveProcessFlowDraft,
     saveProductBom,
     saveProductInfo,
     saving,

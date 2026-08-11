@@ -151,6 +151,7 @@ class ProductDetailResponse(ProductResponseFields):
     version_editable: bool
     bom_items: list[BomItemResponse]
     process_flow: ProcessFlowPayload
+    process_flow_is_draft: bool
     created_at: str
     updated_at: str
 

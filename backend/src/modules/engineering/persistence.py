@@ -10,7 +10,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from database import Base
 
 
-JSON_TYPE = JSON().with_variant(JSONB, "postgresql")
+JSON_TYPE = JSON(none_as_null=True).with_variant(
+    JSONB(none_as_null=True),
+    "postgresql",
+)
 
 
 class Product(Base):
@@ -195,6 +198,10 @@ class ProductProcessFlow(Base):
         nullable=False,
         default=lambda: {"schema_version": 3, "nodes": [], "edges": []},
         server_default=text("'{\"schema_version\": 3, \"nodes\": [], \"edges\": []}'"),
+    )
+    draft_flow_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSON_TYPE,
+        nullable=True,
     )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")

@@ -17,6 +17,7 @@ from modules.engineering.support import (
     empty_process_flow,
     raise_integrity_error,
     raise_stale_data_error,
+    validated_draft_flow,
     validated_flow,
 )
 from schemas.engineering import (
@@ -344,6 +345,48 @@ def update_product_process_flow(
                 product_version,
                 validated,
             )
+            repository.flush()
+            product.updated_at = utc_now()
+            product.revision += 1
+            return command_result(repository, product, product_version)
+    except IntegrityError as exc:
+        raise_integrity_error(exc)
+    except StaleDataError as exc:
+        raise_stale_data_error(exc)
+
+
+def save_product_process_flow_draft(
+    product_id: int,
+    expected_revision: int,
+    product_version: int,
+    process_flow: ProcessFlowPayload,
+) -> dict:
+    try:
+        with SessionLocal.begin() as session:
+            repository = EngineeringProductRepository(session)
+            product = repository.get(product_id)
+            if product is None:
+                raise product_not_found()
+            session.refresh(product, with_for_update=True)
+            validate_expected_revision(product.revision, expected_revision)
+            ensure_version_exists(product, product_version)
+            ensure_product_version_editable(session, product.id, product_version)
+            bom_items = {
+                item.id: (item.part_name, item.part_no)
+                for item in product.bom_items
+                if item.product_version == product_version
+            }
+            validated_draft_flow(process_flow, set(bom_items))
+            flow = synchronize_part_metadata(
+                process_flow,
+                bom_items,
+                product.factory_code,
+            )
+            validated = flow.model_dump(exclude_none=True)
+            _ensure_procedures_exist(session, flow)
+            _validate_flow_departments_and_procedures(session, flow)
+            repository.set_process_flow_draft(product, product_version, validated)
+            repository.flush()
             product.updated_at = utc_now()
             product.revision += 1
             return command_result(repository, product, product_version)

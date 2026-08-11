@@ -4,6 +4,7 @@ from modules.engineering.commands import (
     create_product,
     delete_product,
     replace_product_bom,
+    save_product_process_flow_draft,
     update_product_info,
     update_product_process_flow,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "list_product_versions",
     "list_products",
     "replace_product_bom",
+    "save_product_process_flow_draft",
     "update_product_info",
     "update_product_process_flow",
 ]

@@ -20,6 +20,7 @@ from modules.engineering.api import (
     list_product_versions,
     list_products,
     replace_product_bom,
+    save_product_process_flow_draft,
     update_product_info,
     update_product_process_flow,
 )
@@ -123,6 +124,22 @@ def product_process_flow_update(
 ):
     return {
         "data": update_product_process_flow(
+            product_id,
+            payload.expected_revision,
+            payload.product_version,
+            payload.process_flow,
+        )
+    }
+
+
+@router.put("/{product_id}/process-flow/draft", response_model=ProductDetailEnvelope)
+def product_process_flow_draft_save(
+    product_id: int,
+    payload: UpdateProcessFlowPayload,
+    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+):
+    return {
+        "data": save_product_process_flow_draft(
             product_id,
             payload.expected_revision,
             payload.product_version,

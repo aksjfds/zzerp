@@ -29,9 +29,17 @@ def validated_flow(flow: ProcessFlowPayload, bom_ids: set[int]) -> dict:
     return validate_process_flow(flow, bom_ids).model_dump(exclude_none=True)
 
 
+def validated_draft_flow(flow: ProcessFlowPayload, bom_ids: set[int]) -> dict:
+    from domain.process_flow import validate_process_flow_draft
+
+    return validate_process_flow_draft(flow, bom_ids).model_dump(exclude_none=True)
+
+
 def raise_integrity_error(exc: IntegrityError) -> None:
-    constraint = getattr(getattr(exc, "orig", None), "diag", None)
-    constraint_name = getattr(constraint, "constraint_name", "")
+    diagnostic = getattr(getattr(exc, "orig", None), "diag", None)
+    constraint_name = getattr(diagnostic, "constraint_name", "") or ""
+    table_name = getattr(diagnostic, "table_name", "") or ""
+    column_name = getattr(diagnostic, "column_name", "") or ""
     if constraint_name == "uq_product_factory_code":
         raise DomainError(
             "factory_code_conflict", "本厂型号已存在", status_code=409, path="factory_code"
@@ -50,7 +58,42 @@ def raise_integrity_error(exc: IntegrityError) -> None:
             status_code=409,
             path="bom_items",
         ) from exc
-    raise DomainError("data_conflict", "数据违反唯一性或关联约束", status_code=409) from exc
+    if constraint_name == "uq_product_process_flow_version":
+        raise DomainError(
+            "process_flow_version_conflict",
+            "当前产品版本已存在工序流程记录，请刷新后重试",
+            status_code=409,
+            path="process_flow",
+        ) from exc
+    if constraint_name == "fk_product_process_flow_version":
+        raise DomainError(
+            "process_flow_product_version_missing",
+            "当前产品版本不存在，无法保存工序流程",
+            status_code=409,
+            path="product_version",
+        ) from exc
+    if table_name == "product_process_flow" and column_name == "draft_flow_json":
+        raise DomainError(
+            "process_flow_draft_column_invalid",
+            "数据库字段 draft_flow_json 不允许清空，请使用最新 zzerp.sql 重建数据库",
+            status_code=409,
+            path="process_flow",
+        ) from exc
+    if table_name == "product_process_flow":
+        conflict = constraint_name or column_name or "未知约束"
+        raise DomainError(
+            "process_flow_storage_conflict",
+            f"工序流程保存违反数据库约束：{conflict}",
+            status_code=409,
+            path="process_flow",
+        ) from exc
+    conflict = constraint_name or column_name or "未知约束"
+    location = f"{table_name}.{conflict}" if table_name else conflict
+    raise DomainError(
+        "data_conflict",
+        f"数据违反数据库约束：{location}",
+        status_code=409,
+    ) from exc
 
 
 def raise_stale_data_error(exc: StaleDataError) -> None:

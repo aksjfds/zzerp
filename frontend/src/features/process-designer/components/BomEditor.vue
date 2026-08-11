@@ -1,8 +1,17 @@
 <script setup lang="ts">
 import type { BomItem } from '../domain/types'
 
-const props = defineProps<{ modelValue: BomItem[]; readonly?: boolean }>()
-const emit = defineEmits<{ 'update:modelValue': [value: BomItem[]] }>()
+const props = defineProps<{
+  modelValue: BomItem[]
+  readonly?: boolean
+  canSave?: boolean
+  dirty?: boolean
+  saving?: boolean
+}>()
+const emit = defineEmits<{
+  'update:modelValue': [value: BomItem[]]
+  save: []
+}>()
 
 function update(index: number, field: keyof BomItem, value: string | number | undefined) {
   if (props.readonly) return
@@ -48,7 +57,16 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
         <h2>BOM 明细</h2>
         <p>配件名称、配件编号和用量必填；保存后可拖入流程图。</p>
       </div>
-      <ElButton v-if="!readonly" type="primary" plain @click="addRow">新增 BOM 行</ElButton>
+      <div v-if="!readonly" class="heading-actions">
+        <ElButton plain :disabled="saving" @click="addRow">新增配件</ElButton>
+        <ElButton
+          v-if="canSave"
+          type="primary"
+          :disabled="!dirty"
+          :loading="saving"
+          @click="emit('save')"
+        >保存 BOM</ElButton>
+      </div>
     </div>
     <ElTable :data="modelValue" border table-layout="auto" empty-text="请新增至少一条 BOM 明细">
       <ElTableColumn type="index" label="#" width="54" />
@@ -103,7 +121,9 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
       </ElTableColumn>
       <ElTableColumn v-if="!readonly" label="操作" width="84" fixed="right">
         <template #default="{ $index }">
-          <ElButton type="danger" link @click="removeRow($index)">删除</ElButton>
+          <ElPopconfirm title="确定删除这条 BOM 配件吗？" @confirm="removeRow($index)">
+            <template #reference><ElButton type="danger" link>删除</ElButton></template>
+          </ElPopconfirm>
         </template>
       </ElTableColumn>
     </ElTable>
@@ -112,11 +132,14 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
 
 <style scoped>
 .section-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
+.heading-actions { display: flex; align-items: center; flex: none; gap: 8px; }
+.heading-actions :deep(.el-button + .el-button) { margin-left: 0; }
 h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; }
 .bom-editor :deep(.el-form-item) { margin-bottom: 14px; }
 @media (max-width: 600px) {
   .section-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
-  .section-heading :deep(.el-button) { width: 100%; }
+  .heading-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .heading-actions :deep(.el-button) { width: 100%; margin: 0; }
 }
 </style>

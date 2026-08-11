@@ -18,6 +18,7 @@ export function useProductEditorForm() {
     customer_code: '',
     bom_items: [{ part_name: '', part_no: '', pcs: 1, remark: '' }],
     process_flow: EMPTY_FLOW(),
+    process_flow_is_draft: false,
   })
   const baseSnapshot = ref('')
   const bomSnapshot = ref('')
@@ -94,6 +95,7 @@ export function useProductEditorForm() {
       customer_code: product.customer_code,
       bom_items: product.bom_items.map((item) => ({ ...item })),
       process_flow: product.process_flow,
+      process_flow_is_draft: product.process_flow_is_draft,
     })
   }
 
