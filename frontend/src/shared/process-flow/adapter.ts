@@ -8,6 +8,8 @@ import {
   type ProcessFlow,
 } from './types'
 
+export const PROCESS_FLOW_GRID_SIZE = 100
+
 const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'qc', 'assembly', 'shipping'])
 const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }> = {
   part: { halfWidth: 75, halfHeight: 28 },
@@ -78,8 +80,8 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
   const base = {
     id: node.id,
     type,
-    x: node.x,
-    y: node.y,
+    x: snapCoordinate(node.x),
+    y: snapCoordinate(node.y),
     label: textValue(node.text),
     label_position: textPosition(node.text),
     z_index: node.zIndex,
@@ -183,11 +185,32 @@ function requiredNumber(value: unknown, field: string): number {
 }
 
 function normalizeEdgeAnchors(flow: ProcessFlow): ProcessFlow {
+  const nodes = flow.nodes.map((node) => {
+    const x = snapCoordinate(node.x)
+    const y = snapCoordinate(node.y)
+    const dx = x - node.x
+    const dy = y - node.y
+    return {
+      ...node,
+      x,
+      y,
+      label_position: node.label_position
+        ? {
+            x: node.label_position.x + dx,
+            y: node.label_position.y + dy,
+          }
+        : undefined,
+    }
+  })
   return {
     ...flow,
-    nodes: flow.nodes.map(node => ({ ...node })),
-    edges: flow.edges.map(edge => normalizeEdgeAnchor(edge, flow.nodes)),
+    nodes,
+    edges: flow.edges.map(edge => normalizeEdgeAnchor(edge, nodes)),
   }
+}
+
+function snapCoordinate(value: number) {
+  return Math.round(value / PROCESS_FLOW_GRID_SIZE) * PROCESS_FLOW_GRID_SIZE
 }
 
 function normalizeEdgeAnchor(edge: FlowEdge, nodes: FlowNode[]): FlowEdge {

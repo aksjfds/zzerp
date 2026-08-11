@@ -6,6 +6,11 @@ import LogicFlow, {
 } from '@logicflow/core'
 import { materialColors } from '@/shared/material/tokens'
 
+function displayScale(properties: Record<string, unknown>) {
+  const value = Number(properties.__displayScale)
+  return Number.isFinite(value) && value > 0 ? value : 1
+}
+
 function fourMidpointAnchors(model: { id: string; x: number; y: number; width: number; height: number }) {
   const { id, x, y, width, height } = model
   return [
@@ -26,9 +31,10 @@ class PartNodeModel extends RectNodeModel {
   }
 
   setAttributes() {
-    this.width = 150
-    this.height = 56
-    this.radius = 12
+    const scale = displayScale(this.properties)
+    this.width = 150 * scale
+    this.height = 56 * scale
+    this.radius = 12 * scale
   }
 
   getNodeStyle() {
@@ -47,9 +53,10 @@ class PartNodeModel extends RectNodeModel {
 
 class ProcessNodeModel extends RectNodeModel {
   setAttributes() {
-    this.width = 150
-    this.height = 56
-    this.radius = 28
+    const scale = displayScale(this.properties)
+    this.width = 150 * scale
+    this.height = 56 * scale
+    this.radius = 28 * scale
   }
 
   getNodeStyle() {
@@ -74,8 +81,9 @@ class ProcessNodeModel extends RectNodeModel {
 
 class QcNodeModel extends DiamondNodeModel {
   setAttributes() {
-    this.rx = 68
-    this.ry = 42
+    const scale = displayScale(this.properties)
+    this.rx = 68 * scale
+    this.ry = 42 * scale
   }
 
   getNodeStyle() {
@@ -94,9 +102,10 @@ class QcNodeModel extends DiamondNodeModel {
 
 class ShippingNodeModel extends RectNodeModel {
   setAttributes() {
-    this.width = 150
-    this.height = 56
-    this.radius = 12
+    const scale = displayScale(this.properties)
+    this.width = 150 * scale
+    this.height = 56 * scale
+    this.radius = 12 * scale
   }
 
   getNodeStyle() {
@@ -115,9 +124,10 @@ class ShippingNodeModel extends RectNodeModel {
 
 class AssemblyNodeModel extends RectNodeModel {
   setAttributes() {
-    this.width = 160
-    this.height = 56
-    this.radius = 12
+    const scale = displayScale(this.properties)
+    this.width = 160 * scale
+    this.height = 56 * scale
+    this.radius = 12 * scale
   }
 
   getNodeStyle() {
