@@ -7,6 +7,7 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import { setupPermission } from './permission'
 import router from './router'
+import { setupTableColumnWidthPersistence } from './shared/table/columnWidthPersistence'
 import { useAuthStore } from './stores/auth'
 
 const app = createApp(App)
@@ -15,6 +16,7 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 setupPermission(app)
+setupTableColumnWidthPersistence()
 
 const authStore = useAuthStore(pinia)
 window.addEventListener('zzerp:unauthorized', () => {

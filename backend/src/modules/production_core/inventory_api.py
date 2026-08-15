@@ -46,7 +46,11 @@ def accept_issued_inventory(
     )
     if target is None:
         raise DomainError("inventory_issue_target_missing", "库存项目没有可进入的后续节点", status_code=409)
-    production_item = _load_or_create_production_item(session, plan_item)
+    production_item = _load_or_create_production_item(
+        session,
+        plan_item,
+        inventory_stock.flow_node_id,
+    )
     if target.get("type") == "shipping":
         department_id = move_to_node(
             session,
@@ -138,12 +142,16 @@ def _accept_finished(
     refresh_order_closed(session, production_item, actor_username)
 
 
-def _load_or_create_production_item(session, plan_item) -> ProductionItem:
+def _load_or_create_production_item(
+    session,
+    plan_item,
+    origin_flow_node_id: str,
+) -> ProductionItem:
     condition = [
         ProductionItem.customer_order_item_id == plan_item.customer_order_item_id,
         ProductionItem.product_id == plan_item.product_id,
         ProductionItem.product_version == plan_item.product_version,
-        ProductionItem.origin_flow_node_id == plan_item.flow_node_id,
+        ProductionItem.origin_flow_node_id == origin_flow_node_id,
     ]
     if plan_item.product_bom_id is None:
         condition.append(ProductionItem.product_bom_id.is_(None))
@@ -156,7 +164,7 @@ def _load_or_create_production_item(session, plan_item) -> ProductionItem:
             product_id=plan_item.product_id,
             product_version=plan_item.product_version,
             product_bom_id=plan_item.product_bom_id,
-            origin_flow_node_id=plan_item.flow_node_id,
+            origin_flow_node_id=origin_flow_node_id,
         )
         session.add(production_item)
         session.flush()

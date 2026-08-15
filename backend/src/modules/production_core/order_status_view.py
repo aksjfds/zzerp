@@ -18,6 +18,7 @@ from modules.production_core.operational_api import load_product_flow
 from modules.production_core.operational_api import production_item_name
 from modules.production_core.operational_api import rework_pending_by_order
 from modules.production_core.operational_api import production_item_unit_quantity
+from modules.production_core.flow import assembly_material_key
 
 
 def get_customer_order_production(order_id: int) -> dict:
@@ -296,9 +297,8 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         input_details: dict[str, int] = {}
         output_quantity = 0
         if node_type == "part":
-            bom_item = bom_by_id.get(node.get("bom_item_id"))
-            entered = order_item.quantity * bom_item.pcs if bom_item else 0
             transferred = transferred_by_node[node_id]
+            entered = transferred
             current = max(entered - transferred, 0)
         elif node_type == "process":
             abnormal = process_abnormal_by_node[node_id]
@@ -317,11 +317,18 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
                 for edge in flow.get("edges", [])
                 if edge["target_node_id"] == node_id
             }
-            source_capacities = []
+            required_source_groups: dict[str, list[str]] = defaultdict(list)
             for source_id in required_source_ids:
-                source_repositories = current_repository_sources[node_id].get(
-                    source_id, []
-                )
+                material_key = assembly_material_key(flow, nodes, source_id)
+                if material_key is not None:
+                    required_source_groups[material_key].append(source_id)
+            source_capacities = []
+            for source_ids in required_source_groups.values():
+                source_repositories = [
+                    repository
+                    for source_id in source_ids
+                    for repository in current_repository_sources[node_id].get(source_id, [])
+                ]
                 if not source_repositories:
                     source_capacities.append(0)
                     continue

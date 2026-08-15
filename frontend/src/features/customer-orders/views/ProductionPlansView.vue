@@ -11,7 +11,7 @@ import {
 import type { CustomerOrder, ProductionPlan } from '../domain/types'
 
 type PlanEditorApi = {
-  save: () => Promise<ProductionPlan | undefined>
+  save: (options?: { silent?: boolean }) => Promise<ProductionPlan | undefined>
 }
 
 const loading = ref(false)
@@ -77,7 +77,7 @@ async function confirmPlan() {
       { type: 'warning' },
     )
     confirming.value = true
-    const saved = await editor.value?.save()
+    const saved = await editor.value?.save({ silent: true })
     if (!saved) return
     await confirmProductionPlan(order.id, order.revision, saved.revision)
     ElMessage.success('生产计划已确认并进入生产')
@@ -103,7 +103,7 @@ defineExpose({ load })
         <h2>生产计划</h2>
         <p>客户订单确认后自动生成草稿计划；客户订单结单后，已确认生产计划仍会继续生产。</p>
       </div>
-      <ElButton @click="load">刷新</ElButton>
+      <ElButton :loading="loading" @click="load">刷新</ElButton>
     </div>
     <ElTable v-loading="loading" :data="orders" border stripe table-layout="auto">
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="150" />
@@ -155,25 +155,27 @@ defineExpose({ load })
         @validity-change="planInvalid = $event"
       />
       <template #footer>
-        <ElButton
-          :disabled="savingDraft || confirming"
-          @click="dialogVisible = false"
-        >{{ activeOrder?.status === 'confirmed' ? '取消' : '关闭' }}</ElButton>
-        <ElButton
-          v-if="activeOrder?.status === 'confirmed'"
-          v-permission="ORDER_PERMISSIONS.edit"
-          :loading="savingDraft"
-          :disabled="planInvalid || confirming"
-          @click="saveDraft"
-        >保存草稿</ElButton>
-        <ElButton
-          v-if="activeOrder?.status === 'confirmed'"
-          v-permission="ORDER_PERMISSIONS.confirm"
-          type="primary"
-          :loading="confirming"
-          :disabled="!activePlan || planInvalid || savingDraft"
-          @click="confirmPlan"
-        >确认生产计划</ElButton>
+        <div class="dialog-actions">
+          <ElButton
+            :disabled="savingDraft || confirming"
+            @click="dialogVisible = false"
+          >关闭</ElButton>
+          <div v-if="activeOrder?.status === 'confirmed'" class="dialog-primary-actions">
+            <ElButton
+              v-permission="ORDER_PERMISSIONS.edit"
+              :loading="savingDraft"
+              :disabled="planInvalid || confirming"
+              @click="saveDraft"
+            >暂存计划</ElButton>
+            <ElButton
+              v-permission="ORDER_PERMISSIONS.confirm"
+              type="primary"
+              :loading="confirming"
+              :disabled="!activePlan || planInvalid || savingDraft"
+              @click="confirmPlan"
+            >保存并确认</ElButton>
+          </div>
+        </div>
       </template>
     </ElDialog>
   </section>
@@ -184,8 +186,14 @@ defineExpose({ load })
 .plans-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
 .plans-heading h2 { margin: 0; font-size: 20px; }
 .plans-heading p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
+.dialog-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
+.dialog-primary-actions { display: flex; align-items: center; gap: 10px; }
+.dialog-actions :deep(.el-button) { margin-left: 0; }
 .pagination { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 680px) {
   .plans-heading { align-items: stretch; flex-direction: column; }
+  .dialog-actions { align-items: stretch; flex-direction: column-reverse; }
+  .dialog-primary-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .dialog-actions :deep(.el-button) { width: 100%; }
 }
 </style>

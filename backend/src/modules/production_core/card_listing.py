@@ -18,6 +18,7 @@ from modules.production_core.card_filters import (
     filter_and_paginate_assembly_groups,
     filter_and_paginate_cards,
 )
+from modules.production_core.card_status import dominant_work_status, work_order_stage
 from modules.production_core.cards import (
     _current_cards,
     _historical_cards,
@@ -91,6 +92,8 @@ def list_production_cards(
                 workshop_name,
                 work_status,
             )
+        if department_code != "purchasing":
+            _simplify_production_card_statuses(cards)
         return filter_and_paginate_cards(
             cards,
             page,
@@ -99,6 +102,12 @@ def list_production_cards(
             workshop_name,
             work_status,
         )
+
+
+def _simplify_production_card_statuses(cards: list[dict]) -> None:
+    for card in cards:
+        if card["work_status"] not in {"unprocessed", "completed"}:
+            card["work_status"] = "processing"
 
 
 def _current_positions(session, department: Department) -> set[tuple]:
@@ -185,11 +194,8 @@ def _aggregate_standard_parent_cards(session, cards: list[dict]) -> list[dict]:
             for item in group
             if item.get("can_create_work_order", False)
         )
-        status = (
-            "processing"
-            if pending_qc_quantity
-            or any(item["work_status"] == "processing" for item in group)
-            else "unprocessed"
+        status = dominant_work_status(
+            (item["work_status"] for item in group),
         )
         arrived_at = max(
             (item["arrived_at"] or "" for item in group),
@@ -333,6 +339,12 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
                     )
                 ),
                 "assembly_required_source_ids": [],
+                "assembly_material_key": (
+                    f"part:{production_item.product_bom_id}"
+                    if production_item.product_bom_id is not None
+                    else f"assembly:{production_item.origin_flow_node_id}"
+                ),
+                "assembly_required_material_keys": [],
                 "assembly_group_complete": True,
                 "delivery_date": row.CustomerOrderItem.delivery_date,
                 "arrived_at": business_iso(
@@ -340,7 +352,7 @@ def _pending_standard_cards(session, department: Department) -> list[dict]:
                     or row.WorkOrder.closed_at
                     or row.WorkOrder.created_at
                 ),
-                "work_status": "processing",
+                "work_status": work_order_stage(row.WorkOrder, batches),
                 "can_create_work_order": False,
                 "_pending_qc_quantity": progress.pending_qc_quantity,
             }

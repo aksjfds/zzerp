@@ -170,17 +170,26 @@ def submit_tag_order(
         raise DomainError("submission_quantity_exceeded", "提交数量超过工单剩余数量")
     context, _ = node_context(session, production_item, node["id"])
     qc_node = process_qc_node(context.flow, context.nodes, node["id"])
+    final_tag_set = is_final_tag_set(
+        session,
+        production_item,
+        procedure.id,
+        order.target_tag_set_id,
+    )
     batch = None
     if completion_action == "qc":
-        if qc_node is None:
-            raise DomainError("work_order_qc_not_configured", "当前工艺未配置QC节点")
+        if final_tag_set and qc_node is None:
+            raise DomainError(
+                "work_order_qc_not_configured",
+                "全部标记已完成且当前工艺未配置QC节点，应确认合格",
+            )
         batch = create_inspection_batch(
             session,
             work_order_id=order.id,
             submitted_quantity=quantity,
             source_flow_node_id=order.source_flow_node_id,
         )
-        target_flow_node_id = qc_node["id"]
+        target_flow_node_id = qc_node["id"] if qc_node else node["id"]
         target_department_id = get_department_ids_by_codes(
             session,
             {"qc"},
@@ -188,14 +197,7 @@ def submit_tag_order(
         if target_department_id is None:
             raise DomainError("department_not_found", "QC部门不存在")
     else:
-        if qc_node is not None:
-            raise DomainError("work_order_qc_required", "当前工艺配置了QC，必须送检")
-        if is_final_tag_set(
-            session,
-            production_item,
-            procedure.id,
-            order.target_tag_set_id,
-        ):
+        if final_tag_set:
             target = context.normal_target(node["id"])
             target_department_id = move_to_node(
                 session,
@@ -270,8 +272,11 @@ def resubmit_tag_rework_batch(
 
         order_batches = list_inspection_batches(session, order.id)
         available = rework_pending_quantities(order_batches).get(source_batch.id, 0)
-        if quantity <= 0 or quantity > available:
-            raise DomainError("qc_rework_quantity_exceeded", "返工送检数量超过待返工数量")
+        if available <= 0 or quantity != available:
+            raise DomainError(
+                "qc_rework_full_quantity_required",
+                "返工送检必须一次提交该批全部待返工数量",
+            )
 
         production_item = load_production_item_context(
             session,
@@ -303,8 +308,6 @@ def resubmit_tag_rework_batch(
             order.source_tag_set_id,
         )
         qc_node = process_qc_node(context.flow, context.nodes, node["id"])
-        if qc_node is None:
-            raise DomainError("work_order_qc_not_configured", "标记工艺后必须配置QC节点")
         qc_department_id = get_department_ids_by_codes(
             session,
             {"qc"},
@@ -325,7 +328,7 @@ def resubmit_tag_rework_batch(
             quantity=quantity,
             movement_type="process",
             source_flow_node_id=node["id"],
-            target_flow_node_id=qc_node["id"],
+            target_flow_node_id=qc_node["id"] if qc_node else node["id"],
             source_tag_set_id=order.source_tag_set_id,
             target_tag_set_id=order.target_tag_set_id,
             source_department_id=department_id,

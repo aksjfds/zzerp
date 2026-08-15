@@ -2,8 +2,8 @@
 
 from modules.production_core.work_orders import (
     cancel_work_order,
-    complete_work_order_processing,
     create_work_order,
+    register_purchase_arrival,
     resubmit_work_order_rework_batch,
     submit_work_order,
 )
@@ -20,12 +20,12 @@ from modules.production_core.work_order_queries import list_department_work_orde
 __all__ = [
     "cancel_work_order",
     "cancel_order_production",
-    "complete_work_order_processing",
     "create_work_order",
     "initialize_order_production",
     "list_department_work_orders",
     "list_production_cards",
     "list_tag_cards",
+    "register_purchase_arrival",
     "resubmit_work_order_rework_batch",
     "submit_work_order",
     "undo_production_operation",

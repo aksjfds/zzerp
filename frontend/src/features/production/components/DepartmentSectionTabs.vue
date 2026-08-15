@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getDepartmentModule } from '@/features/departments/registry'
 import DepartmentWorkersView from '../views/DepartmentWorkersView.vue'
@@ -19,6 +19,7 @@ type DepartmentTab = 'workspace' | 'inventory' | 'workers' | 'progress' | 'tag-p
 const route = useRoute()
 const router = useRouter()
 const department = computed(() => getDepartmentModule(props.departmentCode))
+let tabSwitchRevision = 0
 const availableTabs = computed<DepartmentTab[]>(() => {
   const tabs: DepartmentTab[] = ['workspace']
   const capabilities = department.value?.capabilities
@@ -36,12 +37,28 @@ const activeTab = computed<DepartmentTab>({
     return availableTabs.value.includes(requested) ? requested : 'workspace'
   },
   set(tab) {
-    const query = { ...route.query }
-    if (tab === 'workspace') delete query.tab
-    else query.tab = tab
-    void router.replace({ path: department.value?.routePath || route.path, query })
+    void switchTab(tab)
   },
 })
+
+async function switchTab(tab: DepartmentTab) {
+  const currentTab = activeTab.value
+  if (tab === currentTab) return
+  const revision = ++tabSwitchRevision
+  const scrollTop = window.scrollY
+  const query = { ...route.query }
+  if (tab === 'workspace') delete query.tab
+  else query.tab = tab
+  await router.replace({ path: department.value?.routePath || route.path, query })
+  await nextTick()
+  window.requestAnimationFrame(() => {
+    if (revision !== tabSwitchRevision) return
+    window.scrollTo({
+      top: scrollTop,
+      behavior: 'auto',
+    })
+  })
+}
 </script>
 
 <template>
@@ -49,22 +66,7 @@ const activeTab = computed<DepartmentTab>({
     <ElTabPane label="生产工作台" name="workspace" lazy>
       <slot />
     </ElTabPane>
-    <ElTabPane
-      v-if="availableTabs.includes('inventory')"
-      label="库存"
-      name="inventory"
-      lazy
-    >
-      <DepartmentSurplusInventoryView :department-code="departmentCode" />
-    </ElTabPane>
-    <ElTabPane
-      v-if="availableTabs.includes('progress')"
-      label="查看生产进度"
-      name="progress"
-      lazy
-    >
-      <DepartmentProductionProgressView embedded :department-code="departmentCode" />
-    </ElTabPane>
+
     <ElTabPane
       v-if="availableTabs.includes('tag-prices')"
       label="标记与单价配置"
@@ -84,6 +86,22 @@ const activeTab = computed<DepartmentTab>({
       lazy
     >
       <DepartmentWorkersView embedded :department-code="departmentCode" />
+    </ElTabPane>
+    <ElTabPane
+      v-if="availableTabs.includes('progress')"
+      label="生产任务"
+      name="progress"
+      lazy
+    >
+      <DepartmentProductionProgressView embedded :department-code="departmentCode" />
+    </ElTabPane>
+    <ElTabPane
+      v-if="availableTabs.includes('inventory')"
+      label="库存"
+      name="inventory"
+      lazy
+    >
+      <DepartmentSurplusInventoryView :department-code="departmentCode" />
     </ElTabPane>
   </ElTabs>
 </template>

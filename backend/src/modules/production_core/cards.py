@@ -22,8 +22,9 @@ from modules.production_core.card_status import (
     reserved_quantities,
     reserved_tag_quantities,
     tag_stock_statuses,
+    work_order_stage,
 )
-from modules.production_core.flow import load_production_flow
+from modules.production_core.flow import assembly_material_key, load_production_flow
 from modules.standard_execution.tag_api import (
     configured_tag_suggestions,
     is_final_tag_set,
@@ -340,6 +341,8 @@ def _tag_stock_card(
             context.nodes.get(production_item.origin_flow_node_id, {}).get("output_pcs", 1)
         ),
         "assembly_required_source_ids": [],
+        "assembly_material_key": _production_item_material_key(production_item),
+        "assembly_required_material_keys": [],
         "assembly_group_complete": True,
         "assembly_output_name": None,
         "delivery_date": order_item.delivery_date,
@@ -465,6 +468,8 @@ def _current_card(
             context.nodes.get(production_item.origin_flow_node_id, {}).get("output_pcs", 1)
         ),
         "assembly_required_source_ids": [],
+        "assembly_material_key": _production_item_material_key(production_item),
+        "assembly_required_material_keys": [],
         "assembly_group_complete": department.department_code != "assembly",
         "assembly_output_name": (
             node.get("output_name")
@@ -488,6 +493,9 @@ def _current_card(
     if department.department_code == "assembly":
         card["assembly_required_source_ids"] = _normal_input_source_ids(
             context.flow, repository.flow_node_id
+        )
+        card["assembly_required_material_keys"] = _normal_input_material_keys(
+            context.flow, context.nodes, repository.flow_node_id
         )
     return card
 
@@ -665,6 +673,48 @@ def _historical_cards(
                 if movement_id in movements_by_id
             }
 
+    open_assembly_by_position: dict[tuple[int, str], WorkOrder] = {}
+    assembly_stage_by_order: dict[int, str] = {}
+    if department.department_code == "assembly" and candidate_positions:
+        assembly_rows = session.execute(
+            select(WorkOrderMaterial.production_item_id, WorkOrder)
+            .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
+            .where(
+                tuple_(
+                    WorkOrderMaterial.production_item_id,
+                    WorkOrder.flow_node_id,
+                ).in_(candidate_positions),
+                WorkOrder.work_order_type == "assembly",
+                WorkOrder.status == "open",
+            )
+            .order_by(WorkOrder.id.desc())
+        ).all()
+        for production_item_id, open_order in assembly_rows:
+            open_assembly_by_position.setdefault(
+                (production_item_id, open_order.flow_node_id),
+                open_order,
+            )
+        batches_by_order: dict[int, list[WorkOrderBatch]] = {
+            order.id: [] for order in open_assembly_by_position.values()
+        }
+        orders_by_id = {
+            order.id: order for order in open_assembly_by_position.values()
+        }
+        if batches_by_order:
+            for batch in session.scalars(
+                select(WorkOrderBatch).where(
+                    WorkOrderBatch.work_order_id.in_(list(batches_by_order))
+                )
+            ):
+                batches_by_order[batch.work_order_id].append(batch)
+        assembly_stage_by_order = {
+            order_id: work_order_stage(
+                orders_by_id[order_id],
+                batches,
+            )
+            for order_id, batches in batches_by_order.items()
+        }
+
     cards = []
     for position in candidate_positions:
         if position in current_positions:
@@ -673,11 +723,34 @@ def _historical_cards(
         movement = latest_movements.get(position)
         if movement is None:
             continue
-        cards.append(_historical_card(session, production_item_id, node_id, department, movement))
+        open_assembly_order = open_assembly_by_position.get(
+            (production_item_id, node_id)
+        )
+        cards.append(_historical_card(
+            session,
+            production_item_id,
+            node_id,
+            department,
+            movement,
+            open_assembly_order=open_assembly_order,
+            assembly_status=(
+                assembly_stage_by_order.get(open_assembly_order.id, "processing")
+                if open_assembly_order is not None else "completed"
+            ),
+        ))
     return cards
 
 
-def _historical_card(session, production_item_id, node_id, department, movement):
+def _historical_card(
+    session,
+    production_item_id,
+    node_id,
+    department,
+    movement,
+    *,
+    open_assembly_order=None,
+    assembly_status="completed",
+):
     production_item = session.get(ProductionItem, production_item_id)
     context = load_production_flow(session, production_item)
     order_item = context.order_item
@@ -697,20 +770,6 @@ def _historical_card(session, production_item_id, node_id, department, movement)
     ):
         source_flow_node_id = movement_order.source_flow_node_id
     source = context.nodes.get(source_flow_node_id, {})
-    open_assembly_order = None
-    if department.department_code == "assembly":
-        open_assembly_order = session.scalar(
-            select(WorkOrder)
-            .join(WorkOrderMaterial, WorkOrderMaterial.work_order_id == WorkOrder.id)
-            .where(
-                WorkOrderMaterial.production_item_id == production_item_id,
-                WorkOrder.flow_node_id == node_id,
-                WorkOrder.work_order_type == "assembly",
-                WorkOrder.status == "open",
-            )
-            .order_by(WorkOrder.id.desc())
-            .limit(1)
-        )
     procedure = session.get(Procedure, node.get("procedure_id")) if node.get("procedure_id") else None
     workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
     part_no, part_name = context.item_name(production_item)
@@ -747,6 +806,8 @@ def _historical_card(session, production_item_id, node_id, department, movement)
         "available_quantity": 0,
         "assembly_unit_quantity": context.bom_item.pcs if context.bom_item else 1,
         "assembly_required_source_ids": [],
+        "assembly_material_key": _production_item_material_key(production_item),
+        "assembly_required_material_keys": [],
         "assembly_group_complete": department.department_code != "assembly",
         "assembly_output_name": (
             node.get("output_name")
@@ -754,12 +815,15 @@ def _historical_card(session, production_item_id, node_id, department, movement)
         ),
         "delivery_date": order_item.delivery_date,
         "arrived_at": business_iso(movement.created_at),
-        "work_status": "processing" if open_assembly_order else "completed",
+        "work_status": assembly_status,
         "can_create_work_order": False,
     }
     if department.department_code == "assembly":
         card["assembly_required_source_ids"] = _normal_input_source_ids(
             context.flow, node_id
+        )
+        card["assembly_required_material_keys"] = _normal_input_material_keys(
+            context.flow, context.nodes, node_id
         )
     return card
 
@@ -771,3 +835,21 @@ def _normal_input_source_ids(flow: dict, node_id: str) -> list[str]:
         if edge.get("target_node_id") == node_id
         and edge.get("source_node_id")
     ))
+
+
+def _normal_input_material_keys(
+    flow: dict,
+    nodes: dict[str, dict],
+    node_id: str,
+) -> list[str]:
+    return list(dict.fromkeys(
+        key
+        for source_id in _normal_input_source_ids(flow, node_id)
+        if (key := assembly_material_key(flow, nodes, source_id)) is not None
+    ))
+
+
+def _production_item_material_key(production_item) -> str:
+    if production_item.product_bom_id is not None:
+        return f"part:{production_item.product_bom_id}"
+    return f"assembly:{production_item.origin_flow_node_id}"

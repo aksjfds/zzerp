@@ -4,7 +4,7 @@ from database import SessionLocal
 from domain.time import business_now, utc_now
 from modules.organization.model_api import Department, Procedure
 from modules.quality.model_api import WorkOrderBatch
-from modules.production_core.persistence import ProductionItem, WorkOrder
+from modules.production_core.persistence import WorkOrder
 from modules.assembly.api import (
     resubmit_assembly_rework_batch,
     submit_assembly_work_order,
@@ -108,7 +108,7 @@ def submit_work_order(
     actor_username: str,
 ) -> dict:
     if completion_action not in {"direct", "qc"}:
-        raise DomainError("completion_action_invalid", "请选择直接完成或送 QC")
+        raise DomainError("completion_action_invalid", "请选择确认合格或送 QC")
     with SessionLocal.begin() as session:
         order = session.get(WorkOrder, work_order_id, with_for_update=True)
         if order is None:
@@ -117,6 +117,24 @@ def submit_work_order(
             raise DomainError("work_order_closed", "工单已经结单")
         before = capture_operation_state(session, order)
         ready_quantity = order.processed_quantity - order.completed_quantity
+        if order.work_order_type in {"tag", "assembly"}:
+            if order.completed_quantity != 0 or quantity != order.quantity:
+                raise DomainError(
+                    "work_order_full_quantity_required",
+                    "送检或确认合格必须一次处理整张工单的全部数量",
+                )
+            order.processed_quantity = order.quantity
+            ready_quantity = order.quantity
+        elif completion_action == "qc":
+            if (
+                order.processed_quantity != order.quantity
+                or order.completed_quantity != 0
+                or quantity != order.quantity
+            ):
+                raise DomainError(
+                    "work_order_full_quantity_required",
+                    "外购工单必须全部到货后一次送检全部数量",
+                )
         if (
             completion_action == "qc"
             or order.work_order_type == "tag"
@@ -125,14 +143,14 @@ def submit_work_order(
             if quantity <= 0 or quantity > ready_quantity:
                 raise DomainError(
                     "work_order_result_quantity_exceeded",
-                    "处理数量超过已加工完成待处理数量",
+                    "处理数量超过工单可处理数量",
                 )
         else:
             processing_quantity = order.quantity - order.processed_quantity
             if quantity <= 0 or quantity > processing_quantity:
                 raise DomainError(
                     "work_order_completion_quantity_exceeded",
-                    "完成数量超过工单加工中数量",
+                    "到货数量超过工单待到货数量",
                 )
             order.processed_quantity += quantity
         if order.work_order_type == "assembly":
@@ -148,7 +166,11 @@ def submit_work_order(
                 order,
                 before,
                 operation_type="submission",
-                operation_label="撤回装配送检" if completion_action == "qc" else "撤回装配完成",
+                operation_label=(
+                    "撤回装配送检"
+                    if completion_action == "qc"
+                    else "撤回装配确认合格"
+                ),
                 department_code="assembly",
                 actor_username=actor_username,
             )
@@ -209,7 +231,7 @@ def submit_work_order(
             operation_label=(
                 "撤回送检"
                 if completion_action == "qc"
-                else "撤回直接完成"
+                else "撤回确认合格"
             ),
             department_code=department.department_code,
             actor_username=actor_username,
@@ -217,7 +239,7 @@ def submit_work_order(
         return serialize_work_order(session, order)
 
 
-def complete_work_order_processing(
+def register_purchase_arrival(
     work_order_id: int,
     quantity: int,
     user_department: str,
@@ -229,33 +251,26 @@ def complete_work_order_processing(
             raise DomainError("work_order_not_found", "工单不存在", status_code=404)
         if order.status != "open":
             raise DomainError("work_order_closed", "工单已经结单")
+        if order.work_order_type != "purchase_receipt":
+            raise DomainError(
+                "purchase_arrival_order_invalid",
+                "只有外购工单可以登记到货",
+            )
         before = capture_operation_state(session, order)
         remaining = order.quantity - order.processed_quantity
         if quantity <= 0 or quantity > remaining:
             raise DomainError(
                 "work_order_processing_quantity_exceeded",
-                "加工完成数量超过工单加工中数量",
+                "到货数量超过工单待到货数量",
             )
-        if order.work_order_type == "assembly":
-            if user_department not in {"sys", "assembly"}:
-                raise DomainError("department_access_denied", "只有装配部可以操作装配工单", status_code=403)
-            department_code = "assembly"
-            operation_label = "撤回装配完成"
-            production_item = session.get(ProductionItem, order.production_item_id)
-        else:
-            source, production_item = load_order_source(session, order)
-            department = session.get(Department, source.department_id)
-            if department is None or user_department not in {
-                "sys",
-                department.department_code,
-            }:
-                raise DomainError("department_access_denied", "无权操作该工单", status_code=403)
-            department_code = department.department_code
-            operation_label = (
-                "撤回到货登记"
-                if order.work_order_type == "purchase_receipt"
-                else "撤回加工完成"
-            )
+        source, production_item = load_order_source(session, order)
+        department = session.get(Department, source.department_id)
+        if department is None or user_department not in {
+            "sys",
+            department.department_code,
+        }:
+            raise DomainError("department_access_denied", "无权操作该工单", status_code=403)
+        department_code = department.department_code
         if production_item is None:
             raise DomainError("production_context_missing", "工单生产资料不存在", status_code=409)
         order.processed_quantity += quantity
@@ -264,8 +279,8 @@ def complete_work_order_processing(
             session,
             order,
             before,
-            operation_type="processing_completion",
-            operation_label=operation_label,
+            operation_type="purchase_arrival",
+            operation_label="撤回到货登记",
             department_code=department_code,
             actor_username=actor_username,
         )

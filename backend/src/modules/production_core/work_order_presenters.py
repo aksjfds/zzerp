@@ -4,6 +4,8 @@ from domain.time import business_iso
 from domain.production_types import (
     REWORK_TRACKED_WORK_ORDER_TYPES,
     WORK_ORDER_ASSEMBLY,
+    WORK_ORDER_PURCHASE_RECEIPT,
+    WORK_ORDER_TAG,
 )
 from modules.engineering.model_api import Product
 from modules.assembly.model_api import WorkOrderMaterial
@@ -15,7 +17,11 @@ from modules.production_core.undo_presenters import (
 )
 from modules.sales.model_api import CustomerOrder
 from modules.production_core.flow import load_production_flow, process_qc_node
-from modules.production_core.work_order_progress import calculate_work_order_progress
+from modules.production_core.work_order_progress import (
+    calculate_assembly_output_progress,
+    calculate_work_order_progress,
+)
+from modules.standard_execution.tag_api import is_final_tag_set
 from modules.workforce.reference_api import get_worker_reference
 
 
@@ -165,6 +171,22 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         .order_by(WorkOrderBatch.id)
     ).all()
     progress = calculate_work_order_progress(order, batches)
+    output_unit_quantity = (
+        int(flow_context.nodes.get(order.flow_node_id, {}).get("output_pcs", 1))
+        if order.work_order_type == WORK_ORDER_ASSEMBLY else 1
+    )
+    assembly_output_progress = (
+        calculate_assembly_output_progress(
+            order,
+            batches,
+            output_unit_quantity,
+        )
+        if order.work_order_type == WORK_ORDER_ASSEMBLY else None
+    )
+    qualified_output_quantity = (
+        assembly_output_progress.qualified_quantity
+        if assembly_output_progress is not None else progress.qualified_quantity
+    )
     undo_cache = session.info.get("work_order_undo_cache")
     undo_operation = (
         undo_cache.get(order.id)
@@ -181,6 +203,30 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         )
         if operation_batch is None or operation_batch.recorded_at is not None:
             undo_operation = None
+    configured_qc = process_qc_node(
+        flow_context.flow,
+        flow_context.nodes,
+        order.flow_node_id,
+    ) is not None
+    qc_available = configured_qc
+    qc_required = (
+        configured_qc
+        if order.work_order_type == WORK_ORDER_PURCHASE_RECEIPT else False
+    )
+    direct_result_allowed = (
+        not configured_qc
+        if order.work_order_type == WORK_ORDER_PURCHASE_RECEIPT else True
+    )
+    if order.work_order_type == WORK_ORDER_TAG:
+        final_tag_set = bool(order.procedure_id) and is_final_tag_set(
+            session,
+            production_item,
+            order.procedure_id,
+            order.target_tag_set_id,
+        )
+        qc_available = not final_tag_set or configured_qc
+        qc_required = False
+        direct_result_allowed = True
     return {
         "id": order.id,
         "work_order_no": order.work_order_no,
@@ -194,11 +240,9 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         "source_tag_set_id": order.source_tag_set_id,
         "target_tag_set_id": order.target_tag_set_id,
         "work_order_type": order.work_order_type,
-        "qc_required": process_qc_node(
-            flow_context.flow,
-            flow_context.nodes,
-            order.flow_node_id,
-        ) is not None,
+        "qc_available": qc_available,
+        "qc_required": qc_required,
+        "direct_result_allowed": direct_result_allowed,
         "customer_order_no": customer_order.customer_order_no,
         "factory_code": product.factory_code if product else "",
         "product_name": product.product_name if product else "",
@@ -210,12 +254,25 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         "worker_id": order.worker_id,
         "worker_name": worker.worker_name if worker else None,
         "quantity": order.quantity,
+        "output_unit_quantity": output_unit_quantity,
+        "output_quantity": order.quantity * output_unit_quantity,
         "processed_quantity": progress.processed_quantity,
         "submitted_quantity": progress.submitted_quantity,
         "ready_for_qc_quantity": progress.ready_for_qc_quantity,
         "processing_quantity": progress.processing_quantity,
+        "processing_output_quantity": (
+            assembly_output_progress.processing_quantity
+            if assembly_output_progress is not None
+            else progress.processing_quantity
+        ),
+        "ready_output_quantity": (
+            assembly_output_progress.ready_for_qc_quantity
+            if assembly_output_progress is not None
+            else progress.ready_for_qc_quantity
+        ),
         "pending_qc_quantity": progress.pending_qc_quantity,
         "qualified_quantity": progress.qualified_quantity,
+        "qualified_output_quantity": qualified_output_quantity,
         "rework_quantity": progress.rework_quantity,
         "scrap_quantity": progress.scrap_quantity,
         "lost_quantity": progress.lost_quantity,

@@ -12,7 +12,7 @@ def initialize_order_production(
     session,
     order: CustomerOrder,
     *,
-    part_quantities: dict[tuple[int, int], int] | None = None,
+    part_quantities: dict[tuple[int, int, str], int] | None = None,
 ) -> None:
     provision_order_repositories(
         session,

@@ -19,12 +19,29 @@ export type CustomerOrder = {
   customer_id: number
   customer_name: string
   status: CustomerOrderStatus
+  can_edit: boolean
   revision: number
   remark: string
   items: CustomerOrderItem[]
   product_progress: CustomerOrderProductProgress[]
   created_at: string
   updated_at: string
+}
+
+export type CustomerOrderProgressDetail = {
+  customer_order_id: number
+  customer_order_item_id: number
+  factory_code: string
+  product_name: string
+  order_date: string
+  customer_order_no: string
+  customer_code: string
+  order_quantity: number
+  task_quantity: number
+  shipped_quantity: number
+  outstanding_quantity: number
+  delivery_date: string
+  remark: string
 }
 
 export type CustomerOrderProductProgress = {
@@ -97,6 +114,15 @@ export type ProductionPlan = {
     current_inventory_quantity: number
     reserved_inventory_quantity: number
     issued_inventory_quantity: number
+    decomposition: {
+      finished_equivalent_quantity: number
+      parts: Array<{
+        product_bom_id: number
+        item_code: string
+        item_name: string
+        quantity: number
+      }>
+    }
   }>
   confirmed_at: string | null
   confirmed_by: string | null

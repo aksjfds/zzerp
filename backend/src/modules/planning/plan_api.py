@@ -17,6 +17,7 @@ from modules.inventory.reservation_api import (
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
 from modules.planning.plan_builder import (
     planned_finished_quantity,
+    planned_product_quantity,
     refresh_plan_availability,
 )
 from modules.production_core.api import (
@@ -110,7 +111,8 @@ def confirm_order_plan(
             actor_username,
         )
     part_quantities = {
-        (item.customer_order_item_id, item.product_bom_id): item.planned_production_quantity
+        (item.customer_order_item_id, item.product_bom_id, item.flow_node_id):
+            item.planned_production_quantity
         for item in plan.items
         if item.item_type == "part" and item.product_bom_id is not None
     }
@@ -154,7 +156,7 @@ def serialize_plan(session: Session, plan: ProductionPlan) -> dict:
                 "product_code": finished.item_code,
                 "product_name": finished.item_name,
                 "order_quantity": finished.gross_required_quantity,
-                "planned_finished_quantity": planned_finished_quantity(session, items),
+                "planned_finished_quantity": planned_product_quantity(items),
             }
             for customer_order_item_id, items in groups.items()
             for finished in [next(item for item in items if item.item_type == "finished_product")]
@@ -194,9 +196,26 @@ def serialize_plan(session: Session, plan: ProductionPlan) -> dict:
 
 
 def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[dict]:
-    from modules.production_core.flow import load_product_flow
+    from modules.production_core.flow import completed_node_display_label, load_product_flow
+    from modules.engineering.model_api import ProductBom
 
     stock_groups = plan_item_stocks(session, plan.items)
+    bom_ids = {
+        item.product_bom_id
+        for item in plan.items
+        if item.product_bom_id is not None
+    }
+    bom_by_id = {
+        item.id: item
+        for item in session.scalars(select(ProductBom).where(ProductBom.id.in_(bom_ids)))
+    } if bom_ids else {}
+    requirements = {
+        item.product_bom_id: item.unit_requirement
+        for item in plan.items
+        if item.item_type == "part" and item.product_bom_id is not None
+    }
+    incoming_by_product: dict[tuple[int, int], dict[str, list[str]]] = {}
+    reachable_bom_cache: dict[tuple[int, int, str], set[int]] = {}
     reservations = list(session.scalars(select(InventoryReservation).where(
         InventoryReservation.production_plan_id == plan.id
     )))
@@ -209,23 +228,73 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
             issued + reservation.issued_quantity,
         )
     rows: list[dict] = []
+    seen_part_keys: set[tuple[int, int]] = set()
     for item in plan.items:
+        if item.item_type == "part" and item.product_bom_id is not None:
+            part_key = (item.customer_order_item_id, item.product_bom_id)
+            if part_key in seen_part_keys:
+                continue
+            seen_part_keys.add(part_key)
         _flow, nodes = load_product_flow(session, item.product_id, item.product_version)
+        product_key = (item.product_id, item.product_version)
+        if product_key not in incoming_by_product:
+            incoming: dict[str, list[str]] = {}
+            for edge in _flow.get("edges", []):
+                source_id = edge.get("source_node_id")
+                target_id = edge.get("target_node_id")
+                if source_id and target_id:
+                    incoming.setdefault(target_id, []).append(source_id)
+            incoming_by_product[product_key] = incoming
         stocks = stock_groups.get(item.identity_key, [])
+        item_name = item.item_name
+        if item.item_type == "part" and item.product_bom_id is not None:
+            bom_item = bom_by_id.get(item.product_bom_id)
+            if bom_item is not None:
+                item_name = bom_item.part_name
         if not stocks:
-            rows.append(_inventory_item_row(item, None, "—", 0, 0, 0))
+            rows.append(_inventory_item_row(
+                item,
+                None,
+                "—",
+                0,
+                0,
+                0,
+                item_name,
+                _inventory_decomposition(
+                    item,
+                    0,
+                    nodes,
+                    incoming_by_product[product_key],
+                    requirements,
+                    bom_by_id,
+                    reachable_bom_cache,
+                ),
+            ))
             continue
         for stock in stocks:
             reserved, issued = reservation_totals.get((item.id, stock.id), (0, 0))
             rows.append(_inventory_item_row(
                 item,
                 stock.id,
-                nodes.get(stock.completed_flow_node_id, {}).get(
-                    "label", stock.completed_flow_node_id
+                completed_node_display_label(
+                    _flow,
+                    nodes,
+                    stock.flow_node_id,
+                    stock.completed_flow_node_id,
                 ),
                 max(stock.quantity - stock.reserved_quantity, 0),
                 reserved,
                 issued,
+                item_name,
+                _inventory_decomposition(
+                    item,
+                    max(stock.quantity - stock.reserved_quantity, 0),
+                    nodes,
+                    incoming_by_product[product_key],
+                    requirements,
+                    bom_by_id,
+                    reachable_bom_cache,
+                ),
             ))
     return rows
 
@@ -237,6 +306,8 @@ def _inventory_item_row(
     available: int,
     reserved: int,
     issued: int,
+    item_name: str | None = None,
+    decomposition: dict | None = None,
 ) -> dict:
     return {
         "id": stock_id or -item.id,
@@ -247,11 +318,74 @@ def _inventory_item_row(
         "product_bom_id": item.product_bom_id,
         "flow_node_id": item.flow_node_id,
         "item_code": item.item_code,
-        "item_name": item.item_name,
+        "item_name": item_name or item.item_name,
         "completed_node_label": completed_node_label,
         "current_inventory_quantity": available,
         "reserved_inventory_quantity": reserved,
         "issued_inventory_quantity": issued,
+        "decomposition": decomposition or {
+            "finished_equivalent_quantity": 0,
+            "parts": [],
+        },
+    }
+
+
+def _inventory_decomposition(
+    item: ProductionPlanItem,
+    quantity: int,
+    nodes: dict[str, dict],
+    incoming: dict[str, list[str]],
+    requirements: dict[int, int],
+    bom_by_id: dict,
+    reachable_bom_cache: dict[tuple[int, int, str], set[int]],
+) -> dict:
+    finished_equivalent = quantity if item.item_type == "finished_product" else (
+        quantity // max(item.unit_requirement, 1)
+    )
+    if item.item_type == "finished_product":
+        reachable_bom_ids: set[int] = set()
+    elif item.item_type == "part":
+        reachable_bom_ids = {item.product_bom_id} if item.product_bom_id is not None else set()
+    else:
+        cache_key = (item.product_id, item.product_version, item.flow_node_id)
+        if cache_key not in reachable_bom_cache:
+            reachable_bom_ids: set[int] = set()
+            pending = list(incoming.get(item.flow_node_id, []))
+            visited: set[str] = set()
+            while pending:
+                node_id = pending.pop()
+                if node_id in visited:
+                    continue
+                visited.add(node_id)
+                node = nodes.get(node_id, {})
+                if node.get("type") == "part" and isinstance(node.get("bom_item_id"), int):
+                    reachable_bom_ids.add(node["bom_item_id"])
+                    continue
+                pending.extend(incoming.get(node_id, []))
+            reachable_bom_cache[cache_key] = reachable_bom_ids
+        reachable_bom_ids = reachable_bom_cache[cache_key]
+    parts = []
+    for bom_id in sorted(
+        reachable_bom_ids,
+        key=lambda value: getattr(bom_by_id.get(value), "sort_order", 0),
+    ):
+        bom = bom_by_id.get(bom_id)
+        if bom is None:
+            continue
+        equivalent_quantity = (
+            quantity
+            if item.item_type == "part" and item.product_bom_id == bom_id
+            else finished_equivalent * requirements.get(bom_id, bom.pcs)
+        )
+        parts.append({
+            "product_bom_id": bom.id,
+            "item_code": bom.part_no,
+            "item_name": bom.part_name,
+            "quantity": equivalent_quantity,
+        })
+    return {
+        "finished_equivalent_quantity": finished_equivalent,
+        "parts": parts,
     }
 
 
@@ -356,14 +490,46 @@ def _reserve_flow_items(
             if item is None:
                 raise DomainError("production_plan_flow_mismatch", "生产计划与流程图不一致")
             item.gross_required_quantity = required_units * item.unit_requirement
-            _reserve_and_validate_plan_item(session, plan, item, actor_username)
             if node.get("type") == "assembly":
+                _reserve_and_validate_plan_item(session, plan, item, actor_username)
                 next_required = ceil(item.net_required_quantity / item.unit_requirement)
         for source_id in incoming.get(node_id, []):
             if source_id:
                 visit(source_id, next_required, visiting | {node_id})
 
     visit(shipping_node_id, required_product_quantity, set())
+    routes_by_bom: dict[int, list[ProductionPlanItem]] = {}
+    for item in items:
+        if item.item_type == "part" and item.product_bom_id is not None:
+            routes_by_bom.setdefault(item.product_bom_id, []).append(item)
+    for routes in routes_by_bom.values():
+        routes.sort(key=lambda item: item.sort_order)
+        required = max((item.gross_required_quantity for item in routes), default=0)
+        for item in routes:
+            item.gross_required_quantity = 0
+            item.estimated_inventory_quantity = 0
+            item.net_required_quantity = 0
+            item.reserved_inventory_quantity = 0
+        primary = routes[0]
+        primary.gross_required_quantity = required
+        allocated = reserve_plan_item(
+            session,
+            production_plan_id=plan.id,
+            production_plan_item_id=primary.id,
+            plan_item=primary,
+            requested_quantity=required,
+            actor_username=actor_username,
+        )
+        primary.reserved_inventory_quantity = allocated
+        primary.estimated_inventory_quantity = allocated
+        primary.net_required_quantity = required - allocated
+        if sum(item.planned_production_quantity for item in routes) < primary.net_required_quantity:
+            raise DomainError(
+                "production_plan_inventory_changed",
+                f"{primary.item_code} {primary.item_name}的可用库存已变化，请重新加载并分配各路线生产数量",
+                status_code=409,
+                path="items",
+            )
 
 
 __all__ = [

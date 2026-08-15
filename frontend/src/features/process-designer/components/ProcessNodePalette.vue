@@ -95,6 +95,7 @@ const emit = defineEmits<{
         </div>
         <span class="group-count">{{ bomItems.length }}</span>
       </div>
+      <p class="group-hint">同一配件可重复拖入，用于配置自产、外购等不同路线。</p>
       <div class="group-items">
         <button
           v-for="item in bomItems"
@@ -175,6 +176,7 @@ const emit = defineEmits<{
 .department-finished .group-mark { background: var(--flow-finished); }
 .group-count { min-width: 20px; padding: 1px 5px; border-radius: 999px; background: var(--md-surface-container-high); color: var(--md-on-surface-variant); font-size: 10px; line-height: 16px; text-align: center; }
 .group-items { display: grid; gap: 6px; padding: 7px; }
+.group-hint { margin: 0; padding: 7px 9px 0; color: var(--md-on-surface-variant); font-size: 10px; line-height: 1.4; }
 .palette-item { display: flex; width: 100%; min-height: 40px; align-items: center; gap: 7px; padding: 6px 7px; border: 1px solid; border-radius: calc(var(--erp-radius) - 2px); background: var(--md-surface-container-lowest); color: var(--md-on-surface); text-align: left; cursor: grab; transition: transform .12s ease, box-shadow .12s ease; }
 .palette-item:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 2px 6px rgb(0 0 0 / 10%); }
 .palette-item:active:not(:disabled) { cursor: grabbing; transform: translateY(0); box-shadow: none; }

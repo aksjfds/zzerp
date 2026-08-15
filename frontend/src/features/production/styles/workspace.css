@@ -2,12 +2,71 @@
 .production-workspace { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
 .production-execution { min-width: 0; }
 .production-card { margin-bottom: 18px; padding: 20px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
+.production-workspace--viewport {
+  height: calc(100dvh - var(--erp-page-gutter) - 120px);
+  max-height: calc(100dvh - var(--erp-page-gutter) - 120px);
+  align-items: stretch;
+}
+.production-workspace--viewport .production-scroll-column {
+  display: flex;
+  min-height: 0;
+  max-height: 100%;
+  flex-direction: column;
+  overflow: hidden;
+}
+.production-workspace--viewport .production-card.production-scroll-column { margin-bottom: 0; }
+.production-workspace--viewport .production-scroll-column > :first-child {
+  min-height: 0;
+  flex: 1;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+.production-workspace--viewport .production-scroll-column > .production-pagination {
+  flex: 0 0 auto;
+}
 .production-details { min-height: 260px; }
 .production-selection { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding-bottom: 14px; }
 .production-selection span { color: var(--md-on-surface-variant); font-size: 13px; }
 .production-pagination { justify-content: flex-end; margin-top: 14px; }
+.repository-status-tag { flex: 0 0 auto; font-weight: 650; }
+.repository-status-tag.repository-status--unprocessed {
+  --el-tag-bg-color: #f2f4f7;
+  --el-tag-border-color: #d0d5dd;
+  --el-tag-text-color: #475467;
+}
+.repository-status-tag.repository-status--processing {
+  --el-tag-bg-color: #fff4d6;
+  --el-tag-border-color: #f7c948;
+  --el-tag-text-color: #8a4b08;
+}
+.repository-status-tag.repository-status--processing_completed {
+  --el-tag-bg-color: #e8f7ee;
+  --el-tag-border-color: #65c98c;
+  --el-tag-text-color: #176b3a;
+}
+.repository-status-tag.repository-status--qc {
+  --el-tag-bg-color: #f3e8ff;
+  --el-tag-border-color: #c084fc;
+  --el-tag-text-color: #6b21a8;
+}
+.repository-status-tag.repository-status--rework {
+  --el-tag-bg-color: #feeceb;
+  --el-tag-border-color: #f58b86;
+  --el-tag-text-color: #b42318;
+}
+.repository-status-tag.repository-status--completed {
+  --el-tag-bg-color: #dcfce7;
+  --el-tag-border-color: #4ade80;
+  --el-tag-text-color: #166534;
+}
 @media (max-width: 900px) {
   .production-workspace { grid-template-columns: 1fr; }
+  .production-workspace--viewport {
+    height: auto;
+    max-height: none;
+  }
+  .production-workspace--viewport .production-scroll-column { max-height: none; overflow: visible; }
+  .production-workspace--viewport .production-scroll-column > :first-child { overflow-y: visible; }
 }
 @media (max-width: 600px) {
   .production-page { padding: 12px; }

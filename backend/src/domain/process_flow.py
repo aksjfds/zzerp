@@ -27,7 +27,7 @@ def validate_process_flow_draft(
     bom_ids: set[int],
 ) -> ProcessFlowLike:
     node_map = {}
-    part_node_by_bom: dict[int, str] = {}
+    part_node_by_bom: dict[int, list[str]] = defaultdict(list)
     for index, node in enumerate(flow.nodes):
         if node.id in node_map:
             _fail(
@@ -45,14 +45,7 @@ def validate_process_flow_draft(
                     f"process_flow.nodes.{index}.bom_item_id",
                     node.id,
                 )
-            if node.bom_item_id in part_node_by_bom:
-                _fail(
-                    "duplicate_bom_part_node",
-                    "同一 BOM 行不能生成多个配件节点",
-                    f"process_flow.nodes.{index}.bom_item_id",
-                    node.id,
-                )
-            part_node_by_bom[node.bom_item_id] = node.id
+            part_node_by_bom[node.bom_item_id].append(node.id)
 
     edge_ids: set[str] = set()
     edge_keys: set[tuple[str, str]] = set()
@@ -90,7 +83,7 @@ def validate_process_flow(
         _fail("flow_nodes_missing", "流程图存在连线但没有节点", "process_flow.nodes")
 
     node_map = {}
-    part_node_by_bom: dict[int, str] = {}
+    part_node_by_bom: dict[int, list[str]] = defaultdict(list)
     for index, node in enumerate(flow.nodes):
         if node.id in node_map:
             _fail(
@@ -108,14 +101,7 @@ def validate_process_flow(
                     f"process_flow.nodes.{index}.bom_item_id",
                     node.id,
                 )
-            if node.bom_item_id in part_node_by_bom:
-                _fail(
-                    "duplicate_bom_part_node",
-                    "同一 BOM 行不能生成多个配件节点",
-                    f"process_flow.nodes.{index}.bom_item_id",
-                    node.id,
-                )
-            part_node_by_bom[node.bom_item_id] = node.id
+            part_node_by_bom[node.bom_item_id].append(node.id)
 
     missing_bom_ids = bom_ids - set(part_node_by_bom)
     if missing_bom_ids:
@@ -208,6 +194,21 @@ def validate_process_flow(
             if normal_outgoing[node.id] != 1:
                 _fail("execution_output_count", f"节点“{node.label}”必须且只能连接一个后续节点", path, node.id)
 
+    for route_ids in part_node_by_bom.values():
+        if len(route_ids) < 2:
+            continue
+        convergence_ids = {
+            _first_route_convergence(node_map, normal_targets, route_id)
+            for route_id in route_ids
+        }
+        if None in convergence_ids or len(convergence_ids) != 1:
+            _fail(
+                "alternative_route_target_mismatch",
+                "同一 BOM 配件的多条自产/外购路线必须进入同一个装配或发货节点",
+                "process_flow.nodes",
+                route_ids[0],
+            )
+
     _validate_normal_dag(node_map, normal_adjacency, normal_indegree)
     _validate_connected(node_map, undirected)
     return flow
@@ -229,6 +230,23 @@ def _validate_normal_dag(node_map, adjacency, indegree) -> None:
             "宏观工艺路线不能形成环",
             "process_flow.edges",
         )
+
+
+def _first_route_convergence(node_map, targets, start_id: str) -> str | None:
+    current_id = start_id
+    visited: set[str] = set()
+    while current_id not in visited:
+        visited.add(current_id)
+        next_ids = targets.get(current_id, [])
+        if len(next_ids) != 1:
+            return None
+        current_id = next_ids[0]
+        node = node_map.get(current_id)
+        if node is None:
+            return None
+        if node.type in {"assembly", "shipping"}:
+            return current_id
+    return None
 
 
 def _validate_connected(node_map, undirected) -> None:

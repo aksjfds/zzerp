@@ -17,7 +17,16 @@ export type AssemblyGroup = {
 
 function groupKind(item: RepositoryItem) {
   if (!item.card_key.startsWith('history:')) return 'current' as const
-  return item.work_status === 'processing' ? 'processing' as const : 'history' as const
+  return item.work_status !== 'completed' ? 'processing' as const : 'history' as const
+}
+
+const statusPriority: Record<RepositoryItem['work_status'], number> = {
+  completed: 0,
+  unprocessed: 1,
+  processing: 2,
+  processing_completed: 3,
+  qc: 4,
+  rework: 5,
 }
 
 export function assemblyGroupKey(item: RepositoryItem) {
@@ -36,16 +45,17 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
     return [...grouped.entries()].map(([key, groupItems]) => {
       const firstItem = groupItems[0]!
       const kind = groupKind(firstItem)
-      const complete = groupItems.every(item => item.assembly_group_complete)
+      const complete = kind !== 'current'
+        || groupItems.every(item => item.assembly_group_complete)
       const sources = new Map<string, RepositoryItem[]>()
       groupItems.forEach(item => sources.set(
-        item.source_flow_node_id,
-        [...(sources.get(item.source_flow_node_id) || []), item],
+        item.assembly_material_key,
+        [...(sources.get(item.assembly_material_key) || []), item],
       ))
       return {
         key,
         items: groupItems,
-        capacity: complete
+        capacity: kind === 'current' && complete
           ? Math.min(...[...sources.values()].map(sourceItems => Math.floor(
             sourceItems.reduce((sum, item) => sum + item.available_quantity, 0)
               / sourceItems[0]!.assembly_unit_quantity,
@@ -53,14 +63,15 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
           : 0,
         complete,
         productName: firstItem.product_name,
-        name: complete
-          ? firstItem.assembly_output_name
-            || `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`
-          : `待装配物料：${[...new Set(groupItems.map(item => item.part_name))].join('、')}`,
+        name: firstItem.assembly_output_name
+          || `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`,
         orderNo: firstItem.customer_order_no,
-        status: groupItems.some(item => item.work_status === 'processing')
-          ? 'processing'
-          : groupItems.every(item => item.work_status === 'completed') ? 'completed' : 'unprocessed',
+        status: groupItems.every(item => item.work_status === 'completed')
+          ? 'completed'
+          : groupItems
+            .filter(item => item.work_status !== 'completed')
+            .sort((a, b) => statusPriority[b.work_status] - statusPriority[a.work_status])[0]
+            ?.work_status || 'unprocessed',
         arrivedAt: groupItems.map(item => item.arrived_at).filter(Boolean).sort().at(-1) || null,
         sources: [...sources.values()].map(sourceItems => ({
           name: sourceItems[0]!.part_name,

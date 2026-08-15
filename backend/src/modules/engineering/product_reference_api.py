@@ -3,9 +3,11 @@
 from collections.abc import Collection
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from pydantic import ValidationError
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
+from domain.errors import DomainViolation
 from domain.process_flow import validate_process_flow
 from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
 from modules.errors import DomainError
@@ -20,6 +22,12 @@ class ProductReference:
     product_name: str
     factory_code: str
     version: int
+
+
+@dataclass(frozen=True, slots=True)
+class ProductOrderReadiness:
+    ready: bool
+    reason: str
 
 
 def _product_reference(product: Product) -> ProductReference:
@@ -86,73 +94,110 @@ def resolve_order_product_references(
                 "订单产品必须属于所选客户",
                 path="items",
             )
-        _validate_order_engineering_data(session, product)
+    readiness = get_product_order_readinesses(session, products.values())
+    for product in products.values():
+        status = readiness[product.id]
+        if not status.ready:
+            raise DomainError(
+                "product_engineering_data_missing",
+                f"产品 {product.factory_code} 不可用",
+                path="items",
+            )
     return {
         product_id: _product_reference(product)
         for product_id, product in products.items()
     }
 
 
-def _validate_order_engineering_data(
+def get_product_order_readinesses(
     session: Session,
-    product: Product,
-) -> None:
-    bom_ids = set(
-        session.scalars(
-            select(ProductBom.id).where(
-                ProductBom.product_id == product.id,
-                ProductBom.product_version == product.version,
-            )
-        ).all()
-    )
-    flow = session.scalar(
-        select(ProductProcessFlow.flow_json).where(
-            ProductProcessFlow.product_id == product.id,
-            ProductProcessFlow.product_version == product.version,
+    products: Collection[Product],
+) -> dict[int, ProductOrderReadiness]:
+    product_list = list(products)
+    if not product_list:
+        return {}
+    version_keys = {(product.id, product.version) for product in product_list}
+    bom_ids: dict[tuple[int, int], set[int]] = {key: set() for key in version_keys}
+    for product_id, product_version, bom_id in session.execute(
+        select(ProductBom.product_id, ProductBom.product_version, ProductBom.id).where(
+            tuple_(ProductBom.product_id, ProductBom.product_version).in_(list(version_keys))
         )
-    )
-    if not bom_ids or not flow or not flow.get("nodes"):
-        raise DomainError(
-            "product_engineering_data_missing",
-            f"产品 {product.factory_code} 缺少当前版本 BOM 或流程图",
-            path="items",
-        )
-    validated = ProcessFlowPayload.model_validate(flow)
-    validate_process_flow(validated, bom_ids)
-    procedure_ids = {
-        node.procedure_id
-        for node in validated.nodes
-        if node.type == "process"
-        or (node.type == "assembly" and node.procedure_id is not None)
-    }
-    procedures = get_procedure_routes(session, procedure_ids)
-    if set(procedures) != procedure_ids:
-        raise DomainError(
-            "process_procedure_invalid",
-            f"产品 {product.factory_code} 的流程包含失效工艺",
-            path="items",
-        )
-    if any(
-        (
-            node.type == "process"
-            and procedures[node.procedure_id].input_mode != "single"
-        )
-        or (
-            node.type == "assembly"
-            and node.procedure_id is not None
-            and procedures[node.procedure_id].input_mode != "multiple"
-        )
-        for node in validated.nodes
     ):
-        raise DomainError(
-            "process_procedure_input_mode_invalid",
-            f"产品 {product.factory_code} 的工艺输入方式与流程节点不一致",
-            path="items",
+        bom_ids[(product_id, product_version)].add(bom_id)
+    flows = {
+        (product_id, product_version): flow_json
+        for product_id, product_version, flow_json in session.execute(
+            select(
+                ProductProcessFlow.product_id,
+                ProductProcessFlow.product_version,
+                ProductProcessFlow.flow_json,
+            ).where(
+                tuple_(
+                    ProductProcessFlow.product_id,
+                    ProductProcessFlow.product_version,
+                ).in_(list(version_keys))
+            )
         )
+    }
+    validated_flows: dict[int, ProcessFlowPayload] = {}
+    result: dict[int, ProductOrderReadiness] = {}
+    procedure_ids: set[int] = set()
+    for product in product_list:
+        key = (product.id, product.version)
+        current_bom_ids = bom_ids[key]
+        flow = flows.get(key)
+        if not current_bom_ids:
+            result[product.id] = ProductOrderReadiness(False, "当前版本缺少 BOM")
+            continue
+        if not flow or not flow.get("nodes"):
+            result[product.id] = ProductOrderReadiness(False, "当前版本缺少正式流程图")
+            continue
+        try:
+            validated = ProcessFlowPayload.model_validate(flow)
+            validate_process_flow(validated, current_bom_ids)
+        except (ValidationError, DomainViolation):
+            result[product.id] = ProductOrderReadiness(False, "当前版本正式流程图不完整")
+            continue
+        validated_flows[product.id] = validated
+        procedure_ids.update(
+            node.procedure_id
+            for node in validated.nodes
+            if node.type == "process"
+            or (node.type == "assembly" and node.procedure_id is not None)
+        )
+    procedures = get_procedure_routes(session, procedure_ids)
+    for product in product_list:
+        validated = validated_flows.get(product.id)
+        if validated is None:
+            continue
+        flow_procedure_ids = {
+            node.procedure_id
+            for node in validated.nodes
+            if node.type == "process"
+            or (node.type == "assembly" and node.procedure_id is not None)
+        }
+        if not flow_procedure_ids.issubset(procedures):
+            result[product.id] = ProductOrderReadiness(False, "流程图包含已失效工艺")
+            continue
+        if any(
+            (node.type == "process" and procedures[node.procedure_id].input_mode != "single")
+            or (
+                node.type == "assembly"
+                and node.procedure_id is not None
+                and procedures[node.procedure_id].input_mode != "multiple"
+            )
+            for node in validated.nodes
+        ):
+            result[product.id] = ProductOrderReadiness(False, "流程节点与工艺输入方式不匹配")
+            continue
+        result[product.id] = ProductOrderReadiness(True, "")
+    return result
 
 
 __all__ = [
     "ProductReference",
+    "ProductOrderReadiness",
+    "get_product_order_readinesses",
     "get_product_reference",
     "get_product_references",
     "resolve_order_product_references",

@@ -1,5 +1,6 @@
 from modules.engineering.persistence import Product
 from modules.engineering.mapper import serialize_product_detail
+from modules.engineering.product_reference_api import get_product_order_readinesses
 from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import empty_process_flow
 from modules.errors import product_not_found
@@ -16,11 +17,14 @@ def command_result(
         repository.session,
         {product.customer_id},
     )
+    readiness = get_product_order_readinesses(repository.session, [product])[product.id]
     return serialize_product_detail(
         product,
         empty_process_flow(),
         requested_version,
         customer_name=customer_names[product.customer_id],
+        order_ready=readiness.ready,
+        order_ready_reason=readiness.reason,
     )
 
 

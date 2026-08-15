@@ -33,6 +33,19 @@ class WorkOrderProgress:
         return self.pending_qc_quantity == 0 and self.rework_pending_quantity == 0
 
 
+@dataclass(frozen=True)
+class AssemblyOutputProgress:
+    processed_quantity: int
+    submitted_quantity: int
+    ready_for_qc_quantity: int
+    processing_quantity: int
+    pending_qc_quantity: int
+    qualified_quantity: int
+    rework_quantity: int
+    scrap_quantity: int
+    lost_quantity: int
+
+
 def order_remaining_quantity(order: WorkOrder) -> int:
     """Quantity that has not entered direct completion or an initial QC batch."""
     return max(order.quantity - order.completed_quantity, 0)
@@ -120,6 +133,60 @@ def calculate_work_order_progress(
         scrap_quantity=sum(batch.scrap_quantity or 0 for batch in completed_batches),
         lost_quantity=sum(batch.lost_quantity or 0 for batch in completed_batches),
         rework_pending_by_batch=rework_pending_by_batch,
+    )
+
+
+def calculate_assembly_output_progress(
+    order: WorkOrder,
+    batches: Iterable[WorkOrderBatch],
+    output_unit_quantity: int,
+) -> AssemblyOutputProgress:
+    """Return assembly progress consistently in assembly-output units."""
+    unit_quantity = max(int(output_unit_quantity), 1)
+    batch_list = list(batches)
+    pending_batches = [batch for batch in batch_list if batch.recorded_at is None]
+    completed_batches = [batch for batch in batch_list if batch.recorded_at is not None]
+    initial_batches = [
+        batch for batch in batch_list if batch.rework_source_batch_id is None
+    ]
+    initial_submitted_quantity = sum(
+        batch.submitted_quantity for batch in initial_batches
+    )
+    rework_pending = sum(rework_pending_quantities(batch_list).values())
+    direct_quantity = max(
+        order.completed_quantity * unit_quantity - initial_submitted_quantity,
+        0,
+    )
+    operated_quantity = max(
+        order.processed_quantity,
+        order.completed_quantity,
+    )
+    return AssemblyOutputProgress(
+        processed_quantity=operated_quantity * unit_quantity,
+        submitted_quantity=order.completed_quantity * unit_quantity,
+        ready_for_qc_quantity=max(
+            order.processed_quantity - order.completed_quantity,
+            0,
+        ) * unit_quantity,
+        processing_quantity=(
+            max(order.quantity - operated_quantity, 0) * unit_quantity
+            + rework_pending
+        ),
+        pending_qc_quantity=sum(
+            batch.submitted_quantity for batch in pending_batches
+        ),
+        qualified_quantity=direct_quantity + sum(
+            batch.qualified_quantity or 0 for batch in completed_batches
+        ),
+        rework_quantity=sum(
+            batch.rework_quantity or 0 for batch in completed_batches
+        ),
+        scrap_quantity=sum(
+            batch.scrap_quantity or 0 for batch in completed_batches
+        ),
+        lost_quantity=sum(
+            batch.lost_quantity or 0 for batch in completed_batches
+        ),
     )
 
 

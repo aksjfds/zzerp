@@ -178,6 +178,8 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
       factory_code: product.factory_code,
       customer_code: product.customer_code,
       bom_count: product.bom_items.length,
+      order_ready: product.order_ready,
+      order_ready_reason: product.order_ready_reason,
       created_at: product.created_at,
       updated_at: product.updated_at,
     }

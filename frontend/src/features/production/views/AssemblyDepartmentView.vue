@@ -4,11 +4,9 @@ import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import AssemblyGroupCards from '../components/AssemblyGroupCards.vue'
-import TagProductionOverview from '../components/TagProductionOverview.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import AssemblyWorkOrderDialog from '../components/AssemblyWorkOrderDialog.vue'
 import { useAssemblyDepartment } from '../composables/useAssemblyDepartment'
-import { workOrderProductionOverview } from '../domain/productionOverview'
 import '../styles/workspace.css'
 
 const controller = useAssemblyDepartment()
@@ -22,10 +20,6 @@ const {
   activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails, openGroup,
   refresh, saveWorkOrder, selectGroup, selectedGroup, selectedGroupKey, submitting,
 } = controller
-const productionOverview = computed(() => workOrderProductionOverview(
-  workOrders.value,
-  selectedGroup.value?.capacity ?? 0,
-))
 const workOrderWorkers = computed(() => {
   const workshop = workshops.value.find(
     item => item.workshop_name === activeRepository.value?.workshop_name,
@@ -42,29 +36,22 @@ onMounted(load)
     <DepartmentSectionTabs department-code="assembly">
     <RepositoryFilterBar
       :workshops="workshops"
+      mode="assembly"
       @search="applyFilters"
     />
-    <section class="production-workspace">
-      <div class="production-card">
+    <section class="production-workspace production-workspace--viewport">
+      <div class="production-card production-scroll-column">
         <AssemblyGroupCards :groups="assembly.groups.value" :loading="loading" :selected-key="selectedGroupKey"
           @select="selectGroup" @open="openGroup" />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total"
           :page-size="pageSize" :total="repositoryTotal" @current-change="changeRepositoryPage" />
       </div>
-      <div class="production-execution">
-        <TagProductionOverview
-          v-if="selectedGroup"
-          :loading="detailLoading"
-          :summary="productionOverview"
-          subtitle="按当前装配组合统计"
-          pending-label="待装配"
-          processing-label="装配中"
-          completed-label="已装配（累计合格）"
-        />
-        <WorkOrderCards :items="workOrders" :loading="detailLoading" mode="assembly" @submit="workOrderActions.submit"
+      <div class="production-execution production-scroll-column">
+        <WorkOrderCards v-if="selectedGroup" :items="workOrders" :loading="detailLoading" mode="assembly"
           @submit-qc="workOrderActions.submitQc" @submit-direct-result="workOrderActions.submitDirectResult" @resubmit-qc="workOrderActions.resubmitQc"
           @cancel="workOrderActions.cancel" @undo="workOrderActions.undo" />
-        <ElPagination v-model:current-page="historyPage" class="production-pagination" layout="prev, pager, next, total"
+        <ElEmpty v-else description="请先选择装配任务" :image-size="64" />
+        <ElPagination v-if="selectedGroup" v-model:current-page="historyPage" class="production-pagination" layout="prev, pager, next, total"
           :page-size="pageSize" :total="historyTotal" @current-change="loadDetails" />
       </div>
     </section>

@@ -128,12 +128,7 @@ def planned_finished_quantity(session: Session, items: list[ProductionPlanItem])
             required_from_flow,
             availability,
         )
-        return all(
-            gross_quantities.get(item.flow_node_id, 0)
-            <= item.estimated_inventory_quantity + item.planned_production_quantity
-            for item in items
-            if item.item_type == "part"
-        )
+        return _part_routes_support(items, gross_quantities)
 
     low = 0
     high = finished.gross_required_quantity
@@ -144,6 +139,33 @@ def planned_finished_quantity(session: Session, items: list[ProductionPlanItem])
         else:
             high = middle - 1
     return low
+
+
+def planned_product_quantity(items: list[ProductionPlanItem]) -> int:
+    """Return the product quantity represented by the saved ordinary-part plan."""
+    finished = next(
+        (item for item in items if item.item_type == "finished_product"),
+        None,
+    )
+    if finished is None:
+        return 0
+    routes_by_bom: dict[int, list[ProductionPlanItem]] = {}
+    for item in items:
+        if item.item_type == "part" and item.product_bom_id is not None:
+            routes_by_bom.setdefault(item.product_bom_id, []).append(item)
+    if not routes_by_bom:
+        return 0
+    component_capacities = []
+    for routes in routes_by_bom.values():
+        unit_requirement = routes[0].unit_requirement
+        planned_quantity = sum(item.planned_production_quantity for item in routes)
+        net_required_quantity = sum(item.net_required_quantity for item in routes)
+        component_capacities.append(max(
+            finished.gross_required_quantity
+            + (planned_quantity - net_required_quantity) // unit_requirement,
+            0,
+        ))
+    return min(component_capacities)
 
 
 def _order_item_definitions(session: Session, order_item, order_index: int) -> list[PlannedIdentity]:
@@ -233,40 +255,47 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
             gross_required_quantity=order_item.quantity * unit_requirement,
             sort_order=base_sort + index,
         ))
-    part_nodes = {
-        node.get("bom_item_id"): node
-        for node in nodes.values()
-        if node.get("type") == "part"
-    }
+    part_nodes: dict[int, list[dict]] = {}
+    for node in nodes.values():
+        if node.get("type") == "part":
+            part_nodes.setdefault(node.get("bom_item_id"), []).append(node)
+    for routes in part_nodes.values():
+        routes.sort(key=_node_sort_key)
     for index, bom in enumerate(bom_items, start=1):
-        node = part_nodes.get(bom.id)
-        if node is None:
+        routes = part_nodes.get(bom.id, [])
+        if not routes:
             raise DomainError(
                 "product_flow_bom_invalid",
                 f"配件 {bom.part_name} 没有对应流程节点",
                 path="items",
             )
-        result.append(PlannedIdentity(
-            customer_order_item_id=order_item.id,
-            identity_key=component_identity_key(
-                department_code="warehouse",
+        multiple_routes = len(routes) > 1
+        for route_index, node in enumerate(routes, start=1):
+            route_name = _part_route_name(flow, nodes, node["id"], route_index)
+            result.append(PlannedIdentity(
+                customer_order_item_id=order_item.id,
+                identity_key=component_identity_key(
+                    department_code="warehouse",
+                    item_type="part",
+                    product_id=product.id,
+                    product_version=order_item.product_version,
+                    product_bom_id=bom.id,
+                    flow_node_id=node["id"],
+                ),
                 item_type="part",
                 product_id=product.id,
                 product_version=order_item.product_version,
                 product_bom_id=bom.id,
                 flow_node_id=node["id"],
-            ),
-            item_type="part",
-            product_id=product.id,
-            product_version=order_item.product_version,
-            product_bom_id=bom.id,
-            flow_node_id=node["id"],
-            item_code=bom.part_no,
-            item_name=bom.part_name,
-            unit_requirement=bom.pcs,
-            gross_required_quantity=order_item.quantity * bom.pcs,
-            sort_order=base_sort + 1000 + index,
-        ))
+                item_code=bom.part_no,
+                item_name=(
+                    f"{bom.part_name}（{route_name}）"
+                    if multiple_routes else bom.part_name
+                ),
+                unit_requirement=bom.pcs,
+                gross_required_quantity=order_item.quantity * bom.pcs,
+                sort_order=base_sort + 1000 + index * 10 + route_index,
+            ))
     return result
 
 
@@ -347,7 +376,66 @@ def _flow_gross_quantities(
                 visit(source_id, next_required, visiting | {node_id})
 
     visit(shipping_node_id, required_product_quantity, set())
+    _merge_alternative_route_requirements(items, gross)
     return gross
+
+
+def _merge_alternative_route_requirements(items, gross: dict[str, int]) -> None:
+    """A BOM component may have multiple make/buy routes, but is required once."""
+    routes_by_bom: dict[int, list] = {}
+    for item in items:
+        if item.item_type == "part" and item.product_bom_id is not None:
+            routes_by_bom.setdefault(item.product_bom_id, []).append(item)
+    for routes in routes_by_bom.values():
+        if len(routes) < 2:
+            continue
+        routes.sort(key=lambda item: item.sort_order)
+        required = max((gross.get(item.flow_node_id, 0) for item in routes), default=0)
+        for index, item in enumerate(routes):
+            gross[item.flow_node_id] = required if index == 0 else 0
+
+
+def _part_routes_support(items, gross: dict[str, int]) -> bool:
+    routes_by_bom: dict[int, list] = {}
+    for item in items:
+        if item.item_type == "part" and item.product_bom_id is not None:
+            routes_by_bom.setdefault(item.product_bom_id, []).append(item)
+    return all(
+        sum(gross.get(item.flow_node_id, 0) for item in routes)
+        <= sum(
+            item.estimated_inventory_quantity + item.planned_production_quantity
+            for item in routes
+        )
+        for routes in routes_by_bom.values()
+    )
+
+
+def _part_route_name(
+    flow: dict,
+    nodes: dict[str, dict],
+    part_node_id: str,
+    route_index: int,
+) -> str:
+    current_id = part_node_id
+    visited: set[str] = set()
+    while current_id not in visited:
+        visited.add(current_id)
+        target_ids = [
+            edge.get("target_node_id")
+            for edge in flow.get("edges", [])
+            if edge.get("source_node_id") == current_id
+        ]
+        if len(target_ids) != 1 or not target_ids[0]:
+            break
+        target = nodes.get(target_ids[0])
+        if target is None:
+            break
+        if target.get("type") == "process":
+            return str(target.get("label") or f"路线{route_index}")
+        if target.get("type") in {"assembly", "shipping"}:
+            break
+        current_id = target["id"]
+    return f"路线{route_index}"
 
 
 def _node_sort_key(node: dict) -> tuple[float, float, str]:
@@ -356,6 +444,7 @@ def _node_sort_key(node: dict) -> tuple[float, float, str]:
 
 __all__ = [
     "planned_finished_quantity",
+    "planned_product_quantity",
     "rebuild_order_plan",
     "refresh_plan_availability",
 ]

@@ -2,10 +2,12 @@
 import { onBeforeUnmount, reactive, watch } from 'vue'
 import type { RepositoryWorkshop } from '../api/departmentRepositories'
 import type { RepositoryFilters } from '../domain/types'
+import { repositoryStatusLabel } from '../domain/repositoryWorkStatus'
 
-defineProps<{
+const props = withDefaults(defineProps<{
   workshops: RepositoryWorkshop[]
-}>()
+  mode?: 'production' | 'purchase' | 'assembly'
+}>(), { mode: 'production' })
 
 const emit = defineEmits<{
   search: [filters: RepositoryFilters]
@@ -41,9 +43,19 @@ onBeforeUnmount(() => clearTimeout(timer))
   <section class="repository-filter-bar">
     <ElSelect v-model="form.work_status" placement="bottom-start" :fallback-placements="['bottom-start', 'bottom-end']" aria-label="生产状态">
       <ElOption label="全部状态" value="all" />
-      <ElOption label="未加工" value="unprocessed" />
-      <ElOption label="加工中" value="processing" />
-      <ElOption label="已完成" value="completed" />
+      <template v-if="props.mode === 'production'">
+        <ElOption :label="repositoryStatusLabel('unprocessed', props.mode)" value="unprocessed" />
+        <ElOption :label="repositoryStatusLabel('processing', props.mode)" value="processing" />
+        <ElOption :label="repositoryStatusLabel('completed', props.mode)" value="completed" />
+      </template>
+      <template v-else>
+        <ElOption :label="repositoryStatusLabel('unprocessed', props.mode)" value="unprocessed" />
+        <ElOption :label="repositoryStatusLabel('processing', props.mode)" value="processing" />
+        <ElOption v-if="props.mode === 'purchase'" :label="repositoryStatusLabel('processing_completed', props.mode)" value="processing_completed" />
+        <ElOption :label="repositoryStatusLabel('qc', props.mode)" value="qc" />
+        <ElOption v-if="props.mode !== 'purchase'" :label="repositoryStatusLabel('rework', props.mode)" value="rework" />
+        <ElOption :label="repositoryStatusLabel('completed', props.mode)" value="completed" />
+      </template>
     </ElSelect>
     <ElSelect
       v-model="form.workshop_name"

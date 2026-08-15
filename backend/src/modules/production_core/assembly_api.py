@@ -112,11 +112,9 @@ def assign_assembly_work_order_number(
 def record_assembly_output(
     order: WorkOrder,
     *,
-    production_item_id: int,
     completed_quantity: int,
     close_order: bool,
 ) -> None:
-    order.production_item_id = production_item_id
     order.completed_quantity += completed_quantity
     if close_order:
         order.status = "closed"

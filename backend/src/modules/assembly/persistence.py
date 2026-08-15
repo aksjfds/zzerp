@@ -38,8 +38,8 @@ class WorkOrderMaterial(Base):
         Index("idx_work_order_material_repository", "repository_id"),
         UniqueConstraint(
             "work_order_id",
-            "production_item_id",
-            name="uq_work_order_material_item",
+            "repository_id",
+            name="uq_work_order_material_repository",
         ),
     )
 

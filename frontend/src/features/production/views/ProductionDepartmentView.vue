@@ -4,12 +4,10 @@ import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
-import TagProductionOverview from '../components/TagProductionOverview.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
 import PurchaseWorkOrderDialog from '../components/PurchaseWorkOrderDialog.vue'
 import { useProductionDepartment } from '../composables/useProductionDepartment'
-import { workOrderProductionOverview } from '../domain/productionOverview'
 import { departmentSupports } from '@/features/departments/registry'
 import '../styles/workspace.css'
 
@@ -29,13 +27,9 @@ const { items: workOrders, loading: detailLoading, page: historyPage, total: his
 const {
   activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails,
   openWorkOrder, reloadWorkspace, refresh, saveWorkOrder, selectRepository,
-  tagItems, tagLoading, submitting,
+  tagItems, submitting,
 } = controller
 const showSelectedWorkOrders = computed(() => Boolean(selectedRepository.value))
-const nonTagOverview = computed(() => workOrderProductionOverview(
-  workOrders.value,
-  selectedRepository.value?.available_quantity ?? 0,
-))
 const supportsSpecialPrinting = computed(() => (
   departmentSupports(props.departmentCode, 'special_printing')
 ))
@@ -62,10 +56,11 @@ onMounted(load)
     >
     <RepositoryFilterBar
       :workshops="workshops"
+      :mode="mode"
       @search="applyFilters"
     />
-    <section class="production-workspace">
-      <div class="production-card">
+    <section class="production-workspace production-workspace--viewport">
+      <div class="production-card production-scroll-column">
         <RepositoryCards
           :items="items"
           :loading="loading"
@@ -77,24 +72,14 @@ onMounted(load)
         />
         <ElPagination v-model:current-page="repositoryPage" class="production-pagination" layout="prev, next, total" :page-size="pageSize" :total="repositoryTotal" @current-change="changeRepositoryPage" />
       </div>
-      <div class="production-execution">
-        <TagProductionOverview
-          v-if="selectedRepository"
-          :items="mode === 'production' ? tagItems : undefined"
-          :summary="mode === 'purchase' ? nonTagOverview : undefined"
-          :loading="mode === 'production' ? tagLoading : detailLoading"
-          :subtitle="mode === 'production' ? '按当前配件和工艺统计' : '按当前外购配件统计'"
-          :pending-label="mode === 'production' ? '待打标记' : '待入库'"
-          :processing-label="mode === 'production' ? '正在打标记' : '入库处理中'"
-          :completed-label="mode === 'production' ? '已打完标记（累计合格）' : '已入库（累计合格）'"
-        />
+      <div class="production-execution production-scroll-column">
         <WorkOrderCards
           v-if="showSelectedWorkOrders"
           :items="workOrders"
           :loading="detailLoading"
           :mode="mode"
           :special-printing="supportsSpecialPrinting"
-          @submit="workOrderActions.submit"
+          @register-arrival="workOrderActions.registerArrival"
           @submit-qc="workOrderActions.submitQc"
           @submit-direct-result="workOrderActions.submitDirectResult"
           @resubmit-qc="workOrderActions.resubmitQc"

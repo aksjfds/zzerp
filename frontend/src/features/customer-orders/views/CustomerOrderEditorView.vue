@@ -21,8 +21,10 @@ const products = ref<OrderProduct[]>([])
 const customers = ref<Customer[]>([])
 const customerLoading = ref(false)
 const productLoading = ref(false)
+const saving = ref(false)
 let productSearchSequence = 0
 const status = ref('draft')
+const orderEditable = ref(true)
 const revision = ref<number | null>(null)
 const form = reactive({
   customer_order_no: '', customer_id: null as number | null, remark: '', items: [] as CustomerOrderItem[],
@@ -31,7 +33,7 @@ const effectiveOrderId = computed(() => props.orderId ?? (Number(route.params.or
 const canEdit = computed(() => effectiveOrderId.value
   ? authStore.hasPermission(ORDER_PERMISSIONS.edit)
   : authStore.hasPermission(ORDER_PERMISSIONS.add))
-const readOnly = computed(() => props.embedded || status.value !== 'draft' || !canEdit.value)
+const readOnly = computed(() => props.embedded || !orderEditable.value || !canEdit.value)
 
 function addItem() {
   if (!form.customer_id) {
@@ -85,6 +87,13 @@ async function save() {
     || form.items.some((item) => !item.product_id || item.quantity < 1 || !item.delivery_date)) {
     return ElMessage.warning('请完整填写订单和产品明细')
   }
+  const unavailableProduct = form.items
+    .map(item => product(item.product_id))
+    .find(item => item && !item.order_ready)
+  if (unavailableProduct) {
+    return ElMessage.warning(`${unavailableProduct.factory_code} 不可用`)
+  }
+  saving.value = true
   try {
     const payload: CustomerOrderPayload = {
       customer_order_no: form.customer_order_no,
@@ -107,6 +116,8 @@ async function save() {
     router.push('/business/orders')
   } catch (error) {
     ElMessage.error(getApiErrorDetail(error)?.message || '客户订单保存失败')
+  } finally {
+    saving.value = false
   }
 }
 
@@ -120,6 +131,7 @@ onMounted(async () => {
   if (effectiveOrderId.value) {
     const order = await queryCustomerOrder(effectiveOrderId.value)
     status.value = order.status
+    orderEditable.value = order.can_edit
     revision.value = order.revision
     Object.assign(form, {
       customer_order_no: order.customer_order_no,
@@ -141,8 +153,8 @@ onMounted(async () => {
 
 <template>
   <main class="editor-page" :class="{ embedded: props.embedded }">
-    <header v-if="!props.embedded"><div><span>业务部</span><h1>{{ effectiveOrderId ? '客户订单详情' : '创建客户订单' }}</h1></div><div><ElButton @click="router.push('/business/orders')">返回</ElButton><ElButton v-if="!readOnly" type="primary" @click="save">保存草稿</ElButton></div></header>
-    <section v-if="!effectiveOrderId" class="card">
+    <header v-if="!props.embedded"><div><span>业务部</span><h1>{{ effectiveOrderId ? readOnly ? '客户订单详情' : '编辑客户订单' : '创建客户订单' }}</h1></div><div class="header-actions"><ElButton :disabled="saving" @click="router.push('/business/orders')">返回列表</ElButton><ElButton v-if="!readOnly" type="primary" :loading="saving" @click="save">保存草稿</ElButton></div></header>
+    <section v-if="!props.embedded" class="card">
       <ElForm :model="form" :disabled="readOnly" label-position="top">
         <div class="grid">
           <ElFormItem label="客户订单编号"><ElInput v-model="form.customer_order_no" /></ElFormItem>
@@ -170,7 +182,15 @@ onMounted(async () => {
         <ElTableColumn label="产品" min-width="220">
           <template #default="{ row }">
             <span v-if="readOnly" class="readonly-value">{{ productLabel(row.product_id) }}</span>
-            <ElSelect v-else v-model="row.product_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" :disabled="!form.customer_id" filterable remote :remote-method="searchProducts" :loading="productLoading" placeholder="选择该客户的产品"><ElOption v-for="item in products" :key="item.id" :value="item.id" :label="`${item.factory_code} · ${item.product_name}`" :disabled="form.items.some(other => other !== row && other.product_id === item.id)" /></ElSelect>
+            <ElSelect v-else v-model="row.product_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" :disabled="!form.customer_id" filterable remote :remote-method="searchProducts" :loading="productLoading" placeholder="选择该客户的产品">
+              <ElOption
+                v-for="item in products"
+                :key="item.id"
+                :value="item.id"
+                :label="`${item.factory_code} · ${item.product_name}${item.order_ready ? '' : '（不可用）'}`"
+                :disabled="!item.order_ready || form.items.some(other => other !== row && other.product_id === item.id)"
+              />
+            </ElSelect>
           </template>
         </ElTableColumn>
         <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.product_version ?? product(row.product_id)?.version ?? '-' }}</template></ElTableColumn>

@@ -12,6 +12,7 @@ from schemas.sales import (
     CustomerOrderCreate,
     CustomerOrderEnvelope,
     CustomerOrderListEnvelope,
+    CustomerOrderProgressDetailEnvelope,
     CustomerOrderUpdate,
     ProductionPlanEnvelope,
     ProductionPlanUpdate,
@@ -24,6 +25,7 @@ from modules.sales.api import (
     get_customer_order_production,
     get_order,
     list_orders,
+    list_order_progress_details,
     update_order,
 )
 from modules.planning.api import get_order_plan, update_order_plan
@@ -49,6 +51,17 @@ def customer_order_create(
     _: dict = Depends(require_any_permission(ORDER_ADD, csrf=True)),
 ):
     return {"data": create_order(payload)}
+
+
+@router.get("/progress-details", response_model=CustomerOrderProgressDetailEnvelope)
+def customer_order_progress_details(
+    page: int = Query(default=1, gt=0),
+    page_size: int = Query(default=50, gt=0, le=200),
+    customer_id: int | None = Query(default=None, gt=0),
+    _: dict = Depends(require_any_permission(ORDER_VIEW)),
+):
+    data, total = list_order_progress_details(page, page_size, customer_id)
+    return {"data": data, "total": total}
 
 
 @router.get("/production-plans", response_model=CustomerOrderListEnvelope)

@@ -118,7 +118,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
     <div class="section-heading">
       <div>
         <h2>工序流程配置</h2>
-        <p>配件可直接进入生产工艺、采购部外购节点或装配；不同部门之间可以直接流转，也可以按实际需要添加QC，并以“发货”作为流程终点。</p>
+        <p>配件可直接进入生产工艺、采购部外购节点或装配；同一 BOM 配件可配置多条自产/外购路线，系统会在装配时按可替代来源合并计算。</p>
       </div>
       <div class="heading-actions"><slot name="actions" /></div>
     </div>

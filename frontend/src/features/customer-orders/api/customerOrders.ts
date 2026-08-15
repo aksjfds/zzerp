@@ -1,6 +1,7 @@
 import { service } from '@/api/request'
 import type {
   CustomerOrder,
+  CustomerOrderProgressDetail,
   CustomerOrderPayload,
   CustomerOrderProduction,
   ProductionPlan,
@@ -9,6 +10,20 @@ import type {
 export async function queryCustomerOrders(page = 1, pageSize = 50, includeProgress = false) {
   const response = await service.get<{ data: CustomerOrder[]; total: number }>('/customer-orders', {
     params: { page, page_size: pageSize, include_progress: includeProgress || undefined },
+  })
+  return { items: response.data.data, total: response.data.total }
+}
+
+export async function queryCustomerOrderProgressDetails(
+  page = 1,
+  pageSize = 50,
+  customerId?: number,
+) {
+  const response = await service.get<{
+    data: CustomerOrderProgressDetail[]
+    total: number
+  }>('/customer-orders/progress-details', {
+    params: { page, page_size: pageSize, customer_id: customerId },
   })
   return { items: response.data.data, total: response.data.total }
 }

@@ -378,7 +378,7 @@ class ProductionOperationUndo(Base):
     __tablename__ = "production_operation_undo"
     __table_args__ = (
         CheckConstraint(
-            "operation_type IN ('processing_completion', 'submission', 'rework_submission')",
+            "operation_type IN ('purchase_arrival', 'submission', 'rework_submission')",
             name="ck_production_operation_undo_type",
         ),
         CheckConstraint(

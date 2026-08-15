@@ -50,7 +50,7 @@ function print() {
         <tbody>
           <tr><th>客户订单</th><td>{{ item.customer_order_no }}</td><th>工单状态</th><td>{{ statusLabel }}</td></tr>
           <tr><th>配件编号</th><td>{{ item.part_no }}</td><th>配件名称</th><td>{{ item.part_name }}</td></tr>
-          <tr><th>工单内容</th><td>{{ item.work_order_name }}</td><th>工单数量</th><td class="quantity">{{ item.quantity }}</td></tr>
+          <tr><th>工单内容</th><td>{{ item.work_order_name }}</td><th>{{ item.work_order_type === 'assembly' ? '对应产品数 / 装配体数' : '工单数量' }}</th><td class="quantity">{{ item.work_order_type === 'assembly' ? `${item.quantity} / ${item.output_quantity}` : item.quantity }}</td></tr>
           <tr><th>执行工人</th><td>{{ item.worker_name || '未分配' }}</td><th>创建时间</th><td>{{ item.created_at }}</td></tr>
           <tr><th>备注</th><td colspan="3" class="remark">{{ item.remark || '无' }}</td></tr>
         </tbody>
@@ -59,10 +59,10 @@ function print() {
       <section class="progress-section">
         <h2>执行记录</h2>
         <div class="progress-grid">
-          <div><span>已提交</span><strong>{{ item.submitted_quantity }}</strong></div>
-          <div><span>加工中</span><strong>{{ item.processing_quantity }}</strong></div>
+          <div><span>{{ item.work_order_type === 'assembly' ? '已提交产品数' : '已提交' }}</span><strong>{{ item.submitted_quantity }}</strong></div>
+          <div><span>{{ item.work_order_type === 'assembly' ? '装配/返工中' : '加工中' }}</span><strong>{{ item.work_order_type === 'assembly' ? item.processing_output_quantity : item.processing_quantity }}</strong></div>
           <div><span>待质检</span><strong>{{ item.pending_qc_quantity }}</strong></div>
-          <div><span>合格</span><strong>{{ item.qualified_quantity }}</strong></div>
+          <div><span>合格</span><strong>{{ item.work_order_type === 'assembly' ? item.qualified_output_quantity : item.qualified_quantity }}</strong></div>
           <div><span>报废</span><strong>{{ item.scrap_quantity }}</strong></div>
           <div><span>遗失</span><strong>{{ item.lost_quantity }}</strong></div>
         </div>

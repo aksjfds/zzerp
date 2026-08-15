@@ -99,7 +99,7 @@ function tableSpan({
   row: PriceTableRow
   columnIndex: number
 }) {
-  if (![0, 3].includes(columnIndex)) return [1, 1]
+  if (![0, 1, 4].includes(columnIndex)) return [1, 1]
   return row.firstInGroup ? [row.groupSize, 1] : [0, 0]
 }
 
@@ -230,11 +230,14 @@ onMounted(load)
           <div class="part-title">
             <strong>{{ partTitle(row.part) }}</strong>
             <span>
-              {{ row.procedure.procedure_name }} · V{{ row.part.product_version }}
+              V{{ row.part.product_version }}
               <template v-if="row.procedure.tags_locked"> · 标记已锁定</template>
             </span>
           </div>
         </template>
+      </ElTableColumn>
+      <ElTableColumn label="加工工艺" min-width="140">
+        <template #default="{ row }">{{ row.procedure.procedure_name }}</template>
       </ElTableColumn>
       <ElTableColumn label="标记" min-width="160">
         <template #default="{ row }">{{ row.tagName || '暂未配置标记' }}</template>

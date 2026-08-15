@@ -8,6 +8,10 @@ from database import SessionLocal
 from modules.sales.model_api import Customer
 from modules.engineering.model_api import Product, ProductBom
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
+from modules.planning.assembly_progress import (
+    assembly_arrival_progress,
+    assembly_completion_summary,
+)
 from modules.organization.model_api import Department, Procedure, Workshop
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.production_core.model_api import (
@@ -18,9 +22,11 @@ from modules.production_core.model_api import (
 )
 from modules.quality.model_api import WorkOrderBatch
 from modules.standard_execution.model_api import ProcedureTagStock
+from modules.standard_execution.tag_api import is_final_tag_set
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.production_core.operational_api import load_production_flow
 from modules.production_core.operational_api import load_product_flow
+from modules.production_core.flow import physical_route_nodes
 from modules.production_core.operational_api import production_item_name
 from modules.production_core.operational_api import (
     calculate_work_order_progress,
@@ -254,6 +260,8 @@ def list_department_production_progress(
     page_size: int,
     keyword: str | None,
 ) -> tuple[list[dict], int]:
+    if department_code == "assembly":
+        return _list_assembly_production_progress(page, page_size, keyword)
     orders, _, _ = list_part_progress(
         page=1,
         page_size=1_000_000,
@@ -265,22 +273,48 @@ def list_department_production_progress(
         only_exception=False,
         only_unfinished=False,
     )
-    rows = [
-        {
-            "production_item_id": part["production_item_id"],
-            "part_no": part["part_no"],
-            "part_name": f'{part["product_name"]}-{part["part_name"]}',
-            "customer_order_no": part["customer_order_no"],
-            "order_date": part["order_date"],
-            "order_quantity": part["target_quantity"],
-            "shipped_quantity": part["shipped_quantity"],
-            "outstanding_quantity": part["outstanding_quantity"],
-            "completion_date": part["completion_date"],
-            "remark": part["remark"],
-        }
-        for order in orders
-        for part in order["parts"]
-    ]
+    parts = [part for order in orders for part in order["parts"]]
+    plan_refs = _production_plan_refs({
+        part["production_item_id"] for part in parts
+    })
+    rows = []
+    for part in parts:
+        plan_ref = plan_refs[part["production_item_id"]]
+        task_quantity = plan_ref["planned_production_quantity"]
+        workshop_arrivals = part["department_workshop_arrivals"].get(
+            department_code,
+            {},
+        )
+        for processing_workshop in (
+            part["department_workshops"].get(department_code) or [""]
+        ):
+            arrived_quantity = workshop_arrivals.get(processing_workshop, 0)
+            completed_quantity = (
+                part["department_workshop_completions"]
+                .get(department_code, {})
+                .get(
+                    processing_workshop,
+                    part["departments"].get(department_code, {}).get(
+                        "completed_quantity",
+                        0,
+                    ) if not processing_workshop else 0,
+                )
+            )
+            rows.append({
+                "production_plan_item_id": plan_ref["production_plan_item_id"],
+                "production_item_id": part["production_item_id"],
+                "flow_node_id": None,
+                "part_no": part["part_no"],
+                "part_name": f'{part["product_name"]}-{part["part_name"]}',
+                "processing_workshop": processing_workshop,
+                "customer_order_no": part["customer_order_no"],
+                "order_date": part["order_date"],
+                "task_quantity": task_quantity,
+                "arrived_quantity": arrived_quantity,
+                "material_arrivals": [],
+                "completed_quantity": completed_quantity,
+                "remark": part["remark"],
+            })
     rows.extend(
         _list_planned_department_progress(
             department_code,
@@ -297,7 +331,368 @@ def list_department_production_progress(
     )
     total = len(rows)
     offset = (page - 1) * page_size
-    return rows[offset:offset + page_size], total
+    page_rows = rows[offset:offset + page_size]
+    return [
+        {
+            key: value
+            for key, value in row.items()
+            if key not in {"customer_order_no", "order_date"}
+        }
+        for row in page_rows
+    ], total
+
+
+def _list_assembly_production_progress(
+    page: int,
+    page_size: int,
+    keyword: str | None,
+) -> tuple[list[dict], int]:
+    with SessionLocal() as session:
+        plan_rows = session.execute(
+            select(
+                ProductionPlanItem,
+                ProductionPlan,
+                CustomerOrderItem,
+                CustomerOrder,
+                Product,
+            )
+            .join(
+                ProductionPlan,
+                ProductionPlan.id == ProductionPlanItem.production_plan_id,
+            )
+            .join(
+                CustomerOrderItem,
+                CustomerOrderItem.id == ProductionPlanItem.customer_order_item_id,
+            )
+            .join(
+                CustomerOrder,
+                CustomerOrder.id == ProductionPlan.customer_order_id,
+            )
+            .join(Product, Product.id == ProductionPlanItem.product_id)
+            .where(
+                ProductionPlan.status.in_(("draft", "confirmed")),
+                CustomerOrder.status != "cancelled",
+                ProductionPlanItem.item_type == "assembly",
+                ProductionPlanItem.planned_production_quantity > 0,
+            )
+        ).all()
+        if not plan_rows:
+            return [], 0
+
+        order_item_ids = {
+            order_item.id
+            for _, _, order_item, _, _ in plan_rows
+        }
+        production_items = list(session.scalars(
+            select(ProductionItem).where(
+                ProductionItem.customer_order_item_id.in_(order_item_ids)
+            )
+        ).all())
+        production_item_by_id = {item.id: item for item in production_items}
+        production_items_by_order_item = _group(
+            production_items,
+            "customer_order_item_id",
+        )
+        production_item_ids = set(production_item_by_id)
+        movements = list(session.scalars(
+            select(ProductionMovement).where(
+                ProductionMovement.production_item_id.in_(production_item_ids)
+            )
+        ).all()) if production_item_ids else []
+        movements_by_order_item: dict[int, list[ProductionMovement]] = defaultdict(list)
+        for movement in movements:
+            production_item = production_item_by_id.get(movement.production_item_id)
+            if production_item is not None:
+                movements_by_order_item[production_item.customer_order_item_id].append(
+                    movement
+                )
+
+        work_orders_by_task: dict[tuple[int, str], list[WorkOrder]] = defaultdict(list)
+        work_orders = []
+        if production_item_ids:
+            for work_order, order_item_id in session.execute(
+                select(WorkOrder, ProductionItem.customer_order_item_id)
+                .join(
+                    ProductionItem,
+                    ProductionItem.id == WorkOrder.production_item_id,
+                )
+                .where(
+                    ProductionItem.customer_order_item_id.in_(order_item_ids),
+                    WorkOrder.status != "cancelled",
+                )
+            ):
+                work_orders.append(work_order)
+                work_orders_by_task[(order_item_id, work_order.flow_node_id)].append(
+                    work_order
+                )
+        work_order_ids = {item.id for item in work_orders}
+        batches_by_order: dict[int, list[WorkOrderBatch]] = defaultdict(list)
+        if work_order_ids:
+            for batch in session.scalars(
+                select(WorkOrderBatch).where(
+                    WorkOrderBatch.work_order_id.in_(work_order_ids)
+                )
+            ):
+                batches_by_order[batch.work_order_id].append(batch)
+
+        bom_items = {
+            item.id: item
+            for item in session.scalars(
+                select(ProductBom).where(
+                    ProductBom.product_id.in_(
+                        {product.id for _, _, _, _, product in plan_rows}
+                    )
+                )
+            )
+        }
+        procedures = {
+            item.id: item for item in session.scalars(select(Procedure)).all()
+        }
+        workshops = {
+            item.id: item for item in session.scalars(select(Workshop)).all()
+        }
+        assembly_department = session.scalar(
+            select(Department).where(Department.department_code == "assembly")
+        )
+        normalized_keyword = (keyword or "").strip().lower()
+        flow_cache: dict[tuple[int, int], tuple[dict, dict[str, dict]]] = {}
+        rows = []
+        for plan_item, plan, order_item, order, product in plan_rows:
+            flow_key = (plan_item.product_id, plan_item.product_version)
+            if flow_key not in flow_cache:
+                flow_cache[flow_key] = load_product_flow(
+                    session,
+                    plan_item.product_id,
+                    plan_item.product_version,
+                )
+            flow, nodes = flow_cache[flow_key]
+            assembly_node = nodes.get(plan_item.flow_node_id)
+            if assembly_node is None or assembly_node.get("type") != "assembly":
+                continue
+            output_unit_quantity = max(
+                int(assembly_node.get("output_pcs") or 1),
+                1,
+            )
+            task_nodes = _assembly_department_task_nodes(
+                flow,
+                nodes,
+                plan_item.flow_node_id,
+                assembly_department.id if assembly_department else None,
+                procedures,
+                workshops,
+            )
+            search_text = " ".join((
+                plan_item.item_code,
+                plan_item.item_name,
+                product.factory_code,
+                product.product_name,
+                order.customer_order_no,
+                *(
+                    str(node.get("label") or "")
+                    for node in task_nodes
+                ),
+                *(
+                    procedures[node["procedure_id"]].procedure_name
+                    for node in task_nodes
+                    if node.get("procedure_id") in procedures
+                ),
+            )).lower()
+            if normalized_keyword and normalized_keyword not in search_text:
+                continue
+            remarks = [
+                value.strip()
+                for value in (order_item.remark, order.remark)
+                if value and value.strip()
+            ]
+            output_item = next(
+                (
+                    item
+                    for item in production_items_by_order_item.get(order_item.id, [])
+                    if item.product_bom_id is None
+                    and item.origin_flow_node_id == plan_item.flow_node_id
+                ),
+                None,
+            )
+            for task_node in task_nodes:
+                task_node_id = task_node["id"]
+                task_procedure = procedures.get(task_node.get("procedure_id"))
+                task_workshop = (
+                    workshops.get(task_procedure.workshop_id)
+                    if task_procedure else None
+                )
+                task_orders = work_orders_by_task.get(
+                    (order_item.id, task_node_id),
+                    [],
+                )
+                if task_node_id == plan_item.flow_node_id:
+                    completed_quantity = assembly_completion_summary(
+                        task_orders,
+                        batches_by_order,
+                        output_unit_quantity,
+                    )
+                    arrived_quantity, material_arrivals = assembly_arrival_progress(
+                        flow,
+                        nodes,
+                        plan_item.flow_node_id,
+                        output_unit_quantity,
+                        production_items_by_order_item.get(order_item.id, []),
+                        movements_by_order_item.get(order_item.id, []),
+                        bom_items,
+                        plan_item.planned_production_quantity,
+                    )
+                else:
+                    completed_quantity = _process_completion_summary(
+                        session,
+                        task_orders,
+                        batches_by_order,
+                        production_item_by_id,
+                        task_procedure,
+                    )
+                    arrived_quantity = sum(
+                        movement.quantity
+                        for movement in movements_by_order_item.get(order_item.id, [])
+                        if movement.target_flow_node_id == task_node_id
+                        and movement.source_flow_node_id != task_node_id
+                    )
+                    material_arrivals = []
+                processing_workshop = (
+                    task_workshop.workshop_name
+                    if task_workshop else str(task_node.get("label") or "装配")
+                )
+                rows.append({
+                    "production_plan_item_id": plan_item.id,
+                    "production_item_id": output_item.id if output_item else None,
+                    "flow_node_id": task_node_id,
+                    "part_no": plan_item.item_code,
+                    "part_name": f"{product.product_name}-{plan_item.item_name}",
+                    "processing_workshop": processing_workshop,
+                    "customer_order_no": order.customer_order_no,
+                    "order_date": order.created_at.date().isoformat(),
+                    "task_quantity": plan_item.planned_production_quantity,
+                    "arrived_quantity": arrived_quantity,
+                    "material_arrivals": material_arrivals,
+                    "completed_quantity": completed_quantity,
+                    "remark": "；".join(dict.fromkeys(remarks)),
+                })
+        rows.sort(
+            key=lambda item: (
+                item["order_date"],
+                item["customer_order_no"],
+                item["part_no"],
+            ),
+            reverse=True,
+        )
+        total = len(rows)
+        offset = (page - 1) * page_size
+        return [
+            {
+                key: value
+                for key, value in row.items()
+                if key not in {"customer_order_no", "order_date"}
+            }
+            for row in rows[offset:offset + page_size]
+        ], total
+
+
+def _assembly_department_task_nodes(
+    flow: dict,
+    nodes: dict[str, dict],
+    origin_node_id: str,
+    assembly_department_id: int | None,
+    procedures: dict[int, Procedure],
+    workshops: dict[int, Workshop],
+) -> list[dict]:
+    result = []
+    for node in physical_route_nodes(flow, nodes, origin_node_id):
+        if node["id"] == origin_node_id:
+            result.append(node)
+            continue
+        if node.get("type") != "process":
+            continue
+        procedure = procedures.get(node.get("procedure_id"))
+        workshop = workshops.get(procedure.workshop_id) if procedure else None
+        if workshop and workshop.department_id == assembly_department_id:
+            result.append(node)
+    return result
+
+
+def _process_completion_summary(
+    session,
+    work_orders: list[WorkOrder],
+    batches_by_order: dict[int, list[WorkOrderBatch]],
+    production_item_by_id: dict[int, ProductionItem],
+    procedure: Procedure | None,
+) -> int:
+    completed_quantity = 0
+    for work_order in work_orders:
+        production_item = production_item_by_id.get(work_order.production_item_id)
+        if (
+            work_order.work_order_type == "tag"
+            and procedure is not None
+            and production_item is not None
+            and not is_final_tag_set(
+                session,
+                production_item,
+                procedure.id,
+                work_order.target_tag_set_id,
+            )
+        ):
+            continue
+        batches = batches_by_order.get(work_order.id, [])
+        progress = calculate_work_order_progress(work_order, batches)
+        completed_quantity += progress.qualified_quantity
+    return completed_quantity
+
+
+def _production_plan_refs(production_item_ids: set[int]) -> dict[int, dict]:
+    if not production_item_ids:
+        return {}
+    with SessionLocal() as session:
+        production_items = list(session.scalars(
+            select(ProductionItem).where(ProductionItem.id.in_(production_item_ids))
+        ).all())
+        order_item_ids = {
+            item.customer_order_item_id for item in production_items
+        }
+        plan_items = list(session.scalars(
+            select(ProductionPlanItem)
+            .join(
+                ProductionPlan,
+                ProductionPlan.id == ProductionPlanItem.production_plan_id,
+            )
+            .where(
+                ProductionPlan.status == "confirmed",
+                ProductionPlanItem.customer_order_item_id.in_(order_item_ids),
+            )
+        ).all())
+        plan_item_by_identity = {
+            (
+                item.customer_order_item_id,
+                item.product_id,
+                item.product_version,
+                item.product_bom_id,
+                item.flow_node_id,
+            ): item
+            for item in plan_items
+        }
+        return {
+            item.id: {
+                "production_plan_item_id": plan_item.id,
+                "planned_production_quantity": (
+                    plan_item.planned_production_quantity
+                ),
+            }
+            for item in production_items
+            for plan_item in [plan_item_by_identity[
+                (
+                    item.customer_order_item_id,
+                    item.product_id,
+                    item.product_version,
+                    item.product_bom_id,
+                    item.origin_flow_node_id,
+                )
+            ]]
+        }
 
 
 def _list_planned_department_progress(
@@ -422,6 +817,14 @@ def _list_planned_department_progress(
             )
             if not belongs_to_department:
                 continue
+            processing_workshops = _department_workshop_names(
+                route_nodes,
+                department_code,
+                department_by_code,
+                workshops,
+                procedures,
+                origin_flow_node_id=item.flow_node_id,
+            )
             plan = plans[item.production_plan_id]
             order_item = order_items[item.customer_order_item_id]
             order = orders[plan.customer_order_id]
@@ -446,18 +849,22 @@ def _list_planned_department_progress(
                 else "等待前序生产"
             )
             quantity = item.planned_production_quantity
-            rows.append({
-                "production_item_id": None,
-                "part_no": item.item_code,
-                "part_name": f"{product.product_name}-{item.item_name}",
-                "customer_order_no": order.customer_order_no,
-                "order_date": order.created_at.date().isoformat(),
-                "order_quantity": quantity,
-                "shipped_quantity": 0,
-                "outstanding_quantity": quantity,
-                "completion_date": None,
-                "remark": "；".join(dict.fromkeys(remarks)),
-            })
+            for processing_workshop in processing_workshops or [""]:
+                rows.append({
+                    "production_plan_item_id": item.id,
+                    "production_item_id": None,
+                    "flow_node_id": None,
+                    "part_no": item.item_code,
+                    "part_name": f"{product.product_name}-{item.item_name}",
+                    "processing_workshop": processing_workshop,
+                    "customer_order_no": order.customer_order_no,
+                    "order_date": order.created_at.date().isoformat(),
+                    "task_quantity": quantity,
+                    "arrived_quantity": 0,
+                    "material_arrivals": [],
+                    "completed_quantity": 0,
+                    "remark": "；".join(dict.fromkeys(remarks)),
+                })
         return rows
 
 
@@ -532,6 +939,9 @@ def _serialize_item(
         for item in ordered_departments
     }
     route_nodes = _physical_route(context, production_item.origin_flow_node_id)
+    department_workshops: dict[str, list[str]] = {}
+    department_workshop_arrivals: dict[str, dict[str, int]] = {}
+    department_workshop_completions: dict[str, dict[str, int]] = {}
     edge_pairs = {
         (edge.get("source_node_id"), edge.get("target_node_id"))
         for edge in context.flow.get("edges", [])
@@ -547,6 +957,36 @@ def _serialize_item(
             continue
         cell = cells[department.department_code]
         cell["in_route"] = True
+        if node.get("type") in {"process", "assembly"}:
+            workshop = _node_workshop(node, workshops, procedures)
+            if workshop:
+                names = department_workshops.setdefault(
+                    department.department_code,
+                    [],
+                )
+                if workshop.workshop_name not in names:
+                    names.append(workshop.workshop_name)
+
+    for movement in movements:
+        target_node = context.nodes.get(movement.target_flow_node_id or "", {})
+        target_workshop = _node_workshop(target_node, workshops, procedures)
+        if target_workshop is None:
+            continue
+        target_department = department_by_id.get(target_workshop.department_id)
+        if target_department is None:
+            continue
+        source_node = context.nodes.get(movement.source_flow_node_id or "", {})
+        source_workshop = _node_workshop(source_node, workshops, procedures)
+        if source_workshop and source_workshop.id == target_workshop.id:
+            continue
+        arrivals = department_workshop_arrivals.setdefault(
+            target_department.department_code,
+            {},
+        )
+        arrivals[target_workshop.workshop_name] = (
+            arrivals.get(target_workshop.workshop_name, 0)
+            + movement.quantity
+        )
 
     if assembly_processing_quantity:
         assembly_cell = cells.get("assembly")
@@ -589,9 +1029,32 @@ def _serialize_item(
         ):
             cell = cells[department.department_code]
             cell["in_route"] = True
+            progress = calculate_work_order_progress(work_order, order_batches)
             if work_order.status == "open":
-                progress = calculate_work_order_progress(work_order, order_batches)
                 cell["processing_quantity"] += progress.processing_quantity
+            workshop = _node_workshop(node, workshops, procedures)
+            procedure = procedures.get(work_order.procedure_id)
+            completion_is_final = (
+                work_order.work_order_type != "tag"
+                or (
+                    procedure is not None
+                    and is_final_tag_set(
+                        session,
+                        production_item,
+                        procedure.id,
+                        work_order.target_tag_set_id,
+                    )
+                )
+            )
+            if workshop and completion_is_final:
+                completions = department_workshop_completions.setdefault(
+                    department.department_code,
+                    {},
+                )
+                completions[workshop.workshop_name] = (
+                    completions.get(workshop.workshop_name, 0)
+                    + progress.qualified_quantity
+                )
 
         qc_cell = cells.get("qc")
         if qc_cell is None or work_order.status == "cancelled":
@@ -673,6 +1136,9 @@ def _serialize_item(
         "remark": "；".join(dict.fromkeys(remarks)),
         "delivery_date": order_item.delivery_date.isoformat(),
         "departments": cells,
+        "department_workshops": department_workshops,
+        "department_workshop_arrivals": department_workshop_arrivals,
+        "department_workshop_completions": department_workshop_completions,
         "search_text": " ".join((
             order.customer_order_no,
             customer.customer_name,
@@ -833,6 +1299,41 @@ def _node_department(node, department_by_code, workshops, procedures):
         "shipping": "finished",
     }.get(node_type)
     return department_by_code.get(code) if code else None
+
+
+def _node_workshop(node, workshops, procedures):
+    if node.get("type") not in {"process", "assembly"}:
+        return None
+    procedure = procedures.get(node.get("procedure_id"))
+    return workshops.get(procedure.workshop_id) if procedure else None
+
+
+def _department_workshop_names(
+    route_nodes,
+    department_code,
+    department_by_code,
+    workshops,
+    procedures,
+    origin_flow_node_id=None,
+):
+    names = []
+    for node in route_nodes:
+        department = _node_department(
+            node,
+            department_by_code,
+            workshops,
+            procedures,
+        )
+        if department is None or department.department_code != department_code:
+            continue
+        if node.get("type") == "assembly" and node.get("id") != origin_flow_node_id:
+            continue
+        if node.get("type") not in {"process", "assembly"}:
+            continue
+        workshop = _node_workshop(node, workshops, procedures)
+        if workshop and workshop.workshop_name not in names:
+            names.append(workshop.workshop_name)
+    return names
 
 
 def _assembly_target_quantity(context, production_item, work_orders) -> int:

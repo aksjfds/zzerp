@@ -19,6 +19,9 @@ def serialize_product_summary(
     product: Product,
     bom_count: int,
     customer_name: str,
+    *,
+    order_ready: bool,
+    order_ready_reason: str,
 ) -> dict:
     return {
         "id": product.id,
@@ -30,6 +33,8 @@ def serialize_product_summary(
         "factory_code": product.factory_code,
         "customer_code": product.customer_code,
         "bom_count": bom_count,
+        "order_ready": order_ready,
+        "order_ready_reason": order_ready_reason,
         "created_at": business_iso(product.created_at),
         "updated_at": business_iso(product.updated_at),
     }
@@ -41,6 +46,8 @@ def serialize_product_detail(
     requested_version: int | None = None,
     *,
     customer_name: str,
+    order_ready: bool,
+    order_ready_reason: str,
     base_info_editable: bool = True,
     version_editable: bool = True,
 ) -> dict:
@@ -56,6 +63,8 @@ def serialize_product_detail(
         "revision": product.revision,
         "base_info_editable": base_info_editable,
         "version_editable": version_editable,
+        "order_ready": order_ready,
+        "order_ready_reason": order_ready_reason,
         "customer_id": product.customer_id,
         "customer_name": customer_name,
         "product_name": product.product_name,

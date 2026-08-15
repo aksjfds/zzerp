@@ -5,23 +5,30 @@ import { ORDER_PERMISSIONS } from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
 import CustomerOrdersView from './CustomerOrdersView.vue'
 import ProductionPlansView from './ProductionPlansView.vue'
+import OrderProgressDetailsView from './OrderProgressDetailsView.vue'
 
 const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const ordersView = ref<{ load: () => Promise<void> }>()
 const plansView = ref<{ load: () => Promise<void> }>()
+const progressView = ref<{ load: () => Promise<void> }>()
 const activeTab = computed({
-  get: () => route.query.tab === 'plans' ? 'plans' : 'orders',
+  get: () => route.query.tab === 'plans'
+    ? 'plans'
+    : route.query.tab === 'progress'
+      ? 'progress'
+      : 'orders',
   set: (tab: string) => router.replace({
     path: '/business/orders',
-    query: tab === 'plans' ? { tab: 'plans' } : {},
+    query: tab === 'orders' ? {} : { tab },
   }),
 })
 
 watch(activeTab, async (tab) => {
   await nextTick()
   if (tab === 'plans') await plansView.value?.load()
+  else if (tab === 'progress') await progressView.value?.load()
   else await ordersView.value?.load()
 })
 
@@ -51,6 +58,9 @@ async function logout() {
         </ElTabPane>
         <ElTabPane label="生产计划" name="plans" lazy>
           <ProductionPlansView ref="plansView" />
+        </ElTabPane>
+        <ElTabPane label="进度明细表" name="progress" lazy>
+          <OrderProgressDetailsView ref="progressView" />
         </ElTabPane>
       </ElTabs>
     </section>

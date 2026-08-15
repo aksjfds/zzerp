@@ -8,7 +8,7 @@ import {
   type ProcessFlow,
 } from './types'
 
-export const PROCESS_FLOW_GRID_X = 250
+export const PROCESS_FLOW_GRID_X = 500
 export const PROCESS_FLOW_GRID_Y = 250
 
 const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'qc', 'assembly', 'shipping'])

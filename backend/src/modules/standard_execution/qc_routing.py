@@ -40,14 +40,18 @@ def route_qualified(
     quantity: int,
 ) -> tuple[str, int]:
     qc_node = process_qc_node(context.flow, context.nodes, node["id"])
-    if qc_node is None:
-        raise DomainError("work_order_qc_not_configured", "标记工艺后必须配置QC节点")
-    if is_final_tag_set(
+    final_tag_set = is_final_tag_set(
         session,
         production_item,
         procedure.id,
         order.target_tag_set_id,
-    ):
+    )
+    if final_tag_set:
+        if qc_node is None:
+            raise DomainError(
+                "work_order_qc_not_configured",
+                "全部标记已完成且当前工艺未配置QC节点",
+            )
         qc_department_id = get_department_ids_by_codes(
             session,
             {"qc"},

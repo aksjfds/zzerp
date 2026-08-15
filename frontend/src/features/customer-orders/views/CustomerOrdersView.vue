@@ -13,16 +13,11 @@ import {
   queryCustomerOrders,
 } from '../api/customerOrders'
 import type { CustomerOrder } from '../domain/types'
-import OrderProductProgress from '../components/OrderProductProgress.vue'
 
 const props = withDefaults(defineProps<{
   embedded?: boolean
-  readOnly?: boolean
-  showProductProgress?: boolean
 }>(), {
   embedded: false,
-  readOnly: false,
-  showProductProgress: false,
 })
 const router = useRouter()
 const authStore = useAuthStore()
@@ -54,11 +49,7 @@ const filteredOrders = computed(() => {
 async function loadOrders() {
   loading.value = true
   try {
-    const result = await queryCustomerOrders(
-      page.value,
-      pageSize,
-      props.showProductProgress,
-    )
+    const result = await queryCustomerOrders(page.value, pageSize)
     orders.value = result.items
     total.value = result.total
   }
@@ -67,13 +58,36 @@ async function loadOrders() {
 }
 
 async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete') {
+  const prompts = {
+    confirm: {
+      title: '确认客户订单',
+      message: '确认后，系统会创建一份待填写的生产计划。是否继续？',
+      success: '客户订单已确认',
+    },
+    cancel: {
+      title: '取消客户订单',
+      message: '确定取消这个客户订单吗？',
+      success: '客户订单已取消',
+    },
+    delete: {
+      title: '删除订单草稿',
+      message: '删除后无法恢复，确定删除这个订单草稿吗？',
+      success: '订单草稿已删除',
+    },
+  } as const
+  const prompt = prompts[action]
   try {
-    await ElMessageBox.confirm('确认执行该操作？', '客户订单', { type: 'warning' })
+    await ElMessageBox.confirm(prompt.message, prompt.title, {
+      type: action === 'confirm' ? 'info' : 'warning',
+      confirmButtonText: action === 'delete' ? '确认删除' : '确认',
+      cancelButtonText: '返回',
+    })
     if (action === 'confirm') {
       await confirmCustomerOrder(order.id, order.revision)
     }
     else if (action === 'cancel') await cancelCustomerOrder(order.id, order.revision)
     else await deleteCustomerOrder(order.id, order.revision)
+    ElMessage.success(prompt.success)
     await loadOrders()
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') {
@@ -82,23 +96,27 @@ async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete'
   }
 }
 
-async function openOrder(order: CustomerOrder) {
-  if (props.readOnly) {
-    await router.push({
-      path: '/pmc',
-      query: {
-        tab: 'parts',
-        orderId: String(order.id),
-      },
-    })
-    return
-  }
-  if (order.status === 'draft' && !props.readOnly) {
-    await router.push(`/business/orders/${order.id}`)
-    return
-  }
+async function viewOrder(order: CustomerOrder) {
   activeOrderId.value = order.id
   detailVisible.value = true
+}
+
+async function editOrder(order: CustomerOrder) {
+  await router.push(`/business/orders/${order.id}`)
+}
+
+function hasMoreActions(order: CustomerOrder) {
+  return (
+    ['draft', 'confirmed', 'planned'].includes(order.status)
+    && authStore.hasPermission(ORDER_PERMISSIONS.cancel)
+  ) || (
+    order.status === 'draft'
+    && authStore.hasPermission(ORDER_PERMISSIONS.edit)
+  )
+}
+
+async function handleMoreAction(order: CustomerOrder, action: string | number | object) {
+  if (action === 'cancel' || action === 'delete') await act(order, action)
 }
 
 async function logout() {
@@ -127,15 +145,6 @@ defineExpose({ load: loadOrders })
         <ElTableColumn label="产品明细" min-width="260">
           <template #default="{ row }"><div v-for="item in row.items" :key="item.id">{{ item.factory_code }}-{{ item.product_name }}-{{ item.quantity }}个</div></template>
         </ElTableColumn>
-        <ElTableColumn v-if="props.showProductProgress" label="产品进度" min-width="540">
-          <template #default="{ row }">
-            <OrderProductProgress
-              v-for="progress in row.product_progress"
-              :key="progress.customer_order_item_id"
-              :progress="progress"
-            />
-          </template>
-        </ElTableColumn>
         <ElTableColumn label="状态" width="100">
           <template #default="{ row }">
             <ElTag :type="statusTagTypes[row.status as keyof typeof statusTagTypes]" effect="light">
@@ -144,14 +153,47 @@ defineExpose({ load: loadOrders })
           </template>
         </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" width="170" />
-        <ElTableColumn label="操作" :width="props.readOnly ? 90 : 260" fixed="right">
+        <ElTableColumn label="操作" width="250" fixed="right">
           <template #default="{ row }">
-            <ElButton link @click="openOrder(row)">{{ props.readOnly ? '查看' : row.status === 'draft' ? '编辑' : '查看' }}</ElButton>
-            <template v-if="!props.readOnly">
-              <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.confirm" link type="primary" @click="act(row, 'confirm')">确认订单</ElButton>
-              <ElButton v-if="['draft', 'confirmed', 'planned'].includes(row.status)" v-permission="ORDER_PERMISSIONS.cancel" link type="warning" @click="act(row, 'cancel')">取消</ElButton>
-              <ElButton v-if="row.status === 'draft'" v-permission="ORDER_PERMISSIONS.edit" link type="danger" @click="act(row, 'delete')">删除</ElButton>
-            </template>
+            <div class="row-actions">
+              <ElButton link @click="viewOrder(row)">查看</ElButton>
+              <ElButton
+                v-if="row.can_edit"
+                v-permission="ORDER_PERMISSIONS.edit"
+                link
+                :type="row.status === 'cancelled' ? 'primary' : undefined"
+                @click="editOrder(row)"
+              >编辑</ElButton>
+              <ElButton
+                v-if="row.status === 'draft'"
+                v-permission="ORDER_PERMISSIONS.confirm"
+                link
+                type="primary"
+                @click="act(row, 'confirm')"
+              >确认订单</ElButton>
+              <ElDropdown
+                v-if="hasMoreActions(row)"
+                trigger="click"
+                @command="handleMoreAction(row, $event)"
+              >
+                <ElButton link>更多</ElButton>
+                <template #dropdown>
+                  <ElDropdownMenu>
+                    <ElDropdownItem
+                      v-if="['draft', 'confirmed', 'planned'].includes(row.status)"
+                      v-permission="ORDER_PERMISSIONS.cancel"
+                      command="cancel"
+                    >取消订单</ElDropdownItem>
+                    <ElDropdownItem
+                      v-if="row.status === 'draft'"
+                      v-permission="ORDER_PERMISSIONS.edit"
+                      command="delete"
+                      divided
+                    >删除草稿</ElDropdownItem>
+                  </ElDropdownMenu>
+                </template>
+              </ElDropdown>
+            </div>
           </template>
         </ElTableColumn>
       </ElTable>
@@ -181,6 +223,8 @@ defineExpose({ load: loadOrders })
 .content-card { padding: 20px; }
 .content-card.embedded { border: 0; box-shadow: none; padding: 0; }
 .search { width: min(384px, 100%); margin-bottom: 16px; }
+.row-actions { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.row-actions :deep(.el-button) { margin-left: 0; }
 .pagination { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 760px) {
   .page-shell:not(.embedded) { padding: 16px; }

@@ -2,7 +2,7 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { createAssemblyWorkOrder } from '../api/workOrders'
-import type { RepositoryFilters, RepositoryItem } from '../domain/types'
+import type { RepositoryFilters, RepositoryItem, WorkOrderQueryScope } from '../domain/types'
 import { assemblyGroupKey, useAssemblyGroups, type AssemblyGroup } from './useAssemblyGroups'
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
 import { useWorkOrderList } from './useWorkOrders'
@@ -11,10 +11,22 @@ import { useAssemblyWorkOrderActions } from './useAssemblyWorkOrderActions'
 export function useAssemblyDepartment() {
   const workspace = useDepartmentWorkspace('assembly', true)
   const assembly = useAssemblyGroups(workspace.items)
+  const workOrderScope = computed<WorkOrderQueryScope | null>(() => {
+    const item = workspace.selectedRepository.value
+    return item
+      ? {
+          flowNodeId: item.flow_node_id,
+          sourceFlowNodeId: '',
+          existingTagIds: [],
+          applyingTagIds: [],
+        }
+      : null
+  })
   const workOrderList = useWorkOrderList(
     'assembly',
     workspace.selectedProductionItemId,
     workspace.pageSize,
+    workOrderScope,
   )
   const activeRepository = ref<RepositoryItem>()
   const dialogVisible = ref(false)
@@ -55,6 +67,8 @@ export function useAssemblyDepartment() {
     }
     activeRepository.value = {
       ...firstItem,
+      part_no: group.name,
+      part_name: group.name,
       quantity: maximum,
       available_quantity: maximum,
     }

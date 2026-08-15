@@ -31,6 +31,7 @@ def serialize_order(
     products: dict[int, ProductReference] | None = None,
     *,
     include_progress: bool = False,
+    production_plan_started: bool = False,
 ) -> dict:
     if products is None:
         product_ids = {item.product_id for item in order.items}
@@ -65,6 +66,9 @@ def serialize_order(
         "customer_id": order.customer_id,
         "customer_name": order.customer.customer_name,
         "status": order.status,
+        "can_edit": order.status == "draft" or (
+            order.status == "cancelled" and not production_plan_started
+        ),
         "revision": order.revision,
         "remark": order.remark or "",
         "items": item_rows,

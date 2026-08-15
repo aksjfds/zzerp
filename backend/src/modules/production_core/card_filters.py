@@ -1,5 +1,17 @@
 from collections import defaultdict
 
+from modules.production_core.card_status import dominant_work_status
+
+
+WORK_STATUS_SORT_RANK = {
+    "processing": 5,
+    "processing_completed": 4,
+    "qc": 3,
+    "rework": 2,
+    "unprocessed": 1,
+    "completed": 0,
+}
+
 
 def filter_and_paginate_cards(
     cards: list[dict],
@@ -20,7 +32,11 @@ def filter_and_paginate_cards(
         )
     ]
     filtered.sort(
-        key=lambda item: (item["arrived_at"] or "", item["card_key"]),
+        key=lambda item: (
+            WORK_STATUS_SORT_RANK.get(item["work_status"], 1),
+            item["arrived_at"] or "",
+            item["card_key"],
+        ),
         reverse=True,
     )
     total = len(filtered)
@@ -40,7 +56,7 @@ def filter_and_paginate_assembly_groups(
     for item in cards:
         if not item["card_key"].startswith("history:"):
             kind = "current"
-        elif item["work_status"] == "processing":
+        elif item["work_status"] != "completed":
             kind = "processing"
         else:
             kind = "history"
@@ -49,14 +65,12 @@ def filter_and_paginate_assembly_groups(
     filtered_groups: list[tuple[tuple[str, int, str], list[dict]]] = []
     for group_key, group in groups.items():
         required_sources = {
-            source_id
+            material_key
             for item in group
-            for source_id in item["assembly_required_source_ids"]
+            for material_key in item["assembly_required_material_keys"]
         }
-        present_sources = {item["source_flow_node_id"] for item in group}
+        present_sources = {item["assembly_material_key"] for item in group}
         group_complete = bool(required_sources) and required_sources == present_sources
-        if group_key[0] == "current" and not group_complete:
-            continue
         status = _group_status(group)
         arrived_at = max((item["arrived_at"] or "" for item in group), default="") or None
         representative = {
@@ -76,7 +90,9 @@ def filter_and_paginate_assembly_groups(
         for item in group:
             item["work_status"] = status
             item["arrived_at"] = arrived_at
-            item["assembly_group_complete"] = group_complete
+            item["assembly_group_complete"] = (
+                group_complete if group_key[0] == "current" else True
+            )
             item["can_create_work_order"] = (
                 item["can_create_work_order"] and group_complete
             )
@@ -85,6 +101,10 @@ def filter_and_paginate_assembly_groups(
     ordered = sorted(
         filtered_groups,
         key=lambda entry: (
+            WORK_STATUS_SORT_RANK.get(
+                entry[1][0]["work_status"],
+                1,
+            ),
             entry[1][0]["arrived_at"] or "",
             entry[0][1],
             entry[0][0],
@@ -122,8 +142,8 @@ def matches_filters(
 
 
 def _group_status(group: list[dict]) -> str:
-    if any(item["work_status"] == "processing" for item in group):
-        return "processing"
     if all(item["work_status"] == "completed" for item in group):
         return "completed"
-    return "unprocessed"
+    return dominant_work_status(
+        (item["work_status"] for item in group if item["work_status"] != "completed")
+    )

@@ -2,23 +2,23 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import CustomerOrdersView from '@/features/customer-orders/views/CustomerOrdersView.vue'
+import OrderProgressDetailsView from '@/features/customer-orders/views/OrderProgressDetailsView.vue'
 import { useAuthStore } from '@/stores/auth'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
 import WorkerOverview from '@/features/workers/components/WorkerOverview.vue'
 import { useAdminWorkers } from '../composables/useAdminWorkers'
-import PmcPartProgressView from './PmcPartProgressView.vue'
 
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const props = withDefaults(defineProps<{ mode?: 'admin' | 'pmc' }>(), { mode: 'admin' })
 const isPmc = computed(() => props.mode === 'pmc')
-type DashboardTab = 'orders' | 'parts' | 'workers'
+type DashboardTab = 'orders' | 'progress' | 'workers'
 const routeTab = (): DashboardTab => (
-  isPmc.value && route.query.tab === 'parts'
-    ? 'parts'
-    : route.query.tab === 'workers'
-      ? 'workers'
+  route.query.tab === 'workers'
+    ? 'workers'
+    : isPmc.value
+      ? 'progress'
       : 'orders'
 )
 const activeTab = ref<DashboardTab>(routeTab())
@@ -37,13 +37,13 @@ watch(
 )
 watch(activeTab, (tab) => {
   const query = { ...route.query }
-  if (tab === 'orders') {
+  const defaultTab = isPmc.value ? 'progress' : 'orders'
+  if (tab === defaultTab) {
     delete query.tab
-    delete query.orderId
   } else {
     query.tab = tab
-    if (tab !== 'parts') delete query.orderId
   }
+  delete query.orderId
   if (
     route.query.tab !== query.tab
     || route.query.orderId !== query.orderId
@@ -63,17 +63,17 @@ onMounted(workers.loadWorkers)
       @logout="logout"
     />
     <ElTabs v-model="activeTab" class="admin-tabs">
-      <ElTabPane label="客户订单生产情况" name="orders">
-        <section class="orders-card">
+      <ElTabPane v-if="!isPmc" label="客户订单生产情况" name="orders">
+        <section class="dashboard-card">
           <CustomerOrdersView
             embedded
-            :read-only="isPmc"
-            :show-product-progress="isPmc"
           />
         </section>
       </ElTabPane>
-      <ElTabPane v-if="isPmc" label="配件生产进度" name="parts">
-        <PmcPartProgressView />
+      <ElTabPane v-if="isPmc" label="进度明细表" name="progress" lazy>
+        <section class="dashboard-card">
+          <OrderProgressDetailsView />
+        </section>
       </ElTabPane>
       <ElTabPane label="工人总览" name="workers">
         <WorkerOverview
@@ -100,7 +100,7 @@ onMounted(workers.loadWorkers)
 <style scoped>
 .admin-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .admin-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }
-.orders-card {
+.dashboard-card {
   padding: 20px;
   border: 1px solid var(--erp-border);
   border-radius: var(--erp-radius-lg);
@@ -108,5 +108,5 @@ onMounted(workers.loadWorkers)
   box-shadow: var(--erp-shadow-sm);
 }
 @media (max-width: 900px) { .admin-page { padding: 16px; } }
-@media (max-width: 560px) { .admin-page { padding: 12px; } .orders-card { padding: 12px; border-radius: var(--erp-radius); } }
+@media (max-width: 560px) { .admin-page { padding: 12px; } .dashboard-card { padding: 12px; border-radius: var(--erp-radius); } }
 </style>

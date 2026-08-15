@@ -61,6 +61,16 @@ onMounted(() => store.loadProducts(page.value, pageSize))
         <ElTableColumn prop="factory_code" label="厂编" min-width="140" />
         <ElTableColumn prop="customer_code" label="客编" min-width="140" />
         <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.version }}</template></ElTableColumn>
+        <ElTableColumn label="可用状态" min-width="210">
+          <template #default="{ row }">
+            <div class="readiness-cell">
+              <ElTag :type="row.order_ready ? 'success' : 'danger'" effect="light">
+                {{ row.order_ready ? '可用' : '不可用' }}
+              </ElTag>
+              <span v-if="!row.order_ready">{{ row.order_ready_reason }}</span>
+            </div>
+          </template>
+        </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" min-width="160" />
         <ElTableColumn label="操作" width="140" fixed="right">
           <template #default="{ row }">
@@ -100,6 +110,8 @@ onMounted(() => store.loadProducts(page.value, pageSize))
 .page-header p { margin: 0; color: var(--el-text-color-secondary); }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
 .header-actions, .row-actions { display: flex; align-items: center; gap: 8px; }
+.readiness-cell { display: flex; align-items: flex-start; flex-direction: column; gap: 5px; }
+.readiness-cell span { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.35; }
 .header-actions :deep(.el-button + .el-button), .row-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .content-card { padding: 20px; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 13px; }

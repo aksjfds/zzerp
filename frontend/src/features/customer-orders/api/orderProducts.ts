@@ -10,6 +10,8 @@ export type OrderProduct = {
   factory_code: string
   customer_code: string
   bom_count: number
+  order_ready: boolean
+  order_ready_reason: string
   created_at: string
   updated_at: string
 }
@@ -44,6 +46,8 @@ export async function queryOrderProduct(productId: number): Promise<OrderProduct
     factory_code: product.factory_code,
     customer_code: product.customer_code,
     bom_count: product.bom_items.length,
+    order_ready: product.order_ready,
+    order_ready_reason: product.order_ready_reason,
     created_at: product.created_at,
     updated_at: product.updated_at,
   }

@@ -83,6 +83,8 @@ export type ProductSummary = ProductFields & {
   version: number
   revision: number
   bom_count: number
+  order_ready: boolean
+  order_ready_reason: string
   created_at: string
   updated_at: string
 }
@@ -94,6 +96,8 @@ export type EngineeringProduct = ProductFields & {
   revision: number
   base_info_editable: boolean
   version_editable: boolean
+  order_ready: boolean
+  order_ready_reason: string
   bom_items: BomItem[]
   process_flow: ProcessFlow
   process_flow_is_draft: boolean

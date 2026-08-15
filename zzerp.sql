@@ -75,7 +75,7 @@ CREATE TABLE product_version (
     PRIMARY KEY (product_id, version)
 );
 
--- product_bom：保存产品各版本的配件明细、用量、编号及显示顺序。
+-- product_bom：保存产品各版本的逻辑配件明细；自产、外购等可替代路线在流程图中重复引用同一 BOM 行。
 CREATE TABLE product_bom (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
@@ -588,7 +588,7 @@ CREATE TABLE work_order_material (
     CONSTRAINT fk_work_order_material_repository_item
         FOREIGN KEY (repository_id, production_item_id)
         REFERENCES repository(id, production_item_id),
-    UNIQUE (work_order_id, production_item_id)
+    UNIQUE (work_order_id, repository_id)
 );
 
 -- work_order_batch：保存工单送检批次、QC 结果及返工复检的父子关系。
@@ -723,7 +723,7 @@ CREATE TABLE production_operation_undo (
     -- 批次删除后仍保留原编号作为撤回审计信息，因此不设置外键。
     work_order_batch_id BIGINT,
     operation_type TEXT NOT NULL
-        CHECK (operation_type IN ('processing_completion', 'submission', 'rework_submission')),
+        CHECK (operation_type IN ('purchase_arrival', 'submission', 'rework_submission')),
     operation_label TEXT NOT NULL,
     department_code TEXT NOT NULL,
     actor_username TEXT NOT NULL,
@@ -1955,7 +1955,6 @@ JOIN (
         ('Z8740', '中针',            'Z8740-02', NULL,   2),
         ('Z8711', 'logo件',          'Z8711-01', NULL,   1),
         ('Z8711', '脚钉',            'Z8711-02', NULL,   2),
-        ('Z8711', '脚钉（外购）',    'Z8711-03', '外购', 3),
         ('Z8609', 'L15.1双C镂空件',  'Z8609-01', NULL,   1)
 ) AS component(factory_code, part_name, part_no, remark, sort_order)
     ON component.factory_code = product.factory_code;
@@ -2052,6 +2051,12 @@ CROSS JOIN (
 WHERE department.department_code = 'outsource' AND workshop.workshop_name = '电镀外协';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
+SELECT '赵哥', department.id, workshop.id
+FROM department
+JOIN workshop ON workshop.department_id = department.id
+WHERE department.department_code = 'purchasing' AND workshop.workshop_name = '采购组';
+
+INSERT INTO worker (worker_name, department_id, workshop_id)
 SELECT 'QC示例工人', id, NULL FROM department WHERE department_code = 'qc';
 
 INSERT INTO worker (worker_name, department_id, workshop_id)
@@ -2067,3 +2072,6 @@ JOIN workshop ON workshop.department_id = department.id
 WHERE department.department_code = 'assembly' AND workshop.workshop_name = '焊接车间';
 
 COMMIT;
+
+TRUNCATE TABLE product_process_flow RESTART IDENTITY;
+\copy product_process_flow FROM '/tmp/product_process_flow.csv' CSV HEADER

@@ -69,6 +69,9 @@
   --erp-shadow-sm: 0 1px 2px rgb(25 28 32 / 8%), 0 1px 3px 1px rgb(25 28 32 / 5%);
   --erp-shadow-md: 0 2px 6px 2px rgb(25 28 32 / 10%);
   --erp-page-gutter: 24px;
+  --erp-motion-duration-fast: 160ms;
+  --erp-motion-duration-medium: 300ms;
+  --erp-motion-easing-standard: cubic-bezier(0.2, 0, 0, 1);
 
   /* Element Plus mapped to the same Material color roles and geometry. */
   --el-color-primary: var(--md-primary);
@@ -341,6 +344,185 @@ a {
 
 .el-dialog__footer {
   padding: 8px 24px 24px;
+}
+
+/*
+ * Motion states are deliberately complete and symmetric. Every enter/leave
+ * transition defines both endpoints so teleported overlays never depend on
+ * an implicit transform left behind by the component mounting lifecycle.
+ */
+.el-overlay.is-drawer,
+.el-overlay.is-drawer .el-drawer {
+  transition: none;
+}
+
+/*
+ * Use explicit keyframes for drawers instead of relying on the browser to
+ * capture Vue's short-lived enter-from frame. This keeps the opening motion
+ * intact even when the teleported overlay is created and shown in one render.
+ */
+.el-overlay.is-drawer.el-drawer-fade-enter-active,
+.el-overlay.is-drawer.el-drawer-fade-leave-active {
+  transition-property: background-color;
+  transition-duration: var(
+    --erp-drawer-transition-duration,
+    var(--erp-motion-duration-medium)
+  ) !important;
+  transition-timing-function: linear;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer,
+.el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer {
+  animation-duration: var(
+    --erp-drawer-transition-duration,
+    var(--erp-motion-duration-medium)
+  ) !important;
+  animation-fill-mode: both;
+  animation-timing-function: var(--erp-motion-easing-standard);
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer.rtl {
+  animation-name: erp-drawer-enter-rtl;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer.rtl {
+  animation-name: erp-drawer-leave-rtl;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer.ltr {
+  animation-name: erp-drawer-enter-ltr;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer.ltr {
+  animation-name: erp-drawer-leave-ltr;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer.ttb {
+  animation-name: erp-drawer-enter-ttb;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer.ttb {
+  animation-name: erp-drawer-leave-ttb;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer.btt {
+  animation-name: erp-drawer-enter-btt;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer.btt {
+  animation-name: erp-drawer-leave-btt;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-from,
+.el-overlay.is-drawer.el-drawer-fade-leave-to {
+  opacity: 1;
+  background-color: var(--el-overlay-color-lighter) !important;
+}
+
+.el-drawer-fade-enter-from .el-drawer.rtl,
+.el-drawer-fade-leave-to .el-drawer.rtl {
+  transform: translateX(100%);
+}
+
+.el-drawer-fade-enter-from .el-drawer.ltr,
+.el-drawer-fade-leave-to .el-drawer.ltr {
+  transform: translateX(-100%);
+}
+
+.el-drawer-fade-enter-from .el-drawer.ttb,
+.el-drawer-fade-leave-to .el-drawer.ttb {
+  transform: translateY(-100%);
+}
+
+.el-drawer-fade-enter-from .el-drawer.btt,
+.el-drawer-fade-leave-to .el-drawer.btt {
+  transform: translateY(100%);
+}
+
+.el-drawer-fade-enter-to .el-drawer,
+.el-drawer-fade-leave-from .el-drawer {
+  transform: translate(0);
+}
+
+@keyframes erp-drawer-enter-rtl {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes erp-drawer-leave-rtl {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
+
+@keyframes erp-drawer-enter-ltr {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes erp-drawer-leave-ltr {
+  from { transform: translateX(0); }
+  to { transform: translateX(-100%); }
+}
+
+@keyframes erp-drawer-enter-ttb {
+  from { transform: translateY(-100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes erp-drawer-leave-ttb {
+  from { transform: translateY(0); }
+  to { transform: translateY(-100%); }
+}
+
+@keyframes erp-drawer-enter-btt {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes erp-drawer-leave-btt {
+  from { transform: translateY(0); }
+  to { transform: translateY(100%); }
+}
+
+/* Shared primitives for future application transitions. */
+.erp-fade-enter-active,
+.erp-fade-leave-active,
+.erp-slide-right-enter-active,
+.erp-slide-right-leave-active {
+  transition-duration: var(--erp-motion-duration-medium);
+  transition-timing-function: var(--erp-motion-easing-standard);
+}
+
+.erp-fade-enter-active,
+.erp-fade-leave-active {
+  transition-property: opacity;
+}
+
+.erp-fade-enter-from,
+.erp-fade-leave-to {
+  opacity: 0;
+}
+
+.erp-fade-enter-to,
+.erp-fade-leave-from {
+  opacity: 1;
+}
+
+.erp-slide-right-enter-active,
+.erp-slide-right-leave-active {
+  transition-property: transform, opacity;
+}
+
+.erp-slide-right-enter-from,
+.erp-slide-right-leave-to {
+  opacity: 0;
+  transform: translateX(100%);
+}
+
+.erp-slide-right-enter-to,
+.erp-slide-right-leave-from {
+  opacity: 1;
+  transform: translateX(0);
 }
 
 .el-message-box {

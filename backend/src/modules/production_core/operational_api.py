@@ -27,6 +27,7 @@ from modules.production_core.work_order_presenters import (
     serialize_work_order,
 )
 from modules.production_core.work_order_progress import (
+    calculate_assembly_output_progress,
     calculate_work_order_progress,
     order_remaining_quantity,
     refresh_qc_work_order_closed,
@@ -47,6 +48,7 @@ from modules.production_core.work_order_support import (
 
 __all__ = [
     "InventorySource",
+    "calculate_assembly_output_progress",
     "calculate_work_order_progress",
     "capture_operation_state",
     "consume_order_source",

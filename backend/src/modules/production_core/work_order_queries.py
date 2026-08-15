@@ -1,4 +1,4 @@
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import case, exists, func, or_, select
 
 from database import SessionLocal
 from domain.production_types import (
@@ -42,7 +42,14 @@ def list_department_work_orders(
             select(WorkOrder)
             .outerjoin(Procedure, Procedure.id == WorkOrder.procedure_id)
             .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
-            .order_by(WorkOrder.id.desc())
+            .order_by(
+                case(
+                    (WorkOrder.status == "open", 0),
+                    (WorkOrder.status == "closed", 1),
+                    else_=2,
+                ),
+                WorkOrder.id.desc(),
+            )
         )
         condition = (
             WorkOrder.work_order_type == WORK_ORDER_ASSEMBLY

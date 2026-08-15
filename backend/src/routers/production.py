@@ -19,6 +19,7 @@ from schemas.production import (
     DepartmentWorkerOverviewEnvelope,
     DepartmentWorkerPayEnvelope,
     RepositoryListEnvelope,
+    ProductionProgressItemDetailResponse,
     TagCardListEnvelope,
     WarehouseStorageInput,
     WarehouseStorageResponse,
@@ -99,6 +100,29 @@ def department_production_progress(
 
 
 @router.get(
+    "/departments/{department_code}/production-progress/items/"
+    "{production_plan_item_id}",
+    response_model=ProductionProgressItemDetailResponse,
+)
+def department_production_progress_item(
+    department_code: str,
+    production_plan_item_id: int,
+    processing_workshop: str | None = Query(default=None, max_length=100),
+    flow_node_id: str | None = Query(default=None, max_length=200),
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, department_code)
+    return department_api(
+        department_code,
+        CAP_PRODUCTION_PROGRESS,
+    ).get_production_progress_item(
+        production_plan_item_id,
+        processing_workshop,
+        flow_node_id,
+    )
+
+
+@router.get(
     "/departments/{department_code}/repositories",
     response_model=RepositoryListEnvelope,
 )
@@ -108,7 +132,12 @@ def department_repositories(
     page_size: int = Query(default=50, gt=0, le=10000),
     keyword: str | None = Query(default=None, max_length=200),
     workshop_name: str | None = Query(default=None, max_length=200),
-    work_status: str = Query(default="all", pattern="^(all|unprocessed|processing|completed)$"),
+    work_status: str = Query(
+        default="all",
+        pattern=(
+            "^(all|unprocessed|processing|processing_completed|qc|rework|completed)$"
+        ),
+    ),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     if user["department"] not in {"sys", department_code}:

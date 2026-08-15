@@ -3,10 +3,6 @@ import type { BomItem } from '../domain/types'
 
 export function startPartDrag(lf: LogicFlow, item: BomItem) {
   if (!item.id) throw new Error('请先保存 BOM 行')
-  const duplicated = lf.getGraphRawData().nodes.some(
-    (node) => node.type === 'part' && node.properties?.bomItemId === item.id,
-  )
-  if (duplicated) throw new Error(`“${item.part_name}”已存在于流程图中`)
   lf.dnd.startDrag({
     type: 'part',
     text: item.part_name,

@@ -1,6 +1,6 @@
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import { completeWorkOrderProcessing, submitWorkOrder } from '../api/workOrders'
+import { registerPurchaseArrival, submitWorkOrder } from '../api/workOrders'
 import type { WorkOrder } from '../domain/types'
 import {
   createCancelWorkOrderAction,
@@ -12,7 +12,7 @@ import {
 export function usePurchaseWorkOrderActions(
   onChanged: () => Promise<void>,
 ): WorkOrderActions {
-  async function submit(item: WorkOrder) {
+  async function registerArrival(item: WorkOrder) {
     try {
       const remaining = Math.max(item.quantity - item.processed_quantity, 0)
       const { value } = await ElMessageBox.prompt(
@@ -30,12 +30,16 @@ export function usePurchaseWorkOrderActions(
         return
       }
       if (item.qc_required) {
-        await completeWorkOrderProcessing(item.id, quantity)
+        await registerPurchaseArrival(item.id, quantity)
       } else {
         await submitWorkOrder(item.id, quantity, 'direct')
       }
       await onChanged()
-      ElMessage.success(item.qc_required ? '已登记到货，等待送检' : '到货数量已入库')
+      ElMessage.success(
+        item.qc_required
+          ? '到货数量已登记'
+          : '到货数量已入库',
+      )
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
         ElMessage.error(getApiErrorDetail(error)?.message || '到货登记失败')
@@ -45,20 +49,12 @@ export function usePurchaseWorkOrderActions(
 
   async function submitQc(item: WorkOrder) {
     try {
-      const { value } = await ElMessageBox.prompt(
-        `待送检 ${item.ready_for_qc_quantity} 件，请输入本次送检数量`,
-        '外购件送检',
-        {
-          inputValue: String(item.ready_for_qc_quantity),
-          inputPattern: /^[1-9]\d*$/,
-          inputErrorMessage: '请输入正整数',
-        },
+      const quantity = item.ready_for_qc_quantity
+      await ElMessageBox.confirm(
+        `确认将整张外购工单的 ${quantity} 件全部送检？`,
+        '外购工单 · 整单送检',
+        { confirmButtonText: '全部送检', cancelButtonText: '取消' },
       )
-      const quantity = Number(value)
-      if (quantity > item.ready_for_qc_quantity) {
-        ElMessage.warning('送检数量不能超过待送检数量')
-        return
-      }
       await submitWorkOrder(item.id, quantity, 'qc')
       await onChanged()
       ElMessage.success('已送 QC 检验')
@@ -72,7 +68,7 @@ export function usePurchaseWorkOrderActions(
   return {
     cancel: createCancelWorkOrderAction(onChanged),
     resubmitQc: ignoreWorkOrderAction,
-    submit,
+    registerArrival,
     submitQc,
     submitDirectResult: ignoreWorkOrderAction,
     undo: createUndoProductionOperationAction(onChanged),

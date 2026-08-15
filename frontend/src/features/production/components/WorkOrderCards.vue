@@ -15,7 +15,7 @@ const props = withDefaults(defineProps<{
   specialPrinting?: boolean
 }>(), { mode: 'production' })
 const emit = defineEmits<{
-  submit: [item: WorkOrder]
+  registerArrival: [item: WorkOrder]
   submitQc: [item: WorkOrder]
   submitDirectResult: [item: WorkOrder]
   resubmitQc: [item: WorkOrder, batch: WorkOrderBatch]
@@ -73,7 +73,7 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
         <span>创建：{{ item.created_at }}</span>
       </div>
       <p v-if="item.remark" class="remark">备注：{{ item.remark }}</p>
-      <dl class="metrics" :class="policy.metricsClass">
+      <dl class="metrics">
         <div v-for="metric in policy.metrics(item)" :key="metric.label">
           <dt>{{ metric.label }}</dt><dd>{{ metric.value }}</dd>
         </div>
@@ -116,39 +116,39 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
       <div class="work-order-actions">
         <div class="primary-actions">
           <ElButton
-            v-if="policy.showComplete(item)"
+            v-if="mode === 'purchase' && item.status === 'open' && item.processing_quantity > 0"
             type="primary"
             size="small"
-            :disabled="policy.disableComplete(item)"
-            @click="emit('submit', item)"
-          >{{ policy.completeLabel(item) }}</ElButton>
+            @click="emit('registerArrival', item)"
+          >登记到货</ElButton>
           <ElButton
             v-if="policy.showInitialQc(item)"
             type="warning"
             size="small"
             @click="emit('submitQc', item)"
-          >送检（{{ item.ready_for_qc_quantity }}）</ElButton>
+          >送检</ElButton>
           <ElButton
             v-if="policy.showDirectResult(item)"
             type="success"
             size="small"
             @click="emit('submitDirectResult', item)"
-          >{{ mode === 'assembly' ? '填写装配结果' : '填写加工结果' }}（{{ item.ready_for_qc_quantity }}）</ElButton>
+          >确认合格</ElButton>
         </div>
         <div class="utility-actions">
-          <ElButton size="small" plain @click="openPrint(item)">打印工单</ElButton>
+          <ElButton size="small" text @click="openPrint(item)">打印</ElButton>
           <ElButton
             v-if="item.undo_operation"
             type="danger"
-            plain
+            text
             size="small"
             @click="emit('undo', item)"
           >{{ item.undo_operation.operation_label }}</ElButton>
           <ElButton
-            v-if="item.status === 'open' && item.processed_quantity === 0"
+            v-if="item.status === 'open' && item.processed_quantity === 0 && item.submitted_quantity === 0"
             size="small"
+            text
             @click="emit('cancel', item)"
-          >取消工单</ElButton>
+          >取消</ElButton>
         </div>
       </div>
     </article>
@@ -170,11 +170,10 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
 .heading span, .meta { color: var(--el-text-color-secondary); font-size: 13px; }
 .meta { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-top: 12px; }
 .remark { margin: 10px 0 0; padding: 9px 11px; border-radius: var(--erp-radius-sm); color: var(--md-on-surface-variant); background: var(--md-surface-container-lowest); font-size: 13px; white-space: pre-wrap; }
-.metrics { display: grid; grid-template-columns: repeat(6, minmax(80px, 1fr)); gap: 8px; margin: 14px 0 0; }
+.metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; margin: 14px 0 0; }
 .metrics div { padding: 10px; border-radius: var(--erp-radius-sm); background: var(--md-surface-container-lowest); }
 .metrics dt { color: var(--el-text-color-secondary); font-size: 12px; }
 .metrics dd { margin: 5px 0 0; font-size: 17px; font-weight: 700; }
-.purchase-metrics, .assembly-metrics { grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); }
 .batches { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--erp-border); }
 .batches h4 { margin: 0 0 8px; font-size: 13px; }
 .batch-row { padding: 9px 10px; border-radius: var(--erp-radius-sm); background: var(--md-surface-container-lowest); font-size: 12px; }
@@ -184,16 +183,15 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
 .batch-result { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; }
 .batch-row p { margin: 6px 0 0; color: var(--el-text-color-secondary); }
 .batch-rework { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 8px; color: var(--el-color-warning); }
-.work-order-actions { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px 20px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--erp-border); }
+.work-order-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px 20px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--erp-border); }
 .primary-actions, .utility-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .utility-actions { justify-content: flex-end; }
 .work-order-actions :deep(.el-button) { margin: 0; }
-@media (max-width: 1150px) { .metrics { grid-template-columns: repeat(3, 1fr); } }
 @media (max-width: 620px) {
   .heading, .batch-heading { align-items: flex-start; flex-direction: column; }
   .batch-result { justify-content: flex-start; }
-  .metrics, .purchase-metrics, .assembly-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .work-order-actions { grid-template-columns: 1fr; width: 100%; }
+  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .work-order-actions { align-items: stretch; flex-direction: column; width: 100%; }
   .primary-actions, .utility-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
   .work-order-actions :deep(.el-button) { width: 100%; }
 }

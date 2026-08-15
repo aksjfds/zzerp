@@ -8,6 +8,7 @@ from modules.sales.orders import (
     delete_order,
     get_order,
     list_orders,
+    list_order_progress_details,
     update_order,
 )
 from modules.production_core.sales_api import get_customer_order_production
@@ -22,5 +23,6 @@ __all__ = [
     "get_order",
     "list_customers",
     "list_orders",
+    "list_order_progress_details",
     "update_order",
 ]

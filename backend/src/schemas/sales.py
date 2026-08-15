@@ -58,6 +58,7 @@ class CustomerOrderResponse(SalesModel):
     customer_id: int
     customer_name: str
     status: str
+    can_edit: bool
     revision: int
     remark: str
     items: list[CustomerOrderItemResponse]
@@ -72,6 +73,27 @@ class CustomerOrderEnvelope(SalesModel):
 
 class CustomerOrderListEnvelope(SalesModel):
     data: list[CustomerOrderResponse]
+    total: int
+
+
+class CustomerOrderProgressDetail(SalesModel):
+    customer_order_id: int
+    customer_order_item_id: int
+    factory_code: str
+    product_name: str
+    order_date: date
+    customer_order_no: str
+    customer_code: str
+    order_quantity: int
+    task_quantity: int
+    shipped_quantity: int
+    outstanding_quantity: int
+    delivery_date: date
+    remark: str
+
+
+class CustomerOrderProgressDetailEnvelope(SalesModel):
+    data: list[CustomerOrderProgressDetail]
     total: int
 
 
@@ -115,6 +137,18 @@ class ProductionPlanProductSummary(SalesModel):
     planned_finished_quantity: int
 
 
+class ProductionPlanInventoryPartEquivalent(SalesModel):
+    product_bom_id: int
+    item_code: str
+    item_name: str
+    quantity: int
+
+
+class ProductionPlanInventoryDecomposition(SalesModel):
+    finished_equivalent_quantity: int
+    parts: list[ProductionPlanInventoryPartEquivalent]
+
+
 class ProductionPlanInventoryItem(SalesModel):
     id: int
     customer_order_item_id: int
@@ -129,6 +163,7 @@ class ProductionPlanInventoryItem(SalesModel):
     current_inventory_quantity: int
     reserved_inventory_quantity: int
     issued_inventory_quantity: int
+    decomposition: ProductionPlanInventoryDecomposition
 
 
 class ProductionPlanResponse(SalesModel):

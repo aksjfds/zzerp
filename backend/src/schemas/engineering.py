@@ -138,6 +138,8 @@ class ProductSummaryResponse(ProductResponseFields):
     version: int
     revision: int
     bom_count: int
+    order_ready: bool
+    order_ready_reason: str
     created_at: str
     updated_at: str
 
@@ -149,6 +151,8 @@ class ProductDetailResponse(ProductResponseFields):
     revision: int
     base_info_editable: bool
     version_editable: bool
+    order_ready: bool
+    order_ready_reason: str
     bom_items: list[BomItemResponse]
     process_flow: ProcessFlowPayload
     process_flow_is_draft: bool

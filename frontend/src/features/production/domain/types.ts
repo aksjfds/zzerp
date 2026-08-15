@@ -35,11 +35,13 @@ export type RepositoryItem = {
   available_quantity: number
   assembly_unit_quantity: number
   assembly_required_source_ids: string[]
+  assembly_material_key: string
+  assembly_required_material_keys: string[]
   assembly_group_complete: boolean
   assembly_output_name: string | null
   delivery_date: string
   arrived_at: string | null
-  work_status: 'unprocessed' | 'processing' | 'completed'
+  work_status: 'unprocessed' | 'processing' | 'processing_completed' | 'qc' | 'rework' | 'completed'
   can_create_work_order: boolean
 }
 
@@ -88,22 +90,10 @@ export type TagCard = {
   can_create_work_order: boolean
 }
 
-export type ProductionOverviewRow = {
-  name: string
-  quantity: number
-}
-
-export type ProductionOverviewSummary = {
-  pendingQuantity: number
-  processingRows: ProductionOverviewRow[]
-  pendingQcRows: ProductionOverviewRow[]
-  completedRows: ProductionOverviewRow[]
-}
-
 export type RepositoryFilters = {
   keyword: string
   workshop_name: string | null
-  work_status: 'all' | 'unprocessed' | 'processing' | 'completed'
+  work_status: 'all' | RepositoryItem['work_status']
 }
 
 export type WorkOrderBatch = {
@@ -136,7 +126,9 @@ export type WorkOrder = {
   source_tag_set_id: number | null
   target_tag_set_id: number | null
   work_order_type: 'tag' | 'purchase_receipt' | 'assembly'
+  qc_available: boolean
   qc_required: boolean
+  direct_result_allowed: boolean
   input_production_item_ids: number[]
   customer_order_no: string
   factory_code: string
@@ -149,12 +141,17 @@ export type WorkOrder = {
   worker_id: number | null
   worker_name: string | null
   quantity: number
+  output_unit_quantity: number
+  output_quantity: number
   processed_quantity: number
   submitted_quantity: number
   ready_for_qc_quantity: number
   processing_quantity: number
+  processing_output_quantity: number
+  ready_output_quantity: number
   pending_qc_quantity: number
   qualified_quantity: number
+  qualified_output_quantity: number
   rework_quantity: number
   scrap_quantity: number
   lost_quantity: number
@@ -165,7 +162,7 @@ export type WorkOrder = {
   undo_operation: {
     id: number
     work_order_batch_id: number | null
-    operation_type: 'processing_completion' | 'submission' | 'rework_submission'
+    operation_type: 'purchase_arrival' | 'submission' | 'rework_submission'
     operation_label: string
     actor_username: string
     created_at: string

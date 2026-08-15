@@ -42,11 +42,20 @@ class RepositoryResponse(ProductionModel):
     available_quantity: int
     assembly_unit_quantity: int
     assembly_required_source_ids: list[str]
+    assembly_material_key: str
+    assembly_required_material_keys: list[str]
     assembly_group_complete: bool
     assembly_output_name: str | None = None
     delivery_date: date
     arrived_at: str | None
-    work_status: Literal["unprocessed", "processing", "completed"]
+    work_status: Literal[
+        "unprocessed",
+        "processing",
+        "processing_completed",
+        "qc",
+        "rework",
+        "completed",
+    ]
     can_create_work_order: bool
 
 
@@ -94,22 +103,93 @@ class DepartmentSurplusInventoryEnvelope(ProductionModel):
     data: list[DepartmentSurplusInventoryItem]
 
 
+class AssemblyMaterialArrivalResponse(ProductionModel):
+    material_type: Literal["part", "assembly"]
+    material_no: str
+    material_name: str
+    task_quantity: int
+    arrived_quantity: int
+
+
 class DepartmentProductionProgressResponse(ProductionModel):
+    production_plan_item_id: int
     production_item_id: int | None
+    flow_node_id: str | None
     part_no: str
     part_name: str
-    customer_order_no: str
-    order_date: date
-    order_quantity: int
-    shipped_quantity: int
-    outstanding_quantity: int
-    completion_date: date | None
+    processing_workshop: str
+    task_quantity: int
+    arrived_quantity: int
+    material_arrivals: list[AssemblyMaterialArrivalResponse]
+    completed_quantity: int
     remark: str
 
 
 class DepartmentProductionProgressEnvelope(ProductionModel):
     data: list[DepartmentProductionProgressResponse]
     total: int
+
+
+class ProductionProgressWorkOrderResponse(ProductionModel):
+    id: int
+    work_order_no: str
+    worker_name: str | None
+    quantity: int
+    processed_quantity: int
+    submitted_quantity: int
+    pending_qc_quantity: int
+    completed_quantity: int
+    rework_quantity: int
+    scrap_quantity: int
+    lost_quantity: int
+    status: Literal["open", "closed", "cancelled"]
+    created_at: str
+    closed_at: str | None
+
+
+class ProductionProgressTagCardResponse(ProductionModel):
+    card_key: str
+    card_type: Literal["tag", "process", "assembly", "purchase"]
+    sort_order: int
+    flow_node_id: str
+    procedure_id: int | None
+    tag_id: int | None
+    card_name: str
+    department_code: str
+    department_name: str
+    workshop_name: str
+    procedure_name: str
+    status: Literal[
+        "not_arrived",
+        "ready",
+        "processing",
+        "pending_qc",
+        "completed",
+        "exception",
+    ]
+    task_quantity: int
+    arrived_quantity: int
+    processing_quantity: int
+    ready_for_qc_quantity: int
+    pending_qc_quantity: int
+    completed_quantity: int
+    rework_quantity: int
+    scrap_quantity: int
+    lost_quantity: int
+    work_orders: list[ProductionProgressWorkOrderResponse]
+
+
+class ProductionProgressItemDetailResponse(ProductionModel):
+    production_plan_item_id: int
+    production_item_ids: list[int]
+    customer_order_no: str
+    factory_code: str
+    product_name: str
+    part_no: str
+    part_name: str
+    plan_status: Literal["draft", "confirmed", "cancelled"]
+    task_quantity: int
+    cards: list[ProductionProgressTagCardResponse]
 
 
 class WorkerResponse(ProductionModel):
@@ -224,7 +304,7 @@ class WorkOrderSubmission(ProductionModel):
     completion_action: Literal["direct", "qc"]
 
 
-class WorkOrderProcessingCompletion(ProductionModel):
+class PurchaseArrival(ProductionModel):
     quantity: int = Field(gt=0)
 
 
@@ -261,7 +341,7 @@ class WorkOrderBatchResponse(ProductionModel):
 class ProductionUndoOperationResponse(ProductionModel):
     id: int
     work_order_batch_id: int | None
-    operation_type: Literal["processing_completion", "submission", "rework_submission"]
+    operation_type: Literal["purchase_arrival", "submission", "rework_submission"]
     operation_label: str
     actor_username: str
     created_at: str
@@ -280,7 +360,9 @@ class WorkOrderResponse(ProductionModel):
     source_tag_set_id: int | None
     target_tag_set_id: int | None
     work_order_type: Literal["tag", "purchase_receipt", "assembly"]
+    qc_available: bool
     qc_required: bool
+    direct_result_allowed: bool
     input_production_item_ids: list[int]
     customer_order_no: str
     factory_code: str
@@ -293,12 +375,17 @@ class WorkOrderResponse(ProductionModel):
     worker_id: int | None
     worker_name: str | None
     quantity: int
+    output_unit_quantity: int
+    output_quantity: int
     processed_quantity: int
     submitted_quantity: int
     ready_for_qc_quantity: int
     processing_quantity: int
+    processing_output_quantity: int
+    ready_output_quantity: int
     pending_qc_quantity: int
     qualified_quantity: int
+    qualified_output_quantity: int
     rework_quantity: int
     scrap_quantity: int
     lost_quantity: int

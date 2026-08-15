@@ -1,7 +1,10 @@
 import { nextTick, onBeforeUnmount, onMounted, shallowRef, type Ref } from 'vue'
 import LogicFlow, { type BaseNodeModel } from '@logicflow/core'
 import { Control, Menu } from '@logicflow/extension'
-import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
+import {
+  ProcessPolylineEdgeModel,
+  registerProcessNodes,
+} from '@/shared/process-flow/registerNodes'
 import {
   fromLogicFlowData,
   PROCESS_FLOW_GRID_X,
@@ -9,11 +12,14 @@ import {
   toLogicFlowData,
 } from '@/shared/process-flow/adapter'
 import { updateProcessCanvasScale } from '@/shared/process-flow/nodeTextScale'
+import {
+  applyProcessNodeScale,
+  PROCESS_FLOW_FONT_SIZE_STORAGE_KEY,
+  PROCESS_FLOW_MIN_CANVAS_SCALE,
+  PROCESS_FLOW_NODE_SCALE_STORAGE_KEY,
+  storedProcessFlowNumber,
+} from '@/shared/process-flow/canvasDisplay'
 import type { FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
-
-const FONT_SIZE_STORAGE_KEY = 'zzerp.processFlow.fontSize'
-const NODE_SCALE_STORAGE_KEY = 'zzerp.processFlow.nodeScale'
-const PROCESS_CANVAS_MIN_SCALE = 0.02
 
 type Callbacks = {
   initialFlow: () => ProcessFlow
@@ -29,8 +35,8 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   const instance = shallowRef<LogicFlow | null>(null)
   let resizeObserver: ResizeObserver | null = null
   let resizeFrame: number | null = null
-  let fontSize = storedNumber(FONT_SIZE_STORAGE_KEY, 13, 10)
-  let nodeDisplayScale = storedNumber(NODE_SCALE_STORAGE_KEY, 1, 0.6)
+  let fontSize = storedProcessFlowNumber(PROCESS_FLOW_FONT_SIZE_STORAGE_KEY, 13, 10)
+  let nodeDisplayScale = storedProcessFlowNumber(PROCESS_FLOW_NODE_SCALE_STORAGE_KEY, 1, 0.6)
   let applyingDisplayScale = false
   let batchConnecting = false
   let panElement: HTMLDivElement | null = null
@@ -144,12 +150,12 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   function changeFontSize(delta: number) {
     fontSize = Math.max(10, fontSize + delta)
     container.value?.style.setProperty('--process-node-font-size', `${fontSize}px`)
-    localStorage.setItem(FONT_SIZE_STORAGE_KEY, String(fontSize))
+    localStorage.setItem(PROCESS_FLOW_FONT_SIZE_STORAGE_KEY, String(fontSize))
   }
 
   function changeNodeSize(delta: number) {
     nodeDisplayScale = Math.max(0.6, Number((nodeDisplayScale + delta).toFixed(2)))
-    localStorage.setItem(NODE_SCALE_STORAGE_KEY, String(nodeDisplayScale))
+    localStorage.setItem(PROCESS_FLOW_NODE_SCALE_STORAGE_KEY, String(nodeDisplayScale))
     if (instance.value) applyNodeDisplayScale(instance.value)
   }
 
@@ -182,6 +188,15 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
         node.y + deltaY,
         true,
       )
+    })
+  }
+
+  function replanConnectedEdges(lf: LogicFlow, nodeIds: string[]) {
+    const movedNodeIds = new Set(nodeIds)
+    lf.graphModel.edges.forEach((edge) => {
+      if (!(edge instanceof ProcessPolylineEdgeModel)
+        || (!movedNodeIds.has(edge.sourceNodeId) && !movedNodeIds.has(edge.targetNodeId))) return
+      edge.updatePoints()
     })
   }
 
@@ -331,45 +346,9 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   }
 
   function applyNodeDisplayScale(lf: LogicFlow, nodeId?: string) {
-    const nodeIds = nodeId ? [nodeId] : lf.graphModel.nodes.map(node => node.id)
     applyingDisplayScale = true
-    nodeIds.forEach((id) => {
-      const model = lf.getNodeModelById(id)
-      if (model?.properties.__displayScale !== nodeDisplayScale) {
-        lf.setProperties(id, { __displayScale: nodeDisplayScale })
-      }
-    })
+    applyProcessNodeScale(lf, nodeDisplayScale, nodeId)
     applyingDisplayScale = false
-    refreshEdgeEndpoints(lf)
-  }
-
-  function refreshEdgeEndpoints(lf: LogicFlow) {
-    lf.graphModel.edges.forEach((edge) => {
-      const sourceNode = edge.sourceNode
-      const targetNode = edge.targetNode
-      const startPoint = edge.getBeginAnchor(
-        sourceNode,
-        targetNode,
-        edge.sourceAnchorId,
-      )
-      const endPoint = edge.getEndAnchor(targetNode, edge.targetAnchorId)
-      if (!startPoint || !endPoint) return
-      const pointsList = edge.pointsList.length
-        ? edge.pointsList.map((point, index, points) => (
-          index === 0
-            ? { x: startPoint.x, y: startPoint.y }
-            : index === points.length - 1
-              ? { x: endPoint.x, y: endPoint.y }
-              : point
-        ))
-        : []
-      edge.updateAttributes({
-        startPoint: { x: startPoint.x, y: startPoint.y },
-        endPoint: { x: endPoint.x, y: endPoint.y },
-        pointsList,
-      })
-      edge.initPoints()
-    })
   }
 
   function refreshNodeReadability(lf: LogicFlow) {
@@ -475,7 +454,7 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       plugins: [Control, Menu],
     })
     instance.value = lf
-    lf.setZoomMiniSize(PROCESS_CANVAS_MIN_SCALE)
+    lf.setZoomMiniSize(PROCESS_FLOW_MIN_CANVAS_SCALE)
     registerProcessNodes(lf)
     setReadonly(callbacks.readonly?.() ?? false)
     panElement = container.value
@@ -496,8 +475,16 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     })
     lf.on('node:drop', ({ data }) => {
       snapSelectionToGrid(lf, data.id)
+      const selectedNodeIds = lf.getSelectElements().nodes.map(node => node.id)
+      replanConnectedEdges(lf, selectedNodeIds.length ? selectedNodeIds : [data.id])
     })
-    lf.on('selection:drop', () => snapSelectionToGrid(lf))
+    lf.on('selection:drop', () => {
+      snapSelectionToGrid(lf)
+      replanConnectedEdges(
+        lf,
+        lf.getSelectElements().nodes.map(node => node.id),
+      )
+    })
     lf.on('node:click', ({ data }) => {
       const node = currentFlow().nodes.find((item) => item.id === data.id) ?? null
       callbacks.onSelectEdge(null)
@@ -567,18 +554,4 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     renderFlow,
     setReadonly,
   }
-}
-
-function storedNumber(
-  key: string,
-  fallback: number,
-  minimum: number,
-  maximum = Number.POSITIVE_INFINITY,
-) {
-  const stored = localStorage.getItem(key)
-  if (stored === null || stored.trim() === '') return fallback
-  const value = Number(stored)
-  return Number.isFinite(value)
-    ? Math.min(maximum, Math.max(minimum, value))
-    : fallback
 }

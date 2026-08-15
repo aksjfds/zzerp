@@ -15,6 +15,7 @@ from modules.planning.model_api import ProductionPlan, ProductionPlanItem
 from modules.production_core.model_api import ProductionItem, ProductionMovement
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.inventory.persistence import FinishedOrderStock
+from modules.engineering.model_api import ProductBom
 
 
 def list_stocks(department_code: str | None = None) -> list[dict]:
@@ -160,6 +161,11 @@ def list_outbound_plans(department_code: str) -> list[dict]:
         )
         plans: dict[int, dict] = {}
         for plan, order, reservation, stock, item in rows:
+            item_name = item.item_name
+            if item.item_type == "part" and item.product_bom_id is not None:
+                bom_item = session.get(ProductBom, item.product_bom_id)
+                if bom_item is not None:
+                    item_name = bom_item.part_name
             entry = plans.setdefault(plan.id, {
                 "production_plan_id": plan.id,
                 "customer_order_id": order.id,
@@ -170,7 +176,7 @@ def list_outbound_plans(department_code: str) -> list[dict]:
             entry["items"].append({
                 "reservation_id": reservation.id,
                 "item_code": item.item_code,
-                "item_name": item.item_name,
+                "item_name": item_name,
                 "reserved_quantity": reservation.reserved_quantity,
                 "issued_quantity": reservation.issued_quantity,
                 "remaining_quantity": reservation.reserved_quantity - reservation.issued_quantity,
@@ -207,9 +213,14 @@ def issue_outbound_plan(
 
 
 def _completed_node_label(session: Session, item: InventoryStock) -> str:
-    from modules.production_core.flow import load_product_flow
-    _flow, nodes = load_product_flow(session, item.product_id, item.product_version)
-    return nodes.get(item.completed_flow_node_id, {}).get("label", item.completed_flow_node_id)
+    from modules.production_core.flow import completed_node_display_label, load_product_flow
+    flow, nodes = load_product_flow(session, item.product_id, item.product_version)
+    return completed_node_display_label(
+        flow,
+        nodes,
+        item.flow_node_id,
+        item.completed_flow_node_id,
+    )
 
 
 def _serialize_stock(session: Session, item: InventoryStock) -> dict:

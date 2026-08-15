@@ -80,9 +80,9 @@ export async function submitWorkOrder(
   return response.data.data
 }
 
-export async function completeWorkOrderProcessing(workOrderId: number, quantity: number) {
+export async function registerPurchaseArrival(workOrderId: number, quantity: number) {
   const response = await service.post<{ data: WorkOrder }>(
-    `/work-orders/${workOrderId}/processing-completions`,
+    `/work-orders/${workOrderId}/purchase-arrivals`,
     { quantity },
   )
   return response.data.data

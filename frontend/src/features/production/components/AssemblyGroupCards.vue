@@ -1,18 +1,19 @@
 <script setup lang="ts">
 import type { AssemblyGroup } from '../composables/useAssemblyGroups'
+import { repositoryStatusClass, repositoryStatusLabel } from '../domain/repositoryWorkStatus'
 defineProps<{ groups: AssemblyGroup[]; loading: boolean; selectedKey?: string | null }>()
 defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
 </script>
 <template>
   <div v-loading="loading" class="assembly-groups">
     <article v-for="group in groups" :key="group.key" class="assembly-group-card" :class="{ selected: group.key === selectedKey }" tabindex="0" @click="$emit('select', group)" @keydown.enter="$emit('select', group)">
-      <div class="heading"><strong>{{ group.productName }} · {{ group.name }}</strong><ElTag :type="group.status === 'processing' ? 'warning' : group.status === 'completed' ? 'success' : 'info'" size="small">{{ group.kind === 'history' ? '历史' : !group.complete ? '等待物料' : group.status === 'processing' ? '加工中' : group.status === 'completed' ? '已完成' : '未加工' }}</ElTag></div>
+      <div class="heading"><strong>{{ group.productName }} · {{ group.name }}</strong><ElTag class="repository-status-tag" :class="group.kind === 'history' ? repositoryStatusClass('completed') : group.kind === 'current' && !group.complete ? repositoryStatusClass('unprocessed') : repositoryStatusClass(group.status)" effect="plain" size="small">{{ group.kind === 'history' ? '历史' : group.kind === 'current' && !group.complete ? '等待物料' : repositoryStatusLabel(group.status, 'assembly') }}</ElTag></div>
       <p>到达时间：{{ group.arrivedAt || '-' }}</p>
-      <ul>
+      <ul v-if="group.kind === 'current'">
         <li v-for="source in group.sources" :key="source.name">{{ source.name }}：可用 {{ source.available }} / 每件用量 {{
           source.required }}</li>
           <li>可装配 {{ group.capacity }}</li>
-          <li v-if="!group.complete">等待其余装配物料到齐</li>
+          <li v-if="!group.complete">物料尚未到齐</li>
       </ul>
       <ElButton v-if="group.kind === 'current'" type="primary" :disabled="!group.complete || group.capacity < 1" @click.stop="$emit('open', group)">开装配工单</ElButton>
     </article>

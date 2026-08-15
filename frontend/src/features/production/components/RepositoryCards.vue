@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { RepositoryItem } from '../domain/types'
+import { repositoryStatusClass, repositoryStatusLabel } from '../domain/repositoryWorkStatus'
 
 const props = withDefaults(defineProps<{
   items: RepositoryItem[]
@@ -27,18 +28,20 @@ const emit = defineEmits<{
     >
       <div class="card-heading">
         <strong>{{ `${item.factory_code} - ${item.product_name} - ${item.part_name}` }}</strong>
-        <ElTag :type="item.work_status === 'completed' ? 'success' : item.work_status === 'processing' ? 'warning' : 'info'" size="small">
-          {{ item.work_status === 'processing'
-            ? (props.mode === 'purchase' ? '采购中' : '加工中')
-            : item.work_status === 'completed'
-              ? (props.mode === 'purchase' ? '已入库' : '已完成')
-              : (props.mode === 'purchase' ? '待采购' : '未加工') }}
+        <ElTag
+          class="repository-status-tag"
+          :class="repositoryStatusClass(item.work_status)"
+          effect="plain"
+          size="small"
+        >
+          {{ repositoryStatusLabel(item.work_status, props.mode) }}
         </ElTag>
       </div>
       <dl>
         <div><dt>订单编号</dt><dd>{{ item.customer_order_no }}</dd></div>
         <div><dt>当前工艺</dt><dd>{{ item.procedure_name }}</dd></div>
-        <div><dt>{{ props.mode === 'purchase' ? '需求数量' : '当前数量' }}</dt><dd>{{ item.quantity }}</dd></div>
+        <div><dt>{{ props.mode === 'purchase' ? '外购任务数' : '任务数' }}</dt><dd>{{ item.quantity }}</dd></div>
+        <div><dt>{{ props.mode === 'purchase' ? '可开单数量' : '可开工数' }}</dt><dd>{{ item.available_quantity }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求时间' : '到达时间' }}</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
       </dl>
       <div v-if="allowWorkOrder" class="card-actions">
@@ -56,7 +59,7 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.repository-cards { display: grid; grid-template-columns: 1fr; gap: 12px; min-height: 150px; }
+.repository-cards { display: grid; grid-template-columns: 1fr; align-content: start; gap: 12px; min-height: 150px; }
 .repository-card { padding: 14px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-low); cursor: pointer; transition: background-color .16s, border-color .16s, box-shadow .16s; box-shadow: var(--erp-shadow-sm); }
 .repository-card:hover, .repository-card:focus-visible { border-color: var(--erp-primary); outline: none; }
 .repository-card:hover { background: var(--md-surface-container); }

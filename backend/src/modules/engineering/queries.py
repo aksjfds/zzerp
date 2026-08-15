@@ -7,6 +7,7 @@ from modules.engineering.mapper import (
     serialize_product_detail,
     serialize_product_summary,
 )
+from modules.engineering.product_reference_api import get_product_order_readinesses
 from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import empty_process_flow
 from modules.errors import product_not_found
@@ -28,11 +29,17 @@ def list_products(
             session,
             {product.customer_id for product, _ in products_with_counts},
         )
+        readiness = get_product_order_readinesses(
+            session,
+            [product for product, _ in products_with_counts],
+        )
         data = [
             serialize_product_summary(
                 product,
                 bom_count,
                 customer_names[product.customer_id],
+                order_ready=readiness[product.id].ready,
+                order_ready_reason=readiness[product.id].reason,
             )
             for product, bom_count in products_with_counts
         ]
@@ -49,11 +56,14 @@ def get_product(product_id: int, version: int | None = None) -> dict:
         if requested_version not in available_versions:
             raise product_not_found()
         customer_names = customer_names_by_ids(session, {product.customer_id})
+        readiness = get_product_order_readinesses(session, [product])[product.id]
         return serialize_product_detail(
             product,
             empty_process_flow(),
             requested_version,
             customer_name=customer_names[product.customer_id],
+            order_ready=readiness.ready,
+            order_ready_reason=readiness.reason,
             base_info_editable=is_base_info_editable(session, product_id),
             version_editable=is_product_version_editable(session, product_id, requested_version),
         )
