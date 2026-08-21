@@ -2,7 +2,7 @@ from sqlalchemy import func, select
 
 from modules.engineering.model_api import ProductBom
 from domain.time import utc_now
-from modules.organization.model_api import Department, Procedure, Workshop
+from modules.organization.model_api import Department, Workshop
 from modules.planning.model_api import ProductionPlan
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.production_core.persistence import (
@@ -48,15 +48,17 @@ def production_item_unit_quantity(
 def target_department_id(session, node: dict) -> int:
     node_type = node.get("type")
     if node_type == "process":
-        procedure = session.get(Procedure, node.get("procedure_id"))
-        workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
+        workshop = session.get(Workshop, node.get("workshop_id"))
         if workshop is None:
-            raise DomainError("procedure_department_missing", "目标工艺没有有效部门")
+            raise DomainError("workshop_department_missing", "目标节点没有有效车间")
         return workshop.department_id
     if node_type == "shipping":
         department_code = "finished"
     elif node_type == "assembly":
-        department_code = "assembly"
+        workshop = session.get(Workshop, node.get("workshop_id"))
+        if workshop is None:
+            raise DomainError("workshop_department_missing", "目标节点没有有效车间")
+        return workshop.department_id
     else:
         raise DomainError("flow_target_invalid", "目标节点类型不支持生产流转")
     department_id = session.scalar(
@@ -73,6 +75,7 @@ def move_to_node(
     node: dict | None,
     quantity: int,
     source_node_id: str,
+    source_work_order_id: int | None = None,
 ) -> int | None:
     if quantity <= 0 or node is None:
         return None
@@ -94,6 +97,7 @@ def move_to_node(
             Repository.flow_node_id == node["id"],
             Repository.source_flow_node_id == source_node_id,
             Repository.department_id == department_id,
+            Repository.source_work_order_id == source_work_order_id,
         )
         .with_for_update()
     )
@@ -104,6 +108,7 @@ def move_to_node(
                 flow_node_id=node["id"],
                 source_flow_node_id=source_node_id,
                 department_id=department_id,
+                source_work_order_id=source_work_order_id,
                 quantity=quantity,
             )
         )

@@ -11,8 +11,6 @@ class WorkOrderCapability:
         production_item_id: int | None = None,
         flow_node_id: str | None = None,
         source_flow_node_id: str | None = None,
-        existing_tag_ids: list[int] | None = None,
-        applying_tag_ids: list[int] | None = None,
     ) -> tuple[list[dict], int]:
         self.require_capability(CAP_WORK_ORDERS)
         return production.list_department_work_orders(
@@ -22,6 +20,4 @@ class WorkOrderCapability:
             production_item_id=production_item_id,
             flow_node_id=flow_node_id,
             source_flow_node_id=source_flow_node_id,
-            existing_tag_ids=existing_tag_ids,
-            applying_tag_ids=applying_tag_ids,
         )

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import '@logicflow/core/es/index.css'
 import '@logicflow/extension/lib/style/index.css'
 import ProcessFlowCanvas from './ProcessFlowCanvas.vue'
@@ -11,21 +11,20 @@ import type {
   FlowNode,
   ProcessFlow,
 } from '../domain/types'
-import { queryProcedures, type ProcedureOption } from '@/api/organization'
+import { queryWorkshopRoutes, type WorkshopRouteOption } from '@/api/organization'
 
 type NodeProperty = {
-  key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId' | 'departmentCode'
+  key: 'outputName' | 'outputPcs' | 'workshopId' | 'departmentCode'
   value: string | number | boolean
 } | null
 type CanvasApi = {
   dragPart: (item: BomItem) => void
-  dragAssembly: () => void
   dragQc: () => void
   dragShipping: () => void
   dragProcess: (
-    procedureId: number,
-    procedureName: string,
-    inputMode: 'single' | 'multiple',
+    workshopId: number,
+    workshopName: string,
+    multiple: boolean,
     departmentCode: string,
   ) => void
   focusElement: (elementId?: string) => void
@@ -43,48 +42,24 @@ const emit = defineEmits<{ 'update:modelValue': [value: ProcessFlow] }>()
 const canvas = ref<CanvasApi>()
 const selectedNode = ref<FlowNode | null>(null)
 const selectedEdge = ref<FlowEdge | null>(null)
-const procedures = ref<ProcedureOption[]>([])
+const workshops = ref<WorkshopRouteOption[]>([])
+const placedBomIds = computed(() => props.modelValue.nodes.flatMap(node => (
+  node.type === 'part' ? [node.bom_item_id] : []
+)))
 
 function updateFlow(flow: ProcessFlow) {
   if (props.readonly) return
   emit('update:modelValue', flow)
 }
 
-function dragProcedure(procedure: ProcedureOption) {
+function dragWorkshop(workshop: WorkshopRouteOption) {
   if (props.readonly) return
   canvas.value?.dragProcess(
-    procedure.id,
-    procedure.procedure_name,
-    procedure.input_mode,
-    procedure.department_code,
+    workshop.id,
+    workshop.workshop_name,
+    workshop.department_code === 'assembly',
+    workshop.department_code,
   )
-}
-
-function updateProcess(label: string, process_code: string) {
-  if (props.readonly || selectedNode.value?.type !== 'process') return
-  canvas.value?.updateNode(selectedNode.value.id, label, { key: 'processCode', value: process_code })
-  selectedNode.value = { ...selectedNode.value, label, process_code }
-}
-
-function updateProcedure(procedureId: number) {
-  if (props.readonly || selectedNode.value?.type !== 'process') return
-  const procedure = procedures.value.find((item) => item.id === procedureId)
-  if (!procedure) return
-  canvas.value?.updateNode(
-    selectedNode.value.id,
-    procedure.procedure_name,
-    { key: 'procedureId', value: procedureId },
-  )
-  canvas.value?.updateNode(
-    selectedNode.value.id,
-    procedure.procedure_name,
-    { key: 'departmentCode', value: procedure.department_code },
-  )
-  selectedNode.value = {
-    ...selectedNode.value,
-    label: procedure.procedure_name,
-    procedure_id: procedureId,
-  }
 }
 
 function updateAssembly(label: string, output_name: string, output_pcs: number) {
@@ -110,7 +85,7 @@ function reload(flow: ProcessFlow) {
 }
 
 defineExpose({ focusElement, getGraphData: graphData, reload })
-onMounted(async () => { procedures.value = await queryProcedures() })
+onMounted(async () => { workshops.value = await queryWorkshopRoutes() })
 </script>
 
 <template>
@@ -118,7 +93,7 @@ onMounted(async () => { procedures.value = await queryProcedures() })
     <div class="section-heading">
       <div>
         <h2>工序流程配置</h2>
-        <p>配件可直接进入生产工艺、采购部外购节点或装配；同一 BOM 配件可配置多条自产/外购路线，系统会在装配时按可替代来源合并计算。</p>
+        <p>工程部只配置配件经过的车间和QC节点；具体加工工艺由车间在开工单时选择。</p>
       </div>
       <div class="heading-actions"><slot name="actions" /></div>
     </div>
@@ -126,17 +101,17 @@ onMounted(async () => { procedures.value = await queryProcedures() })
       <ProcessNodePalette
         v-if="!readonly"
         :bom-items="bomItems"
-        :procedures="procedures"
+        :placed-bom-ids="placedBomIds"
+        :workshops="workshops"
         @drag-part="canvas?.dragPart($event)"
-        @drag-procedure="dragProcedure"
+        @drag-workshop="dragWorkshop"
         @drag-qc="canvas?.dragQc()"
         @drag-shipping="canvas?.dragShipping()"
-        @drag-assembly="canvas?.dragAssembly()"
       />
       <ProcessFlowCanvas
         ref="canvas"
         :model-value="modelValue"
-        :procedures="procedures"
+        :workshops="workshops"
         :readonly="readonly"
         @update:model-value="updateFlow"
         @select-node="selectedNode = $event"
@@ -146,10 +121,8 @@ onMounted(async () => { procedures.value = await queryProcedures() })
         v-if="selectedNode || selectedEdge"
         :node="selectedNode"
         :edge="selectedEdge"
-        :procedures="procedures"
+        :workshops="workshops"
         :readonly="readonly"
-        @update-process="updateProcess"
-        @update-procedure="updateProcedure"
         @update-assembly="updateAssembly"
       />
     </div>

@@ -24,11 +24,6 @@ from modules.production_core.operational_api import (
 from modules.production_core.flow import physical_route_nodes
 from modules.quality.model_api import WorkOrderBatch
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
-from modules.standard_execution.model_api import (
-    ProcedureTag,
-    ProcedureTagPrice,
-    ProcedureTagSetMember,
-)
 from modules.workforce.model_api import Worker
 
 
@@ -39,7 +34,7 @@ ARRIVAL_MOVEMENT_TYPES = {
     "purchase_receipt",
     "assembly_output",
 }
-QC_FORWARD_MOVEMENT_TYPES = {"qc_qualified", "qc_dispatch"}
+QC_FORWARD_MOVEMENT_TYPES = {"qc_qualified"}
 
 
 def get_department_production_progress_item(
@@ -90,7 +85,6 @@ def get_department_production_progress_item(
             for node in route_nodes
             if _node_department_code(
                 node,
-                procedures,
                 workshops,
                 departments,
             ) == department_code
@@ -118,7 +112,6 @@ def get_department_production_progress_item(
                 for node in department_route_nodes
                 if _node_workshop_name(
                     node,
-                    procedures,
                     workshops,
                 ) == processing_workshop
             ]
@@ -172,20 +165,6 @@ def get_department_production_progress_item(
         batches_by_order: dict[int, list[WorkOrderBatch]] = defaultdict(list)
         for batch in batches:
             batches_by_order[batch.work_order_id].append(batch)
-
-        applied_set_ids = {
-            item.applied_tag_set_id
-            for item in work_orders
-            if item.applied_tag_set_id is not None
-        }
-        tag_ids_by_set: dict[int, set[int]] = defaultdict(set)
-        if applied_set_ids:
-            for member in session.scalars(
-                select(ProcedureTagSetMember).where(
-                    ProcedureTagSetMember.tag_set_id.in_(applied_set_ids)
-                )
-            ).all():
-                tag_ids_by_set[member.tag_set_id].add(member.tag_id)
 
         worker_ids = {item.worker_id for item in work_orders if item.worker_id}
         workers = {
@@ -253,19 +232,9 @@ def get_department_production_progress_item(
                 ):
                     arrivals_by_node[movement.target_flow_node_id] += movement.quantity
 
-        configured_tags = _configured_tags_by_procedure(
-            session,
-            plan_item,
-            {
-                node.get("procedure_id")
-                for node in department_route_nodes
-                if isinstance(node.get("procedure_id"), int)
-            },
-        )
         cards = []
         for sort_order, node in enumerate(department_route_nodes, start=1):
-            procedure = procedures.get(node.get("procedure_id"))
-            workshop = workshops.get(procedure.workshop_id) if procedure else None
+            workshop = workshops.get(node.get("workshop_id"))
             department = departments.get(workshop.department_id) if workshop else None
             node_type = node.get("type")
             if node_type == "assembly":
@@ -276,37 +245,20 @@ def get_department_production_progress_item(
                 item for item in work_orders
                 if item.flow_node_id == node["id"] and item.status != "cancelled"
             ]
-            tags = configured_tags.get(procedure.id, []) if procedure else []
-            if tags:
-                for tag in tags:
-                    tag_orders = [
-                        item for item in node_orders
-                        if tag.id in tag_ids_by_set.get(
-                            item.applied_tag_set_id or 0,
-                            set(),
-                        )
-                    ]
-                    cards.append(_card(
-                        node=node,
-                        procedure=procedure,
-                        workshop=workshop,
-                        department=department,
-                        tag=tag,
-                        orders=tag_orders,
-                        batches_by_order=batches_by_order,
-                        workers=workers,
-                        task_quantity=plan_item.planned_production_quantity,
-                        arrived_quantity=arrivals_by_node.get(node["id"], 0),
-                        sort_order=sort_order,
-                    ))
-            else:
+            procedure_ids = list(dict.fromkeys(
+                item.procedure_id for item in node_orders if item.procedure_id is not None
+            )) or [None]
+            for procedure_id in procedure_ids:
+                procedure = procedures.get(procedure_id) if procedure_id else None
                 cards.append(_card(
                     node=node,
                     procedure=procedure,
                     workshop=workshop,
                     department=department,
-                    tag=None,
-                    orders=node_orders,
+                    orders=[
+                        item for item in node_orders
+                        if item.procedure_id == procedure_id
+                    ],
                     batches_by_order=batches_by_order,
                     workers=workers,
                     task_quantity=plan_item.planned_production_quantity,
@@ -328,40 +280,12 @@ def get_department_production_progress_item(
         }
 
 
-def _configured_tags_by_procedure(
-    session,
-    plan_item: ProductionPlanItem,
-    procedure_ids: set[int],
-) -> dict[int, list[ProcedureTag]]:
-    result: dict[int, list[ProcedureTag]] = defaultdict(list)
-    if not procedure_ids:
-        return result
-    tags = session.scalars(
-        select(ProcedureTag)
-        .join(
-            ProcedureTagPrice,
-            ProcedureTagPrice.procedure_tag_id == ProcedureTag.id,
-        )
-        .where(
-            ProcedureTagPrice.product_id == plan_item.product_id,
-            ProcedureTagPrice.product_version == plan_item.product_version,
-            ProcedureTagPrice.origin_flow_node_id == plan_item.flow_node_id,
-            ProcedureTagPrice.procedure_id.in_(procedure_ids),
-        )
-        .order_by(ProcedureTag.tag_name, ProcedureTag.id)
-    ).all()
-    for tag in tags:
-        result[tag.procedure_id].append(tag)
-    return result
-
-
 def _card(
     *,
     node,
     procedure,
     workshop,
     department,
-    tag,
     orders,
     batches_by_order,
     workers,
@@ -427,36 +351,18 @@ def _card(
         scrap_quantity,
         lost_quantity,
     )
-    card_type = "tag"
-    card_name = tag.tag_name if tag else (
-        "装配"
-        if node.get("type") == "assembly"
-        else (
-            "外购到货"
-            if procedure and procedure.procedure_type == "purchase_receipt"
-            else "普通加工"
-        )
+    card_type = (
+        "assembly" if node.get("type") == "assembly"
+        else "purchase" if procedure and procedure.procedure_type == "purchase_receipt"
+        else "process"
     )
-    if tag is None:
-        card_type = (
-            "assembly"
-            if node.get("type") == "assembly"
-            else (
-                "purchase"
-                if procedure and procedure.procedure_type == "purchase_receipt"
-                else "process"
-            )
-        )
+    card_name = procedure.procedure_name if procedure else "尚未开工单"
     return {
-        "card_key": (
-            f"tag:{node['id']}:{tag.id}"
-            if tag else f"{card_type}:{node['id']}"
-        ),
+        "card_key": f"{card_type}:{node['id']}:{procedure.id if procedure else 'empty'}",
         "card_type": card_type,
         "sort_order": sort_order,
         "flow_node_id": node["id"],
         "procedure_id": procedure.id if procedure else None,
-        "tag_id": tag.id if tag else None,
         "card_name": card_name,
         "department_code": department.department_code,
         "department_name": department.department_name,
@@ -526,22 +432,19 @@ def _normal_target(flow, nodes, node_id):
     return targets[0] if len(targets) == 1 else None
 
 
-def _node_department_code(node, procedures, workshops, departments):
-    if node.get("type") == "process":
-        procedure = procedures.get(node.get("procedure_id"))
-        workshop = workshops.get(procedure.workshop_id) if procedure else None
+def _node_department_code(node, workshops, departments):
+    if node.get("type") in {"process", "assembly"}:
+        workshop = workshops.get(node.get("workshop_id"))
         department = departments.get(workshop.department_id) if workshop else None
         return department.department_code if department else None
     return {
         "qc": "qc",
-        "assembly": "assembly",
         "shipping": "finished",
     }.get(node.get("type"))
 
 
-def _node_workshop_name(node, procedures, workshops):
-    procedure = procedures.get(node.get("procedure_id"))
-    workshop = workshops.get(procedure.workshop_id) if procedure else None
+def _node_workshop_name(node, workshops):
+    workshop = workshops.get(node.get("workshop_id"))
     if workshop:
         return workshop.workshop_name
     if node.get("type") == "assembly":

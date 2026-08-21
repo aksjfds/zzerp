@@ -1,17 +1,15 @@
 <script setup lang="ts">
 import type { FlowEdge, FlowNode } from '../domain/types'
-import type { ProcedureOption } from '@/api/organization'
+import type { WorkshopRouteOption } from '@/api/organization'
 
 defineProps<{
   node: FlowNode | null
   edge: FlowEdge | null
-  procedures: ProcedureOption[]
+  workshops: WorkshopRouteOption[]
   readonly?: boolean
 }>()
 const emit = defineEmits<{
   updateAssembly: [label: string, output_name: string, output_pcs: number]
-  updateProcess: [label: string, process_code: string]
-  updateProcedure: [procedure_id: number]
 }>()
 </script>
 
@@ -19,26 +17,9 @@ const emit = defineEmits<{
   <aside class="property-panel">
     <template v-if="node?.type === 'process'">
       <h3>工序节点</h3>
-      <label>显示名称</label>
-      <ElInput :model-value="node.label" :disabled="readonly" @change="emit('updateProcess', $event, node.process_code)" />
-      <label>工序编码</label>
-      <ElInput :model-value="node.process_code" :disabled="readonly" @change="emit('updateProcess', node.label, $event)" />
-      <label>关联工艺</label>
-      <ElSelect
-        :model-value="node.procedure_id"
-        placement="top-start"
-        :fallback-placements="['top-start', 'top-end']"
-        :disabled="readonly"
-        placeholder="选择工艺"
-        @update:model-value="emit('updateProcedure', $event)"
-      >
-        <ElOption
-          v-for="item in procedures.filter(procedure => procedure.input_mode === 'single')"
-          :key="item.id"
-          :label="`${item.procedure_name}${item.procedure_type === 'purchase_receipt' ? '（外购）' : ''}`"
-          :value="item.id"
-        />
-      </ElSelect>
+      <label>车间</label>
+      <ElInput :model-value="workshops.find(item => item.id === node.workshop_id)?.workshop_name || node.label" disabled />
+      <p>具体加工工艺由该车间开工单时选择。</p>
     </template>
     <template v-else-if="node?.type === 'qc'">
       <h3>QC节点</h3>
@@ -50,12 +31,8 @@ const emit = defineEmits<{
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>
-      <template v-if="node.procedure_id">
-        <label>装配工艺</label>
-        <ElInput :model-value="procedures.find(item => item.id === node.procedure_id)?.procedure_name || node.label" disabled />
-      </template>
-      <label>显示名称</label>
-      <ElInput :model-value="node.label" :disabled="readonly" @change="emit('updateAssembly', $event, node.output_name, node.output_pcs)" />
+      <label>车间</label>
+      <ElInput :model-value="workshops.find(item => item.id === node.workshop_id)?.workshop_name || node.label" disabled />
       <label>装配体名称</label>
       <ElInput :model-value="node.output_name" disabled placeholder="根据输入配件自动生成" />
       <label>系统编号</label>

@@ -1,7 +1,6 @@
 from sqlalchemy import func, select, tuple_
 
 from modules.assembly.model_api import WorkOrderMaterial
-from modules.standard_execution.model_api import ProcedureTagStock
 from modules.quality.model_api import WorkOrderBatch
 from modules.production_core.persistence import Repository, WorkOrder
 from modules.production_core.work_order_progress import (
@@ -86,53 +85,6 @@ def reserved_quantities(session, repository_ids: list[int]) -> dict[int, int]:
     ):
         result[repository_id] = result.get(repository_id, 0) + quantity
     return result
-
-
-def reserved_tag_quantities(session, tag_stock_ids: list[int]) -> dict[int, int]:
-    if not tag_stock_ids:
-        return {}
-    return {
-        stock_id: quantity
-        for stock_id, quantity in session.execute(
-            select(
-                WorkOrder.procedure_tag_stock_id,
-                func.sum(order_remaining_expression()),
-            )
-            .where(
-                WorkOrder.procedure_tag_stock_id.in_(tag_stock_ids),
-                WorkOrder.status == "open",
-            )
-            .group_by(WorkOrder.procedure_tag_stock_id)
-        )
-    }
-
-
-def tag_stock_statuses(
-    session,
-    tag_stock_ids: list[int],
-) -> dict[int, str]:
-    if not tag_stock_ids:
-        return {}
-    rows = session.execute(
-        select(ProcedureTagStock.id, WorkOrder)
-        .join(
-            WorkOrder,
-            WorkOrder.procedure_tag_stock_id == ProcedureTagStock.id,
-        )
-        .where(
-            ProcedureTagStock.id.in_(tag_stock_ids),
-            WorkOrder.status == "open",
-        )
-    ).all()
-    orders = list({row.WorkOrder.id: row.WorkOrder for row in rows}.values())
-    stages = _stages_by_order(session, orders)
-    status_by_stock: dict[int, list[str]] = {}
-    for stock_id, order in rows:
-        status_by_stock.setdefault(stock_id, []).append(stages[order.id])
-    return {
-        stock_id: dominant_work_status(status_by_stock.get(stock_id, []))
-        for stock_id in tag_stock_ids
-    }
 
 
 def position_statuses(

@@ -19,7 +19,7 @@ from routers import (
     inventory,
     organization,
     pmc,
-    procedure_tag_prices,
+    procedure_prices,
     production,
     products,
     qc,
@@ -192,7 +192,7 @@ app.include_router(customer_orders.router)
 app.include_router(inventory.router)
 app.include_router(pmc.router)
 app.include_router(production.router)
-app.include_router(procedure_tag_prices.router)
+app.include_router(procedure_prices.router)
 app.include_router(work_orders.router)
 app.include_router(qc.router)
 

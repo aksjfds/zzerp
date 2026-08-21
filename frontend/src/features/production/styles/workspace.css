@@ -18,6 +18,7 @@
 .production-workspace--viewport .production-scroll-column > :first-child {
   min-height: 0;
   flex: 1;
+  align-content: start;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }

@@ -30,8 +30,7 @@ class PartNodePayload(FlowNodeBase):
 
 class ProcessNodePayload(FlowNodeBase):
     type: Literal["process"]
-    process_code: str = Field(min_length=1, max_length=100)
-    procedure_id: int = Field(gt=0)
+    workshop_id: int = Field(gt=0)
 
 
 class QcNodePayload(FlowNodeBase):
@@ -44,7 +43,7 @@ class ShippingNodePayload(FlowNodeBase):
 
 class AssemblyNodePayload(FlowNodeBase):
     type: Literal["assembly"]
-    procedure_id: int | None = Field(default=None, gt=0)
+    workshop_id: int = Field(gt=0)
     output_name: str = Field(min_length=1, max_length=500)
     output_pcs: int = Field(default=1, gt=0)
     assembly_sequence: int | None = Field(default=None, ge=81)
@@ -74,7 +73,7 @@ class FlowEdgePayload(ContractModel):
 
 
 class ProcessFlowPayload(ContractModel):
-    schema_version: Literal[3] = 3
+    schema_version: Literal[4] = 4
     nodes: list[FlowNodePayload] = Field(default_factory=list, max_length=500)
     edges: list[FlowEdgePayload] = Field(default_factory=list, max_length=2000)
 

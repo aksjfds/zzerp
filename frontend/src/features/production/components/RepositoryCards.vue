@@ -7,8 +7,9 @@ const props = withDefaults(defineProps<{
   loading: boolean
   selectedKey?: string | null
   allowWorkOrder?: boolean
+  showEmpty?: boolean
   mode?: 'production' | 'purchase'
-}>(), { mode: 'production' })
+}>(), { mode: 'production', showEmpty: true })
 const emit = defineEmits<{
   select: [item: RepositoryItem]
   createWorkOrder: [item: RepositoryItem]
@@ -39,7 +40,7 @@ const emit = defineEmits<{
       </div>
       <dl>
         <div><dt>订单编号</dt><dd>{{ item.customer_order_no }}</dd></div>
-        <div><dt>当前工艺</dt><dd>{{ item.procedure_name }}</dd></div>
+        <div><dt>当前车间</dt><dd>{{ item.workshop_name }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '外购任务数' : '任务数' }}</dt><dd>{{ item.quantity }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '可开单数量' : '可开工数' }}</dt><dd>{{ item.available_quantity }}</dd></div>
         <div><dt>{{ props.mode === 'purchase' ? '需求时间' : '到达时间' }}</dt><dd>{{ item.arrived_at || '-' }}</dd></div>
@@ -54,12 +55,12 @@ const emit = defineEmits<{
         >{{ props.mode === 'purchase' ? '建外购单' : '开工单' }}</ElButton>
       </div>
     </article>
-    <ElEmpty v-if="!loading && !items.length" description="当前部门暂无配件或装配体" :image-size="72" />
+    <ElEmpty v-if="showEmpty && !loading && !items.length" description="当前部门暂无配件或装配体" :image-size="72" />
   </div>
 </template>
 
 <style scoped>
-.repository-cards { display: grid; grid-template-columns: 1fr; align-content: start; gap: 12px; min-height: 150px; }
+.repository-cards { display: grid; grid-template-columns: 1fr; grid-auto-rows: max-content; align-content: start; gap: 12px; min-height: 150px; }
 .repository-card { padding: 14px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-low); cursor: pointer; transition: background-color .16s, border-color .16s, box-shadow .16s; box-shadow: var(--erp-shadow-sm); }
 .repository-card:hover, .repository-card:focus-visible { border-color: var(--erp-primary); outline: none; }
 .repository-card:hover { background: var(--md-surface-container); }

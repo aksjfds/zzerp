@@ -51,8 +51,9 @@ def filter_and_paginate_assembly_groups(
     keyword: str | None,
     workshop_name: str | None,
     work_status: str,
+    fulfilled_positions: set[tuple[int, str]] | None = None,
 ) -> tuple[list[dict], int]:
-    groups: dict[tuple[str, int, str], list[dict]] = defaultdict(list)
+    groups: dict[tuple[str, int, str, str], list[dict]] = defaultdict(list)
     for item in cards:
         if not item["card_key"].startswith("history:"):
             kind = "current"
@@ -60,17 +61,34 @@ def filter_and_paginate_assembly_groups(
             kind = "processing"
         else:
             kind = "history"
-        groups[(kind, item["customer_order_item_id"], item["flow_node_id"])].append(item)
+        group_suffix = "" if item.get("node_type") == "assembly" else item["card_key"]
+        groups[(
+            kind,
+            item["customer_order_item_id"],
+            item["flow_node_id"],
+            group_suffix,
+        )].append(item)
 
-    filtered_groups: list[tuple[tuple[str, int, str], list[dict]]] = []
+    filtered_groups: list[tuple[tuple[str, int, str, str], list[dict]]] = []
     for group_key, group in groups.items():
+        is_assembly_group = group[0].get("node_type") == "assembly"
         required_sources = {
             material_key
             for item in group
             for material_key in item["assembly_required_material_keys"]
         }
         present_sources = {item["assembly_material_key"] for item in group}
-        group_complete = bool(required_sources) and required_sources == present_sources
+        group_complete = (
+            bool(required_sources) and required_sources == present_sources
+            if is_assembly_group else True
+        )
+        if (
+            is_assembly_group
+            and group_key[0] == "current"
+            and not group_complete
+            and (group_key[1], group_key[2]) in (fulfilled_positions or set())
+        ):
+            continue
         status = _group_status(group)
         arrived_at = max((item["arrived_at"] or "" for item in group), default="") or None
         representative = {
@@ -91,7 +109,9 @@ def filter_and_paginate_assembly_groups(
             item["work_status"] = status
             item["arrived_at"] = arrived_at
             item["assembly_group_complete"] = (
-                group_complete if group_key[0] == "current" else True
+                group_complete
+                if is_assembly_group and group_key[0] == "current"
+                else True
             )
             item["can_create_work_order"] = (
                 item["can_create_work_order"] and group_complete

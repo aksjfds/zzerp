@@ -3,12 +3,10 @@ import type { PendingQcBatch } from '../domain/types'
 defineProps<{
   items: PendingQcBatch[]
   loading: boolean
-  submitting?: boolean
   history?: boolean
 }>()
 defineEmits<{
   inspect: [batch: PendingQcBatch]
-  dispatch: [batch: PendingQcBatch]
 }>()
 
 function itemName(batch: PendingQcBatch) {
@@ -30,16 +28,13 @@ function itemName(batch: PendingQcBatch) {
         <p>{{ batch.qc_worker_name }}</p>
         <p>{{ batch.recorded_at }}</p>
         <p v-if="batch.defect_reason">不良原因：{{ batch.defect_reason }}</p>
+        <p v-if="batch.qualified_quantity">合格品去向：{{ batch.qualified_disposition === 'return' ? '返回当前车间' : '放行下一节点' }}</p>
       </template>
       <ElButton v-else-if="!history" type="primary" size="small" @click="$emit('inspect', batch)">录入 QC 结果</ElButton>
-      <div v-if="batch.dispatchable_quantity > 0" class="dispatch-row">
-        <span>合格待放行 {{ batch.dispatchable_quantity }} 件 → {{ batch.target_node_label }}</span>
-        <ElButton type="success" size="small" :loading="submitting" @click="$emit('dispatch', batch)">放行</ElButton>
-      </div>
     </article>
     <ElEmpty
       v-if="!loading && !items.length"
-      :description="history ? '暂无历史质检记录' : '暂无待检或待放行批次'"
+      :description="history ? '暂无历史质检记录' : '暂无待检批次'"
       :image-size="64"
     />
   </div>

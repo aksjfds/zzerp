@@ -196,8 +196,8 @@ class ProductProcessFlow(Base):
     flow_json: Mapped[dict[str, Any]] = mapped_column(
         JSON_TYPE,
         nullable=False,
-        default=lambda: {"schema_version": 3, "nodes": [], "edges": []},
-        server_default=text("'{\"schema_version\": 3, \"nodes\": [], \"edges\": []}'"),
+        default=lambda: {"schema_version": 4, "nodes": [], "edges": []},
+        server_default=text("'{\"schema_version\": 4, \"nodes\": [], \"edges\": []}'"),
     )
     draft_flow_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSON_TYPE,

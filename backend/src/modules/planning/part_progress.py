@@ -12,7 +12,7 @@ from modules.planning.assembly_progress import (
     assembly_arrival_progress,
     assembly_completion_summary,
 )
-from modules.organization.model_api import Department, Procedure, Workshop
+from modules.organization.model_api import Department, Workshop
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.production_core.model_api import (
     ProductionItem,
@@ -21,8 +21,6 @@ from modules.production_core.model_api import (
     WorkOrder,
 )
 from modules.quality.model_api import WorkOrderBatch
-from modules.standard_execution.model_api import ProcedureTagStock
-from modules.standard_execution.tag_api import is_final_tag_set
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.production_core.operational_api import load_production_flow
 from modules.production_core.operational_api import load_product_flow
@@ -100,11 +98,6 @@ def list_part_progress(
         repositories = list(session.scalars(
             select(Repository).where(Repository.production_item_id.in_(item_ids))
         ).all())
-        tag_stocks = list(session.scalars(
-            select(ProcedureTagStock).where(
-                ProcedureTagStock.production_item_id.in_(item_ids)
-            )
-        ).all())
         work_orders = list(session.scalars(
             select(WorkOrder).where(WorkOrder.production_item_id.in_(item_ids))
         ).all())
@@ -126,12 +119,10 @@ def list_part_progress(
         ).all())
 
         repositories_by_item = _group(repositories, "production_item_id")
-        stocks_by_item = _group(tag_stocks, "production_item_id")
         orders_by_item = _group(work_orders, "production_item_id")
         work_order_by_id = {item.id: item for item in work_orders}
         assembly_processing_by_item: dict[int, int] = defaultdict(int)
         reserved_repository: dict[int, int] = defaultdict(int)
-        reserved_stock: dict[int, int] = defaultdict(int)
         for order in work_orders:
             if (
                 order.work_order_type == "assembly"
@@ -188,16 +179,10 @@ def list_part_progress(
             remaining = order_remaining_quantity(order)
             if order.repository_id is not None:
                 reserved_repository[order.repository_id] += remaining
-            if order.procedure_tag_stock_id is not None:
-                reserved_stock[order.procedure_tag_stock_id] += remaining
 
         workshops = {
             item.id: item for item in session.scalars(select(Workshop)).all()
         }
-        procedures = {
-            item.id: item for item in session.scalars(select(Procedure)).all()
-        }
-
         rows = []
         normalized_keyword = (keyword or "").strip().lower()
         for production_item in production_items:
@@ -208,15 +193,12 @@ def list_part_progress(
                 department_by_id,
                 department_by_code,
                 workshops,
-                procedures,
                 repositories_by_item.get(production_item.id, []),
-                stocks_by_item.get(production_item.id, []),
                 orders_by_item.get(production_item.id, []),
                 batches_by_order,
                 movements_by_item.get(production_item.id, []),
                 movements_by_batch,
                 reserved_repository,
-                reserved_stock,
                 assembly_processing_by_item.get(production_item.id, 0),
                 shipping_by_order_item[production_item.customer_order_item_id],
             )
@@ -445,9 +427,6 @@ def _list_assembly_production_progress(
                 )
             )
         }
-        procedures = {
-            item.id: item for item in session.scalars(select(Procedure)).all()
-        }
         workshops = {
             item.id: item for item in session.scalars(select(Workshop)).all()
         }
@@ -478,7 +457,6 @@ def _list_assembly_production_progress(
                 nodes,
                 plan_item.flow_node_id,
                 assembly_department.id if assembly_department else None,
-                procedures,
                 workshops,
             )
             search_text = " ".join((
@@ -490,11 +468,6 @@ def _list_assembly_production_progress(
                 *(
                     str(node.get("label") or "")
                     for node in task_nodes
-                ),
-                *(
-                    procedures[node["procedure_id"]].procedure_name
-                    for node in task_nodes
-                    if node.get("procedure_id") in procedures
                 ),
             )).lower()
             if normalized_keyword and normalized_keyword not in search_text:
@@ -515,11 +488,7 @@ def _list_assembly_production_progress(
             )
             for task_node in task_nodes:
                 task_node_id = task_node["id"]
-                task_procedure = procedures.get(task_node.get("procedure_id"))
-                task_workshop = (
-                    workshops.get(task_procedure.workshop_id)
-                    if task_procedure else None
-                )
+                task_workshop = workshops.get(task_node.get("workshop_id"))
                 task_orders = work_orders_by_task.get(
                     (order_item.id, task_node_id),
                     [],
@@ -542,11 +511,8 @@ def _list_assembly_production_progress(
                     )
                 else:
                     completed_quantity = _process_completion_summary(
-                        session,
                         task_orders,
                         batches_by_order,
-                        production_item_by_id,
-                        task_procedure,
                     )
                     arrived_quantity = sum(
                         movement.quantity
@@ -599,7 +565,6 @@ def _assembly_department_task_nodes(
     nodes: dict[str, dict],
     origin_node_id: str,
     assembly_department_id: int | None,
-    procedures: dict[int, Procedure],
     workshops: dict[int, Workshop],
 ) -> list[dict]:
     result = []
@@ -609,35 +574,18 @@ def _assembly_department_task_nodes(
             continue
         if node.get("type") != "process":
             continue
-        procedure = procedures.get(node.get("procedure_id"))
-        workshop = workshops.get(procedure.workshop_id) if procedure else None
+        workshop = workshops.get(node.get("workshop_id"))
         if workshop and workshop.department_id == assembly_department_id:
             result.append(node)
     return result
 
 
 def _process_completion_summary(
-    session,
     work_orders: list[WorkOrder],
     batches_by_order: dict[int, list[WorkOrderBatch]],
-    production_item_by_id: dict[int, ProductionItem],
-    procedure: Procedure | None,
 ) -> int:
     completed_quantity = 0
     for work_order in work_orders:
-        production_item = production_item_by_id.get(work_order.production_item_id)
-        if (
-            work_order.work_order_type == "tag"
-            and procedure is not None
-            and production_item is not None
-            and not is_final_tag_set(
-                session,
-                production_item,
-                procedure.id,
-                work_order.target_tag_set_id,
-            )
-        ):
-            continue
         batches = batches_by_order.get(work_order.id, [])
         progress = calculate_work_order_progress(work_order, batches)
         completed_quantity += progress.qualified_quantity
@@ -780,9 +728,6 @@ def _list_planned_department_progress(
         workshops = {
             item.id: item for item in session.scalars(select(Workshop)).all()
         }
-        procedures = {
-            item.id: item for item in session.scalars(select(Procedure)).all()
-        }
         normalized_keyword = (keyword or "").strip().lower()
         rows = []
         for item in plan_items:
@@ -810,7 +755,6 @@ def _list_planned_department_progress(
                         node,
                         department_by_code,
                         workshops,
-                        procedures,
                     ))
                     and department.department_code == department_code
                 )
@@ -822,7 +766,6 @@ def _list_planned_department_progress(
                 department_code,
                 department_by_code,
                 workshops,
-                procedures,
                 origin_flow_node_id=item.flow_node_id,
             )
             plan = plans[item.production_plan_id]
@@ -875,15 +818,12 @@ def _serialize_item(
     department_by_id,
     department_by_code,
     workshops,
-    procedures,
     repositories,
-    tag_stocks,
     work_orders,
     batches_by_order,
     movements,
     movements_by_batch,
     reserved_repository,
-    reserved_stock,
     assembly_processing_quantity,
     shipping_summary,
 ) -> dict:
@@ -951,14 +891,13 @@ def _serialize_item(
             node,
             department_by_code,
             workshops,
-            procedures,
         )
         if department is None or department.department_code not in cells:
             continue
         cell = cells[department.department_code]
         cell["in_route"] = True
         if node.get("type") in {"process", "assembly"}:
-            workshop = _node_workshop(node, workshops, procedures)
+            workshop = _node_workshop(node, workshops)
             if workshop:
                 names = department_workshops.setdefault(
                     department.department_code,
@@ -969,14 +908,14 @@ def _serialize_item(
 
     for movement in movements:
         target_node = context.nodes.get(movement.target_flow_node_id or "", {})
-        target_workshop = _node_workshop(target_node, workshops, procedures)
+        target_workshop = _node_workshop(target_node, workshops)
         if target_workshop is None:
             continue
         target_department = department_by_id.get(target_workshop.department_id)
         if target_department is None:
             continue
         source_node = context.nodes.get(movement.source_flow_node_id or "", {})
-        source_workshop = _node_workshop(source_node, workshops, procedures)
+        source_workshop = _node_workshop(source_node, workshops)
         if source_workshop and source_workshop.id == target_workshop.id:
             continue
         arrivals = department_workshop_arrivals.setdefault(
@@ -1003,16 +942,6 @@ def _serialize_item(
                 repository.quantity - reserved_repository[repository.id],
                 0,
             )
-    for stock in tag_stocks:
-        department = department_by_id.get(stock.department_id)
-        if department and department.department_code in cells:
-            cell = cells[department.department_code]
-            cell["in_route"] = True
-            cell["waiting_quantity"] += max(
-                stock.quantity - reserved_stock[stock.id],
-                0,
-            )
-
     for work_order in work_orders:
         order_batches = batches_by_order.get(work_order.id, [])
         node = context.nodes.get(work_order.flow_node_id, {})
@@ -1020,7 +949,6 @@ def _serialize_item(
             node,
             department_by_code,
             workshops,
-            procedures,
         )
         if (
             department
@@ -1032,28 +960,17 @@ def _serialize_item(
             progress = calculate_work_order_progress(work_order, order_batches)
             if work_order.status == "open":
                 cell["processing_quantity"] += progress.processing_quantity
-            workshop = _node_workshop(node, workshops, procedures)
-            procedure = procedures.get(work_order.procedure_id)
-            completion_is_final = (
-                work_order.work_order_type != "tag"
-                or (
-                    procedure is not None
-                    and is_final_tag_set(
-                        session,
-                        production_item,
-                        procedure.id,
-                        work_order.target_tag_set_id,
-                    )
-                )
-            )
-            if workshop and completion_is_final:
+            workshop = _node_workshop(node, workshops)
+            if workshop:
                 completions = department_workshop_completions.setdefault(
                     department.department_code,
                     {},
                 )
                 completions[workshop.workshop_name] = (
-                    completions.get(workshop.workshop_name, 0)
-                    + progress.qualified_quantity
+                    max(
+                        completions.get(workshop.workshop_name, 0),
+                        progress.qualified_quantity,
+                    )
                 )
 
         qc_cell = cells.get("qc")
@@ -1074,12 +991,7 @@ def _serialize_item(
                         == movement.target_flow_node_id
                     )
                 )
-                dispatched = sum(
-                    movement.quantity
-                    for movement in batch_movements
-                    if movement.movement_type == "qc_dispatch"
-                )
-                held = max(held_qualified - dispatched, 0)
+                held = held_qualified
                 if held:
                     qc_cell["in_route"] = True
                     qc_cell["waiting_quantity"] += held
@@ -1278,11 +1190,10 @@ def _normal_target(
     return targets[0] if len(targets) == 1 else None
 
 
-def _node_department(node, department_by_code, workshops, procedures):
+def _node_department(node, department_by_code, workshops):
     node_type = node.get("type")
-    if node_type == "process":
-        procedure = procedures.get(node.get("procedure_id"))
-        workshop = workshops.get(procedure.workshop_id) if procedure else None
+    if node_type in {"process", "assembly"}:
+        workshop = workshops.get(node.get("workshop_id"))
         return (
             next(
                 (
@@ -1295,17 +1206,15 @@ def _node_department(node, department_by_code, workshops, procedures):
         )
     code = {
         "qc": "qc",
-        "assembly": "assembly",
         "shipping": "finished",
     }.get(node_type)
     return department_by_code.get(code) if code else None
 
 
-def _node_workshop(node, workshops, procedures):
+def _node_workshop(node, workshops):
     if node.get("type") not in {"process", "assembly"}:
         return None
-    procedure = procedures.get(node.get("procedure_id"))
-    return workshops.get(procedure.workshop_id) if procedure else None
+    return workshops.get(node.get("workshop_id"))
 
 
 def _department_workshop_names(
@@ -1313,7 +1222,6 @@ def _department_workshop_names(
     department_code,
     department_by_code,
     workshops,
-    procedures,
     origin_flow_node_id=None,
 ):
     names = []
@@ -1322,7 +1230,6 @@ def _department_workshop_names(
             node,
             department_by_code,
             workshops,
-            procedures,
         )
         if department is None or department.department_code != department_code:
             continue
@@ -1330,7 +1237,7 @@ def _department_workshop_names(
             continue
         if node.get("type") not in {"process", "assembly"}:
             continue
-        workshop = _node_workshop(node, workshops, procedures)
+        workshop = _node_workshop(node, workshops)
         if workshop and workshop.workshop_name not in names:
             names.append(workshop.workshop_name)
     return names

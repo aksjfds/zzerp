@@ -1,9 +1,8 @@
 import { ref } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { queryDepartmentWorkers } from '../api/departmentRepositories'
 import {
-  dispatchQcBatch,
   inspectQcBatch,
   queryPendingQcBatches,
 } from '../api/qc'
@@ -90,36 +89,6 @@ export function useQcDepartment() {
     }
   }
 
-  async function dispatch(batch: PendingQcBatch) {
-    try {
-      const { value } = await ElMessageBox.prompt(
-        `请输入放行到${batch.target_node_label || '下一节点'}的数量`,
-        `工单 ${batch.work_order_no} QC 放行`,
-        {
-          inputValue: String(batch.dispatchable_quantity),
-          inputPattern: /^[1-9]\d*$/,
-          inputErrorMessage: '请输入正整数',
-        },
-      )
-      const quantity = Number(value)
-      if (quantity < 1 || quantity > batch.dispatchable_quantity) {
-        ElMessage.warning('放行数量不能超过合格待放行数量')
-        return
-      }
-      submitting.value = true
-      await dispatchQcBatch(batch.id, quantity)
-      await loadBatches()
-      ElMessage.success(`已向${batch.target_node_label || '下一节点'}放行 ${quantity} 件`)
-    } catch (error) {
-      if (error !== 'cancel' && error !== 'close') {
-        ElMessage.error(getApiErrorDetail(error)?.message || 'QC放行失败')
-      }
-    } finally {
-      submitting.value = false
-    }
-  }
-
-
   async function refresh() {
     page.value = 1
     await Promise.all([loadBatches(), loadWorkers()])
@@ -153,7 +122,6 @@ export function useQcDepartment() {
     changePage,
     changeView,
     dialogVisible,
-    dispatch,
     load,
     loadBatches,
     loading,

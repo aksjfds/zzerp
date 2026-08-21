@@ -5,7 +5,9 @@ from modules.assembly import api as assembly
 class AssemblyCapability:
     def create_assembly_work_order(
         self,
-        repository_ids: list[int],
+        materials: list[dict],
+        procedure_id: int | None,
+        procedure_name: str | None,
         quantity: int,
         worker_id: int | None,
         remark: str | None,
@@ -13,7 +15,9 @@ class AssemblyCapability:
     ) -> dict:
         self.require_capability(CAP_ASSEMBLY)
         return assembly.create_assembly_work_order(
-            repository_ids,
+            materials,
+            procedure_id,
+            procedure_name,
             quantity,
             worker_id,
             remark,

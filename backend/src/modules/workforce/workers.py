@@ -263,7 +263,7 @@ def worker_pay_summary(
             session,
             monthly_order_ids,
             worker_id=worker_id,
-            work_order_type="tag",
+            work_order_type="standard",
         )
         orders_by_id = {item.id: item for item in candidate_orders}
         batches = list_batch_activities(
@@ -294,22 +294,16 @@ def worker_pay_summary(
             quantity = batch.qualified_quantity or 0
             total_quantity += quantity
             details = pay_details_by_order.get(order.id, [])
-            unit_price = (
-                sum((item.unit_price for item in details), Decimal("0"))
-                if details else None
-            )
-            tag_names = tuple(item.tag_name for item in details)
+            unit_price = details[0].unit_price if details else None
             item_name = _worker_item_name(session, order)
             key = (
                 order.production_item_id,
                 order.procedure_id,
-                tag_names,
                 unit_price,
             )
             group = groups.setdefault(key, {
                 "item_name": item_name,
                 "procedure_name": order.work_order_name,
-                "tag_names": list(tag_names),
                 "qualified_quantity": 0,
                 "unit_price": unit_price,
                 "pay_amount": Decimal("0") if unit_price is not None else None,
@@ -406,7 +400,7 @@ def _serialize_history_item(
     scrap_quantity = sum(item.scrap_quantity or 0 for item in worker_batches or batches)
     rework_pending = (
         progress.rework_pending_quantity
-        if order.work_order_type == "tag" and order.worker_id == worker.id else 0
+        if order.work_order_type in {"standard", "assembly"} and order.worker_id == worker.id else 0
     )
     return {
         "work_order_id": order.id,

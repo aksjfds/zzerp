@@ -1,4 +1,4 @@
-import { computed, ref, type Ref } from 'vue'
+import { computed, type Ref } from 'vue'
 import type { RepositoryItem } from '../domain/types'
 
 export type AssemblyGroup = {
@@ -7,6 +7,7 @@ export type AssemblyGroup = {
   capacity: number
   complete: boolean
   productName: string
+  workshopName: string
   name: string
   orderNo: string
   status: RepositoryItem['work_status']
@@ -34,11 +35,9 @@ export function assemblyGroupKey(item: RepositoryItem) {
 }
 
 export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
-  const selections = ref(new Map<number, RepositoryItem>())
-  const selectedIds = computed(() => [...selections.value.keys()])
   const groups = computed<AssemblyGroup[]>(() => {
     const grouped = new Map<string, RepositoryItem[]>()
-    items.value.forEach((item) => {
+    items.value.filter(item => item.node_type === 'assembly').forEach((item) => {
       const key = assemblyGroupKey(item)
       grouped.set(key, [...(grouped.get(key) || []), item])
     })
@@ -63,6 +62,7 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
           : 0,
         complete,
         productName: firstItem.product_name,
+        workshopName: firstItem.workshop_name || '多路车间',
         name: firstItem.assembly_output_name
           || `${[...new Set(groupItems.map(item => item.part_name.replace(/装配体$/, '')))].join('-')}装配体`,
         orderNo: firstItem.customer_order_no,
@@ -82,11 +82,5 @@ export function useAssemblyGroups(items: Ref<RepositoryItem[]>) {
       }
     })
   })
-  function selectGroup(group: AssemblyGroup) {
-    selections.value.clear()
-    group.items.forEach((item) => {
-      if (item.repository_id) selections.value.set(item.repository_id, item)
-    })
-  }
-  return { clear: () => selections.value.clear(), groups, selectGroup, selectedIds }
+  return { groups }
 }

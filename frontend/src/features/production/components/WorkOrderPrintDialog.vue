@@ -9,10 +9,10 @@ const props = defineProps<{
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
 const typeLabel = computed(() => ({
-  tag: '生产标记工单',
+  standard: '生产加工工单',
   purchase_receipt: '外购入库工单',
   assembly: '装配工单',
-}[props.item?.work_order_type || 'tag']))
+}[props.item?.work_order_type || 'standard']))
 const statusLabel = computed(() => ({
   open: '进行中',
   closed: '已结单',

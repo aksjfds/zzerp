@@ -151,23 +151,7 @@ def completed_node_display_label(
     completed_label = str(
         nodes.get(completed_flow_node_id, {}).get("label", completed_flow_node_id)
     )
-    origin = nodes.get(origin_flow_node_id)
-    if origin is None or origin.get("type") != "part":
-        return completed_label
-    same_component_routes = [
-        node for node in nodes.values()
-        if node.get("type") == "part"
-        and node.get("bom_item_id") == origin.get("bom_item_id")
-    ]
-    if len(same_component_routes) < 2:
-        return completed_label
-    target = normal_target(flow, nodes, origin_flow_node_id)
-    route_label = (
-        str(target.get("label"))
-        if target and target.get("type") == "process" and target.get("label")
-        else "供应路线"
-    )
-    return f"{completed_label}（{route_label}路线）"
+    return completed_label
 
 
 def process_qc_node(
@@ -190,78 +174,23 @@ def next_execution_node(
     return target
 
 
-def part_route_procedure_ids(
-    flow: dict,
-    bom_item_id: int,
-    allowed_procedure_ids: set[int] | None = None,
-) -> list[int]:
-    nodes = {item["id"]: item for item in flow.get("nodes", [])}
-    part = next(
-        (
-            node
-            for node in nodes.values()
-            if node.get("type") == "part" and node.get("bom_item_id") == bom_item_id
-        ),
-        None,
+def load_production_flow(
+    session,
+    production_item: ProductionItem,
+) -> ProductionFlowContext:
+    order_item = session.get(
+        CustomerOrderItem,
+        production_item.customer_order_item_id,
     )
-    if part is None:
-        return []
-
-    procedure_ids: list[int] = []
-    visited: set[str] = set()
-    node = normal_target(flow, nodes, part["id"])
-    while node is not None and node["id"] not in visited:
-        visited.add(node["id"])
-        if node.get("type") == "assembly":
-            break
-        procedure_id = node.get("procedure_id")
-        if (
-            node.get("type") == "process"
-            and isinstance(procedure_id, int)
-            and (
-                allowed_procedure_ids is None
-                or procedure_id in allowed_procedure_ids
-            )
-            and procedure_id not in procedure_ids
-        ):
-            procedure_ids.append(procedure_id)
-        node = normal_target(flow, nodes, node["id"])
-    return procedure_ids
-
-
-def origin_route_procedure_ids(
-    flow: dict,
-    origin_node_id: str,
-    allowed_procedure_ids: set[int] | None = None,
-) -> list[int]:
-    """Return procedures applied to one physical item before it is assembled again."""
-    nodes = {item["id"]: item for item in flow.get("nodes", [])}
-    origin = nodes.get(origin_node_id)
-    if origin is None or origin.get("type") not in {"part", "assembly"}:
-        return []
-    procedure_ids: list[int] = []
-    visited: set[str] = set()
-    node = normal_target(flow, nodes, origin_node_id)
-    while node is not None and node["id"] not in visited:
-        visited.add(node["id"])
-        if node.get("type") == "assembly":
-            break
-        procedure_id = node.get("procedure_id")
-        if (
-            node.get("type") == "process"
-            and isinstance(procedure_id, int)
-            and (allowed_procedure_ids is None or procedure_id in allowed_procedure_ids)
-            and procedure_id not in procedure_ids
-        ):
-            procedure_ids.append(procedure_id)
-        node = normal_target(flow, nodes, node["id"])
-    return procedure_ids
-
-
-def load_production_flow(session, production_item: ProductionItem) -> ProductionFlowContext:
-    order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
     if order_item is None:
         raise DomainError("production_context_missing", "生产订单明细不存在")
-    bom_item = session.get(ProductBom, production_item.product_bom_id) if production_item.product_bom_id else None
-    flow, nodes = load_product_flow(session, order_item.product_id, order_item.product_version)
+    bom_item = (
+        session.get(ProductBom, production_item.product_bom_id)
+        if production_item.product_bom_id else None
+    )
+    flow, nodes = load_product_flow(
+        session,
+        order_item.product_id,
+        order_item.product_version,
+    )
     return ProductionFlowContext(order_item, bom_item, flow, nodes)

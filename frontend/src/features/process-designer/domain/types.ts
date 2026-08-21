@@ -1,4 +1,4 @@
-export const PROCESS_FLOW_SCHEMA_VERSION = 3 as const
+export const PROCESS_FLOW_SCHEMA_VERSION = 4 as const
 
 export type FlowNodeType = 'part' | 'process' | 'qc' | 'assembly' | 'shipping'
 
@@ -20,8 +20,7 @@ export type PartFlowNode = FlowNodeBase & {
 
 export type ProcessFlowNode = FlowNodeBase & {
   type: 'process'
-  process_code: string
-  procedure_id: number
+  workshop_id: number
 }
 
 export type QcFlowNode = FlowNodeBase & { type: 'qc' }
@@ -29,7 +28,7 @@ export type ShippingFlowNode = FlowNodeBase & { type: 'shipping' }
 
 export type AssemblyFlowNode = FlowNodeBase & {
   type: 'assembly'
-  procedure_id?: number
+  workshop_id: number
   output_name: string
   output_pcs: number
   assembly_sequence?: number

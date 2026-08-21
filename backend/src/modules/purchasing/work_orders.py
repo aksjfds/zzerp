@@ -8,16 +8,18 @@ from modules.production_core.context_api import (
 )
 from modules.production_core.operational_api import (
     create_order_record,
-    move_to_node,
     order_remaining_quantity,
     process_qc_node,
     record_movement,
 )
+from modules.production_core.ownership_api import add_repository_quantity
 from modules.production_core.purchase_api import (
     finalize_purchase_submission,
     is_repository_source,
 )
 from modules.quality.ownership_api import create_inspection_batch
+from modules.standard_execution.pricing_api import attach_work_order_price
+from modules.standard_execution.procedures import material_key, procedure_department_id
 
 
 def create_purchase_order(
@@ -26,16 +28,13 @@ def create_purchase_order(
     source: InventorySourceContext,
     production_item: ProductionItemContext,
     procedure: ProcedureContext,
-    tag_names: list[str],
     quantity: int,
     worker_id: int | None,
     remark: str | None,
 ) -> WorkOrderContext:
     if not is_repository_source(source):
         raise DomainError("purchase_source_invalid", "外购入库单只能使用待外购数量")
-    if any((tag_name or "").strip() for tag_name in tag_names):
-        raise DomainError("purchase_tag_not_allowed", "外购入库工单不使用生产标记")
-    return create_order_record(
+    order = create_order_record(
         session,
         source=source,
         production_item=production_item,
@@ -45,6 +44,17 @@ def create_purchase_order(
         work_order_type="purchase_receipt",
         remark=remark,
     )
+    attach_work_order_price(
+        session,
+        work_order_id=order.id,
+        product_id=production_item.product_id,
+        product_version=production_item.product_version,
+        material_key=material_key(production_item),
+        flow_node_id=source.flow_node_id,
+        procedure_id=procedure.id,
+        procedure_name=procedure.procedure_name,
+    )
+    return order
 
 
 def submit_purchase_order(
@@ -82,15 +92,17 @@ def submit_purchase_order(
         target_flow_node_id = qc_node["id"]
         target_department_id = qc_department_id
     else:
-        target = context.normal_target(node["id"])
-        target_department_id = move_to_node(
+        target_department_id = procedure_department_id(session, procedure)
+        add_repository_quantity(
             session,
-            production_item,
-            target,
-            quantity,
-            node["id"],
+            production_item_id=production_item.id,
+            flow_node_id=node["id"],
+            source_flow_node_id=node["id"],
+            department_id=target_department_id,
+            quantity=quantity,
+            source_work_order_id=order.id,
         )
-        target_flow_node_id = target.get("id") if target else None
+        target_flow_node_id = node["id"]
 
     record_movement(
         session,
@@ -99,8 +111,6 @@ def submit_purchase_order(
         movement_type="purchase_receipt",
         source_flow_node_id=node["id"],
         target_flow_node_id=target_flow_node_id,
-        source_tag_set_id=None,
-        target_tag_set_id=None,
         source_department_id=source.department_id,
         target_department_id=target_department_id,
         work_order_id=order.id,

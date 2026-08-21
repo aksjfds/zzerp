@@ -5,7 +5,7 @@ from math import ceil
 
 from sqlalchemy import select
 
-from modules.organization.model_api import Procedure
+from modules.organization.model_api import Department, Workshop
 from modules.production_core.persistence import (
     ProductionItem,
     ProductionMovement,
@@ -146,19 +146,15 @@ def _po_shortage_quantity(
     draft_quantity: int,
 ) -> int:
     process_nodes = [node for node in nodes.values() if node.get("type") == "process"]
-    procedure_ids = {
-        node.get("procedure_id") for node in process_nodes if node.get("procedure_id")
-    }
-    purchase_procedure_ids = set(session.scalars(
-        select(Procedure.id).where(
-            Procedure.id.in_(procedure_ids),
-            Procedure.procedure_type == "purchase_receipt",
-        )
-    ).all()) if procedure_ids else set()
+    purchase_workshop_ids = set(session.scalars(
+        select(Workshop.id)
+        .join(Department, Department.id == Workshop.department_id)
+        .where(Department.department_code == "purchasing")
+    ).all())
     purchase_node_ids = {
         node["id"]
         for node in process_nodes
-        if node.get("procedure_id") in purchase_procedure_ids
+        if node.get("workshop_id") in purchase_workshop_ids
     }
     if not purchase_node_ids:
         return 0

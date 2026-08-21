@@ -1,12 +1,11 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { ProcedureOption } from '@/api/organization'
+import type { WorkshopRouteOption } from '@/api/organization'
 import type { BomItem, FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 import { useLogicFlowInstance } from '../composables/useLogicFlowInstance'
 import {
   startPartDrag,
-  startAssemblyDrag,
   startProcessDrag,
   startQcDrag,
   startShippingDrag,
@@ -15,7 +14,7 @@ import {
 
 const props = defineProps<{
   modelValue: ProcessFlow
-  procedures: ProcedureOption[]
+  workshops: WorkshopRouteOption[]
   readonly?: boolean
 }>()
 const emit = defineEmits<{
@@ -39,13 +38,13 @@ const {
   onConnectionError: (message) => ElMessage.error(message),
   onSelectEdge: (edge) => emit('selectEdge', edge),
   onSelectNode: (node) => emit('selectNode', node),
-  processDepartmentCode: (procedureId) => props.procedures.find(
-    procedure => procedure.id === procedureId,
+  workshopDepartmentCode: (workshopId) => props.workshops.find(
+    workshop => workshop.id === workshopId,
   )?.department_code,
 })
 
 watch(() => props.readonly, value => setReadonly(Boolean(value)))
-watch(() => props.procedures, () => renderFlow(props.modelValue))
+watch(() => props.workshops, () => renderFlow(props.modelValue))
 
 watch(
   () => props.modelValue,
@@ -72,24 +71,19 @@ function dragPart(item: BomItem) {
 }
 
 function dragProcess(
-  procedureId: number,
-  procedureName: string,
-  inputMode: 'single' | 'multiple',
+  workshopId: number,
+  workshopName: string,
+  multiple: boolean,
   departmentCode: string,
 ) {
   if (props.readonly) return
   withInstance((lf) => startProcessDrag(
     lf,
-    procedureId,
-    procedureName,
-    inputMode,
+    workshopId,
+    workshopName,
+    multiple,
     departmentCode,
   ))
-}
-
-function dragAssembly() {
-  if (props.readonly) return
-  withInstance(startAssemblyDrag)
 }
 
 function dragQc() {
@@ -115,7 +109,6 @@ function focusElement(elementId?: string) {
 
 defineExpose({
   dragPart,
-  dragAssembly,
   dragProcess,
   dragQc,
   dragShipping,

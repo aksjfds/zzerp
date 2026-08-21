@@ -228,13 +228,7 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
             issued + reservation.issued_quantity,
         )
     rows: list[dict] = []
-    seen_part_keys: set[tuple[int, int]] = set()
     for item in plan.items:
-        if item.item_type == "part" and item.product_bom_id is not None:
-            part_key = (item.customer_order_item_id, item.product_bom_id)
-            if part_key in seen_part_keys:
-                continue
-            seen_part_keys.add(part_key)
         _flow, nodes = load_product_flow(session, item.product_id, item.product_version)
         product_key = (item.product_id, item.product_version)
         if product_key not in incoming_by_product:
@@ -490,48 +484,15 @@ def _reserve_flow_items(
             if item is None:
                 raise DomainError("production_plan_flow_mismatch", "生产计划与流程图不一致")
             item.gross_required_quantity = required_units * item.unit_requirement
-            if node.get("type") == "assembly":
+            if node.get("type") in {"assembly", "part"}:
                 _reserve_and_validate_plan_item(session, plan, item, actor_username)
+            if node.get("type") == "assembly":
                 next_required = ceil(item.net_required_quantity / item.unit_requirement)
         for source_id in incoming.get(node_id, []):
             if source_id:
                 visit(source_id, next_required, visiting | {node_id})
 
     visit(shipping_node_id, required_product_quantity, set())
-    routes_by_bom: dict[int, list[ProductionPlanItem]] = {}
-    for item in items:
-        if item.item_type == "part" and item.product_bom_id is not None:
-            routes_by_bom.setdefault(item.product_bom_id, []).append(item)
-    for routes in routes_by_bom.values():
-        routes.sort(key=lambda item: item.sort_order)
-        required = max((item.gross_required_quantity for item in routes), default=0)
-        for item in routes:
-            item.gross_required_quantity = 0
-            item.estimated_inventory_quantity = 0
-            item.net_required_quantity = 0
-            item.reserved_inventory_quantity = 0
-        primary = routes[0]
-        primary.gross_required_quantity = required
-        allocated = reserve_plan_item(
-            session,
-            production_plan_id=plan.id,
-            production_plan_item_id=primary.id,
-            plan_item=primary,
-            requested_quantity=required,
-            actor_username=actor_username,
-        )
-        primary.reserved_inventory_quantity = allocated
-        primary.estimated_inventory_quantity = allocated
-        primary.net_required_quantity = required - allocated
-        if sum(item.planned_production_quantity for item in routes) < primary.net_required_quantity:
-            raise DomainError(
-                "production_plan_inventory_changed",
-                f"{primary.item_code} {primary.item_name}的可用库存已变化，请重新加载并分配各路线生产数量",
-                status_code=409,
-                path="items",
-            )
-
-
 __all__ = [
     "cancel_order_plan",
     "confirm_order_plan",

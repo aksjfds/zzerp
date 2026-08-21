@@ -6,7 +6,7 @@ import {
   queryProductionProgressItemDetail,
   type DepartmentProductionProgressItem,
   type ProductionProgressItemDetail,
-  type ProductionProgressTagCard,
+  type ProductionProgressProcedureCard,
 } from '../api/productionProgress'
 
 const props = defineProps<{
@@ -25,7 +25,7 @@ const visible = computed({
 const loading = ref(false)
 const detail = ref<ProductionProgressItemDetail | null>(null)
 
-const statusLabels: Record<ProductionProgressTagCard['status'], string> = {
+const statusLabels: Record<ProductionProgressProcedureCard['status'], string> = {
   not_arrived: '未到货',
   ready: '待开工',
   processing: '生产中',
@@ -34,7 +34,7 @@ const statusLabels: Record<ProductionProgressTagCard['status'], string> = {
   exception: '存在异常',
 }
 const statusTypes: Record<
-  ProductionProgressTagCard['status'],
+  ProductionProgressProcedureCard['status'],
   'info' | 'primary' | 'warning' | 'success' | 'danger'
 > = {
   not_arrived: 'info',
@@ -60,11 +60,11 @@ function progressWidth(quantity: number, taskQuantity: number) {
   return `${Math.min(Math.max(quantity / taskQuantity * 100, 0), 100)}%`
 }
 
-function machiningCompletedQuantity(card: ProductionProgressTagCard) {
+function machiningCompletedQuantity(card: ProductionProgressProcedureCard) {
   return Math.min(card.completed_quantity, card.task_quantity)
 }
 
-function progressSegments(card: ProductionProgressTagCard) {
+function progressSegments(card: ProductionProgressProcedureCard) {
   let remaining = Math.max(card.task_quantity, 0)
   const take = (quantity: number) => {
     const result = Math.min(Math.max(quantity, 0), remaining)
@@ -79,24 +79,24 @@ function progressSegments(card: ProductionProgressTagCard) {
 }
 
 function segmentProgressWidth(
-  card: ProductionProgressTagCard,
+  card: ProductionProgressProcedureCard,
   segment: keyof ReturnType<typeof progressSegments>,
 ) {
   return progressWidth(progressSegments(card)[segment], card.task_quantity)
 }
 
-function currentProgressQuantity(card: ProductionProgressTagCard) {
+function currentProgressQuantity(card: ProductionProgressProcedureCard) {
   return Object.values(progressSegments(card)).reduce(
     (total, quantity) => total + quantity,
     0,
   )
 }
 
-function exceptionQuantity(card: ProductionProgressTagCard) {
+function exceptionQuantity(card: ProductionProgressProcedureCard) {
   return card.rework_quantity + card.scrap_quantity + card.lost_quantity
 }
 
-function isFocused(card: ProductionProgressTagCard) {
+function isFocused(card: ProductionProgressProcedureCard) {
   return Boolean(
     props.item?.processing_workshop
     && (
@@ -171,13 +171,6 @@ watch(
           </div>
         </header>
 
-        <ElAlert
-          type="info"
-          :closable="false"
-          show-icon
-          title="各标记独立统计；同一工单同时加工多个标记时会分别计入对应卡片，卡片数量不能相加。"
-        />
-
         <div v-if="detail.cards.length" class="tag-card-grid">
           <article
             v-for="card in detail.cards"
@@ -189,13 +182,8 @@ watch(
               <div>
                 <div class="card-title-row">
                   <h3>{{ card.card_name }}</h3>
-                  <ElTag
-                    v-if="card.card_type !== 'tag'"
-                    size="small"
-                    type="info"
-                    effect="plain"
-                  >
-                    {{ card.card_type === 'assembly' ? '装配' : card.card_type === 'purchase' ? '外购' : '无标记' }}
+                  <ElTag size="small" type="info" effect="plain">
+                    {{ card.card_type === 'assembly' ? '装配' : card.card_type === 'purchase' ? '外购' : '加工' }}
                   </ElTag>
                 </div>
                 <p>
@@ -304,7 +292,7 @@ watch(
             <p v-else class="no-work-order">尚未创建工单</p>
           </article>
         </div>
-        <ElEmpty v-else description="该生产项暂无可展示的加工标记" />
+        <ElEmpty v-else description="该生产项暂无工艺记录" />
       </template>
       <ElEmpty v-else-if="!loading" description="生产情况未加载" />
     </div>

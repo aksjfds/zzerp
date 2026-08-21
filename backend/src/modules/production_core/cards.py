@@ -6,10 +6,8 @@ from domain.time import BUSINESS_TIMEZONE, business_iso
 from modules.engineering.model_api import Product, ProductBom
 from modules.organization.model_api import Department, Procedure, Workshop
 from modules.planning.model_api import ProductionPlan
-from modules.standard_execution.model_api import ProcedureTagSet
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.quality.model_api import WorkOrderBatch
-from modules.standard_execution.model_api import ProcedureTagStock
 from modules.production_core.persistence import (
     ProductionItem,
     ProductionMovement,
@@ -20,19 +18,27 @@ from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.production_core.card_status import (
     position_statuses,
     reserved_quantities,
-    reserved_tag_quantities,
-    tag_stock_statuses,
     work_order_stage,
 )
 from modules.production_core.flow import assembly_material_key, load_production_flow
-from modules.standard_execution.tag_api import (
-    configured_tag_suggestions,
-    is_final_tag_set,
-    serialize_tag,
-    serialize_tag_set,
-    tag_suggestions,
-)
+from modules.organization.read_api import get_procedure_views
 from modules.production_core.work_order_presenters import production_item_name
+
+
+def _workshop_procedures(
+    session, workshop_id: int | None, procedure_type: str, input_mode: str,
+):
+    if workshop_id is None:
+        return []
+    cache = session.info.get("workshop_procedure_views")
+    if cache is None:
+        cache = {}
+        for item in get_procedure_views(session):
+            cache.setdefault(
+                (item.workshop_id, item.procedure_type, item.input_mode), []
+            ).append(item)
+        session.info["workshop_procedure_views"] = cache
+    return cache.get((workshop_id, procedure_type, input_mode), [])
 
 
 def _current_cards(
@@ -162,201 +168,6 @@ def _current_cards(
     ]
 
 
-def _tag_stock_cards(
-    session,
-    department: Department,
-    keyword: str | None,
-    arrived_from: date | None,
-    arrived_to: date | None,
-) -> list[dict]:
-    arrival_tag_set_id = case(
-        (
-            ProductionMovement.movement_type == "qc_rework",
-            WorkOrder.source_tag_set_id,
-        ),
-        else_=WorkOrder.target_tag_set_id,
-    )
-    latest_arrivals = (
-        select(
-            ProductionMovement.production_item_id.label("production_item_id"),
-            ProductionMovement.target_flow_node_id.label("flow_node_id"),
-            WorkOrder.source_flow_node_id.label("source_flow_node_id"),
-            arrival_tag_set_id.label("tag_set_id"),
-            func.max(ProductionMovement.created_at).label("arrived_at"),
-        )
-        .join(WorkOrder, WorkOrder.id == ProductionMovement.work_order_id)
-        .outerjoin(
-            WorkOrderBatch,
-            WorkOrderBatch.id == ProductionMovement.work_order_batch_id,
-        )
-        .where(
-            ProductionMovement.target_department_id == department.id,
-            ProductionMovement.target_flow_node_id.is_not(None),
-            ProductionMovement.movement_type.in_(
-                ("process", "purchase_receipt", "qc_qualified", "qc_rework")
-            ),
-        )
-        .group_by(
-            ProductionMovement.production_item_id,
-            ProductionMovement.target_flow_node_id,
-            WorkOrder.source_flow_node_id,
-            arrival_tag_set_id,
-        )
-        .subquery()
-    )
-    statement = (
-        select(
-            ProcedureTagStock,
-            ProductionItem,
-            CustomerOrderItem,
-            CustomerOrder,
-            Product,
-            ProductBom,
-            latest_arrivals.c.arrived_at,
-        )
-        .join(
-            ProductionItem,
-            ProductionItem.id == ProcedureTagStock.production_item_id,
-        )
-        .join(
-            CustomerOrderItem,
-            CustomerOrderItem.id == ProductionItem.customer_order_item_id,
-        )
-        .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
-        .join(ProductionPlan, ProductionPlan.customer_order_id == CustomerOrder.id)
-        .join(Product, Product.id == CustomerOrderItem.product_id)
-        .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
-        .outerjoin(
-            latest_arrivals,
-            and_(
-                latest_arrivals.c.production_item_id
-                == ProcedureTagStock.production_item_id,
-                latest_arrivals.c.flow_node_id == ProcedureTagStock.flow_node_id,
-                latest_arrivals.c.source_flow_node_id
-                == ProcedureTagStock.source_flow_node_id,
-                latest_arrivals.c.tag_set_id == ProcedureTagStock.tag_set_id,
-            ),
-        )
-        .where(
-            ProcedureTagStock.department_id == department.id,
-            ProductionPlan.status == "confirmed",
-        )
-    )
-    statement = _apply_current_source_filters(
-        statement,
-        latest_arrivals.c.arrived_at,
-        keyword,
-        arrived_from,
-        arrived_to,
-    )
-    rows = session.execute(statement).all()
-    stock_ids = [row.ProcedureTagStock.id for row in rows]
-    reserved_by_id = reserved_tag_quantities(session, stock_ids)
-    status_by_id = tag_stock_statuses(session, stock_ids)
-    return [
-        _tag_stock_card(
-            session,
-            row.ProcedureTagStock,
-            row.ProductionItem,
-            row.CustomerOrderItem,
-            row.CustomerOrder,
-            row.Product,
-            row.ProductBom,
-            department,
-            reserved_by_id.get(row.ProcedureTagStock.id, 0),
-            row.arrived_at,
-            status_by_id[row.ProcedureTagStock.id],
-        )
-        for row in rows
-    ]
-
-
-def _tag_stock_card(
-    session,
-    stock,
-    production_item,
-    order_item,
-    order,
-    product,
-    bom_item,
-    department,
-    reserved,
-    arrived_at,
-    work_status,
-) -> dict:
-    context = load_production_flow(session, production_item)
-    node = context.nodes.get(stock.flow_node_id, {})
-    source = context.nodes.get(stock.source_flow_node_id, {})
-    tag_set = session.get(ProcedureTagSet, stock.tag_set_id)
-    procedure = session.get(Procedure, tag_set.procedure_id) if tag_set else None
-    workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
-    final_tag_set = bool(procedure) and is_final_tag_set(
-        session,
-        production_item,
-        procedure.id,
-        stock.tag_set_id,
-    )
-    suggestions = tag_suggestions(session, procedure.id) if procedure else []
-    configured_suggestions = configured_tag_suggestions(
-        session,
-        production_item,
-        procedure.id,
-    ) if procedure else []
-    part_no, part_name = context.item_name(production_item)
-    if context.bom_item is None:
-        part_name = production_item_name(session, production_item, set())
-        part_no = part_name
-    return {
-        "card_key": f"tag-stock:{stock.id}",
-        "repository_id": None,
-        "tag_stock_id": stock.id,
-        "production_item_id": production_item.id,
-        "customer_order_item_id": order_item.id,
-        "customer_order_no": order.customer_order_no,
-        "customer_name": order.customer.customer_name,
-        "product_id": product.id,
-        "product_version": order_item.product_version,
-        "product_name": product.product_name,
-        "factory_code": product.factory_code,
-        "product_bom_id": bom_item.id if bom_item else None,
-        "part_name": part_name,
-        "part_no": part_no,
-        "flow_node_id": stock.flow_node_id,
-        "source_flow_node_id": stock.source_flow_node_id,
-        "source_node_label": source.get("label", "未知来源"),
-        "procedure_id": procedure.id if procedure else None,
-        "procedure_name": procedure.procedure_name if procedure else node.get("label", ""),
-        "current_tag_set_name": serialize_tag_set(session, stock.tag_set_id)["tag_set_name"],
-        "available_tags": [serialize_tag(item) for item in suggestions],
-        "configured_tags": [
-            serialize_tag(item) for item in configured_suggestions
-        ],
-        "workshop_name": workshop.workshop_name if workshop else "",
-        "department_id": department.id,
-        "department_name": department.department_name,
-        "department_code": department.department_code,
-        "quantity": stock.quantity,
-        "available_quantity": max(stock.quantity - reserved, 0),
-        "assembly_unit_quantity": bom_item.pcs if bom_item else int(
-            context.nodes.get(production_item.origin_flow_node_id, {}).get("output_pcs", 1)
-        ),
-        "assembly_required_source_ids": [],
-        "assembly_material_key": _production_item_material_key(production_item),
-        "assembly_required_material_keys": [],
-        "assembly_group_complete": True,
-        "assembly_output_name": None,
-        "delivery_date": order_item.delivery_date,
-        "arrived_at": business_iso(arrived_at),
-        "work_status": work_status,
-        "can_create_work_order": (
-            bool(procedure)
-            and procedure.procedure_type == "standard"
-            and bool(configured_suggestions)
-            and not final_tag_set
-            and reserved < stock.quantity
-        ),
-    }
-
 
 def _apply_current_source_filters(
     statement,
@@ -417,22 +228,28 @@ def _current_card(
     context = load_production_flow(session, production_item)
     node = context.nodes.get(repository.flow_node_id, {})
     source = context.nodes.get(repository.source_flow_node_id, {})
-    procedure = session.get(Procedure, node.get("procedure_id")) if node.get("procedure_id") else None
-    workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
-    suggestions = tag_suggestions(session, procedure.id) if procedure else []
-    configured_suggestions = configured_tag_suggestions(
+    workshop = (
+        session.get(Workshop, node.get("workshop_id"))
+        if node.get("workshop_id") else None
+    )
+    procedures = _workshop_procedures(
         session,
-        production_item,
-        procedure.id,
-    ) if procedure else []
+        workshop.id if workshop else None,
+        (
+            "purchase_receipt"
+            if department.department_code == "purchasing"
+            else "standard"
+        ),
+        "multiple" if node.get("type") == "assembly" else "single",
+    )
     part_no, part_name = context.item_name(production_item)
     if context.bom_item is None:
         part_name = production_item_name(session, production_item, set())
         part_no = part_name
+    is_assembly_node = node.get("type") == "assembly"
     card = {
         "card_key": f"repository:{repository.id}",
         "repository_id": repository.id,
-        "tag_stock_id": None,
         "production_item_id": production_item.id,
         "customer_order_item_id": order_item.id,
         "customer_order_no": order.customer_order_no,
@@ -445,19 +262,12 @@ def _current_card(
         "part_name": part_name,
         "part_no": part_no,
         "flow_node_id": repository.flow_node_id,
+        "node_type": str(node.get("type") or ""),
         "source_flow_node_id": repository.source_flow_node_id,
         "source_node_label": source.get("label", "未知来源"),
-        "procedure_id": procedure.id if procedure else None,
-        "procedure_name": procedure.procedure_name if procedure else node.get("label", ""),
-        "current_tag_set_name": (
-            "未打标记"
-            if procedure and procedure.procedure_type == "standard"
-            else node.get("label", "")
-        ),
-        "available_tags": [serialize_tag(item) for item in suggestions],
-        "configured_tags": [
-            serialize_tag(item) for item in configured_suggestions
-        ],
+        "material_source_name": _material_source_name(context, production_item),
+        "workshop_id": workshop.id if workshop else 0,
+        "available_procedures": procedures,
         "workshop_name": workshop.workshop_name if workshop else "",
         "department_id": department.id,
         "department_name": department.department_name,
@@ -470,27 +280,14 @@ def _current_card(
         "assembly_required_source_ids": [],
         "assembly_material_key": _production_item_material_key(production_item),
         "assembly_required_material_keys": [],
-        "assembly_group_complete": department.department_code != "assembly",
-        "assembly_output_name": (
-            node.get("output_name")
-            if department.department_code == "assembly" else None
-        ),
+        "assembly_group_complete": not is_assembly_node,
+        "assembly_output_name": node.get("output_name") if is_assembly_node else None,
         "delivery_date": order_item.delivery_date,
         "arrived_at": business_iso(arrived_at),
         "work_status": work_status,
-        "can_create_work_order": (
-            department.department_code == "assembly"
-            or (
-                procedure is not None
-                and (
-                    procedure.procedure_type != "standard"
-                    or bool(configured_suggestions)
-                )
-                and reserved < repository.quantity
-            )
-        ),
+        "can_create_work_order": workshop is not None and reserved < repository.quantity,
     }
-    if department.department_code == "assembly":
+    if is_assembly_node:
         card["assembly_required_source_ids"] = _normal_input_source_ids(
             context.flow, repository.flow_node_id
         )
@@ -498,7 +295,6 @@ def _current_card(
             context.flow, context.nodes, repository.flow_node_id
         )
     return card
-
 
 def _historical_cards(
     session,
@@ -760,8 +556,7 @@ def _historical_card(
     source_flow_node_id = movement.source_flow_node_id or ""
     movement_order = (
         session.get(WorkOrder, movement.work_order_id)
-        if movement.work_order_id is not None
-        else None
+        if movement.work_order_id is not None else None
     )
     if (
         department.department_code != "assembly"
@@ -770,16 +565,18 @@ def _historical_card(
     ):
         source_flow_node_id = movement_order.source_flow_node_id
     source = context.nodes.get(source_flow_node_id, {})
-    procedure = session.get(Procedure, node.get("procedure_id")) if node.get("procedure_id") else None
-    workshop = session.get(Workshop, procedure.workshop_id) if procedure else None
+    workshop = (
+        session.get(Workshop, node.get("workshop_id"))
+        if node.get("workshop_id") else None
+    )
     part_no, part_name = context.item_name(production_item)
     if context.bom_item is None:
         part_name = production_item_name(session, production_item, set())
         part_no = part_name
+    is_assembly_node = node.get("type") == "assembly"
     card = {
         "card_key": f"history:{production_item_id}:{node_id}:{movement.id}",
         "repository_id": None,
-        "tag_stock_id": None,
         "production_item_id": production_item_id,
         "customer_order_item_id": order_item.id,
         "customer_order_no": order.customer_order_no,
@@ -792,12 +589,12 @@ def _historical_card(
         "part_name": part_name,
         "part_no": part_no,
         "flow_node_id": node_id,
+        "node_type": str(node.get("type") or ""),
         "source_flow_node_id": source_flow_node_id,
         "source_node_label": source.get("label", "未知来源"),
-        "procedure_id": procedure.id if procedure else None,
-        "procedure_name": procedure.procedure_name if procedure else node.get("label", ""),
-        "current_tag_set_name": "加工中" if open_assembly_order else "已完成",
-        "available_tags": [],
+        "material_source_name": _material_source_name(context, production_item),
+        "workshop_id": workshop.id if workshop else 0,
+        "available_procedures": [],
         "workshop_name": workshop.workshop_name if workshop else "",
         "department_id": department.id,
         "department_name": department.department_name,
@@ -808,17 +605,14 @@ def _historical_card(
         "assembly_required_source_ids": [],
         "assembly_material_key": _production_item_material_key(production_item),
         "assembly_required_material_keys": [],
-        "assembly_group_complete": department.department_code != "assembly",
-        "assembly_output_name": (
-            node.get("output_name")
-            if department.department_code == "assembly" else None
-        ),
+        "assembly_group_complete": not is_assembly_node,
+        "assembly_output_name": node.get("output_name") if is_assembly_node else None,
         "delivery_date": order_item.delivery_date,
         "arrived_at": business_iso(movement.created_at),
         "work_status": assembly_status,
         "can_create_work_order": False,
     }
-    if department.department_code == "assembly":
+    if is_assembly_node:
         card["assembly_required_source_ids"] = _normal_input_source_ids(
             context.flow, node_id
         )
@@ -826,6 +620,21 @@ def _historical_card(
             context.flow, context.nodes, node_id
         )
     return card
+
+def _material_source_name(context, production_item) -> str:
+    current_id = production_item.origin_flow_node_id
+    visited: set[str] = set()
+    while current_id and current_id not in visited:
+        visited.add(current_id)
+        target = context.normal_target(current_id)
+        if target is None:
+            break
+        if target.get("type") == "process":
+            return str(target.get("label") or "路线")
+        if target.get("type") in {"assembly", "shipping"}:
+            break
+        current_id = str(target.get("id") or "")
+    return "装配体" if production_item.product_bom_id is None else "直接来源"
 
 
 def _normal_input_source_ids(flow: dict, node_id: str) -> list[str]:

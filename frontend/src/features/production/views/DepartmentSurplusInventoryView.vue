@@ -6,7 +6,6 @@ import {
   queryDepartmentSurplusInventory,
   storePositionInWarehouse,
 } from '../api/departmentRepositories'
-import { storeQcBatchInWarehouse } from '../api/qc'
 import type { DepartmentSurplusInventoryItem } from '../domain/types'
 
 const props = defineProps<{ departmentCode: string }>()
@@ -45,9 +44,7 @@ async function store(item: DepartmentSurplusInventoryItem) {
       return
     }
     submittingKey.value = item.key
-    const result = item.source_kind === 'qc'
-      ? await storeQcBatchInWarehouse(item.batch_id!, quantity)
-      : await storePositionInWarehouse(props.departmentCode, item, quantity)
+    const result = await storePositionInWarehouse(props.departmentCode, item, quantity)
     ElMessage.success(
       `已存入仓库 ${result.quantity} 件，完成状态：${result.completed_node_label}完`,
     )

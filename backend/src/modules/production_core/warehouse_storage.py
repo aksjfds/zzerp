@@ -8,13 +8,11 @@ from modules.errors import DomainError
 from modules.inventory.identity import inventory_identity_key
 from modules.inventory.ownership_api import confirm_receipt, create_receipt
 from modules.organization.model_api import Department
-from modules.production_core.card_status import reserved_quantities, reserved_tag_quantities
+from modules.production_core.card_status import reserved_quantities
 from modules.production_core.flow import load_production_flow
 from modules.production_core.persistence import ProductionItem, Repository
 from modules.production_core.work_order_presenters import production_item_name
 from modules.production_core.work_order_support import consume_repository, refresh_order_closed
-from modules.standard_execution.model_api import ProcedureTagStock
-from modules.standard_execution.tags import consume_tag_stock
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 
 
@@ -36,36 +34,14 @@ def list_closed_surplus_positions(department_code: str) -> list[dict]:
             )
             .order_by(Repository.id)
         ))
-        tag_stocks = list(session.scalars(
-            select(ProcedureTagStock)
-            .join(
-                ProductionItem,
-                ProductionItem.id == ProcedureTagStock.production_item_id,
-            )
-            .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-            .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
-            .where(
-                ProcedureTagStock.department_id == department.id,
-                CustomerOrder.status == "closed",
-            )
-            .order_by(ProcedureTagStock.id)
-        ))
         repository_reserved = reserved_quantities(
             session, [item.id for item in repositories]
-        )
-        tag_reserved = reserved_tag_quantities(
-            session, [item.id for item in tag_stocks]
         )
         grouped: dict[tuple[int, str, str], int] = {}
         for item in repositories:
             key = (item.production_item_id, item.flow_node_id, item.source_flow_node_id)
             grouped[key] = grouped.get(key, 0) + max(
                 item.quantity - repository_reserved.get(item.id, 0), 0
-            )
-        for item in tag_stocks:
-            key = (item.production_item_id, item.flow_node_id, item.source_flow_node_id)
-            grouped[key] = grouped.get(key, 0) + max(
-                item.quantity - tag_reserved.get(item.id, 0), 0
             )
         return [
             _serialize_closed_position(session, department_code, key, quantity)
@@ -151,22 +127,10 @@ def store_position_in_warehouse(
                 Repository.department_id == department.id,
             ).order_by(Repository.id).with_for_update()
         ))
-        tag_stocks = list(session.scalars(
-            select(ProcedureTagStock).where(
-                ProcedureTagStock.production_item_id == production_item.id,
-                ProcedureTagStock.flow_node_id == flow_node_id,
-                ProcedureTagStock.source_flow_node_id == source_flow_node_id,
-                ProcedureTagStock.department_id == department.id,
-            ).order_by(ProcedureTagStock.id).with_for_update()
-        ))
         repository_reserved = reserved_quantities(session, [item.id for item in repositories])
-        tag_reserved = reserved_tag_quantities(session, [item.id for item in tag_stocks])
         available = sum(
             max(item.quantity - repository_reserved.get(item.id, 0), 0)
             for item in repositories
-        ) + sum(
-            max(item.quantity - tag_reserved.get(item.id, 0), 0)
-            for item in tag_stocks
         )
         if quantity > available:
             raise DomainError(
@@ -212,17 +176,6 @@ def store_position_in_warehouse(
                 remaining -= allocated
             if not remaining:
                 break
-        if remaining:
-            for stock in tag_stocks:
-                allocated = min(
-                    max(stock.quantity - tag_reserved.get(stock.id, 0), 0),
-                    remaining,
-                )
-                if allocated:
-                    consume_tag_stock(session, stock, allocated)
-                    remaining -= allocated
-                if not remaining:
-                    break
         warehouse_stock = confirm_receipt(
             session, receipt.id, actor_username, "生产节点存入仓库"
         )

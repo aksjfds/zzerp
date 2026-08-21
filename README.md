@@ -49,14 +49,10 @@ Python 3.12 和 Node 22，并在构建阶段安装 `backend/requirements-dev.txt
 
 ## 测试部署
 
-Render 后端、Netlify 前端和 Neon PostgreSQL 的配置与操作顺序见
-[部署说明](docs/deployment.md)。数据库密钥只配置在托管平台环境变量中，不写入
-仓库。
+Render 后端和 Netlify 前端的仓库配置分别见 [render.yaml](render.yaml) 与
+[netlify.toml](netlify.toml)。数据库密钥只配置在托管平台环境变量中，不写入仓库。
 
 ## 文档入口
 
-- [项目目录与文件职责](docs/project-structure.md)
-- [模块架构、边界与迁移状态](docs/modular-architecture.md)
-- [数据库设计](docs/database-design.md)
-- [开发基线](docs/development-baseline.md)
-- [Render、Netlify 与 Neon 测试部署](docs/deployment.md)
+- [项目介绍、业务流程与目录职责](PROJECT_OVERVIEW.md)
+- [AI 与 Agent 协作规范](AGENTS.md)

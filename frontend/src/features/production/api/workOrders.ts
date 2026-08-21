@@ -8,8 +8,6 @@ export async function queryDepartmentWorkOrders(
   productionItemId?: number | null,
   flowNodeId?: string | null,
   sourceFlowNodeId?: string | null,
-  existingTagIds: number[] = [],
-  applyingTagIds: number[] = [],
 ) {
   const params = new URLSearchParams()
   params.set('page', String(page))
@@ -17,8 +15,6 @@ export async function queryDepartmentWorkOrders(
   if (productionItemId) params.set('production_item_id', String(productionItemId))
   if (flowNodeId) params.set('flow_node_id', flowNodeId)
   if (sourceFlowNodeId) params.set('source_flow_node_id', sourceFlowNodeId)
-  existingTagIds.forEach(id => params.append('existing_tag_id', String(id)))
-  applyingTagIds.forEach(id => params.append('applying_tag_id', String(id)))
   const response = await service.get<{ data: WorkOrder[]; total: number }>(
     `/departments/${departmentCode}/work-orders`,
     { params },
@@ -27,22 +23,17 @@ export async function queryDepartmentWorkOrders(
 }
 
 export async function createWorkOrder(
-  repositoryId: number | null,
-  procedureTagStockId: number | null,
-  tagNames: string[],
+  repositoryId: number,
+  procedureId: number | null,
+  procedureName: string | null,
   quantity: number,
   workerId: number | null,
   remark: string,
 ) {
-  if ((repositoryId === null) === (procedureTagStockId === null)) {
-    throw new Error('工单来源必须且只能选择一种库存')
-  }
-  const source = procedureTagStockId === null
-    ? { repository_id: repositoryId }
-    : { procedure_tag_stock_id: procedureTagStockId }
   const response = await service.post<{ data: WorkOrder }>('/work-orders', {
-    ...source,
-    tag_names: tagNames,
+    repository_id: repositoryId,
+    procedure_id: procedureId,
+    procedure_name: procedureName,
     quantity,
     worker_id: workerId,
     remark,
@@ -51,13 +42,17 @@ export async function createWorkOrder(
 }
 
 export async function createAssemblyWorkOrder(
-  repositoryIds: number[],
+  materials: Array<{ repository_id: number; quantity: number }>,
+  procedureId: number | null,
+  procedureName: string | null,
   quantity: number,
   workerId: number | null,
   remark: string,
 ) {
   const response = await service.post<{ data: WorkOrder }>('/assembly-work-orders', {
-    repository_ids: repositoryIds,
+    materials,
+    procedure_id: procedureId,
+    procedure_name: procedureName,
     quantity,
     worker_id: workerId,
     remark,

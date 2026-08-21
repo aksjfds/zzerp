@@ -52,7 +52,6 @@ class Procedure(Base):
             "input_mode IN ('single', 'multiple')",
             name="ck_procedure_input_mode",
         ),
-        UniqueConstraint("id", "procedure_type", name="uq_procedure_id_type"),
         UniqueConstraint("workshop_id", "procedure_name"),
     )
 

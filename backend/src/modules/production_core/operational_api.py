@@ -7,7 +7,6 @@ of depending on production_core implementation files.
 from modules.production_core.flow import (
     load_product_flow,
     load_production_flow,
-    origin_route_procedure_ids,
     process_qc_node,
 )
 from modules.production_core.movements import record_movement
@@ -62,7 +61,6 @@ __all__ = [
     "move_to_node",
     "node_context",
     "order_remaining_quantity",
-    "origin_route_procedure_ids",
     "process_qc_node",
     "production_item_name",
     "production_item_unit_quantity",

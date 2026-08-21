@@ -3,6 +3,7 @@
 from modules.assembly.work_orders import (
     create_assembly_work_order,
     resubmit_assembly_rework_batch,
+    restore_cancelled_assembly_materials,
     submit_assembly_work_order,
 )
 
@@ -10,5 +11,6 @@ from modules.assembly.work_orders import (
 __all__ = [
     "create_assembly_work_order",
     "resubmit_assembly_rework_batch",
+    "restore_cancelled_assembly_materials",
     "submit_assembly_work_order",
 ]

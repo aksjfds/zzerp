@@ -7,7 +7,7 @@ from modules.errors import DomainError
 
 
 def empty_process_flow() -> dict:
-    return {"schema_version": 3, "nodes": [], "edges": []}
+    return {"schema_version": 4, "nodes": [], "edges": []}
 
 
 def bom_commands(items: list[BomItemPayload]) -> list[BomItemCommand]:

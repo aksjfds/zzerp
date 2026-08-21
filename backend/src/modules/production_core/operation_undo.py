@@ -7,7 +7,6 @@ from sqlalchemy import func, select
 from domain.time import utc_now
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.quality.model_api import WorkOrderBatch
-from modules.standard_execution.model_api import ProcedureTagStock
 from modules.production_core.persistence import (
     ProductionItem,
     ProductionMovement,
@@ -31,10 +30,9 @@ def _inventory_row(row) -> dict:
         "flow_node_id": row.flow_node_id,
         "source_flow_node_id": row.source_flow_node_id,
         "department_id": row.department_id,
+        "source_work_order_id": row.source_work_order_id,
         "quantity": row.quantity,
     }
-    if isinstance(row, ProcedureTagStock):
-        data["tag_set_id"] = row.tag_set_id
     return data
 
 
@@ -56,11 +54,6 @@ def capture_operation_state(
         .where(Repository.production_item_id.in_(affected_ids))
         .order_by(Repository.id)
     ).all())
-    tag_stocks = list(session.scalars(
-        select(ProcedureTagStock)
-        .where(ProcedureTagStock.production_item_id.in_(affected_ids))
-        .order_by(ProcedureTagStock.id)
-    ).all())
     production_items = list(session.scalars(
         select(ProductionItem)
         .where(ProductionItem.id.in_(affected_ids))
@@ -81,7 +74,6 @@ def capture_operation_state(
         "order": {
             "production_item_id": order.production_item_id,
             "repository_id": order.repository_id,
-            "procedure_tag_stock_id": order.procedure_tag_stock_id,
             "processed_quantity": order.processed_quantity,
             "completed_quantity": order.completed_quantity,
             "status": order.status,
@@ -92,7 +84,6 @@ def capture_operation_state(
             for item in materials
         ],
         "repositories": [_inventory_row(item) for item in repositories],
-        "tag_stocks": [_inventory_row(item) for item in tag_stocks],
         "production_items": [item.id for item in production_items],
         "batch_ids": [batch.id for batch in batches],
         "batches": [
@@ -107,6 +98,7 @@ def capture_operation_state(
                 "qc_worker_id": batch.qc_worker_id,
                 "qc_worker_name": batch.qc_worker_name,
                 "defect_reason": batch.defect_reason,
+                "qualified_disposition": batch.qualified_disposition,
                 "recorded_at": _iso(batch.recorded_at),
             }
             for batch in batches
@@ -194,7 +186,6 @@ def undo_production_operation(
             )
 
         current_repository_ids = {item["id"] for item in after["repositories"]}
-        current_tag_stock_ids = {item["id"] for item in after["tag_stocks"]}
         dependent_order = session.scalar(
             select(WorkOrder.id).where(
                 WorkOrder.id != order.id,
@@ -202,10 +193,6 @@ def undo_production_operation(
                 (
                     WorkOrder.repository_id.in_(current_repository_ids)
                     if current_repository_ids else WorkOrder.id < 0
-                )
-                | (
-                    WorkOrder.procedure_tag_stock_id.in_(current_tag_stock_ids)
-                    if current_tag_stock_ids else WorkOrder.id < 0
                 ),
             ).limit(1)
         )
@@ -248,17 +235,10 @@ def undo_production_operation(
 def _lock_operation_state(session, state: dict) -> None:
     item_ids = set(state["affected_item_ids"])
     repository_ids = {item["id"] for item in state["repositories"]}
-    tag_stock_ids = {item["id"] for item in state["tag_stocks"]}
     if repository_ids:
         list(session.scalars(
             select(Repository)
             .where(Repository.id.in_(repository_ids))
-            .with_for_update()
-        ).all())
-    if tag_stock_ids:
-        list(session.scalars(
-            select(ProcedureTagStock)
-            .where(ProcedureTagStock.id.in_(tag_stock_ids))
             .with_for_update()
         ).all())
     if item_ids:
@@ -296,11 +276,8 @@ def _restore_state(session, order: WorkOrder, before: dict, after: dict) -> None
         session.delete(batch)
 
     before_repository_ids = {item["id"] for item in before["repositories"]}
-    before_tag_stock_ids = {item["id"] for item in before["tag_stocks"]}
     if order.repository_id not in before_repository_ids:
         order.repository_id = None
-    if order.procedure_tag_stock_id not in before_tag_stock_ids:
-        order.procedure_tag_stock_id = None
     materials = {
         item.id: item for item in session.scalars(
             select(WorkOrderMaterial).where(WorkOrderMaterial.work_order_id == order.id)
@@ -313,11 +290,9 @@ def _restore_state(session, order: WorkOrder, before: dict, after: dict) -> None
     session.flush()
 
     _restore_inventory_table(session, Repository, before["repositories"], after["repositories"])
-    _restore_inventory_table(session, ProcedureTagStock, before["tag_stocks"], after["tag_stocks"])
     session.flush()
 
     order.repository_id = before["order"]["repository_id"]
-    order.procedure_tag_stock_id = before["order"]["procedure_tag_stock_id"]
     order.processed_quantity = before["order"]["processed_quantity"]
     order.completed_quantity = before["order"]["completed_quantity"]
     order.status = before["order"]["status"]

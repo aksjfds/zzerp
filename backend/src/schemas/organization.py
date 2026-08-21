@@ -19,6 +19,11 @@ class WorkshopResponse(OrganizationModel):
     workshop_name: str
 
 
+class WorkshopRouteResponse(WorkshopResponse):
+    department_name: str
+    department_code: str
+
+
 class ProcedureResponse(OrganizationModel):
     id: int
     workshop_id: int
@@ -27,9 +32,3 @@ class ProcedureResponse(OrganizationModel):
     procedure_name: str
     procedure_type: Literal["standard", "purchase_receipt"]
     input_mode: Literal["single", "multiple"]
-
-
-class ProcedureTagResponse(OrganizationModel):
-    id: int
-    procedure_id: int
-    tag_name: str

@@ -35,21 +35,18 @@ def create_assembly_work_order_record(
     session,
     *,
     production_item_id: int,
-    procedure_id: int | None,
+    procedure_id: int,
     flow_node_id: str,
     work_order_name: str,
     worker_id: int | None,
     quantity: int,
     remark: str | None,
+    repository_id: int | None = None,
 ) -> WorkOrder:
     order = WorkOrder(
-        repository_id=None,
-        procedure_tag_stock_id=None,
+        repository_id=repository_id,
         production_item_id=production_item_id,
         procedure_id=procedure_id,
-        applied_tag_set_id=None,
-        source_tag_set_id=None,
-        target_tag_set_id=None,
         work_order_type="assembly",
         flow_node_id=flow_node_id,
         source_flow_node_id=flow_node_id,
@@ -71,6 +68,7 @@ def add_repository_quantity(
     source_flow_node_id: str,
     department_id: int,
     quantity: int,
+    source_work_order_id: int | None = None,
 ) -> Repository | None:
     if quantity <= 0:
         return None
@@ -82,6 +80,7 @@ def add_repository_quantity(
             Repository.flow_node_id == flow_node_id,
             Repository.source_flow_node_id == source_flow_node_id,
             Repository.department_id == department_id,
+            Repository.source_work_order_id == source_work_order_id,
         )
         .with_for_update()
     )
@@ -91,6 +90,7 @@ def add_repository_quantity(
             flow_node_id=flow_node_id,
             source_flow_node_id=source_flow_node_id,
             department_id=department_id,
+            source_work_order_id=source_work_order_id,
             quantity=quantity,
         )
         session.add(repository)

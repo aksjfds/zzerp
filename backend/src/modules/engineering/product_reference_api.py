@@ -11,7 +11,7 @@ from domain.errors import DomainViolation
 from domain.process_flow import validate_process_flow
 from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
 from modules.errors import DomainError
-from modules.organization.read_api import get_procedure_routes
+from modules.organization.read_api import get_workshop_routes
 from schemas.engineering import ProcessFlowPayload
 
 
@@ -141,7 +141,7 @@ def get_product_order_readinesses(
     }
     validated_flows: dict[int, ProcessFlowPayload] = {}
     result: dict[int, ProductOrderReadiness] = {}
-    procedure_ids: set[int] = set()
+    workshop_ids: set[int] = set()
     for product in product_list:
         key = (product.id, product.version)
         current_bom_ids = bom_ids[key]
@@ -159,36 +159,23 @@ def get_product_order_readinesses(
             result[product.id] = ProductOrderReadiness(False, "当前版本正式流程图不完整")
             continue
         validated_flows[product.id] = validated
-        procedure_ids.update(
-            node.procedure_id
+        workshop_ids.update(
+            node.workshop_id
             for node in validated.nodes
-            if node.type == "process"
-            or (node.type == "assembly" and node.procedure_id is not None)
+            if node.type in {"process", "assembly"}
         )
-    procedures = get_procedure_routes(session, procedure_ids)
+    workshops = get_workshop_routes(session, workshop_ids)
     for product in product_list:
         validated = validated_flows.get(product.id)
         if validated is None:
             continue
-        flow_procedure_ids = {
-            node.procedure_id
+        flow_workshop_ids = {
+            node.workshop_id
             for node in validated.nodes
-            if node.type == "process"
-            or (node.type == "assembly" and node.procedure_id is not None)
+            if node.type in {"process", "assembly"}
         }
-        if not flow_procedure_ids.issubset(procedures):
-            result[product.id] = ProductOrderReadiness(False, "流程图包含已失效工艺")
-            continue
-        if any(
-            (node.type == "process" and procedures[node.procedure_id].input_mode != "single")
-            or (
-                node.type == "assembly"
-                and node.procedure_id is not None
-                and procedures[node.procedure_id].input_mode != "multiple"
-            )
-            for node in validated.nodes
-        ):
-            result[product.id] = ProductOrderReadiness(False, "流程节点与工艺输入方式不匹配")
+        if not flow_workshop_ids.issubset(workshops):
+            result[product.id] = ProductOrderReadiness(False, "流程图包含已失效车间")
             continue
         result[product.id] = ProductOrderReadiness(True, "")
     return result

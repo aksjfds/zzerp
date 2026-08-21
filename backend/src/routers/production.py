@@ -4,7 +4,6 @@ from authorization import ensure_department_access, require_any_permission
 from departments.contracts import (
     CAP_PRODUCTION_PROGRESS,
     CAP_REPOSITORIES,
-    CAP_STANDARD_EXECUTION,
     CAP_WORKERS,
 )
 from departments.registry import department_api
@@ -20,7 +19,6 @@ from schemas.production import (
     DepartmentWorkerPayEnvelope,
     RepositoryListEnvelope,
     ProductionProgressItemDetailResponse,
-    TagCardListEnvelope,
     WarehouseStorageInput,
     WarehouseStorageResponse,
     WorkerListEnvelope,
@@ -41,8 +39,7 @@ def department_surplus_inventory(
 ):
     ensure_department_access(user, department_code)
     if department_code == "qc":
-        from modules.quality.dispatches import list_closed_qc_surplus
-        return {"data": list_closed_qc_surplus()}
+        return {"data": []}
     from modules.production_core.warehouse_storage import list_closed_surplus_positions
     return {"data": list_closed_surplus_positions(department_code)}
 
@@ -251,30 +248,5 @@ def department_worker_create(
         ).create_worker(
             payload.worker_name,
             payload.workshop_id,
-        )
-    }
-
-
-@router.get(
-    "/departments/{department_code}/production-items/{production_item_id}/tag-cards",
-    response_model=TagCardListEnvelope,
-)
-def production_item_tag_cards(
-    department_code: str,
-    production_item_id: int,
-    flow_node_id: str = Query(min_length=1, max_length=200),
-    source_flow_node_id: str = Query(min_length=1, max_length=200),
-    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
-):
-    if user["department"] not in {"sys", department_code}:
-        raise HTTPException(status_code=403, detail="无权访问该部门")
-    return {
-        "data": department_api(
-            department_code,
-            CAP_STANDARD_EXECUTION,
-        ).list_tag_cards(
-            production_item_id,
-            flow_node_id,
-            source_flow_node_id,
         )
     }

@@ -102,6 +102,7 @@ def create_product_version(
                 product_id=product.id,
                 source_version=copy_from_version,
                 target_version=next_version,
+                bom_id_map=id_map,
             )
             product.version = next_version
             product.revision += 1

@@ -1,4 +1,4 @@
-"""Immutable piece-rate details used by workforce reporting."""
+"""Work-order procedure prices used by workforce reporting."""
 
 from collections.abc import Collection
 from dataclasses import dataclass
@@ -14,8 +14,8 @@ from modules.standard_execution.persistence import WorkOrderPayDetail
 class PayDetailView:
     id: int
     work_order_id: int
-    tag_name: str
-    unit_price: Decimal
+    procedure_name: str
+    unit_price: Decimal | None
 
 
 def list_pay_details(
@@ -28,17 +28,17 @@ def list_pay_details(
         select(
             WorkOrderPayDetail.id,
             WorkOrderPayDetail.work_order_id,
-            WorkOrderPayDetail.tag_name,
+            WorkOrderPayDetail.procedure_name,
             WorkOrderPayDetail.unit_price,
         )
         .where(WorkOrderPayDetail.work_order_id.in_(work_order_ids))
-        .order_by(WorkOrderPayDetail.tag_name, WorkOrderPayDetail.id)
+        .order_by(WorkOrderPayDetail.id)
     )
     return [
         PayDetailView(
             id=row.id,
             work_order_id=row.work_order_id,
-            tag_name=row.tag_name,
+            procedure_name=row.procedure_name,
             unit_price=row.unit_price,
         )
         for row in rows

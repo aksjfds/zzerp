@@ -47,8 +47,6 @@ def department_work_orders(
         min_length=1,
         max_length=200,
     ),
-    existing_tag_id: list[int] | None = Query(default=None),
-    applying_tag_id: list[int] | None = Query(default=None),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     if user["department"] not in {"sys", department_code}:
@@ -62,8 +60,6 @@ def department_work_orders(
         production_item_id=production_item_id,
         flow_node_id=flow_node_id,
         source_flow_node_id=source_flow_node_id,
-        existing_tag_ids=existing_tag_id,
-        applying_tag_ids=applying_tag_id,
     )
     return {"data": data, "total": total}
 
@@ -76,8 +72,8 @@ def work_order_create(
     if user["department"] == "sys":
         data = create_work_order(
             payload.repository_id,
-            payload.procedure_tag_stock_id,
-            payload.tag_names,
+            payload.procedure_id,
+            payload.procedure_name,
             payload.quantity,
             payload.worker_id,
             payload.remark,
@@ -89,8 +85,8 @@ def work_order_create(
             (CAP_STANDARD_EXECUTION, CAP_PURCHASING),
         ).create_source_work_order(
             payload.repository_id,
-            payload.procedure_tag_stock_id,
-            payload.tag_names,
+            payload.procedure_id,
+            payload.procedure_name,
             payload.quantity,
             payload.worker_id,
             payload.remark,
@@ -112,7 +108,9 @@ def assembly_work_order_create(
             "assembly",
             CAP_ASSEMBLY,
         ).create_assembly_work_order(
-            payload.repository_ids,
+            [item.model_dump() for item in payload.materials],
+            payload.procedure_id,
+            payload.procedure_name,
             payload.quantity,
             payload.worker_id,
             payload.remark,

@@ -50,7 +50,6 @@ class AdminWorkerHistoryEnvelope(AdminModel):
 class AdminWorkerPayItem(AdminModel):
     item_name: str
     procedure_name: str
-    tag_names: list[str]
     qualified_quantity: int
     unit_price: Decimal | None
     pay_amount: Decimal | None

@@ -12,17 +12,17 @@ export function startPartDrag(lf: LogicFlow, item: BomItem) {
 
 export function startProcessDrag(
   lf: LogicFlow,
-  procedureId: number,
-  procedureName: string,
-  inputMode: 'single' | 'multiple',
+  workshopId: number,
+  workshopName: string,
+  multiple: boolean,
   departmentCode: string,
 ) {
-  if (inputMode === 'multiple') {
+  if (multiple) {
     lf.dnd.startDrag({
       type: 'assembly',
-      text: procedureName,
+      text: workshopName,
       properties: {
-        procedureId,
+        workshopId,
         outputName: '装配体',
         outputPcs: 1,
       },
@@ -31,10 +31,9 @@ export function startProcessDrag(
   }
   lf.dnd.startDrag({
     type: 'process',
-    text: procedureName,
+    text: workshopName,
     properties: {
-      processCode: `procedure_${procedureId}`,
-      procedureId,
+      workshopId,
       departmentCode,
     },
   })
@@ -48,20 +47,12 @@ export function startShippingDrag(lf: LogicFlow) {
   lf.dnd.startDrag({ type: 'shipping', text: '发货' })
 }
 
-export function startAssemblyDrag(lf: LogicFlow) {
-  lf.dnd.startDrag({
-    type: 'assembly',
-    text: '装配',
-    properties: { outputName: '装配体', outputPcs: 1 },
-  })
-}
-
 export function updateNodeDefinition(
   lf: LogicFlow,
   nodeId: string,
   label: string,
   property: {
-    key: 'processCode' | 'outputName' | 'outputPcs' | 'procedureId' | 'departmentCode'
+    key: 'outputName' | 'outputPcs' | 'workshopId' | 'departmentCode'
     value: string | number | boolean
   } | null,
 ) {

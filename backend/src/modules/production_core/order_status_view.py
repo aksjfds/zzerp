@@ -11,7 +11,6 @@ from modules.production_core.persistence import (
     WorkOrder,
 )
 from modules.quality.model_api import WorkOrderBatch
-from modules.standard_execution.model_api import ProcedureTagStock
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.errors import DomainError
 from modules.production_core.operational_api import load_product_flow
@@ -42,7 +41,7 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             session, order_item.product_id, order_item.product_version
         )
     except DomainError:
-        flow, nodes = {"schema_version": 3, "nodes": [], "edges": []}, {}
+        flow, nodes = {"schema_version": 4, "nodes": [], "edges": []}, {}
     bom_items = session.scalars(
         select(ProductBom).where(
             ProductBom.product_id == order_item.product_id,
@@ -61,15 +60,6 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         if production_item_ids
         else []
     )
-    tag_stocks = (
-        session.scalars(
-            select(ProcedureTagStock).where(
-                ProcedureTagStock.production_item_id.in_(production_item_ids)
-            )
-        ).all()
-        if production_item_ids
-        else []
-    )
     movements = (
         session.scalars(
             select(ProductionMovement).where(
@@ -83,7 +73,7 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
         list(session.scalars(
             select(WorkOrder).where(
                 WorkOrder.production_item_id.in_(production_item_ids),
-                WorkOrder.work_order_type.in_(("tag", "assembly")),
+                WorkOrder.work_order_type.in_(("standard", "assembly")),
             )
         ).all())
         if production_item_ids
@@ -140,15 +130,6 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             else "未知来源"
         )
         current_inputs[repository.flow_node_id][source_name] += repository.quantity
-    for stock in tag_stocks:
-        current_by_node[stock.flow_node_id] += stock.quantity
-        production_item = session.get(ProductionItem, stock.production_item_id)
-        source_name = (
-            production_item_name(session, production_item, set())
-            if production_item
-            else "未知来源"
-        )
-        current_inputs[stock.flow_node_id][source_name] += stock.quantity
     for flow_node_id, quantity in pending_qc_by_node:
         if flow_node_id:
             current_by_node[flow_node_id] += int(quantity or 0)
@@ -172,8 +153,6 @@ def _serialize_order_item(session, order_item: CustomerOrderItem) -> dict:
             and movement.target_flow_node_id
         ):
             held_qc_by_node[movement.target_flow_node_id] += movement.quantity
-        elif movement.movement_type == "qc_dispatch" and movement.source_flow_node_id:
-            held_qc_by_node[movement.source_flow_node_id] -= movement.quantity
     for flow_node_id, quantity in held_qc_by_node.items():
         current_by_node[flow_node_id] += max(quantity, 0)
     pending_rework = rework_pending_by_order(work_order_batches)

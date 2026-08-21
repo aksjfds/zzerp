@@ -4,10 +4,9 @@ from domain.time import business_iso
 from domain.production_types import (
     REWORK_TRACKED_WORK_ORDER_TYPES,
     WORK_ORDER_ASSEMBLY,
-    WORK_ORDER_PURCHASE_RECEIPT,
-    WORK_ORDER_TAG,
 )
 from modules.engineering.model_api import Product
+from modules.organization.model_api import Procedure
 from modules.assembly.model_api import WorkOrderMaterial
 from modules.quality.model_api import WorkOrderBatch
 from modules.production_core.persistence import ProductionItem, WorkOrder
@@ -21,7 +20,6 @@ from modules.production_core.work_order_progress import (
     calculate_assembly_output_progress,
     calculate_work_order_progress,
 )
-from modules.standard_execution.tag_api import is_final_tag_set
 from modules.workforce.reference_api import get_worker_reference
 
 
@@ -148,6 +146,7 @@ def serialize_batch(
         "qc_worker_id": batch.qc_worker_id,
         "qc_worker_name": batch.qc_worker_name,
         "defect_reason": batch.defect_reason,
+        "qualified_disposition": batch.qualified_disposition,
         "recorded_at": business_iso(batch.recorded_at),
     }
 
@@ -155,7 +154,8 @@ def serialize_batch(
 def serialize_work_order(session, order: WorkOrder) -> dict:
     customer_order, _, production_item, flow_context = work_order_context(session, order)
     product = session.get(Product, production_item.product_id)
-    procedure_name = flow_context.nodes.get(order.flow_node_id, {}).get("label") or ""
+    procedure = session.get(Procedure, order.procedure_id)
+    procedure_name = procedure.procedure_name if procedure else order.work_order_name
     part_no, part_name = flow_context.item_name(production_item)
     if order.work_order_type == WORK_ORDER_ASSEMBLY:
         part_name = assembly_output_name(session, order)
@@ -209,39 +209,17 @@ def serialize_work_order(session, order: WorkOrder) -> dict:
         order.flow_node_id,
     ) is not None
     qc_available = configured_qc
-    qc_required = (
-        configured_qc
-        if order.work_order_type == WORK_ORDER_PURCHASE_RECEIPT else False
-    )
-    direct_result_allowed = (
-        not configured_qc
-        if order.work_order_type == WORK_ORDER_PURCHASE_RECEIPT else True
-    )
-    if order.work_order_type == WORK_ORDER_TAG:
-        final_tag_set = bool(order.procedure_id) and is_final_tag_set(
-            session,
-            production_item,
-            order.procedure_id,
-            order.target_tag_set_id,
-        )
-        qc_available = not final_tag_set or configured_qc
-        qc_required = False
-        direct_result_allowed = True
+    direct_result_allowed = True
     return {
         "id": order.id,
         "work_order_no": order.work_order_no,
         "repository_id": order.repository_id,
-        "procedure_tag_stock_id": order.procedure_tag_stock_id,
         "production_item_id": order.production_item_id,
         "procedure_id": order.procedure_id,
         "flow_node_id": order.flow_node_id,
         "source_flow_node_id": order.source_flow_node_id,
-        "applied_tag_set_id": order.applied_tag_set_id,
-        "source_tag_set_id": order.source_tag_set_id,
-        "target_tag_set_id": order.target_tag_set_id,
         "work_order_type": order.work_order_type,
         "qc_available": qc_available,
-        "qc_required": qc_required,
         "direct_result_allowed": direct_result_allowed,
         "customer_order_no": customer_order.customer_order_no,
         "factory_code": product.factory_code if product else "",

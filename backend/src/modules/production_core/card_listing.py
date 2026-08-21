@@ -1,37 +1,25 @@
 from sqlalchemy import select
 
 from database import SessionLocal
-from domain.time import business_iso
-from modules.engineering.model_api import Product, ProductBom
 from modules.organization.model_api import Department, Procedure, Workshop
 from modules.quality.model_api import WorkOrderBatch
-from modules.standard_execution.model_api import ProcedureTagStock
-from modules.production_core.persistence import (
-    ProductionItem,
-    ProductionMovement,
-    Repository,
-    WorkOrder,
-)
-from modules.sales.model_api import CustomerOrder, CustomerOrderItem
+from modules.planning.persistence import ProductionPlan, ProductionPlanItem
+from modules.production_core.persistence import ProductionItem, Repository, WorkOrder
 from modules.errors import DomainError
 from modules.production_core.card_filters import (
     filter_and_paginate_assembly_groups,
     filter_and_paginate_cards,
 )
-from modules.production_core.card_status import dominant_work_status, work_order_stage
+from modules.production_core.card_status import work_order_stage
 from modules.production_core.cards import (
     _current_cards,
     _historical_cards,
-    _tag_stock_cards,
 )
 from modules.production_core.flow import load_production_flow
-from modules.standard_execution.tag_api import (
-    configured_tag_suggestions,
-    serialize_tag,
-    tag_suggestions,
+from modules.production_core.work_order_progress import (
+    calculate_assembly_output_progress,
+    calculate_work_order_progress,
 )
-from modules.production_core.work_order_presenters import production_item_name
-from modules.production_core.work_order_progress import calculate_work_order_progress
 
 
 def list_production_cards(
@@ -64,12 +52,7 @@ def list_production_cards(
                         None,
                     )
                 )
-            else:
-                active_cards.extend(
-                    _tag_stock_cards(session, department, None, None, None)
-                )
-                active_cards.extend(_pending_standard_cards(session, department))
-            cards.extend(_aggregate_standard_parent_cards(session, active_cards))
+            cards.extend(active_cards)
         if work_status in {"all", "completed"} and (
             department_code != "assembly" or work_status == "completed"
         ):
@@ -91,6 +74,7 @@ def list_production_cards(
                 keyword,
                 workshop_name,
                 work_status,
+                _fulfilled_assembly_positions(session, cards),
             )
         if department_code != "purchasing":
             _simplify_production_card_statuses(cards)
@@ -108,6 +92,87 @@ def _simplify_production_card_statuses(cards: list[dict]) -> None:
     for card in cards:
         if card["work_status"] not in {"unprocessed", "completed"}:
             card["work_status"] = "processing"
+
+
+def _fulfilled_assembly_positions(
+    session,
+    cards: list[dict],
+) -> set[tuple[int, str]]:
+    positions = {
+        (item["customer_order_item_id"], item["flow_node_id"])
+        for item in cards
+        if item.get("node_type") == "assembly"
+        and not item["card_key"].startswith("history:")
+    }
+    if not positions:
+        return set()
+    order_item_ids = {position[0] for position in positions}
+    plan_rows = session.execute(
+        select(
+            ProductionPlanItem.customer_order_item_id,
+            ProductionPlanItem.flow_node_id,
+            ProductionPlanItem.planned_production_quantity,
+        )
+        .join(ProductionPlan, ProductionPlan.id == ProductionPlanItem.production_plan_id)
+        .where(
+            ProductionPlan.status == "confirmed",
+            ProductionPlanItem.item_type == "assembly",
+            ProductionPlanItem.customer_order_item_id.in_(order_item_ids),
+        )
+    ).all()
+    planned = {
+        (row.customer_order_item_id, row.flow_node_id): row.planned_production_quantity
+        for row in plan_rows
+        if (row.customer_order_item_id, row.flow_node_id) in positions
+    }
+    if not planned:
+        return set()
+    order_rows = session.execute(
+        select(WorkOrder, ProductionItem)
+        .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
+        .where(
+            WorkOrder.work_order_type == "assembly",
+            WorkOrder.status.in_(("open", "closed")),
+            ProductionItem.customer_order_item_id.in_(order_item_ids),
+            WorkOrder.flow_node_id.in_({position[1] for position in positions}),
+        )
+    ).all()
+    orders = [row.WorkOrder for row in order_rows]
+    batches_by_order: dict[int, list[WorkOrderBatch]] = {}
+    if orders:
+        for batch in session.scalars(
+            select(WorkOrderBatch).where(
+                WorkOrderBatch.work_order_id.in_([order.id for order in orders])
+            )
+        ).all():
+            batches_by_order.setdefault(batch.work_order_id, []).append(batch)
+    completed: dict[tuple[int, str], int] = {}
+    output_units: dict[int, int] = {}
+    for row in order_rows:
+        order = row.WorkOrder
+        production_item = row.ProductionItem
+        key = (production_item.customer_order_item_id, order.flow_node_id)
+        if key not in planned:
+            continue
+        if production_item.id not in output_units:
+            node = load_production_flow(session, production_item).nodes.get(
+                order.flow_node_id,
+                {},
+            )
+            output_units[production_item.id] = max(
+                int(node.get("output_pcs") or 1),
+                1,
+            )
+        progress = calculate_assembly_output_progress(
+            order,
+            batches_by_order.get(order.id, []),
+            output_units[production_item.id],
+        )
+        completed[key] = completed.get(key, 0) + progress.qualified_quantity
+    return {
+        key for key, planned_quantity in planned.items()
+        if completed.get(key, 0) >= planned_quantity
+    }
 
 
 def _current_positions(session, department: Department) -> set[tuple]:
@@ -133,17 +198,6 @@ def _current_positions(session, department: Department) -> set[tuple]:
     positions.update(
         session.execute(
             select(
-                ProcedureTagStock.production_item_id,
-                ProcedureTagStock.flow_node_id,
-                ProcedureTagStock.source_flow_node_id,
-            )
-            .where(ProcedureTagStock.department_id == department.id)
-            .distinct()
-        ).all()
-    )
-    positions.update(
-        session.execute(
-            select(
                 WorkOrder.production_item_id,
                 WorkOrder.flow_node_id,
                 WorkOrder.source_flow_node_id,
@@ -160,201 +214,3 @@ def _current_positions(session, department: Department) -> set[tuple]:
         ).all()
     )
     return positions
-
-
-def _aggregate_standard_parent_cards(session, cards: list[dict]) -> list[dict]:
-    groups: dict[tuple[int, str, str], list[dict]] = {}
-    passthrough: list[dict] = []
-    for card in cards:
-        procedure = (
-            session.get(Procedure, card.get("procedure_id"))
-            if card.get("procedure_id")
-            else None
-        )
-        if procedure is None or procedure.procedure_type != "standard":
-            passthrough.append(card)
-            continue
-        key = (
-            card["production_item_id"],
-            card["flow_node_id"],
-            card["source_flow_node_id"],
-        )
-        groups.setdefault(key, []).append(card)
-
-    for (production_item_id, flow_node_id, source_flow_node_id), group in groups.items():
-        representative = next(
-            (item for item in group if item.get("repository_id") is not None),
-            group[0],
-        )
-        pending_qc_quantity = sum(
-            item.get("_pending_qc_quantity", 0) for item in group
-        )
-        openable_quantity = sum(
-            item["available_quantity"]
-            for item in group
-            if item.get("can_create_work_order", False)
-        )
-        status = dominant_work_status(
-            (item["work_status"] for item in group),
-        )
-        arrived_at = max(
-            (item["arrived_at"] or "" for item in group),
-            default="",
-        ) or None
-        public_representative = {
-            key: value
-            for key, value in representative.items()
-            if not key.startswith("_")
-        }
-        passthrough.append(
-            {
-                **public_representative,
-                "card_key": (
-                    f"production:{production_item_id}:{flow_node_id}:"
-                    f"{source_flow_node_id}"
-                ),
-                "repository_id": None,
-                "tag_stock_id": None,
-                "current_tag_set_name": "标记组合",
-                "quantity": sum(item["quantity"] for item in group)
-                + pending_qc_quantity,
-                "available_quantity": openable_quantity,
-                "arrived_at": arrived_at,
-                "work_status": status,
-                "can_create_work_order": any(
-                    item.get("can_create_work_order", False) for item in group
-                ),
-            }
-        )
-    return passthrough
-
-
-def _pending_standard_cards(session, department: Department) -> list[dict]:
-    rows = session.execute(
-        select(
-            WorkOrder,
-            ProductionItem,
-            CustomerOrderItem,
-            CustomerOrder,
-            Product,
-            ProductBom,
-            Procedure,
-            Workshop,
-        )
-        .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
-        .join(
-            CustomerOrderItem,
-            CustomerOrderItem.id == ProductionItem.customer_order_item_id,
-        )
-        .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
-        .join(Product, Product.id == CustomerOrderItem.product_id)
-        .outerjoin(ProductBom, ProductBom.id == ProductionItem.product_bom_id)
-        .join(Procedure, Procedure.id == WorkOrder.procedure_id)
-        .join(Workshop, Workshop.id == Procedure.workshop_id)
-        .where(
-            WorkOrder.status == "open",
-            WorkOrder.work_order_type == "tag",
-            Procedure.procedure_type == "standard",
-            Workshop.department_id == department.id,
-        )
-    ).all()
-    cards = []
-    for row in rows:
-        batches = list(session.scalars(
-            select(WorkOrderBatch).where(
-                WorkOrderBatch.work_order_id == row.WorkOrder.id
-            )
-        ).all())
-        progress = calculate_work_order_progress(row.WorkOrder, batches)
-        if progress.pending_qc_quantity == 0 and progress.rework_pending_quantity == 0:
-            continue
-        production_item = row.ProductionItem
-        context = load_production_flow(session, production_item)
-        source = context.nodes.get(row.WorkOrder.source_flow_node_id, {})
-        part_no, part_name = context.item_name(production_item)
-        if context.bom_item is None:
-            part_name = production_item_name(session, production_item, set())
-            part_no = part_name
-        movement_at = session.scalar(
-            select(ProductionMovement.created_at)
-            .where(
-                ProductionMovement.work_order_id == row.WorkOrder.id,
-                ProductionMovement.movement_type.in_(("process", "purchase_receipt")),
-            )
-            .order_by(ProductionMovement.id.desc())
-            .limit(1)
-        )
-        cards.append(
-            {
-                "card_key": f"open-tag-order:{row.WorkOrder.id}",
-                "repository_id": None,
-                "tag_stock_id": None,
-                "production_item_id": production_item.id,
-                "customer_order_item_id": row.CustomerOrderItem.id,
-                "customer_order_no": row.CustomerOrder.customer_order_no,
-                "customer_name": row.CustomerOrder.customer.customer_name,
-                "product_id": row.Product.id,
-                "product_version": row.CustomerOrderItem.product_version,
-                "product_name": row.Product.product_name,
-                "factory_code": row.Product.factory_code,
-                "product_bom_id": row.ProductBom.id if row.ProductBom else None,
-                "part_name": part_name,
-                "part_no": part_no,
-                "flow_node_id": row.WorkOrder.flow_node_id,
-                "source_flow_node_id": row.WorkOrder.source_flow_node_id,
-                "source_node_label": source.get("label", "未知来源"),
-                "procedure_id": row.Procedure.id,
-                "procedure_name": row.Procedure.procedure_name,
-                "current_tag_set_name": (
-                    "待返工"
-                    if progress.rework_pending_quantity
-                    else "质检中"
-                ),
-                "available_tags": [
-                    serialize_tag(item)
-                    for item in tag_suggestions(session, row.Procedure.id)
-                ],
-                "configured_tags": [
-                    serialize_tag(item)
-                    for item in configured_tag_suggestions(
-                        session,
-                        production_item,
-                        row.Procedure.id,
-                    )
-                ],
-                "workshop_name": row.Workshop.workshop_name,
-                "department_id": department.id,
-                "department_name": department.department_name,
-                "department_code": department.department_code,
-                "quantity": 0,
-                "available_quantity": 0,
-                "assembly_unit_quantity": (
-                    row.ProductBom.pcs
-                    if row.ProductBom
-                    else int(
-                        context.nodes.get(
-                            production_item.origin_flow_node_id,
-                            {},
-                        ).get("output_pcs", 1)
-                    )
-                ),
-                "assembly_required_source_ids": [],
-                "assembly_material_key": (
-                    f"part:{production_item.product_bom_id}"
-                    if production_item.product_bom_id is not None
-                    else f"assembly:{production_item.origin_flow_node_id}"
-                ),
-                "assembly_required_material_keys": [],
-                "assembly_group_complete": True,
-                "delivery_date": row.CustomerOrderItem.delivery_date,
-                "arrived_at": business_iso(
-                    movement_at
-                    or row.WorkOrder.closed_at
-                    or row.WorkOrder.created_at
-                ),
-                "work_status": work_order_stage(row.WorkOrder, batches),
-                "can_create_work_order": False,
-                "_pending_qc_quantity": progress.pending_qc_quantity,
-            }
-        )
-    return cards

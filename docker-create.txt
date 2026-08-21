@@ -5,3 +5,15 @@ docker run -d -it \
   -e POSTGRES_DB=zzerp \
   -p 5432:5432 \
   postgres
+
+
+TDSVER=7.3 tsql \
+-H 192.168.1.211 \
+-p 1433 \
+-U readonly \
+-P 'ReadOnly@123'
+
+use GXZZ
+go
+select top 10 * from V_PUR001
+go

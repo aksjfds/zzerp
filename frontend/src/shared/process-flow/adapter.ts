@@ -21,7 +21,7 @@ const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }>
 }
 
 type RenderOptions = {
-  processDepartmentCode?: (procedureId: number) => string | undefined
+  workshopDepartmentCode?: (workshopId: number) => string | undefined
 }
 
 export function toLogicFlowData(
@@ -100,8 +100,7 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
     return {
       ...base,
       type,
-      process_code: stringValue(properties.processCode),
-      procedure_id: requiredNumber(properties.procedureId, 'procedureId'),
+      workshop_id: requiredNumber(properties.workshopId, 'workshopId'),
     }
   }
   if (type === 'qc') return { ...base, type: 'qc' }
@@ -109,9 +108,7 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
   return {
     ...base,
     type: 'assembly',
-    procedure_id: typeof properties.procedureId === 'number'
-      ? properties.procedureId
-      : undefined,
+    workshop_id: requiredNumber(properties.workshopId, 'workshopId'),
     output_name: stringValue(properties.outputName),
     output_pcs: requiredNumber(properties.outputPcs ?? 1, 'outputPcs'),
     assembly_sequence: typeof properties.assemblySequence === 'number'
@@ -143,16 +140,15 @@ function nodeProperties(node: FlowNode, options: RenderOptions): Record<string, 
   if (node.type === 'part') return { bomItemId: node.bom_item_id, partNo: node.part_no }
   if (node.type === 'process') {
     return {
-      processCode: node.process_code,
-      procedureId: node.procedure_id,
-      departmentCode: options.processDepartmentCode?.(node.procedure_id),
+      workshopId: node.workshop_id,
+      departmentCode: options.workshopDepartmentCode?.(node.workshop_id),
     }
   }
   if (node.type === 'qc') return {}
   if (node.type === 'shipping') return {}
   if (node.type === 'assembly') {
     return {
-      procedureId: node.procedure_id,
+      workshopId: node.workshop_id,
       outputName: node.output_name,
       outputPcs: node.output_pcs,
       assemblySequence: node.assembly_sequence,

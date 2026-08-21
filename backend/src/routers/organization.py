@@ -5,15 +5,15 @@ from departments.registry import department_manifests
 from domain.permissions import PRODUCT_VIEW
 from modules.organization.api import (
     list_departments,
-    list_procedure_tags,
     list_procedures,
     list_workshops,
+    list_workshop_routes,
 )
 from schemas.organization import (
     DepartmentResponse,
     ProcedureResponse,
-    ProcedureTagResponse,
     WorkshopResponse,
+    WorkshopRouteResponse,
 )
 
 
@@ -47,12 +47,6 @@ def procedures(_: dict = Depends(require_any_permission(PRODUCT_VIEW))):
     return list_procedures()
 
 
-@router.get(
-    "/procedures/{procedure_id}/tags",
-    response_model=list[ProcedureTagResponse],
-)
-def procedure_tags(
-    procedure_id: int,
-    _: dict = Depends(require_any_permission(PRODUCT_VIEW, "production:view")),
-):
-    return list_procedure_tags(procedure_id)
+@router.get("/workshop-routes", response_model=list[WorkshopRouteResponse])
+def workshop_routes(_: dict = Depends(require_any_permission(PRODUCT_VIEW))):
+    return list_workshop_routes()

@@ -13,7 +13,6 @@ from modules.production_core.lifecycle import (
     cancel_order_production,
     initialize_order_production,
 )
-from modules.production_core.tag_cards import list_tag_cards
 from modules.production_core.work_order_queries import list_department_work_orders
 
 
@@ -24,7 +23,6 @@ __all__ = [
     "initialize_order_production",
     "list_department_work_orders",
     "list_production_cards",
-    "list_tag_cards",
     "register_purchase_arrival",
     "resubmit_work_order_rework_batch",
     "submit_work_order",

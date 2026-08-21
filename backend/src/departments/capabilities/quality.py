@@ -29,16 +29,3 @@ class QualityCapability:
     ) -> dict:
         self.require_capability(CAP_QUALITY)
         return quality.inspect_batch(batch_id, payload, actor_department)
-
-    def dispatch_qc_batch(
-        self,
-        batch_id: int,
-        quantity: int,
-        actor_department: str,
-    ) -> dict:
-        self.require_capability(CAP_QUALITY)
-        return quality.dispatch_qc_batch(
-            batch_id,
-            quantity,
-            actor_department,
-        )

@@ -1,13 +1,16 @@
-export type ProcedureTag = {
+export type ProcedureOption = {
   id: number
-  procedure_id: number
-  tag_name: string
+  workshop_id: number
+  department_name: string
+  department_code: string
+  procedure_name: string
+  procedure_type: 'standard' | 'purchase_receipt'
+  input_mode: 'single' | 'multiple'
 }
 
 export type RepositoryItem = {
   card_key: string
   repository_id: number | null
-  tag_stock_id: number | null
   production_item_id: number
   customer_order_item_id: number
   customer_order_no: string
@@ -20,13 +23,12 @@ export type RepositoryItem = {
   part_name: string
   part_no: string
   flow_node_id: string
+  node_type: string
   source_flow_node_id: string
   source_node_label: string
-  procedure_id: number | null
-  procedure_name: string
-  current_tag_set_name: string | null
-  available_tags: ProcedureTag[]
-  configured_tags: ProcedureTag[]
+  material_source_name: string
+  workshop_id: number
+  available_procedures: ProcedureOption[]
   workshop_name: string
   department_id: number
   department_name: string
@@ -66,30 +68,6 @@ export type DepartmentSurplusInventoryItem = {
   quantity: number
 }
 
-export type TagCard = {
-  card_key: string
-  production_item_id: number
-  flow_node_id: string
-  source_flow_node_id: string
-  procedure_id: number
-  tag_set_id: number | null
-  tag_ids: number[]
-  tag_names: string[]
-  tag_set_name: string
-  repository_id: number | null
-  tag_stock_id: number | null
-  available_quantity: number
-  processing_quantity: number
-  pending_qc_quantity: number
-  completed_quantity: number
-  processing_details: Array<{
-    tag_names: string[]
-    tag_set_name: string
-    quantity: number
-  }>
-  can_create_work_order: boolean
-}
-
 export type RepositoryFilters = {
   keyword: string
   workshop_name: string | null
@@ -110,6 +88,7 @@ export type WorkOrderBatch = {
   qc_worker_id: number | null
   qc_worker_name: string | null
   defect_reason: string | null
+  qualified_disposition: 'return' | 'release' | null
   recorded_at: string | null
 }
 
@@ -117,17 +96,12 @@ export type WorkOrder = {
   id: number
   work_order_no: string
   repository_id: number | null
-  procedure_tag_stock_id: number | null
   production_item_id: number
-  procedure_id: number | null
+  procedure_id: number
   flow_node_id: string
   source_flow_node_id: string | null
-  applied_tag_set_id: number | null
-  source_tag_set_id: number | null
-  target_tag_set_id: number | null
-  work_order_type: 'tag' | 'purchase_receipt' | 'assembly'
+  work_order_type: 'standard' | 'purchase_receipt' | 'assembly'
   qc_available: boolean
-  qc_required: boolean
   direct_result_allowed: boolean
   input_production_item_ids: number[]
   customer_order_no: string
@@ -177,8 +151,6 @@ export type PendingQcBatch = WorkOrderBatch & {
   part_no: string
   part_name: string
   work_order_name: string
-  dispatchable_quantity: number
-  target_node_label: string | null
 }
 
 export type CompletionAction = 'direct' | 'qc'
@@ -186,8 +158,6 @@ export type CompletionAction = 'direct' | 'qc'
 export type WorkOrderQueryScope = {
   flowNodeId: string
   sourceFlowNodeId: string
-  existingTagIds: number[]
-  applyingTagIds: number[]
 }
 
 export type WorkerItem = {
@@ -204,4 +174,5 @@ export type QcInspectionPayload = {
   scrap_quantity: number
   lost_quantity: number
   defect_reason: string
+  qualified_disposition: 'return' | 'release' | null
 }

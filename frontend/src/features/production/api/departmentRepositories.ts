@@ -3,7 +3,6 @@ import type {
   RepositoryFilters,
   RepositoryItem,
   DepartmentSurplusInventoryItem,
-  TagCard,
   WorkerItem,
 } from '../domain/types'
 
@@ -42,24 +41,6 @@ export async function queryDepartmentRepositories(
 export async function queryDepartmentWorkers(departmentCode: string) {
   const response = await service.get<{ data: WorkerItem[] }>(
     `/departments/${departmentCode}/workers`,
-  )
-  return response.data.data
-}
-
-export async function queryProductionTagCards(
-  departmentCode: string,
-  productionItemId: number,
-  flowNodeId: string,
-  sourceFlowNodeId: string,
-) {
-  const response = await service.get<{ data: TagCard[] }>(
-    `/departments/${departmentCode}/production-items/${productionItemId}/tag-cards`,
-    {
-      params: {
-        flow_node_id: flowNodeId,
-        source_flow_node_id: sourceFlowNodeId,
-      },
-    },
   )
   return response.data.data
 }

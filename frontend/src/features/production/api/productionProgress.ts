@@ -39,13 +39,12 @@ export type ProductionProgressWorkOrder = {
   closed_at: string | null
 }
 
-export type ProductionProgressTagCard = {
+export type ProductionProgressProcedureCard = {
   card_key: string
-  card_type: 'tag' | 'process' | 'assembly' | 'purchase'
+  card_type: 'process' | 'assembly' | 'purchase'
   sort_order: number
   flow_node_id: string
   procedure_id: number | null
-  tag_id: number | null
   card_name: string
   department_code: string
   department_name: string
@@ -74,7 +73,7 @@ export type ProductionProgressItemDetail = {
   part_name: string
   plan_status: 'draft' | 'confirmed' | 'cancelled'
   task_quantity: number
-  cards: ProductionProgressTagCard[]
+  cards: ProductionProgressProcedureCard[]
 }
 
 export async function queryDepartmentProductionProgress(

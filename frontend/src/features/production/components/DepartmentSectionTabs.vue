@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { getDepartmentModule } from '@/features/departments/registry'
 import DepartmentWorkersView from '../views/DepartmentWorkersView.vue'
 import DepartmentProductionProgressView from '../views/DepartmentProductionProgressView.vue'
-import ProcedureTagPriceView from '../views/ProcedureTagPriceView.vue'
+import ProcedurePriceView from '../views/ProcedurePriceView.vue'
 import DepartmentSurplusInventoryView from '../views/DepartmentSurplusInventoryView.vue'
 
 const props = defineProps<{
@@ -69,11 +69,11 @@ async function switchTab(tab: DepartmentTab) {
 
     <ElTabPane
       v-if="availableTabs.includes('tag-prices')"
-      label="标记与单价配置"
+      label="工艺与单价配置"
       name="tag-prices"
       lazy
     >
-      <ProcedureTagPriceView
+      <ProcedurePriceView
         embedded
         :department-code="departmentCode"
         @saved="emit('configurationSaved')"

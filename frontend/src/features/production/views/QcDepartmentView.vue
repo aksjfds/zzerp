@@ -14,7 +14,6 @@ const {
   changePage,
   changeView,
   dialogVisible,
-  dispatch,
   load,
   loading,
   openInspection,
@@ -43,7 +42,7 @@ function applySearch() {
   <main class="production-page">
     <DepartmentPageHeader
       department-name="QC部门"
-      description="录入工单批次质检结果，并将最终合格数量放行到后续流程。"
+      description="录入工单质检结果，并决定合格品返回当前车间或放行下一节点。"
       @refresh="refresh"
     />
     <DepartmentSectionTabs department-code="qc">
@@ -65,10 +64,8 @@ function applySearch() {
       <QcBatchCards
         :items="batches"
         :loading="loading"
-        :submitting="submitting"
         :history="activeView === 'history'"
         @inspect="openInspection"
-        @dispatch="dispatch"
       />
       <ElPagination
         v-model:current-page="page"

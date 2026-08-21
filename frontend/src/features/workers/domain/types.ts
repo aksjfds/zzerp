@@ -35,7 +35,6 @@ export type MoneyValue = number | string
 export type WorkerPayItem = {
   item_name: string
   procedure_name: string
-  tag_names: string[]
   qualified_quantity: number
   unit_price: MoneyValue | null
   pay_amount: MoneyValue | null

@@ -5,7 +5,6 @@ persistence classes. Concrete ORM objects satisfy the persistence-free
 protocols declared in ``context_api.py``.
 """
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from modules.production_core.context_api import (
@@ -41,21 +40,7 @@ def load_work_order_context(
     )
 
 
-def clear_procedure_tag_stock_references(
-    session: Session,
-    procedure_tag_stock_id: int,
-) -> None:
-    orders = session.scalars(
-        select(WorkOrder)
-        .where(WorkOrder.procedure_tag_stock_id == procedure_tag_stock_id)
-        .with_for_update()
-    ).all()
-    for order in orders:
-        order.procedure_tag_stock_id = None
-
-
 __all__ = [
-    "clear_procedure_tag_stock_references",
     "load_production_item_context",
     "load_work_order_context",
 ]

@@ -30,7 +30,7 @@ create copies of the production state machine.
 - `engineering`: products, versions, BOM and process flow.
 - `sales`: customers and customer orders.
 - `production_core`: production items, inventory, movement ledger and work-order orchestration.
-- `standard_execution`: tags, tag sets, piece rates and tagged work orders.
+- `standard_execution`: workshop procedures, piece rates and standard work orders.
 - `purchasing`: purchase receipt work orders.
 - `assembly`: assembly work orders and material allocation.
 - `quality`: inspections and QC release.

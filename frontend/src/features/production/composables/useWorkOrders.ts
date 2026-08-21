@@ -3,10 +3,6 @@ import { ElMessage } from 'element-plus'
 import { queryDepartmentWorkOrders } from '../api/workOrders'
 import type { WorkOrder, WorkOrderQueryScope } from '../domain/types'
 
-function sameIds(left: number[], right: number[]) {
-  return left.length === right.length && left.every((id, index) => id === right[index])
-}
-
 export function useWorkOrderList(
   departmentCode: string,
   productionItemId: Ref<number | null>,
@@ -23,13 +19,7 @@ export function useWorkOrderList(
     const sequence = ++loadSequence
     const requestedProductionItemId = productionItemId.value
     const requestedPage = page.value
-    const requestedScope = scope?.value
-      ? {
-          ...scope.value,
-          existingTagIds: [...scope.value.existingTagIds],
-          applyingTagIds: [...scope.value.applyingTagIds],
-        }
-      : null
+    const requestedScope = scope?.value ? { ...scope.value } : null
     if (!requestedProductionItemId || (scope && !requestedScope)) {
       items.value = []
       total.value = 0
@@ -45,8 +35,6 @@ export function useWorkOrderList(
         requestedProductionItemId,
         requestedScope?.flowNodeId,
         requestedScope?.sourceFlowNodeId,
-        requestedScope?.existingTagIds,
-        requestedScope?.applyingTagIds,
       )
       const currentScope = scope?.value
       if (
@@ -57,8 +45,6 @@ export function useWorkOrderList(
           !currentScope
           || currentScope.flowNodeId !== requestedScope?.flowNodeId
           || currentScope.sourceFlowNodeId !== requestedScope?.sourceFlowNodeId
-          || !sameIds(currentScope.existingTagIds, requestedScope?.existingTagIds || [])
-          || !sameIds(currentScope.applyingTagIds, requestedScope?.applyingTagIds || [])
         ))
       ) return
       items.value = result.items

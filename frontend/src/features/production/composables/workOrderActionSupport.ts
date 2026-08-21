@@ -69,7 +69,7 @@ export function createDirectResultAction(
       )
       await submitWorkOrder(item.id, available, 'direct')
       await onChanged()
-      ElMessage.success('合格数量已确认并流转')
+      ElMessage.success('工单结果已确认')
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
         ElMessage.error(getApiErrorDetail(error)?.message || `${resultName}合格确认失败`)

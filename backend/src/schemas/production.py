@@ -4,7 +4,7 @@ from typing import Literal, Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from schemas.organization import ProcedureTagResponse
+from schemas.organization import ProcedureResponse
 
 
 class ProductionModel(BaseModel):
@@ -14,7 +14,6 @@ class ProductionModel(BaseModel):
 class RepositoryResponse(ProductionModel):
     card_key: str
     repository_id: int | None
-    tag_stock_id: int | None = None
     production_item_id: int
     customer_order_item_id: int
     customer_order_no: str
@@ -27,13 +26,12 @@ class RepositoryResponse(ProductionModel):
     part_name: str
     part_no: str
     flow_node_id: str
+    node_type: str
     source_flow_node_id: str
     source_node_label: str
-    procedure_id: int | None
-    procedure_name: str
-    current_tag_set_name: str | None = None
-    available_tags: list[ProcedureTagResponse] = Field(default_factory=list)
-    configured_tags: list[ProcedureTagResponse] = Field(default_factory=list)
+    material_source_name: str
+    workshop_id: int
+    available_procedures: list[ProcedureResponse] = Field(default_factory=list)
     workshop_name: str
     department_id: int
     department_name: str
@@ -147,13 +145,12 @@ class ProductionProgressWorkOrderResponse(ProductionModel):
     closed_at: str | None
 
 
-class ProductionProgressTagCardResponse(ProductionModel):
+class ProductionProgressProcedureCardResponse(ProductionModel):
     card_key: str
-    card_type: Literal["tag", "process", "assembly", "purchase"]
+    card_type: Literal["process", "assembly", "purchase"]
     sort_order: int
     flow_node_id: str
     procedure_id: int | None
-    tag_id: int | None
     card_name: str
     department_code: str
     department_name: str
@@ -189,7 +186,7 @@ class ProductionProgressItemDetailResponse(ProductionModel):
     part_name: str
     plan_status: Literal["draft", "confirmed", "cancelled"]
     task_quantity: int
-    cards: list[ProductionProgressTagCardResponse]
+    cards: list[ProductionProgressProcedureCardResponse]
 
 
 class WorkerResponse(ProductionModel):
@@ -258,7 +255,6 @@ class DepartmentWorkerHistoryEnvelope(ProductionModel):
 class DepartmentWorkerPayItem(ProductionModel):
     item_name: str
     procedure_name: str
-    tag_names: list[str]
     qualified_quantity: int
     unit_price: Decimal | None
     pay_amount: Decimal | None
@@ -278,25 +274,38 @@ class DepartmentWorkerPayEnvelope(ProductionModel):
 
 
 class WorkOrderCreate(ProductionModel):
-    repository_id: int | None = Field(default=None, gt=0)
-    procedure_tag_stock_id: int | None = Field(default=None, gt=0)
-    tag_names: list[str] = Field(default_factory=list, max_length=20)
+    repository_id: int = Field(gt=0)
+    procedure_id: int | None = Field(default=None, gt=0)
+    procedure_name: str | None = Field(default=None, max_length=200)
     quantity: int = Field(gt=0)
     worker_id: int | None = Field(default=None, gt=0)
     remark: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def validate_source(self) -> Self:
-        if (self.repository_id is None) == (self.procedure_tag_stock_id is None):
-            raise ValueError("repository_id 和 procedure_tag_stock_id 必须且只能提供一个")
+        if (self.procedure_id is None) == (not (self.procedure_name or "").strip()):
+            raise ValueError("procedure_id 和 procedure_name 必须且只能提供一个")
         return self
 
 
+class AssemblyMaterialInput(ProductionModel):
+    repository_id: int = Field(gt=0)
+    quantity: int = Field(ge=0)
+
+
 class AssemblyWorkOrderCreate(ProductionModel):
-    repository_ids: list[int] = Field(min_length=2)
+    materials: list[AssemblyMaterialInput] = Field(min_length=1)
+    procedure_id: int | None = Field(default=None, gt=0)
+    procedure_name: str | None = Field(default=None, max_length=200)
     quantity: int = Field(gt=0)
     worker_id: int | None = Field(default=None, gt=0)
     remark: str | None = Field(default=None, max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_procedure(self) -> Self:
+        if (self.procedure_id is None) == (not (self.procedure_name or "").strip()):
+            raise ValueError("procedure_id 和 procedure_name 必须且只能提供一个")
+        return self
 
 
 class WorkOrderSubmission(ProductionModel):
@@ -319,6 +328,13 @@ class QcInspection(ProductionModel):
     scrap_quantity: int = Field(ge=0)
     lost_quantity: int = Field(ge=0)
     defect_reason: str | None = None
+    qualified_disposition: Literal["return", "release"] | None = None
+
+    @model_validator(mode="after")
+    def validate_disposition(self) -> Self:
+        if (self.qualified_quantity > 0) != (self.qualified_disposition is not None):
+            raise ValueError("存在合格数量时必须且只能选择一个合格品去向")
+        return self
 
 
 class WorkOrderBatchResponse(ProductionModel):
@@ -335,6 +351,7 @@ class WorkOrderBatchResponse(ProductionModel):
     qc_worker_id: int | None
     qc_worker_name: str | None
     defect_reason: str | None
+    qualified_disposition: Literal["return", "release"] | None
     recorded_at: str | None
 
 
@@ -351,17 +368,12 @@ class WorkOrderResponse(ProductionModel):
     id: int
     work_order_no: str
     repository_id: int | None
-    procedure_tag_stock_id: int | None
     production_item_id: int
-    procedure_id: int | None
+    procedure_id: int
     flow_node_id: str
     source_flow_node_id: str | None
-    applied_tag_set_id: int | None
-    source_tag_set_id: int | None
-    target_tag_set_id: int | None
-    work_order_type: Literal["tag", "purchase_receipt", "assembly"]
+    work_order_type: Literal["standard", "purchase_receipt", "assembly"]
     qc_available: bool
-    qc_required: bool
     direct_result_allowed: bool
     input_production_item_ids: list[int]
     customer_order_no: str
@@ -417,56 +429,8 @@ class PendingQcResponse(WorkOrderBatchResponse):
     part_no: str
     part_name: str
     work_order_name: str
-    dispatchable_quantity: int = 0
-    target_node_label: str | None = None
 
 
 class PendingQcListEnvelope(ProductionModel):
     data: list[PendingQcResponse]
     total: int
-
-
-class QcDispatchCreate(ProductionModel):
-    quantity: int = Field(gt=0)
-
-
-class QcDispatchResponse(ProductionModel):
-    batch_id: int
-    quantity: int
-    remaining_quantity: int
-    target_flow_node_id: str
-    target_department_id: int
-
-
-class QcDispatchEnvelope(ProductionModel):
-    data: QcDispatchResponse
-
-
-class TagProcessingDetail(ProductionModel):
-    tag_names: list[str]
-    tag_set_name: str
-    quantity: int
-
-
-class TagCardResponse(ProductionModel):
-    card_key: str
-    production_item_id: int
-    flow_node_id: str
-    source_flow_node_id: str
-    procedure_id: int
-    tag_set_id: int | None
-    tag_ids: list[int]
-    tag_names: list[str]
-    tag_set_name: str
-    repository_id: int | None
-    tag_stock_id: int | None
-    available_quantity: int
-    processing_quantity: int
-    pending_qc_quantity: int
-    completed_quantity: int
-    processing_details: list[TagProcessingDetail]
-    can_create_work_order: bool = False
-
-
-class TagCardListEnvelope(ProductionModel):
-    data: list[TagCardResponse]

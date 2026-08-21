@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import type { AssemblyGroup } from '../composables/useAssemblyGroups'
 import { repositoryStatusClass, repositoryStatusLabel } from '../domain/repositoryWorkStatus'
-defineProps<{ groups: AssemblyGroup[]; loading: boolean; selectedKey?: string | null }>()
+withDefaults(defineProps<{
+  groups: AssemblyGroup[]
+  loading: boolean
+  selectedKey?: string | null
+  showEmpty?: boolean
+}>(), { showEmpty: true })
 defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
 </script>
 <template>
@@ -12,18 +17,20 @@ defineEmits<{ open: [group: AssemblyGroup]; select: [group: AssemblyGroup] }>()
       <ul v-if="group.kind === 'current'">
         <li v-for="source in group.sources" :key="source.name">{{ source.name }}：可用 {{ source.available }} / 每件用量 {{
           source.required }}</li>
-          <li>可装配 {{ group.capacity }}</li>
+          <li>可开工 {{ group.capacity }}</li>
           <li v-if="!group.complete">物料尚未到齐</li>
       </ul>
-      <ElButton v-if="group.kind === 'current'" type="primary" :disabled="!group.complete || group.capacity < 1" @click.stop="$emit('open', group)">开装配工单</ElButton>
+      <ElButton v-if="group.kind === 'current'" type="primary" :disabled="!group.complete || group.capacity < 1" @click.stop="$emit('open', group)">开{{ group.workshopName }}工单</ElButton>
     </article>
-    <ElEmpty v-if="!loading && !groups.length" description="暂无可装配物料" :image-size="72" />
+    <ElEmpty v-if="showEmpty && !loading && !groups.length" description="暂无可装配物料" :image-size="72" />
   </div>
 </template>
 
 <style scoped>
 .assembly-groups {
   display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
   gap: 12px;
   min-height: 150px;
 }

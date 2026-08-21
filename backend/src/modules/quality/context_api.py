@@ -24,6 +24,9 @@ class InspectionBatchContext(Protocol):
     def rework_quantity(self) -> int | None: ...
 
     @property
+    def qualified_disposition(self) -> str | None: ...
+
+    @property
     def recorded_at(self) -> datetime | None: ...
 
 

@@ -7,8 +7,9 @@ from domain.time import business_now
 from domain.assembly import required_material_quantity
 from modules.assembly.persistence import WorkOrderMaterial
 from modules.errors import DomainError
-from modules.organization.model_api import Procedure, Workshop
+from modules.organization.model_api import Workshop
 from modules.organization.read_api import get_department_ids_by_codes
+from modules.organization.transaction_api import resolve_workshop_procedure
 from modules.production_core.assembly_api import (
     assembly_item_unit_quantity,
     assign_assembly_work_order_number,
@@ -46,11 +47,14 @@ from modules.production_core.operational_api import (
     target_department_id,
 )
 from modules.production_core.ownership_api import (
+    add_repository_quantity,
     create_assembly_work_order_record,
     create_production_item,
 )
 from modules.production_core.flow import assembly_material_key
 from modules.quality.ownership_api import create_inspection_batch
+from modules.standard_execution.pricing_api import attach_work_order_price
+from modules.standard_execution.procedures import material_key
 from modules.quality.inspection_api import (
     list_inspection_batches,
     load_inspection_batch,
@@ -59,7 +63,9 @@ from modules.workforce.reference_api import get_worker_reference
 
 
 def create_assembly_work_order(
-    repository_ids: list[int],
+    materials: list[dict],
+    procedure_id: int | None,
+    procedure_name: str | None,
     quantity: int,
     worker_id: int | None,
     remark: str | None,
@@ -68,14 +74,20 @@ def create_assembly_work_order(
     if user_department not in {"sys", "assembly"}:
         raise DomainError("department_access_denied", "只有装配部可以开装配工单", status_code=403)
     with SessionLocal.begin() as session:
-        unique_repository_ids = sorted(set(repository_ids))
+        requested_quantities: dict[int, int] = {}
+        for material in materials:
+            repository_id = int(material["repository_id"])
+            if repository_id in requested_quantities:
+                raise DomainError("assembly_material_duplicate", "同一物料来源不能重复填写")
+            requested_quantities[repository_id] = int(material["quantity"])
+        unique_repository_ids = sorted(requested_quantities)
         repositories = load_repositories(
             session,
             unique_repository_ids,
             for_update=True,
         )
-        if len(repositories) < 2 or len(repositories) != len(unique_repository_ids):
-            raise DomainError("assembly_inputs_invalid", "装配工单至少需要两个有效输入")
+        if not repositories or len(repositories) != len(unique_repository_ids):
+            raise DomainError("assembly_inputs_invalid", "请选择有效的工单输入物料")
         input_items_by_id = load_production_items(
             session,
             {repository.production_item_id for repository in repositories},
@@ -88,17 +100,28 @@ def create_assembly_work_order(
         order_item_ids = {item.customer_order_item_id for item in input_items}
         node_ids = {item.flow_node_id for item in repositories}
         if len(order_item_ids) != 1 or len(node_ids) != 1:
-            raise DomainError("assembly_inputs_mismatch", "装配输入必须属于同一订单明细和装配节点")
+            raise DomainError("assembly_inputs_mismatch", "多路工艺输入必须属于同一订单明细和工艺节点")
 
         context, assembly_node = node_context(
             session, input_items[0], repositories[0].flow_node_id
         )
         if assembly_node.get("type") != "assembly":
-            raise DomainError("assembly_node_invalid", "所选物料不在装配节点")
-        procedure_id = assembly_node.get("procedure_id")
-        procedure = session.get(Procedure, procedure_id) if procedure_id else None
-        if procedure_id and (procedure is None or procedure.input_mode != "multiple"):
-            raise DomainError("assembly_procedure_invalid", "装配节点关联的多路工艺无效")
+            raise DomainError("assembly_node_invalid", "所选物料不在多路工艺节点")
+        workshop_id = assembly_node.get("workshop_id")
+        if not isinstance(workshop_id, int):
+            raise DomainError("assembly_workshop_invalid", "多路节点未配置车间")
+        procedure = resolve_workshop_procedure(
+            session,
+            workshop_id=workshop_id,
+            procedure_id=procedure_id,
+            procedure_name=procedure_name,
+            input_mode="multiple",
+        )
+        continuation = (
+            len(repositories) == 1
+            and input_items[0].product_bom_id is None
+            and input_items[0].origin_flow_node_id == assembly_node["id"]
+        )
         expected_sources = [
             edge.get("source_node_id")
             for edge in context.flow.get("edges", [])
@@ -112,32 +135,36 @@ def create_assembly_work_order(
         selected_materials = {
             _production_item_material_key(item) for item in input_items
         }
-        if not expected_materials or expected_materials != selected_materials:
-            raise DomainError("assembly_inputs_incomplete", "必须选择装配节点的全部输入物料")
+        if not continuation and (not expected_materials or expected_materials != selected_materials):
+            raise DomainError("assembly_inputs_incomplete", "必须填写多路工艺节点的全部输入物料")
 
         assembly_department_id = get_department_ids_by_codes(
             session,
             {"assembly"},
         ).get("assembly")
         worker = get_worker_reference(session, worker_id) if worker_id else None
-        if procedure is not None:
-            workshop = session.get(Workshop, procedure.workshop_id)
-            if workshop is None or workshop.department_id != assembly_department_id:
-                raise DomainError("assembly_procedure_invalid", "多路工艺不属于装配部")
-            if worker_id and (
-                worker is None
-                or worker.department_id != assembly_department_id
-                or worker.workshop_id != procedure.workshop_id
-            ):
-                raise DomainError("worker_invalid", "工人不属于当前装配工艺车间")
-        elif worker_id and (
-            worker is None or worker.department_id != assembly_department_id
+        workshop = session.get(Workshop, procedure.workshop_id)
+        if workshop is None or workshop.department_id != assembly_department_id:
+            raise DomainError("assembly_procedure_invalid", "多路工艺不属于装配部")
+        if worker_id and (
+            worker is None
+            or worker.department_id != assembly_department_id
+            or worker.workshop_id != procedure.workshop_id
         ):
-            raise DomainError("worker_invalid", "工人不属于装配部")
+            raise DomainError("worker_invalid", "工人不属于当前装配工艺车间")
 
-        material_quantities = _allocate_materials(
-            session, repositories, input_items, quantity
-        )
+        if continuation:
+            if requested_quantities[repositories[0].id] != quantity or quantity > repositories[0].quantity:
+                raise DomainError("assembly_quantity_exceeded", "后续工艺数量必须等于所选在制数量")
+            material_quantities = {repositories[0].id: quantity}
+        else:
+            material_quantities = _validate_material_allocations(
+                session,
+                repositories,
+                input_items,
+                requested_quantities,
+                quantity,
+            )
         output_item = _get_or_create_output_item(
             session,
             customer_order_item_id=input_items[0].customer_order_item_id,
@@ -148,41 +175,69 @@ def create_assembly_work_order(
         order = create_assembly_work_order_record(
             session,
             production_item_id=output_item.id,
-            procedure_id=procedure.id if procedure else None,
+            procedure_id=procedure.id,
             flow_node_id=assembly_node["id"],
-            work_order_name=(
-                assembly_node.get("label")
-                or assembly_node.get("output_name")
-                or "装配"
-            ),
+            work_order_name=procedure.procedure_name,
             worker_id=worker_id,
             quantity=quantity,
             remark=remark,
+            repository_id=repositories[0].id if continuation else None,
         )
         mark_order_planned(session, input_items[0])
         assign_assembly_work_order_number(
             order,
             f"WO-{business_now():%Y%m%d}-{order.id:06d}",
         )
-        for repository in repositories:
+        attach_work_order_price(
+            session,
+            work_order_id=order.id,
+            product_id=output_item.product_id,
+            product_version=output_item.product_version,
+            material_key=material_key(output_item),
+            flow_node_id=assembly_node["id"],
+            procedure_id=procedure.id,
+            procedure_name=procedure.procedure_name,
+        )
+        if continuation:
+            session.flush()
+            return serialize_work_order(session, order)
+        for repository, input_item in zip(repositories, input_items, strict=True):
             material_quantity = material_quantities.get(repository.id)
             if material_quantity:
-                session.add(
-                    WorkOrderMaterial(
-                        work_order_id=order.id,
-                        repository_id=repository.id,
-                        production_item_id=repository.production_item_id,
-                        quantity=material_quantity,
-                    )
+                material_row = WorkOrderMaterial(
+                    work_order_id=order.id,
+                    repository_id=repository.id,
+                    production_item_id=repository.production_item_id,
+                    quantity=material_quantity,
+                    source_flow_node_id=repository.flow_node_id,
+                    source_previous_flow_node_id=repository.source_flow_node_id,
+                    source_department_id=repository.department_id,
+                    source_work_order_id=repository.source_work_order_id,
                 )
+                session.add(material_row)
+                record_movement(
+                    session,
+                    production_item=input_item,
+                    quantity=material_quantity,
+                    movement_type="assembly_input",
+                    source_flow_node_id=repository.flow_node_id,
+                    target_flow_node_id=None,
+                    source_department_id=repository.department_id,
+                    work_order_id=order.id,
+                )
+                if repository.quantity == material_quantity:
+                    material_row.repository_id = None
+                    session.flush()
+                consume_repository(session, repository, material_quantity)
         session.flush()
         return serialize_work_order(session, order)
 
 
-def _allocate_materials(
+def _validate_material_allocations(
     session,
     repositories: list[InventorySourceContext],
     input_items: list[ProductionItemContext],
+    requested_quantities: dict[int, int],
     quantity: int,
 ) -> dict[int, int]:
     repositories_by_source: dict[
@@ -194,7 +249,6 @@ def _allocate_materials(
             (repository, input_item)
         )
 
-    allocated_quantities: dict[int, int] = {}
     repository_ids = {repository.id for repository in repositories}
     material_rows = session.execute(
         select(
@@ -214,24 +268,31 @@ def _allocate_materials(
 
     for material_key, source_repositories in repositories_by_source.items():
         first_item = source_repositories[0][1]
-        remaining_required = required_material_quantity(
+        required_quantity = required_material_quantity(
             quantity,
             assembly_item_unit_quantity(session, first_item),
         )
+        selected_quantity = sum(
+            requested_quantities[repository.id]
+            for repository, _ in source_repositories
+        )
+        if selected_quantity != required_quantity:
+            raise DomainError(
+                "assembly_material_quantity_mismatch",
+                f"同一物料的来源数量合计必须为 {required_quantity}",
+            )
         for repository, _ in source_repositories:
             reserved = reserved_by_repository[repository.id]
-            allocated = min(max(repository.quantity - reserved, 0), remaining_required)
-            if allocated:
-                allocated_quantities[repository.id] = allocated
-                remaining_required -= allocated
-            if remaining_required == 0:
-                break
-        if remaining_required:
-            raise DomainError(
-                "assembly_quantity_exceeded",
-                f"装配物料 {material_key} 的可用数量不足",
-            )
-    return allocated_quantities
+            if requested_quantities[repository.id] > max(repository.quantity - reserved, 0):
+                raise DomainError(
+                    "assembly_quantity_exceeded",
+                    "所填来源数量超过当前可用数量",
+                )
+    return {
+        repository_id: material_quantity
+        for repository_id, material_quantity in requested_quantities.items()
+        if material_quantity > 0
+    }
 
 
 def _production_item_material_key(item: ProductionItemContext) -> str:
@@ -302,69 +363,23 @@ def submit_assembly_work_order(
         .where(WorkOrderMaterial.work_order_id == order.id)
         .order_by(WorkOrderMaterial.id)
     ).all()
-    material_items = load_production_items(
-        session,
-        {material.production_item_id for material in materials},
-    )
-    material_groups: dict[str, list[tuple[WorkOrderMaterial, ProductionItemContext]]] = {}
-    for material in materials:
-        material_item = material_items.get(material.production_item_id)
-        if material_item is None:
-            raise DomainError("assembly_material_missing", "装配输入物料不存在")
-        material_groups.setdefault(
-            _production_item_material_key(material_item),
-            [],
-        ).append((material, material_item))
-    for entries in material_groups.values():
-        unit_quantity = assembly_item_unit_quantity(session, entries[0][1])
-        required_before = required_material_quantity(order.completed_quantity, unit_quantity)
-        required_after = required_material_quantity(
-            order.completed_quantity + quantity,
-            unit_quantity,
-        )
-        allocated_before = 0
-        for material, material_item in entries:
-            consumed_before = min(
-                max(required_before - allocated_before, 0),
-                material.quantity,
-            )
-            consumed_after = min(
-                max(required_after - allocated_before, 0),
-                material.quantity,
-            )
-            material_quantity = consumed_after - consumed_before
-            allocated_before += material.quantity
-            if material_quantity <= 0:
-                continue
-            if material.repository_id is None:
-                raise DomainError("assembly_material_missing", "装配输入库存已不存在")
-            repositories = load_repositories(
-                session,
-                {material.repository_id},
-                for_update=True,
-            )
-            repository = repositories[0] if repositories else None
-            if repository is None or repository.quantity < material_quantity:
-                raise DomainError("assembly_material_insufficient", "装配输入库存不足")
-            record_movement(
-                session,
-                production_item=material_item,
-                quantity=material_quantity,
-                movement_type="assembly_input",
-                source_flow_node_id=repository.flow_node_id,
-                target_flow_node_id=None,
-                source_department_id=repository.department_id,
-                work_order_id=order.id,
-            )
-            if repository.quantity == material_quantity:
-                material.repository_id = None
-                session.flush()
-            consume_repository(session, repository, material_quantity)
-        if allocated_before < required_after:
-            raise DomainError("assembly_material_allocation_invalid", "装配工单物料占用不足")
-
     output_item = input_item
-    output_quantity = quantity * int(assembly_node.get("output_pcs", 1))
+    output_quantity = quantity * (
+        int(assembly_node.get("output_pcs", 1)) if materials else 1
+    )
+    if not materials:
+        repositories = load_repositories(
+            session,
+            {order.repository_id} if order.repository_id else set(),
+            for_update=True,
+        )
+        source = repositories[0] if repositories else None
+        if source is None or source.quantity < quantity:
+            raise DomainError("assembly_material_insufficient", "当前在制装配体数量不足")
+        if source.quantity == quantity:
+            order.repository_id = None
+            session.flush()
+        consume_repository(session, source, quantity)
     if completion_action == "qc":
         qc_department_id = get_department_ids_by_codes(session, {"qc"}).get("qc")
         if qc_department_id is None:
@@ -396,9 +411,15 @@ def submit_assembly_work_order(
         refresh_order_closed(session, output_item)
         return serialize_work_order(session, order)
 
-    target = context.normal_target(assembly_node["id"])
-    target_department = move_to_node(
-        session, output_item, target, output_quantity, assembly_node["id"]
+    assembly_department = target_department_id(session, assembly_node)
+    add_repository_quantity(
+        session,
+        production_item_id=output_item.id,
+        flow_node_id=assembly_node["id"],
+        source_flow_node_id=assembly_node["id"],
+        department_id=assembly_department,
+        quantity=output_quantity,
+        source_work_order_id=order.id,
     )
     record_movement(
         session,
@@ -406,9 +427,9 @@ def submit_assembly_work_order(
         quantity=output_quantity,
         movement_type="assembly_output",
         source_flow_node_id=assembly_node["id"],
-        target_flow_node_id=target.get("id") if target else None,
-        source_department_id=target_department_id(session, assembly_node),
-        target_department_id=target_department,
+        target_flow_node_id=assembly_node["id"],
+        source_department_id=assembly_department,
+        target_department_id=assembly_department,
         work_order_id=order.id,
     )
     # Persist the output while the assembly order is still open.
@@ -421,6 +442,43 @@ def submit_assembly_work_order(
     session.flush()
     refresh_order_closed(session, output_item)
     return serialize_work_order(session, order)
+
+
+def restore_cancelled_assembly_materials(session, order: WorkOrderContext) -> None:
+    materials = session.scalars(
+        select(WorkOrderMaterial)
+        .where(WorkOrderMaterial.work_order_id == order.id)
+        .with_for_update()
+    ).all()
+    for material in materials:
+        production_item = load_production_item(
+            session,
+            material.production_item_id,
+            for_update=True,
+        )
+        if production_item is None:
+            raise DomainError("assembly_material_missing", "装配工单原配件不存在")
+        repository = add_repository_quantity(
+            session,
+            production_item_id=material.production_item_id,
+            flow_node_id=material.source_flow_node_id,
+            source_flow_node_id=material.source_previous_flow_node_id,
+            department_id=material.source_department_id,
+            quantity=material.quantity,
+            source_work_order_id=material.source_work_order_id,
+        )
+        material.repository_id = repository.id if repository else None
+        record_movement(
+            session,
+            production_item=production_item,
+            quantity=material.quantity,
+            movement_type="assembly_input_restore",
+            source_flow_node_id=material.source_flow_node_id,
+            target_flow_node_id=material.source_flow_node_id,
+            source_department_id=material.source_department_id,
+            target_department_id=material.source_department_id,
+            work_order_id=order.id,
+        )
 
 
 def resubmit_assembly_rework_batch(

@@ -1,30 +1,18 @@
-"""Public API for standard procedures, tags and piece-rate configuration."""
+"""Public API for workshop procedures, piece rates and standard work orders."""
 
-from modules.standard_execution.price_configs import (
-    list_procedure_tag_prices,
-    update_procedure_tag_prices,
-)
+from modules.standard_execution.price_configs import list_procedure_prices, update_procedure_price
+from modules.standard_execution.procedures import procedure_department_id
 from modules.standard_execution.work_orders import (
-    create_tag_order,
-    resubmit_tag_rework_batch,
-    submit_tag_order,
+    create_standard_order,
+    resubmit_standard_rework_batch,
+    submit_standard_order,
 )
-from modules.standard_execution.tags import (
-    consume_tag_stock,
-    is_final_tag_set,
-    procedure_department_id,
-    restore_tag_source,
-)
-
 
 __all__ = [
-    "create_tag_order",
-    "consume_tag_stock",
-    "is_final_tag_set",
-    "list_procedure_tag_prices",
+    "create_standard_order",
+    "list_procedure_prices",
     "procedure_department_id",
-    "resubmit_tag_rework_batch",
-    "restore_tag_source",
-    "submit_tag_order",
-    "update_procedure_tag_prices",
+    "resubmit_standard_rework_batch",
+    "submit_standard_order",
+    "update_procedure_price",
 ]

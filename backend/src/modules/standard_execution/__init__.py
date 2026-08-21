@@ -1,1 +1,1 @@
-"""Standard tagged-procedure execution module."""
+"""Standard workshop-procedure execution module."""

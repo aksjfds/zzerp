@@ -28,7 +28,7 @@ type Callbacks = {
   onConnectionError: (message: string) => void
   onSelectEdge: (edge: FlowEdge | null) => void
   onSelectNode: (node: FlowNode | null) => void
-  processDepartmentCode?: (procedureId: number) => string | undefined
+  workshopDepartmentCode?: (workshopId: number) => string | undefined
 }
 
 export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>, callbacks: Callbacks) {
@@ -426,7 +426,7 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   function renderFlow(flow: ProcessFlow) {
     const lf = instance.value
     lf?.renderRawData(toLogicFlowData(flow, {
-      processDepartmentCode: callbacks.processDepartmentCode,
+      workshopDepartmentCode: callbacks.workshopDepartmentCode,
     }))
     if (lf) {
       applyNodeDisplayScale(lf)

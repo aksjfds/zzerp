@@ -46,11 +46,13 @@ class WorkOrderBatch(Base):
             "(recorded_at IS NULL AND qualified_quantity IS NULL "
             "AND rework_quantity IS NULL AND scrap_quantity IS NULL "
             "AND lost_quantity IS NULL AND qc_worker_id IS NULL "
-            "AND qc_worker_name IS NULL) OR "
+            "AND qc_worker_name IS NULL AND qualified_disposition IS NULL) OR "
             "(recorded_at IS NOT NULL AND qualified_quantity IS NOT NULL "
             "AND rework_quantity IS NOT NULL AND scrap_quantity IS NOT NULL "
             "AND lost_quantity IS NOT NULL AND qc_worker_id IS NOT NULL "
             "AND qc_worker_name IS NOT NULL "
+            "AND ((qualified_quantity = 0 AND qualified_disposition IS NULL) "
+            "OR (qualified_quantity > 0 AND qualified_disposition IN ('return', 'release'))) "
             "AND qualified_quantity + rework_quantity + scrap_quantity "
             "+ lost_quantity = submitted_quantity)",
             name="ck_batch_inspection_complete",
@@ -98,4 +100,5 @@ class WorkOrderBatch(Base):
     )
     qc_worker_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     defect_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qualified_disposition: Mapped[str | None] = mapped_column(Text, nullable=True)
     recorded_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)

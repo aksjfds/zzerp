@@ -80,50 +80,18 @@ const groups = computed(() => {
     }
   })
 })
-function componentGroups(items: ProductionPlanItem[]) {
-  const grouped = new Map<number, ProductionPlanItem[]>()
-  for (const item of items) {
-    const key = item.product_bom_id ?? item.id
-    const routes = grouped.get(key) || []
-    routes.push(item)
-    grouped.set(key, routes)
-  }
-  return [...grouped.values()]
-}
-function componentFinishedCapacity(items: ProductionPlanItem[], orderQuantity: number) {
-  const unitRequirement = items[0]?.unit_requirement || 1
+function componentFinishedCapacity(item: ProductionPlanItem, orderQuantity: number) {
+  const unitRequirement = item.unit_requirement || 1
   return Math.max(0, Math.floor(
     orderQuantity
-    + (items.reduce((total, item) => total + item.planned_production_quantity, 0)
-      - items.reduce((total, item) => total + item.net_required_quantity, 0))
-      / unitRequirement,
+    + (item.planned_production_quantity - item.net_required_quantity) / unitRequirement,
   ))
 }
 function plannedFinishedQuantity(group: (typeof groups.value)[number]) {
   if (!group.items.length) return 0
-  return Math.min(...componentGroups(group.items).map(
-    items => componentFinishedCapacity(items, group.orderQuantity),
+  return Math.min(...group.items.map(
+    item => componentFinishedCapacity(item, group.orderQuantity),
   ))
-}
-function minimumPlanQuantity(groupItems: ProductionPlanItem[], item: ProductionPlanItem) {
-  const routeCount = groupItems.filter(route => route.product_bom_id === item.product_bom_id).length
-  return routeCount > 1 ? 0 : item.net_required_quantity
-}
-function sharedRequirement(groupItems: ProductionPlanItem[], item: ProductionPlanItem) {
-  return Math.max(
-    ...groupItems
-      .filter(route => route.product_bom_id === item.product_bom_id)
-      .map(route => route.gross_required_quantity),
-    0,
-  )
-}
-function sharedNetRequirement(groupItems: ProductionPlanItem[], item: ProductionPlanItem) {
-  return Math.max(
-    ...groupItems
-      .filter(route => route.product_bom_id === item.product_bom_id)
-      .map(route => route.net_required_quantity),
-    0,
-  )
 }
 function groupSatisfied(group: (typeof groups.value)[number]) {
   return plannedFinishedQuantity(group) >= group.orderQuantity
@@ -244,7 +212,7 @@ onMounted(load)
       <div class="plan-heading">
         <div>
           <h2>生产计划</h2>
-          <p>填写各配件路线的新生产数量；同一配件的自产、外购路线合计满足 BOM 需求即可，确认时系统重新计算并占用库存。</p>
+          <p>填写各配件的新生产数量；确认时系统重新计算需求并占用可用库存。</p>
         </div>
       </div>
       <ElEmpty v-if="!loading && !groups.length" description="暂无生产计划项目" />
@@ -260,20 +228,20 @@ onMounted(load)
         </div>
         <ElTable v-loading="loading" :data="group.items" border stripe table-layout="auto">
           <ElTableColumn prop="item_code" label="编号" min-width="130" />
-          <ElTableColumn prop="item_name" label="配件 / 供应路线" min-width="210" />
+          <ElTableColumn prop="item_name" label="配件" min-width="210" />
           <ElTableColumn prop="unit_requirement" label="单件用量" width="95" align="right" />
           <ElTableColumn label="配件总需求" width="110" align="right">
-            <template #default="{ row }">{{ sharedRequirement(group.items, row) }}</template>
+            <template #default="{ row }">{{ row.gross_required_quantity }}</template>
           </ElTableColumn>
           <ElTableColumn label="待分配数量" width="115" align="right">
-            <template #default="{ row }">{{ sharedNetRequirement(group.items, row) }}</template>
+            <template #default="{ row }">{{ row.net_required_quantity }}</template>
           </ElTableColumn>
           <ElTableColumn label="计划生产数量" width="160" align="right">
             <template #default="{ row }">
               <ElInputNumber
                 v-if="editable && plan?.status === 'draft'"
                 v-model="row.planned_production_quantity"
-                :min="minimumPlanQuantity(group.items, row)"
+                :min="row.net_required_quantity"
                 :controls="false"
               />
               <span v-else>{{ row.planned_production_quantity }}</span>

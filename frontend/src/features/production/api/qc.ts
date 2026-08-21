@@ -34,14 +34,3 @@ export async function inspectQcBatch(batchId: number, payload: QcInspectionPaylo
   )
   return response.data.data
 }
-
-export async function dispatchQcBatch(batchId: number, quantity: number) {
-  await service.post(`/qc/work-order-batches/${batchId}/dispatch`, { quantity })
-}
-
-export async function storeQcBatchInWarehouse(batchId: number, quantity: number) {
-  return (await service.post<{
-    quantity: number
-    completed_node_label: string
-  }>(`/qc/work-order-batches/${batchId}/warehouse-storage`, { quantity })).data
-}

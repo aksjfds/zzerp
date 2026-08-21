@@ -5,7 +5,7 @@ from domain.production_types import (
     REWORK_TRACKED_WORK_ORDER_TYPES,
     WORK_ORDER_ASSEMBLY,
     WORK_ORDER_PURCHASE_RECEIPT,
-    WORK_ORDER_TAG,
+    WORK_ORDER_STANDARD,
 )
 from modules.assembly import qc_api as assembly_qc_routing
 from modules.errors import DomainError
@@ -27,7 +27,7 @@ from modules.production_core.qc_api import (
 )
 from modules.purchasing import qc_api as purchase_qc_routing
 from modules.quality.persistence import WorkOrderBatch
-from modules.standard_execution import qc_api as tag_qc_routing
+from modules.standard_execution import qc_api as standard_qc_routing
 from modules.workforce.reference_api import WorkerReference, get_worker_reference
 from schemas.production import QcInspection
 
@@ -81,28 +81,24 @@ def inspect_batch(
         if production_item is None:
             raise DomainError("production_context_missing", "送检工单的生产资料不完整")
         context, node = node_context(session, production_item, order.flow_node_id)
-        procedure_id = (
-            node.get("procedure_id")
-            if node.get("type") in {"process", "assembly"}
-            else None
-        )
+        procedure_id = order.procedure_id
         procedure = (
             get_procedure_routes(session, {procedure_id}).get(procedure_id)
             if procedure_id is not None
             else None
         )
-        if order.procedure_id != procedure_id or (
-            procedure_id is not None and procedure is None
-        ):
+        if procedure_id is None or procedure is None or procedure.workshop_id != node.get("workshop_id"):
             raise DomainError("production_context_missing", "送检工单的工艺资料不完整")
         routing = {
-            WORK_ORDER_TAG: tag_qc_routing,
+            WORK_ORDER_STANDARD: standard_qc_routing,
             WORK_ORDER_PURCHASE_RECEIPT: purchase_qc_routing,
             WORK_ORDER_ASSEMBLY: assembly_qc_routing,
         }[order.work_order_type]
         routing.validate_context(session, order, procedure)
         qc_node = process_qc_node(context.flow, context.nodes, node["id"])
         qc_flow_node_id = qc_node["id"] if qc_node is not None else node["id"]
+
+        batch.qualified_disposition = payload.qualified_disposition
 
         if payload.qualified_quantity:
             target_node_id, target_department_id = routing.route_qualified(
@@ -122,8 +118,6 @@ def inspect_batch(
                 movement_type="qc_qualified",
                 source_flow_node_id=qc_flow_node_id,
                 target_flow_node_id=target_node_id,
-                source_tag_set_id=order.target_tag_set_id,
-                target_tag_set_id=order.target_tag_set_id,
                 source_department_id=qc_department_id,
                 target_department_id=target_department_id,
                 work_order_id=order.id,
@@ -147,8 +141,6 @@ def inspect_batch(
                 movement_type="qc_rework",
                 source_flow_node_id=qc_flow_node_id,
                 target_flow_node_id=node["id"],
-                source_tag_set_id=order.target_tag_set_id,
-                target_tag_set_id=order.source_tag_set_id,
                 source_department_id=qc_department_id,
                 target_department_id=target_department_id,
                 work_order_id=order.id,
@@ -164,7 +156,6 @@ def inspect_batch(
             payload.scrap_quantity,
             "scrap",
             qc_department_id,
-            order.target_tag_set_id,
         )
         _record_loss(
             session,
@@ -175,7 +166,6 @@ def inspect_batch(
             payload.lost_quantity,
             "lost",
             qc_department_id,
-            order.target_tag_set_id,
         )
         session.flush()
         _complete_batch(batch, payload, qc_worker)
@@ -210,7 +200,6 @@ def _record_loss(
     quantity,
     movement_type,
     qc_department_id,
-    source_tag_set_id,
 ) -> None:
     record_movement(
         session,
@@ -219,7 +208,6 @@ def _record_loss(
         movement_type=movement_type,
         source_flow_node_id=flow_node_id,
         target_flow_node_id=None,
-        source_tag_set_id=source_tag_set_id,
         source_department_id=qc_department_id,
         work_order_id=order.id,
         work_order_batch_id=batch.id,

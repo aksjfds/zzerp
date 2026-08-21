@@ -24,6 +24,19 @@ class WorkshopView:
 
 
 @dataclass(frozen=True, slots=True)
+class WorkshopRoute:
+    workshop_id: int
+    workshop_name: str
+    department_id: int
+    department_name: str
+    department_code: str
+
+    @property
+    def id(self) -> int:
+        return self.workshop_id
+
+
+@dataclass(frozen=True, slots=True)
 class ProcedureView:
     id: int
     workshop_id: int
@@ -131,6 +144,37 @@ def get_workshop_views(
         )
         for row in rows
     ]
+
+
+def get_workshop_routes(
+    session: Session,
+    workshop_ids: Collection[int] | None = None,
+) -> dict[int, WorkshopRoute]:
+    if workshop_ids is not None and not workshop_ids:
+        return {}
+    statement = (
+        select(
+            Workshop.id,
+            Workshop.workshop_name,
+            Workshop.department_id,
+            Department.department_name,
+            Department.department_code,
+        )
+        .join(Department, Department.id == Workshop.department_id)
+    )
+    if workshop_ids is not None:
+        statement = statement.where(Workshop.id.in_(workshop_ids))
+    rows = session.execute(statement.order_by(Department.id, Workshop.id))
+    return {
+        row.id: WorkshopRoute(
+            workshop_id=row.id,
+            workshop_name=row.workshop_name,
+            department_id=row.department_id,
+            department_name=row.department_name,
+            department_code=row.department_code,
+        )
+        for row in rows
+    }
 
 
 def get_procedure_views(session: Session) -> list[ProcedureView]:
@@ -250,6 +294,7 @@ __all__ = [
     "ProcedureView",
     "ProcedureRoute",
     "WorkshopView",
+    "WorkshopRoute",
     "get_department_ids_by_codes",
     "get_department_procedure_routes",
     "get_department_views_by_codes",
@@ -257,4 +302,5 @@ __all__ = [
     "get_procedure_views",
     "get_procedure_routes",
     "get_workshop_views",
+    "get_workshop_routes",
 ]

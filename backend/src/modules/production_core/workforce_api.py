@@ -16,7 +16,7 @@ class WorkOrderActivity:
     id: int
     work_order_no: str | None
     production_item_id: int
-    procedure_id: int | None
+    procedure_id: int
     work_order_type: str
     work_order_name: str
     worker_id: int | None

@@ -1,81 +1,60 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { BomItem } from '../domain/types'
-import type { ProcedureOption } from '@/api/organization'
+import type { WorkshopRouteOption } from '@/api/organization'
 
-const props = defineProps<{ bomItems: BomItem[]; procedures: ProcedureOption[] }>()
+const props = defineProps<{
+  bomItems: BomItem[]
+  workshops: WorkshopRouteOption[]
+  placedBomIds: number[]
+}>()
 type DepartmentGroup = {
   departmentCode: string
   departmentName: string
-  procedures: ProcedureOption[]
+  workshops: WorkshopRouteOption[]
 }
-
 const fixedDepartments = [
   { departmentCode: 'qc', departmentName: 'QC部门' },
-  { departmentCode: 'assembly', departmentName: '装配部' },
   { departmentCode: 'finished', departmentName: '成品部' },
 ]
 const departmentOrder = [
-  'stamp',
-  'cnc',
-  'polish',
-  'outsource',
-  'purchasing',
-  'qc',
-  'assembly',
-  'finished',
+  'stamp', 'cnc', 'polish', 'outsource', 'purchasing', 'qc', 'assembly', 'finished',
 ]
-
 const departmentGroups = computed<DepartmentGroup[]>(() => {
   const groups = new Map<string, DepartmentGroup>()
-  props.procedures.forEach((procedure) => {
-    const group = groups.get(procedure.department_code) ?? {
-      departmentCode: procedure.department_code,
-      departmentName: procedure.department_name,
-      procedures: [],
+  props.workshops.forEach((workshop) => {
+    const group = groups.get(workshop.department_code) ?? {
+      departmentCode: workshop.department_code,
+      departmentName: workshop.department_name,
+      workshops: [],
     }
-    group.procedures.push(procedure)
-    groups.set(procedure.department_code, group)
+    group.workshops.push(workshop)
+    groups.set(workshop.department_code, group)
   })
   fixedDepartments.forEach((department) => {
     if (!groups.has(department.departmentCode)) {
-      groups.set(department.departmentCode, { ...department, procedures: [] })
+      groups.set(department.departmentCode, { ...department, workshops: [] })
     }
   })
   return [...groups.values()].sort((left, right) => {
-    const leftIndex = departmentOrder.indexOf(left.departmentCode)
-    const rightIndex = departmentOrder.indexOf(right.departmentCode)
-    return (leftIndex < 0 ? departmentOrder.length : leftIndex)
-      - (rightIndex < 0 ? departmentOrder.length : rightIndex)
+    const a = departmentOrder.indexOf(left.departmentCode)
+    const b = departmentOrder.indexOf(right.departmentCode)
+    return (a < 0 ? departmentOrder.length : a) - (b < 0 ? departmentOrder.length : b)
   })
 })
-
-function fixedNodeCount(departmentCode: string) {
-  return ['qc', 'assembly', 'finished'].includes(departmentCode) ? 1 : 0
+function fixedNodeCount(code: string) {
+  return ['qc', 'finished'].includes(code) ? 1 : 0
 }
-
-function groupNodeCount(group: DepartmentGroup) {
-  return group.procedures.length + fixedNodeCount(group.departmentCode)
-}
-
-function procedureKind(procedure: ProcedureOption) {
-  if (procedure.procedure_type === 'purchase_receipt') return '外购'
-  if (procedure.input_mode === 'multiple') return '多路'
-  return '工艺'
-}
-
-function procedureColorClass(procedure: ProcedureOption) {
-  if (procedure.department_code === 'outsource') return 'outsource'
-  if (procedure.department_code === 'purchasing') return 'purchase'
-  if (procedure.department_code === 'assembly') return 'assembly'
+function workshopColorClass(workshop: WorkshopRouteOption) {
+  if (workshop.department_code === 'outsource') return 'outsource'
+  if (workshop.department_code === 'purchasing') return 'purchase'
+  if (workshop.department_code === 'assembly') return 'assembly'
   return 'process'
 }
-
 const emit = defineEmits<{
-  dragAssembly: []
   dragQc: []
   dragShipping: []
-  dragProcedure: [procedure: ProcedureOption]
+  dragWorkshop: [workshop: WorkshopRouteOption]
   dragPart: [item: BomItem]
 }>()
 </script>
@@ -95,15 +74,15 @@ const emit = defineEmits<{
         </div>
         <span class="group-count">{{ bomItems.length }}</span>
       </div>
-      <p class="group-hint">同一配件可重复拖入，用于配置自产、外购等不同路线。</p>
+      <p class="group-hint">每个 BOM 配件在流程图中只能放置一次。</p>
       <div class="group-items">
         <button
           v-for="item in bomItems"
           :key="item.id ?? item.part_no"
           class="palette-item part"
           type="button"
-          :disabled="!item.id"
-          :title="item.id ? `拖动配件“${item.part_name}”到画布` : '请先保存 BOM 配件'"
+          :disabled="!item.id || placedBomIds.includes(item.id)"
+          :title="!item.id ? '请先保存 BOM 配件' : placedBomIds.includes(item.id) ? '该配件已放入流程图' : `拖动配件“${item.part_name}”到画布`"
           @mousedown="emit('dragPart', item)"
         >
           <span class="drag-handle" aria-hidden="true">⠿</span>
@@ -128,27 +107,24 @@ const emit = defineEmits<{
           <span class="group-mark" />
           <h3>{{ group.departmentName }}</h3>
         </div>
-        <span class="group-count">{{ groupNodeCount(group) }}</span>
+        <span class="group-count">{{ group.workshops.length + fixedNodeCount(group.departmentCode) }}</span>
       </div>
       <div class="group-items">
         <button
-          v-for="procedure in group.procedures"
-          :key="procedure.id"
+          v-for="workshop in group.workshops"
+          :key="workshop.id"
           class="palette-item"
-          :class="procedureColorClass(procedure)"
+          :class="workshopColorClass(workshop)"
           type="button"
-          :title="`拖动“${procedure.procedure_name}”到画布`"
-          @mousedown="emit('dragProcedure', procedure)"
+          :title="`拖动“${workshop.workshop_name}”到画布`"
+          @mousedown="emit('dragWorkshop', workshop)"
         >
           <span class="drag-handle" aria-hidden="true">⠿</span>
-          <span class="item-content"><strong>{{ procedure.procedure_name }}</strong></span>
-          <span class="item-kind">{{ procedureKind(procedure) }}</span>
+          <span class="item-content"><strong>{{ workshop.workshop_name }}</strong></span>
+          <span class="item-kind">{{ workshop.department_code === 'assembly' ? '多路' : '车间' }}</span>
         </button>
         <button v-if="group.departmentCode === 'qc'" class="palette-item qc" type="button" title="拖动 QC 到画布" @mousedown="emit('dragQc')">
           <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>QC</strong></span><span class="item-kind">QC</span>
-        </button>
-        <button v-if="group.departmentCode === 'assembly'" class="palette-item assembly" type="button" title="拖动装配节点到画布" @mousedown="emit('dragAssembly')">
-          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>装配</strong></span><span class="item-kind">装配</span>
         </button>
         <button v-if="group.departmentCode === 'finished'" class="palette-item shipping" type="button" title="拖动发货节点到画布" @mousedown="emit('dragShipping')">
           <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>发货</strong></span><span class="item-kind">发货</span>

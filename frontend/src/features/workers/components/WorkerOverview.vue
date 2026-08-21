@@ -137,11 +137,6 @@ function money(value: MoneyValue | null | undefined) {
             />
             <ElTable :data="paySummary?.items || []" border table-layout="auto" empty-text="本月暂无计件工资">
               <ElTableColumn prop="item_name" label="加工配件" min-width="220" />
-              <ElTableColumn label="标记" min-width="140">
-                <template #default="{ row }">
-                  {{ row.tag_names.length ? row.tag_names.join('、') : '未配置' }}
-                </template>
-              </ElTableColumn>
               <ElTableColumn prop="qualified_quantity" label="合格数量" width="100" align="right" />
               <ElTableColumn label="单件工资" width="110" align="right">
                 <template #default="{ row }">

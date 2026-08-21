@@ -29,84 +29,47 @@ from schemas.engineering import (
 from modules.errors import DomainError, product_not_found
 from modules.organization.read_api import (
     get_department_ids_by_codes,
-    get_procedure_routes,
+    get_workshop_routes,
 )
 from modules.sales.customer_api import resolve_customer
 
 
-def _ensure_procedures_exist(session, flow: ProcessFlowPayload) -> None:
-    procedure_ids = {
-        node.procedure_id
+def _ensure_workshops_exist(session, flow: ProcessFlowPayload) -> None:
+    workshop_ids = {
+        node.workshop_id
         for node in flow.nodes
-        if node.type == "process"
-        or (node.type == "assembly" and node.procedure_id is not None)
+        if node.type in {"process", "assembly"}
     }
-    if not procedure_ids:
+    if not workshop_ids:
         return
-    procedures = get_procedure_routes(session, procedure_ids)
-    existing_ids = set(procedures)
-    if existing_ids != procedure_ids:
+    workshops = get_workshop_routes(session, workshop_ids)
+    existing_ids = set(workshops)
+    if existing_ids != workshop_ids:
         invalid_node = next(
             node
             for node in flow.nodes
-            if (
-                node.type == "process"
-                or (node.type == "assembly" and node.procedure_id is not None)
-            )
-            and node.procedure_id not in existing_ids
+            if node.type in {"process", "assembly"}
+            and node.workshop_id not in existing_ids
         )
         raise DomainError(
-            "process_procedure_invalid",
-            f"工艺节点“{invalid_node.label}”引用的工艺不存在，请重新选择工艺",
+            "process_workshop_invalid",
+            f"流程节点“{invalid_node.label}”引用的车间不存在，请重新选择车间",
             path="process_flow.nodes",
             element_id=invalid_node.id,
         )
-    invalid_multi_input = next(
-        (
-            node
-            for node in flow.nodes
-            if node.type == "assembly"
-            and node.procedure_id is not None
-            and procedures[node.procedure_id].input_mode != "multiple"
-        ),
-        None,
-    )
-    if invalid_multi_input is not None:
-        raise DomainError(
-            "assembly_procedure_input_mode_invalid",
-            f"装配节点“{invalid_multi_input.label}”关联的工艺不支持多路输入",
-            path="process_flow.nodes",
-            element_id=invalid_multi_input.id,
-        )
-    invalid_single_input = next(
-        (
-            node
-            for node in flow.nodes
-            if node.type == "process"
-            and procedures[node.procedure_id].input_mode != "single"
-        ),
-        None,
-    )
-    if invalid_single_input is not None:
-        raise DomainError(
-            "process_procedure_input_mode_invalid",
-            f"工艺“{invalid_single_input.label}”必须使用多路装配节点",
-            path="process_flow.nodes",
-            element_id=invalid_single_input.id,
-        )
+    for node in flow.nodes:
+        if node.type in {"process", "assembly"}:
+            node.label = workshops[node.workshop_id].workshop_name
 
 
-def _validate_flow_departments_and_procedures(
+def _validate_flow_departments_and_workshops(
     session,
     flow: ProcessFlowPayload,
 ) -> None:
-    procedure_ids = {
-        node.procedure_id
-        for node in flow.nodes
-        if node.type == "process"
-        or (node.type == "assembly" and node.procedure_id is not None)
+    workshop_ids = {
+        node.workshop_id for node in flow.nodes if node.type in {"process", "assembly"}
     }
-    procedures = get_procedure_routes(session, procedure_ids)
+    workshops = get_workshop_routes(session, workshop_ids)
     department_ids = get_department_ids_by_codes(
         session,
         {"assembly", "finished", "qc"},
@@ -140,24 +103,21 @@ def _validate_flow_departments_and_procedures(
         )
 
     for node in flow.nodes:
-        if node.type == "process":
-            procedure = procedures.get(node.procedure_id)
-            if procedure is None:
+        if node.type in {"process", "assembly"}:
+            workshop = workshops.get(node.workshop_id)
+            if workshop is None:
                 raise DomainError(
-                    "process_procedure_invalid",
-                    f"工艺节点“{node.label}”引用的工艺不存在，请重新选择工艺",
+                    "process_workshop_invalid",
+                    f"流程节点“{node.label}”引用的车间不存在，请重新选择车间",
                     path="process_flow.nodes",
                     element_id=node.id,
                 )
-        if node.type == "assembly" and node.procedure_id is not None:
-            procedure = procedures.get(node.procedure_id)
-            if (
-                procedure is None
-                or procedure.department_id != department_ids.get("assembly")
-            ):
+        if node.type == "assembly":
+            workshop = workshops.get(node.workshop_id)
+            if workshop is None or workshop.department_id != department_ids.get("assembly"):
                 raise DomainError(
-                    "assembly_procedure_department_invalid",
-                    f"装配节点“{node.label}”关联的工艺不属于装配部",
+                    "assembly_workshop_department_invalid",
+                    f"装配节点“{node.label}”关联的车间不属于装配部",
                     path="process_flow.nodes",
                     element_id=node.id,
                 )
@@ -338,8 +298,8 @@ def update_product_process_flow(
                     if item.product_version == product_version
                 },
             )
-            _ensure_procedures_exist(session, flow)
-            _validate_flow_departments_and_procedures(session, flow)
+            _ensure_workshops_exist(session, flow)
+            _validate_flow_departments_and_workshops(session, flow)
             repository.set_process_flow(
                 product,
                 product_version,
@@ -383,8 +343,8 @@ def save_product_process_flow_draft(
                 product.factory_code,
             )
             validated = flow.model_dump(exclude_none=True)
-            _ensure_procedures_exist(session, flow)
-            _validate_flow_departments_and_procedures(session, flow)
+            _ensure_workshops_exist(session, flow)
+            _validate_flow_departments_and_workshops(session, flow)
             repository.set_process_flow_draft(product, product_version, validated)
             repository.flush()
             product.updated_at = utc_now()

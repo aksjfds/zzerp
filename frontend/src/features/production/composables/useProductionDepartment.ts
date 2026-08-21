@@ -1,14 +1,8 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import { queryProductionTagCards } from '../api/departmentRepositories'
 import { createWorkOrder } from '../api/workOrders'
-import type {
-  RepositoryFilters,
-  RepositoryItem,
-  TagCard,
-  WorkOrderQueryScope,
-} from '../domain/types'
+import type { RepositoryFilters, RepositoryItem, WorkOrderQueryScope } from '../domain/types'
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
 import { useWorkOrderList } from './useWorkOrders'
 import { useProductionWorkOrderActions } from './useProductionWorkOrderActions'
@@ -19,220 +13,99 @@ export function useProductionDepartment(
   mode: 'production' | 'purchase' = 'production',
 ) {
   const workspace = useDepartmentWorkspace(departmentCode, true)
-  const workOrderScope = ref<WorkOrderQueryScope | null>(null)
+  const workOrderScope = computed<WorkOrderQueryScope | null>(() => {
+    const item = workspace.selectedRepository.value
+    return item ? {
+      flowNodeId: item.flow_node_id,
+      sourceFlowNodeId: item.source_flow_node_id,
+    } : null
+  })
   const workOrderList = useWorkOrderList(
     departmentCode,
     workspace.selectedProductionItemId,
     workspace.pageSize,
-    mode === 'production' ? workOrderScope : undefined,
+    workOrderScope,
   )
   const activeRepository = ref<RepositoryItem>()
   const dialogVisible = ref(false)
   const submitting = ref(false)
-  const tagItems = ref<TagCard[]>([])
-  const tagLoading = ref(false)
-  const existingTagIds = ref<number[]>([])
-  const applyingTagIds = ref<number[]>([])
-  let tagSequence = 0
 
   async function loadDetails() {
     await workOrderList.load()
   }
-
-  function clearTagState() {
-    tagSequence += 1
-    tagItems.value = []
-    existingTagIds.value = []
-    applyingTagIds.value = []
-    workOrderScope.value = null
-    tagLoading.value = false
-  }
-
-  function syncWorkOrderScope() {
-    const repository = workspace.selectedRepository.value
-    workOrderScope.value = repository
-      ? {
-          flowNodeId: repository.flow_node_id,
-          sourceFlowNodeId: repository.source_flow_node_id,
-          existingTagIds: [...existingTagIds.value],
-          applyingTagIds: [...applyingTagIds.value],
-        }
-      : null
-  }
-
-  async function loadTags(item = workspace.selectedRepository.value) {
-    const sequence = ++tagSequence
-    if (mode !== 'production' || !item) {
-      tagItems.value = []
-      tagLoading.value = false
-      return
-    }
-    tagLoading.value = true
-    try {
-      const result = await queryProductionTagCards(
-        departmentCode,
-        item.production_item_id,
-        item.flow_node_id,
-        item.source_flow_node_id,
-      )
-      if (
-        sequence !== tagSequence
-        || workspace.selectedCardKey.value !== item.card_key
-      ) return
-      tagItems.value = result
-      syncWorkOrderScope()
-    } catch {
-      if (sequence === tagSequence) {
-        workOrderScope.value = null
-        workOrderList.reset()
-        ElMessage.warning('标记组合加载失败')
-      }
-    } finally {
-      if (sequence === tagSequence) tagLoading.value = false
-    }
-  }
-
   async function reloadWorkspace() {
     await workspace.loadRepositories()
-    if (mode === 'production') {
-      if (!workspace.selectedRepository.value) {
-        clearTagState()
-        workOrderList.reset()
-        return
-      }
-      await loadTags()
-    }
     await loadDetails()
   }
-
   function selectRepository(item: RepositoryItem) {
     workspace.selectRepository(item)
-    clearTagState()
-    workOrderList.reset()
-    if (mode === 'production') {
-      void loadTags(item).then(loadDetails)
-    }
-    else void loadDetails()
-  }
-
-  function setExistingTagFilter(tagIds: number[]) {
-    existingTagIds.value = tagIds
-    syncWorkOrderScope()
     workOrderList.reset()
     void loadDetails()
   }
-
-  function setApplyingTagFilter(tagIds: number[]) {
-    applyingTagIds.value = tagIds
-    syncWorkOrderScope()
-    workOrderList.reset()
-    void loadDetails()
-  }
-
   async function openWorkOrder(item: RepositoryItem) {
-    const sameRepository = workspace.selectedCardKey.value === item.card_key
     workspace.selectRepository(item)
-    if (!sameRepository) {
-      clearTagState()
-      workOrderList.reset()
-    }
     activeRepository.value = item
-    if (mode === 'production') {
-      await loadTags(item)
-      if (workspace.selectedCardKey.value !== item.card_key) return
-      if (!tagItems.value.some(source => (
-        source.available_quantity > 0
-        && source.can_create_work_order
-        && ((source.repository_id === null) !== (source.tag_stock_id === null))
-      ))) {
-        ElMessage.warning('当前配件没有可用的开单来源')
-        return
-      }
+    if (!item.repository_id || item.available_quantity < 1) {
+      ElMessage.warning('当前物料没有可用数量')
+      return
     }
     await loadDetails()
     dialogVisible.value = true
   }
-
   async function saveWorkOrder(payload: {
-    repositoryId: number | null
-    tagStockId: number | null
+    repositoryId: number
+    procedureId: number | null
+    procedureName: string | null
     quantity: number
     workerId: number | null
-    tagNames: string[]
     remark: string
   }) {
-    if (!activeRepository.value) return
-    if ((payload.repositoryId === null) === (payload.tagStockId === null)) return
-    if (mode === 'production' && payload.tagNames.length === 0) return
     submitting.value = true
     try {
       await createWorkOrder(
         payload.repositoryId,
-        payload.tagStockId,
-        payload.tagNames,
+        payload.procedureId,
+        payload.procedureName,
         payload.quantity,
         payload.workerId,
         payload.remark,
       )
       dialogVisible.value = false
       await reloadWorkspace()
-      ElMessage.success(
-        mode === 'purchase'
-          ? '外购入库单已创建'
-          : `${activeRepository.value.procedure_name || '工艺'}工单已创建`,
-      )
+      ElMessage.success(mode === 'purchase' ? '外购入库单已创建' : '工单已创建')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
     } finally {
       submitting.value = false
     }
   }
-
   async function refresh() {
-    clearTagState()
     workOrderList.reset()
     await workspace.refresh()
+    await loadDetails()
   }
-
   async function changeRepositoryPage(page: number) {
-    clearTagState()
     workOrderList.reset()
     await workspace.changePage(page)
+    await loadDetails()
   }
-
   async function applyFilters(filters: RepositoryFilters) {
-    clearTagState()
     workOrderList.reset()
     await workspace.search(filters)
+    await loadDetails()
   }
-
   async function load() {
     await workspace.load()
+    await loadDetails()
   }
 
   return {
-    activeRepository,
-    applyFilters,
-    changeRepositoryPage,
-    dialogVisible,
-    load,
-    loadDetails,
-    openWorkOrder,
-    reloadWorkspace,
-    refresh,
-    saveWorkOrder,
-    selectRepository,
-    existingTagIds,
-    applyingTagIds,
-    setExistingTagFilter,
-    setApplyingTagFilter,
-    tagItems,
-    tagLoading,
-    submitting,
+    activeRepository, applyFilters, changeRepositoryPage, dialogVisible,
+    load, loadDetails, openWorkOrder, reloadWorkspace, refresh,
+    saveWorkOrder, selectRepository, submitting,
     workOrderActions: mode === 'production'
       ? useProductionWorkOrderActions(reloadWorkspace)
       : usePurchaseWorkOrderActions(reloadWorkspace),
-    workOrderList,
-    workspace,
+    workOrderList, workspace,
   }
 }

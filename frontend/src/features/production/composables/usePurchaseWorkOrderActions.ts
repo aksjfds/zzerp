@@ -4,6 +4,7 @@ import { registerPurchaseArrival, submitWorkOrder } from '../api/workOrders'
 import type { WorkOrder } from '../domain/types'
 import {
   createCancelWorkOrderAction,
+  createDirectResultAction,
   createUndoProductionOperationAction,
   ignoreWorkOrderAction,
   type WorkOrderActions,
@@ -29,17 +30,9 @@ export function usePurchaseWorkOrderActions(
         ElMessage.warning('到货数量不能超过待到货数量')
         return
       }
-      if (item.qc_required) {
-        await registerPurchaseArrival(item.id, quantity)
-      } else {
-        await submitWorkOrder(item.id, quantity, 'direct')
-      }
+      await registerPurchaseArrival(item.id, quantity)
       await onChanged()
-      ElMessage.success(
-        item.qc_required
-          ? '到货数量已登记'
-          : '到货数量已入库',
-      )
+      ElMessage.success('到货数量已登记')
     } catch (error) {
       if (error !== 'cancel' && error !== 'close') {
         ElMessage.error(getApiErrorDetail(error)?.message || '到货登记失败')
@@ -49,7 +42,7 @@ export function usePurchaseWorkOrderActions(
 
   async function submitQc(item: WorkOrder) {
     try {
-      const quantity = item.ready_for_qc_quantity
+      const quantity = item.quantity
       await ElMessageBox.confirm(
         `确认将整张外购工单的 ${quantity} 件全部送检？`,
         '外购工单 · 整单送检',
@@ -70,7 +63,7 @@ export function usePurchaseWorkOrderActions(
     resubmitQc: ignoreWorkOrderAction,
     registerArrival,
     submitQc,
-    submitDirectResult: ignoreWorkOrderAction,
+    submitDirectResult: createDirectResultAction(onChanged, '外购'),
     undo: createUndoProductionOperationAction(onChanged),
   }
 }

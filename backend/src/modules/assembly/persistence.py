@@ -52,3 +52,9 @@ class WorkOrderMaterial(Base):
         BigInteger, ForeignKey("production_item.id"), nullable=False
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_previous_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_department_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("department.id"), nullable=False
+    )
+    source_work_order_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)

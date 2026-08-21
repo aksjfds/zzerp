@@ -26,8 +26,7 @@ const {
 const { items: workOrders, loading: detailLoading, page: historyPage, total: historyTotal } = workOrderList
 const {
   activeRepository, applyFilters, changeRepositoryPage, dialogVisible, load, loadDetails,
-  openWorkOrder, reloadWorkspace, refresh, saveWorkOrder, selectRepository,
-  tagItems, submitting,
+  openWorkOrder, reloadWorkspace, refresh, saveWorkOrder, selectRepository, submitting,
 } = controller
 const showSelectedWorkOrders = computed(() => Boolean(selectedRepository.value))
 const supportsSpecialPrinting = computed(() => (
@@ -106,7 +105,6 @@ onMounted(load)
       v-if="mode === 'production'"
       v-model="dialogVisible"
       :item="activeRepository"
-      :sources="tagItems"
       :workers="workOrderWorkers"
       :submitting="submitting"
       @submit="saveWorkOrder"
