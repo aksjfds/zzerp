@@ -13,15 +13,14 @@ from schemas.engineering import (
 )
 from modules.engineering.api import (
     create_product,
-    create_product_version,
     delete_product,
-    delete_product_version,
     get_product,
     list_product_versions,
     list_products,
-    replace_product_bom,
-    save_product_process_flow_draft,
-    update_product_info,
+)
+from departments.engineering_orchestration import (
+    create_product_version, delete_product_version, replace_product_bom,
+    save_product_process_flow_draft, update_product_info,
     update_product_process_flow,
 )
 
@@ -68,7 +67,10 @@ def product_version_create(
     return {"data": create_product_version(product_id, expected_revision, source_version)}
 
 
-@router.delete("/{product_id}/versions/{product_version}")
+@router.delete(
+    "/{product_id}/versions/{product_version}",
+    response_model=ProductDetailEnvelope,
+)
 def product_version_delete(
     product_id: int,
     product_version: int,

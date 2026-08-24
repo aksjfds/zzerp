@@ -1,5 +1,6 @@
 from database import SessionLocal
 from modules.identity.persistence import User
+from modules.identity.permissions import parse_permissions
 from modules.identity.repository import find_user_by_credentials
 
 
@@ -9,12 +10,9 @@ def serialize_user(user: User) -> dict:
         "username": user.username,
         "name": user.username,
         "department": user.department,
+        "is_system": user.is_system,
         "role": user.role,
-        "permissions": [
-            permission.strip()
-            for permission in user.permissions.split(",")
-            if permission.strip()
-        ],
+        "permissions": parse_permissions(user.permissions),
     }
 
 

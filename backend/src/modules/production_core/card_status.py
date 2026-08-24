@@ -1,8 +1,11 @@
 from sqlalchemy import func, select, tuple_
 
-from modules.assembly.model_api import WorkOrderMaterial
-from modules.quality.model_api import WorkOrderBatch
-from modules.production_core.persistence import Repository, WorkOrder
+from modules.production_core.persistence import (
+    Repository,
+    WorkOrder,
+    WorkOrderBatch,
+    WorkOrderMaterial,
+)
 from modules.production_core.work_order_progress import (
     calculate_work_order_progress,
     order_remaining_expression,

@@ -1,13 +1,15 @@
 from modules.errors import DomainError
+from modules.inventory.finished_goods_api import register_pending_finished_goods
 from modules.organization.context_api import ProcedureContext
 from modules.organization.read_api import get_department_ids_by_codes
 from modules.production_core.context_api import (
+    InspectionBatchContext,
     ProductionItemContext,
     WorkOrderContext,
 )
 from modules.production_core.operational_api import move_to_node, process_qc_node
 from modules.production_core.ownership_api import add_repository_quantity
-from modules.quality.context_api import InspectionBatchContext
+from modules.quality.routing_contract import QualifiedRouteResult, ReworkRouteResult
 
 
 def validate_context(
@@ -32,9 +34,10 @@ def route_qualified(
     context,
     node: dict,
     quantity: int,
-) -> tuple[str, int]:
+    qualified_disposition: str | None,
+) -> QualifiedRouteResult:
     assembly_department_id = get_department_ids_by_codes(session, {"assembly"}).get("assembly")
-    if batch.qualified_disposition == "return":
+    if qualified_disposition == "return":
         if assembly_department_id is None:
             raise DomainError("department_not_found", "装配部不存在")
         add_repository_quantity(
@@ -46,8 +49,8 @@ def route_qualified(
             quantity=quantity,
             source_work_order_id=order.id,
         )
-        return node["id"], assembly_department_id
-    if batch.qualified_disposition != "release":
+        return QualifiedRouteResult(node["id"], assembly_department_id)
+    if qualified_disposition != "release":
         raise DomainError("qc_disposition_required", "请选择合格品返回当前车间或放行下一节点")
     qc_node = process_qc_node(context.flow, context.nodes, node["id"])
     if qc_node is None:
@@ -65,7 +68,14 @@ def route_qualified(
     )
     if department_id is None:
         raise DomainError("qc_target_missing", "QC节点没有后续流程节点")
-    return target["id"], department_id
+    if target.get("type") == "shipping":
+        register_pending_finished_goods(
+            session,
+            production_item=production_item,
+            shipping_node_id=target["id"],
+            quantity=quantity,
+        )
+    return QualifiedRouteResult(target["id"], department_id)
 
 
 def route_rework(
@@ -77,11 +87,11 @@ def route_rework(
     procedure: ProcedureContext | None,
     node: dict,
     quantity: int,
-) -> int:
+) -> ReworkRouteResult:
     assembly_department_id = get_department_ids_by_codes(
         session,
         {"assembly"},
     ).get("assembly")
     if assembly_department_id is None:
         raise DomainError("department_not_found", "装配部不存在")
-    return assembly_department_id
+    return ReworkRouteResult(assembly_department_id)

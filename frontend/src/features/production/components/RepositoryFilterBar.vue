@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeUnmount, reactive, watch } from 'vue'
-import type { RepositoryWorkshop } from '../api/departmentRepositories'
+import type { RepositoryWorkshop } from '../domain/repositories'
 import type { RepositoryFilters } from '../domain/types'
 import { repositoryStatusLabel } from '../domain/repositoryWorkStatus'
 

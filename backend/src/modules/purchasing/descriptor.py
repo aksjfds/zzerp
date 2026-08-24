@@ -6,6 +6,7 @@ MODULE = ModuleDescriptor(
     public_api="modules.purchasing.api",
     owns=("purchase_receipt_execution_policy",),
     collaborates_with=(
+        "inventory",
         "production_core",
         "organization",
         "quality",

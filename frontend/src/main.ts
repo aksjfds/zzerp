@@ -16,7 +16,7 @@ const pinia = createPinia()
 app.use(pinia)
 app.use(router)
 setupPermission(app)
-setupTableColumnWidthPersistence()
+setupTableColumnWidthPersistence(app)
 
 const authStore = useAuthStore(pinia)
 window.addEventListener('zzerp:unauthorized', () => {

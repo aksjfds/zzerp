@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { departmentRoutes, departmentSupportRoutes } from '@/features/departments/registry'
+import { departmentRoutes, departmentSupportRoutes } from '@/features/departments'
 import { setupRouterGuard } from '@/permission/guard'
 import { ORDER_PERMISSIONS, PRODUCT_PERMISSIONS, PRODUCTION_PERMISSIONS } from '@/permission/constants'
 

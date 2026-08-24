@@ -13,6 +13,10 @@ import {
   queryCustomerOrders,
 } from '../api/customerOrders'
 import type { CustomerOrder } from '../domain/types'
+import {
+  customerOrderStatusLabel,
+  customerOrderStatusTagType,
+} from '../domain/orderStatus'
 
 const props = withDefaults(defineProps<{
   embedded?: boolean
@@ -29,16 +33,6 @@ const page = ref(1)
 const pageSize = 50
 const detailVisible = ref(false)
 const activeOrderId = ref<number>()
-const statusLabels = {
-  draft: '草稿', confirmed: '已确认', planned: '生产中', cancelled: '已取消', closed: '已完成',
-}
-const statusTagTypes = {
-  draft: 'info',
-  confirmed: 'primary',
-  planned: 'warning',
-  cancelled: 'danger',
-  closed: 'success',
-} as const
 const filteredOrders = computed(() => {
   const value = keyword.value.trim().toLowerCase()
   return value ? orders.value.filter((item) =>
@@ -139,7 +133,7 @@ defineExpose({ load: loadOrders })
     </header>
     <section class="content-card" :class="{ embedded: props.embedded }">
       <ElInput v-model="keyword" clearable placeholder="搜索当前页的订单编号或客户" class="search" />
-      <ElTable v-loading="loading" :data="filteredOrders" border table-layout="auto">
+      <ElTable v-table-column-widths="'sales.customer-orders'" v-loading="loading" :data="filteredOrders" border table-layout="auto">
         <ElTableColumn prop="customer_name" label="客户名称" min-width="150" />
         <ElTableColumn prop="customer_order_no" label="订单编号" min-width="160" />
         <ElTableColumn label="产品明细" min-width="260">
@@ -147,8 +141,8 @@ defineExpose({ load: loadOrders })
         </ElTableColumn>
         <ElTableColumn label="状态" width="100">
           <template #default="{ row }">
-            <ElTag :type="statusTagTypes[row.status as keyof typeof statusTagTypes]" effect="light">
-              {{ statusLabels[row.status as keyof typeof statusLabels] }}
+            <ElTag :type="customerOrderStatusTagType(row.status)" effect="light">
+              {{ customerOrderStatusLabel(row.status) }}
             </ElTag>
           </template>
         </ElTableColumn>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { WorkerWorkshop } from '@/features/workers/domain/types'
+import type { WorkerWorkshop } from '@/features/workers'
 
 const props = defineProps<{
   modelValue: boolean

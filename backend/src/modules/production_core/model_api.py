@@ -1,4 +1,4 @@
-"""Read-only ORM type surface for production-core persistence."""
+"""Read-only query-model surface for production-core persistence."""
 
 from modules.production_core.persistence import (
     ProductionItem,
@@ -6,6 +6,8 @@ from modules.production_core.persistence import (
     ProductionOperationUndo,
     Repository,
     WorkOrder,
+    WorkOrderBatch,
+    WorkOrderMaterial,
 )
 
 __all__ = [
@@ -14,4 +16,6 @@ __all__ = [
     "ProductionOperationUndo",
     "Repository",
     "WorkOrder",
+    "WorkOrderBatch",
+    "WorkOrderMaterial",
 ]

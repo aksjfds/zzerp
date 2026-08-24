@@ -4,19 +4,23 @@ from datetime import datetime
 
 from sqlalchemy import func, select
 
+from database import SessionLocal
 from domain.time import utc_now
-from modules.assembly.model_api import WorkOrderMaterial
-from modules.quality.model_api import WorkOrderBatch
+from domain.identity import can_access_department
 from modules.production_core.persistence import (
     ProductionItem,
     ProductionMovement,
     ProductionOperationUndo,
     Repository,
     WorkOrder,
+    WorkOrderBatch,
+    WorkOrderMaterial,
 )
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
+from modules.sales.transaction_api import restore_order_state
 from modules.errors import DomainError
 from modules.production_core.undo_presenters import latest_undoable_operation
+from modules.production_core.work_order_presenters import serialize_work_order
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -149,11 +153,10 @@ def record_undoable_operation(
 
 def undo_production_operation(
     operation_id: int,
-    user_department: str,
+    user_department: str | None,
+    user_is_system: bool,
     username: str,
 ) -> dict:
-    from database import SessionLocal
-
     with SessionLocal.begin() as session:
         operation = session.get(
             ProductionOperationUndo,
@@ -164,7 +167,11 @@ def undo_production_operation(
             raise DomainError("production_operation_not_found", "可撤回操作不存在", status_code=404)
         if operation.status != "applied":
             raise DomainError("production_operation_already_reversed", "该操作已经撤回")
-        if user_department not in {"sys", operation.department_code}:
+        if not can_access_department(
+            user_department,
+            user_is_system,
+            operation.department_code,
+        ):
             raise DomainError("department_access_denied", "无权撤回该部门的生产操作", status_code=403)
         latest = latest_undoable_operation(session, operation.work_order_id)
         if latest is None or latest.id != operation.id:
@@ -228,7 +235,6 @@ def undo_production_operation(
         operation.reversed_at = utc_now()
         operation.reversed_by = username
         session.flush()
-        from modules.production_core.work_order_presenters import serialize_work_order
         return serialize_work_order(session, order)
 
 
@@ -312,10 +318,12 @@ def _restore_state(session, order: WorkOrder, before: dict, after: dict) -> None
 
     customer_state = before.get("customer_order")
     if customer_state:
-        customer_order = session.get(CustomerOrder, customer_state["id"], with_for_update=True)
-        if customer_order:
-            customer_order.status = customer_state["status"]
-            customer_order.revision = customer_state["revision"]
+        restore_order_state(
+            session,
+            customer_state["id"],
+            status=customer_state["status"],
+            revision=customer_state["revision"],
+        )
 
 
 def _restore_inventory_table(session, model, before_rows: list[dict], after_rows: list[dict]) -> None:

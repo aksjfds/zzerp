@@ -21,7 +21,12 @@ def procedure_prices(
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     data, total = list_procedure_prices(
-        department_code, page, page_size, keyword, user["department"]
+        department_code,
+        page,
+        page_size,
+        keyword,
+        user["department"],
+        user["is_system"],
     )
     return {"data": data, "total": total}
 
@@ -48,5 +53,6 @@ def procedure_price_update(
         flow_node_id,
         payload,
         user["department"],
+        user["is_system"],
     )
     return Response(status_code=204)

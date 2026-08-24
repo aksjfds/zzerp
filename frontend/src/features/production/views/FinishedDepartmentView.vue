@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import InventoryDepartmentView from '@/features/inventory/views/InventoryDepartmentView.vue'
+import { InventoryDepartmentView } from '@/features/inventory'
 </script>
 
 <template>

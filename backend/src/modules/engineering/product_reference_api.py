@@ -8,20 +8,12 @@ from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
 from domain.errors import DomainViolation
+from domain.product import ProductReference
 from domain.process_flow import validate_process_flow
 from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
 from modules.errors import DomainError
 from modules.organization.read_api import get_workshop_routes
 from schemas.engineering import ProcessFlowPayload
-
-
-@dataclass(frozen=True, slots=True)
-class ProductReference:
-    id: int
-    customer_id: int
-    product_name: str
-    factory_code: str
-    version: int
 
 
 @dataclass(frozen=True, slots=True)

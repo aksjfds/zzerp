@@ -2,6 +2,7 @@
 
 from sqlalchemy import select
 
+from domain.production_inventory import IssuedInventoryStock, IssuedPlanItem
 from modules.errors import DomainError
 from modules.organization.model_api import Department
 from modules.production_core.flow import load_product_flow, normal_target
@@ -9,7 +10,6 @@ from modules.production_core.movements import record_movement
 from modules.production_core.persistence import ProductionItem
 from modules.production_core.work_order_support import (
     move_to_node,
-    refresh_order_closed,
     terminal_unit_quantity,
 )
 from modules.sales.model_api import CustomerOrderItem
@@ -17,11 +17,14 @@ from modules.sales.model_api import CustomerOrderItem
 
 def accept_issued_inventory(
     session,
-    plan_item,
-    inventory_stock,
-    quantity: int,
+    plan_item: IssuedPlanItem,
+    inventory_stock: IssuedInventoryStock,
     actor_username: str,
+    *,
+    register_pending_finished_goods,
+    allocate_issued_finished_goods,
 ) -> None:
+    quantity = inventory_stock.quantity
     if quantity <= 0:
         return
     order_item = session.get(CustomerOrderItem, plan_item.customer_order_item_id)
@@ -37,6 +40,7 @@ def accept_issued_inventory(
             nodes,
             quantity,
             actor_username,
+            allocate_issued_finished_goods,
         )
         return
     target, source_node_id = _resume_target(
@@ -59,6 +63,12 @@ def accept_issued_inventory(
             quantity,
             source_node_id,
         )
+        register_pending_finished_goods(
+            session,
+            production_item=production_item,
+            shipping_node_id=target["id"],
+            quantity=quantity,
+        )
         record_movement(
             session,
             production_item=production_item,
@@ -69,7 +79,6 @@ def accept_issued_inventory(
             source_department_id=_department_id(session, "warehouse"),
             target_department_id=department_id,
         )
-        refresh_order_closed(session, production_item, actor_username)
         return
     department_id = move_to_node(
         session,
@@ -98,6 +107,7 @@ def _accept_finished(
     nodes,
     quantity: int,
     actor_username: str,
+    allocate_issued_finished_goods,
 ) -> None:
     shipping = nodes.get(plan_item.flow_node_id)
     if shipping is None or shipping.get("type") != "shipping":
@@ -131,7 +141,6 @@ def _accept_finished(
         source_department_id=_department_id(session, "finished"),
         target_department_id=_department_id(session, "finished"),
     )
-    from modules.inventory.finished_goods_api import allocate_issued_finished_goods
     allocate_issued_finished_goods(
         session,
         production_item=production_item,
@@ -139,7 +148,6 @@ def _accept_finished(
         quantity=quantity * unit_quantity,
         actor_username=actor_username,
     )
-    refresh_order_closed(session, production_item, actor_username)
 
 
 def _load_or_create_production_item(

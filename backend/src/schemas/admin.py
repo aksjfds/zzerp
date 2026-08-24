@@ -2,6 +2,8 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
 
+from schemas.common import WorkOrderStatus
+
 
 class AdminModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -39,7 +41,7 @@ class AdminWorkerHistoryItem(AdminModel):
     completion_rate: float
     lost_quantity: int
     scrap_quantity: int
-    status: str
+    status: WorkOrderStatus
     completed_at: str | None
 
 

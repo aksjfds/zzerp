@@ -2,7 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import DepartmentPageHeader from '@/features/production/components/DepartmentPageHeader.vue'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import FinishedOrderOperations from '../components/FinishedOrderOperations.vue'
 import {
   issueOutboundPlan,
@@ -39,6 +39,7 @@ const transactionLabels: Record<string, string> = {
   receipt: '入库', reserve: '占用', release: '解除占用', issue: '出库',
   adjust_in: '调整入库', adjust_out: '调整出库',
   finished_receipt: '成品入库', finished_stock_issue: '库存转入订单',
+  finished_surplus_transfer: '订单结余转库存',
   customer_shipment: '客户发货',
 }
 const departmentLabel = props.departmentCode === 'finished' ? '成品部' : '仓库'
@@ -154,7 +155,7 @@ defineExpose({ load })
               </ElButton>
             </div>
           </div>
-          <ElTable :data="plan.items" border table-layout="auto">
+          <ElTable v-table-column-widths="`${departmentCode}.outbound-items`" :data="plan.items" border table-layout="auto">
             <ElTableColumn prop="item_code" label="编号" min-width="130" />
             <ElTableColumn prop="item_name" label="名称" min-width="180" />
             <ElTableColumn prop="completed_node_label" label="完成状态" min-width="120"><template #default="{ row }">{{ `${row.completed_node_label}完` }}</template></ElTableColumn>
@@ -176,7 +177,7 @@ defineExpose({ load })
         </section>
       </ElTabPane>
       <ElTabPane :label="stockTabLabel">
-        <ElTable :data="stocks" border stripe table-layout="auto">
+        <ElTable v-table-column-widths="`${departmentCode}.stocks`" :data="stocks" border stripe table-layout="auto">
           <ElTableColumn label="类型" width="100"><template #default="{ row }">{{ itemTypeLabels[row.item_type as keyof typeof itemTypeLabels] }}</template></ElTableColumn>
           <ElTableColumn prop="item_code" label="编号" min-width="150" />
           <ElTableColumn prop="item_name" label="名称" min-width="180" />
@@ -188,7 +189,7 @@ defineExpose({ load })
         </ElTable>
       </ElTabPane>
       <ElTabPane label="库存流水">
-        <ElTable :data="transactions" border stripe table-layout="auto">
+        <ElTable v-table-column-widths="`${departmentCode}.transactions`" :data="transactions" border stripe table-layout="auto">
           <ElTableColumn prop="created_at" label="时间" min-width="180" />
           <ElTableColumn label="类型" min-width="120"><template #default="{ row }">{{ transactionLabels[row.transaction_type] || row.transaction_type }}</template></ElTableColumn>
           <ElTableColumn label="对象" min-width="240"><template #default="{ row }"><div>{{ row.item_code }} · {{ row.item_name }}</div><small v-if="row.completed_node_label">{{ row.completed_node_label }}完</small><small v-if="row.customer_order_no">订单 {{ row.customer_order_no }}</small></template></ElTableColumn>

@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { getDepartmentModule } from '@/features/departments/registry'
 import DepartmentWorkersView from '../views/DepartmentWorkersView.vue'
 import DepartmentProductionProgressView from '../views/DepartmentProductionProgressView.vue'
 import ProcedurePriceView from '../views/ProcedurePriceView.vue'
@@ -9,6 +8,10 @@ import DepartmentSurplusInventoryView from '../views/DepartmentSurplusInventoryV
 
 const props = defineProps<{
   departmentCode: string
+  showInventory?: boolean
+  showWorkers?: boolean
+  showProgress?: boolean
+  showProcedurePrices?: boolean
 }>()
 const emit = defineEmits<{
   configurationSaved: []
@@ -18,17 +21,13 @@ type DepartmentTab = 'workspace' | 'inventory' | 'workers' | 'progress' | 'tag-p
 
 const route = useRoute()
 const router = useRouter()
-const department = computed(() => getDepartmentModule(props.departmentCode))
 let tabSwitchRevision = 0
 const availableTabs = computed<DepartmentTab[]>(() => {
   const tabs: DepartmentTab[] = ['workspace']
-  const capabilities = department.value?.capabilities
-  if (props.departmentCode === 'qc' || capabilities?.includes('repositories')) {
-    tabs.push('inventory')
-  }
-  if (capabilities?.includes('production_progress')) tabs.push('progress')
-  if (capabilities?.includes('standard_execution')) tabs.push('tag-prices')
-  if (capabilities?.includes('workers')) tabs.push('workers')
+  if (props.showInventory) tabs.push('inventory')
+  if (props.showProgress) tabs.push('progress')
+  if (props.showProcedurePrices) tabs.push('tag-prices')
+  if (props.showWorkers) tabs.push('workers')
   return tabs
 })
 const activeTab = computed<DepartmentTab>({
@@ -49,7 +48,7 @@ async function switchTab(tab: DepartmentTab) {
   const query = { ...route.query }
   if (tab === 'workspace') delete query.tab
   else query.tab = tab
-  await router.replace({ path: department.value?.routePath || route.path, query })
+  await router.replace({ path: route.path, query })
   await nextTick()
   window.requestAnimationFrame(() => {
     if (revision !== tabSwitchRevision) return

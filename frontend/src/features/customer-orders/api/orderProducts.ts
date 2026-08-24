@@ -18,7 +18,16 @@ export type OrderProduct = {
 
 type ProductDetail = Omit<OrderProduct, 'version' | 'bom_count'> & {
   current_version: number
-  bom_items: unknown[]
+  bom_items: Array<{
+    id: number
+    product_id: number
+    product_version: number
+    part_no: string
+    part_name: string
+    pcs: number
+    remark: string
+    sort_order: number
+  }>
 }
 
 export async function queryOrderProducts(customerId: number, keyword?: string) {

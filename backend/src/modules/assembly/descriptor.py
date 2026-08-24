@@ -4,16 +4,18 @@ from modules.contracts import ModuleDescriptor
 MODULE = ModuleDescriptor(
     name="assembly",
     public_api="modules.assembly.api",
-    owns=("assembly_execution_policy", "work_order_material"),
+    owns=("assembly_execution_policy",),
     collaborates_with=(
-        "engineering",
+        "inventory",
         "organization",
+        "planning",
         "production_core",
         "quality",
+        "sales",
+        "standard_execution",
         "workforce",
     ),
     collaboration_apis=(
-        "modules.assembly.model_api",
         "modules.assembly.qc_api",
     ),
 )

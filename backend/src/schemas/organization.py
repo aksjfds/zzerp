@@ -4,7 +4,33 @@ from pydantic import BaseModel, ConfigDict
 
 
 class OrganizationModel(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        str_strip_whitespace=True,
+    )
+
+
+DepartmentCapability = Literal[
+    "repositories",
+    "work_orders",
+    "workers",
+    "standard_execution",
+    "purchasing",
+    "assembly",
+    "quality",
+    "special_printing",
+    "production_progress",
+    "inventory",
+    "finished_goods",
+]
+
+
+class DepartmentModuleResponse(OrganizationModel):
+    code: str
+    name: str
+    execution_module: str
+    capabilities: list[DepartmentCapability]
 
 
 class DepartmentResponse(OrganizationModel):

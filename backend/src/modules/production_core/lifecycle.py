@@ -1,7 +1,6 @@
 from sqlalchemy import func, select
 
-from modules.quality.model_api import WorkOrderBatch
-from modules.production_core.persistence import ProductionItem, WorkOrder
+from modules.production_core.persistence import ProductionItem, WorkOrder, WorkOrderBatch
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.errors import DomainError
 from modules.production_core.repositories import provision_order_repositories

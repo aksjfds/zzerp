@@ -11,6 +11,7 @@ from database import Base
 class Customer(Base):
     __tablename__ = "customer"
     __table_args__ = (
+        UniqueConstraint("customer_name", name="uq_customer_name"),
         Index(
             "idx_customer_name_trgm",
             "customer_name",
@@ -20,7 +21,7 @@ class Customer(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    customer_name: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
@@ -37,13 +38,20 @@ class CustomerOrder(Base):
             name="ck_customer_order_status",
         ),
         CheckConstraint("revision > 0", name="ck_customer_order_revision"),
+        UniqueConstraint("customer_order_no", name="uq_customer_order_no"),
         Index("idx_customer_order_customer", "customer_id"),
         Index("idx_customer_order_status", "status", "id"),
         Index("idx_customer_order_updated", text("updated_at DESC"), text("id DESC")),
+        Index(
+            "idx_customer_order_no_trgm",
+            "customer_order_no",
+            postgresql_using="gin",
+            postgresql_ops={"customer_order_no": "gin_trgm_ops"},
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_order_no: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    customer_order_no: Mapped[str] = mapped_column(Text, nullable=False)
     customer_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("customer.id"), nullable=False
     )
@@ -68,12 +76,20 @@ class CustomerOrderItem(Base):
         ForeignKeyConstraint(
             ["product_id", "product_version"],
             ["product_version.product_id", "product_version.version"],
+            name="fk_customer_order_item_product_version",
         ),
         UniqueConstraint(
             "id",
             "product_id",
             "product_version",
             name="uq_customer_order_item_id_version",
+        ),
+        UniqueConstraint(
+            "id",
+            "customer_order_id",
+            "product_id",
+            "product_version",
+            name="uq_customer_order_item_context",
         ),
         UniqueConstraint(
             "customer_order_id",

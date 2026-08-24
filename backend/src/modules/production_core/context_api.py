@@ -49,42 +49,35 @@ class ProductionItemContext(Protocol):
 
 
 class WorkOrderContext(Protocol):
-    @property
-    def id(self) -> int: ...
+    id: int
+    production_item_id: int
+    procedure_id: int
+    source_flow_node_id: str | None
+    flow_node_id: str
+    work_order_type: str
+    created_by: str
+    worker_name: str | None
+    completed_quantity: int
+    processed_quantity: int
+    quantity: int
+    status: str
+    closed_at: datetime | None
 
-    @property
-    def production_item_id(self) -> int: ...
 
-    @property
-    def procedure_id(self) -> int: ...
-
-    @property
-    def source_flow_node_id(self) -> str: ...
-
-    @property
-    def flow_node_id(self) -> str: ...
-
-    @property
-    def work_order_type(self) -> str: ...
-
-    @property
-    def completed_quantity(self) -> int: ...
-
-    @property
-    def processed_quantity(self) -> int: ...
-
-    @property
-    def quantity(self) -> int: ...
-
-    @property
-    def status(self) -> str: ...
-
-    @property
-    def closed_at(self) -> datetime | None: ...
+class InspectionBatchContext(Protocol):
+    id: int
+    work_order_id: int
+    source_flow_node_id: str
+    rework_source_batch_id: int | None
+    submitted_quantity: int
+    rework_quantity: int | None
+    qualified_disposition: str | None
+    recorded_at: datetime | None
 
 
 __all__ = [
     "InventorySourceContext",
+    "InspectionBatchContext",
     "ProductionItemContext",
     "WorkOrderContext",
 ]

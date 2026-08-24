@@ -174,6 +174,7 @@ onMounted(load)
             </div>
             <p class="decomposition-note">将该产品的配件、装配体和成品库存统一换算；仅供查看，不会改变实际库存。</p>
             <ElTable
+              v-table-column-widths="'sales.inventory-decomposition'"
               :data="productDecomposition(group).parts"
               border
               stripe
@@ -187,6 +188,7 @@ onMounted(load)
           </ElPopover>
         </div>
         <ElTable
+          v-table-column-widths="'sales.plan-inventory'"
           :data="group.items"
           border
           stripe
@@ -226,7 +228,7 @@ onMounted(load)
             BOM 最多可满足 {{ plannedFinishedQuantity(group) }} 件
           </ElTag>
         </div>
-        <ElTable v-loading="loading" :data="group.items" border stripe table-layout="auto">
+        <ElTable v-table-column-widths="'sales.plan-items'" v-loading="loading" :data="group.items" border stripe table-layout="auto">
           <ElTableColumn prop="item_code" label="编号" min-width="130" />
           <ElTableColumn prop="item_name" label="配件" min-width="210" />
           <ElTableColumn prop="unit_requirement" label="单件用量" width="95" align="right" />

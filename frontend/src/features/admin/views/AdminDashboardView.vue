@@ -1,11 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import CustomerOrdersView from '@/features/customer-orders/views/CustomerOrdersView.vue'
-import OrderProgressDetailsView from '@/features/customer-orders/views/OrderProgressDetailsView.vue'
+import { CustomerOrdersView, OrderProgressDetailsView } from '@/features/customer-orders'
 import { useAuthStore } from '@/stores/auth'
 import AdminPageHeader from '../components/AdminPageHeader.vue'
-import WorkerOverview from '@/features/workers/components/WorkerOverview.vue'
+import { WorkerOverview } from '@/features/workers'
 import { useAdminWorkers } from '../composables/useAdminWorkers'
 
 const router = useRouter()

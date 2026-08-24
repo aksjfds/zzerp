@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
 import QcBatchCards from '../components/QcBatchCards.vue'
 import QcInspectionDialog from '../components/QcInspectionDialog.vue'
@@ -45,7 +45,7 @@ function applySearch() {
       description="录入工单质检结果，并决定合格品返回当前车间或放行下一节点。"
       @refresh="refresh"
     />
-    <DepartmentSectionTabs department-code="qc">
+    <DepartmentSectionTabs department-code="qc" show-inventory show-workers>
     <section class="qc-filter-bar">
       <ElInput
         v-model="searchText"

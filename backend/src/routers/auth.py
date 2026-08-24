@@ -2,7 +2,12 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response
 
 from auth_dependencies import get_optional_current_user, require_csrf
 from config import get_settings
-from schemas.user import LoginPayload
+from schemas.user import (
+    CurrentUserResponse,
+    LoginPayload,
+    LoginResponse,
+    MessageResponse,
+)
 from modules.identity.api import (
     authenticate_user,
     create_user_session,
@@ -14,7 +19,7 @@ router = APIRouter(tags=["auth"])
 settings = get_settings()
 
 
-@router.post("/login")
+@router.post("/login", response_model=LoginResponse)
 def login(payload: LoginPayload, response: Response):
     try:
         user = authenticate_user(
@@ -38,7 +43,11 @@ def login(payload: LoginPayload, response: Response):
     return {"data": user, "csrfToken": csrf_token}
 
 
-@router.get("/current_user")
+@router.get(
+    "/current_user",
+    response_model=CurrentUserResponse,
+    response_model_exclude_none=True,
+)
 def current_user(request: Request, user: dict | None = Depends(get_optional_current_user)):
     if user is None:
         return {"data": None}
@@ -46,7 +55,7 @@ def current_user(request: Request, user: dict | None = Depends(get_optional_curr
     return {"data": user, "csrfToken": csrf_token}
 
 
-@router.post("/logout")
+@router.post("/logout", response_model=MessageResponse)
 def logout(
     request: Request,
     response: Response,

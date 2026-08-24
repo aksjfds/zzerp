@@ -1,10 +1,11 @@
-export type UserDepartment = 'assembly' | 'business' | 'cnc' | 'engineering' | 'finished' | 'outsource' | 'pmc' | 'polish' | 'purchasing' | 'qc' | 'stamp' | 'sys' | 'warehouse'
+export type UserDepartment = 'assembly' | 'business' | 'cnc' | 'engineering' | 'finished' | 'outsource' | 'pmc' | 'polish' | 'purchasing' | 'qc' | 'stamp' | 'warehouse'
 
 export type UserProfile = {
   id: number
   username: string
   name: string
-  department: UserDepartment
+  department: UserDepartment | null
+  is_system: boolean
   role: string
   permissions: string[]
 }

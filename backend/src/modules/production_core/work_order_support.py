@@ -1,17 +1,14 @@
-from sqlalchemy import func, select
+from sqlalchemy import select
 
 from modules.engineering.model_api import ProductBom
-from domain.time import utc_now
 from modules.organization.model_api import Department, Workshop
-from modules.planning.model_api import ProductionPlan
-from modules.assembly.model_api import WorkOrderMaterial
 from modules.production_core.persistence import (
     ProductionItem,
-    ProductionMovement,
     Repository,
     WorkOrder,
+    WorkOrderMaterial,
 )
-from modules.sales.model_api import CustomerOrder, CustomerOrderItem
+from modules.sales.model_api import CustomerOrderItem
 from modules.errors import DomainError
 from modules.production_core.flow import (
     ProductionFlowContext,
@@ -82,13 +79,6 @@ def move_to_node(
     session.get(ProductionItem, production_item.id, with_for_update=True)
     department_id = target_department_id(session, node)
     if node.get("type") == "shipping":
-        from modules.inventory.finished_goods_api import register_pending_finished_goods
-        register_pending_finished_goods(
-            session,
-            production_item=production_item,
-            shipping_node_id=node["id"],
-            quantity=quantity,
-        )
         return department_id
     target = session.scalar(
         select(Repository)
@@ -122,109 +112,25 @@ def consume_repository(session, repository: Repository, quantity: int) -> None:
     if remaining_quantity < 0:
         raise DomainError("repository_quantity_insufficient", "当前库存数量不足")
     if remaining_quantity == 0:
-        # Older closed work orders/material allocations can still point at the
-        # same position after earlier partial consumption. Release every such
-        # reference before removing the exhausted row; immutable movements keep
-        # the historical source position.
-        referencing_orders = session.scalars(
-            select(WorkOrder)
+        referenced_by_order = session.scalar(
+            select(WorkOrder.id)
             .where(WorkOrder.repository_id == repository.id)
-            .with_for_update()
-        ).all()
-        referencing_materials = session.scalars(
-            select(WorkOrderMaterial)
+            .limit(1)
+        )
+        referenced_by_material = session.scalar(
+            select(WorkOrderMaterial.id)
             .where(WorkOrderMaterial.repository_id == repository.id)
-            .with_for_update()
-        ).all()
-        for order in referencing_orders:
-            order.repository_id = None
-        for material in referencing_materials:
-            material.repository_id = None
-        # Do not write quantity=0 because the repository check requires a
-        # positive value.
-        session.flush()
+            .limit(1)
+        )
+        if referenced_by_order is not None or referenced_by_material is not None:
+            raise DomainError(
+                "repository_reference_invariant",
+                "仓位仍被未消费的工单或装配物料引用，不能耗尽",
+                status_code=409,
+            )
         session.delete(repository)
     else:
         repository.quantity = remaining_quantity
-
-
-def mark_order_planned(session, production_item: ProductionItem) -> None:
-    order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
-    customer_order = session.get(CustomerOrder, order_item.customer_order_id)
-    session.refresh(customer_order, with_for_update=True)
-    if customer_order.status == "confirmed":
-        customer_order.status = "planned"
-        customer_order.revision += 1
-        customer_order.updated_at = utc_now()
-
-
-def ensure_production_plan_active(session, production_item: ProductionItem) -> None:
-    order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
-    plan = session.scalar(
-        select(ProductionPlan.id).where(
-            ProductionPlan.customer_order_id == order_item.customer_order_id,
-            ProductionPlan.status == "confirmed",
-        )
-    ) if order_item is not None else None
-    if plan is None:
-        raise DomainError(
-            "production_plan_not_active",
-            "生产计划尚未确认或已经取消，不能开工单",
-            status_code=409,
-        )
-
-
-def refresh_order_closed(
-    session,
-    production_item: ProductionItem,
-    actor_username: str = "system",
-) -> None:
-    from modules.inventory.finished_goods_api import transfer_order_finished_surplus
-
-    order_item = session.get(CustomerOrderItem, production_item.customer_order_item_id)
-    customer_order = session.get(CustomerOrder, order_item.customer_order_id)
-    session.refresh(customer_order, with_for_update=True)
-    if customer_order.status != "planned":
-        return
-
-    shipping_complete = all(
-        _order_item_shipping_complete(session, item)
-        for item in session.scalars(
-            select(CustomerOrderItem).where(
-                CustomerOrderItem.customer_order_id == customer_order.id
-            )
-        )
-    )
-    if shipping_complete:
-        transfer_order_finished_surplus(session, customer_order, actor_username)
-        customer_order.status = "closed"
-        customer_order.revision += 1
-        customer_order.updated_at = utc_now()
-
-
-def _order_item_shipping_complete(session, order_item: CustomerOrderItem) -> bool:
-    flow, nodes = load_product_flow(
-        session,
-        order_item.product_id,
-        order_item.product_version,
-    )
-    shipping_nodes = [node for node in nodes.values() if node.get("type") == "shipping"]
-    if len(shipping_nodes) != 1:
-        return False
-    shipping_node = shipping_nodes[0]
-    unit_quantity = terminal_unit_quantity(session, flow, nodes, shipping_node["id"])
-    if unit_quantity is None:
-        return False
-    shipped = session.scalar(
-        select(func.coalesce(func.sum(ProductionMovement.quantity), 0))
-        .join(ProductionItem, ProductionItem.id == ProductionMovement.production_item_id)
-        .where(
-            ProductionItem.customer_order_item_id == order_item.id,
-            ProductionMovement.movement_type == "customer_shipment",
-            ProductionMovement.target_flow_node_id == shipping_node["id"],
-        )
-    ) or 0
-    return int(shipped) >= order_item.quantity * unit_quantity
 
 
 def terminal_unit_quantity(session, flow: dict, nodes: dict[str, dict], node_id: str) -> int | None:
@@ -249,3 +155,34 @@ def terminal_unit_quantity(session, flow: dict, nodes: dict[str, dict], node_id:
     if source_type in {"process", "qc"}:
         return terminal_unit_quantity(session, flow, nodes, source_id)
     return None
+
+
+def shipping_node_and_unit_quantity(
+    session,
+    flow: dict,
+    nodes: dict[str, dict],
+) -> tuple[dict, int]:
+    shipping_nodes = [
+        node for node in nodes.values()
+        if node.get("type") == "shipping"
+    ]
+    if len(shipping_nodes) != 1:
+        raise DomainError(
+            "production_shipping_node_invalid",
+            "产品版本必须配置唯一的成品节点",
+            status_code=409,
+        )
+    shipping_node = shipping_nodes[0]
+    unit_quantity = terminal_unit_quantity(
+        session,
+        flow,
+        nodes,
+        shipping_node["id"],
+    )
+    if unit_quantity is None or unit_quantity <= 0:
+        raise DomainError(
+            "production_shipping_unit_invalid",
+            "产品版本无法确定有效的成品换算单位",
+            status_code=409,
+        )
+    return shipping_node, unit_quantity

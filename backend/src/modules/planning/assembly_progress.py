@@ -4,16 +4,16 @@ from collections import defaultdict
 from math import ceil
 
 from modules.engineering.model_api import ProductBom
-from modules.production_core.flow import assembly_material_key
+from modules.production_core.flow_api import assembly_material_key
 from modules.production_core.model_api import (
     ProductionItem,
     ProductionMovement,
     WorkOrder,
+    WorkOrderBatch,
 )
 from modules.production_core.operational_api import (
     calculate_assembly_output_progress,
 )
-from modules.quality.model_api import WorkOrderBatch
 
 
 def assembly_arrived_output_quantity(

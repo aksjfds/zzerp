@@ -2,6 +2,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
 from domain.models import BomItemCommand
+from domain.process_flow import validate_process_flow, validate_process_flow_draft
 from schemas.engineering import BomItemPayload, ProcessFlowPayload
 from modules.errors import DomainError
 
@@ -24,14 +25,10 @@ def bom_commands(items: list[BomItemPayload]) -> list[BomItemCommand]:
 
 
 def validated_flow(flow: ProcessFlowPayload, bom_ids: set[int]) -> dict:
-    from domain.process_flow import validate_process_flow
-
     return validate_process_flow(flow, bom_ids).model_dump(exclude_none=True)
 
 
 def validated_draft_flow(flow: ProcessFlowPayload, bom_ids: set[int]) -> dict:
-    from domain.process_flow import validate_process_flow_draft
-
     return validate_process_flow_draft(flow, bom_ids).model_dump(exclude_none=True)
 
 

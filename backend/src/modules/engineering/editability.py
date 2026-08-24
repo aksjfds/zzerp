@@ -1,41 +1,53 @@
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from modules.engineering.persistence import ProductBom
 from modules.errors import DomainError
-from modules.production_core.reference_api import has_production_items_for_boms
-from modules.sales.reference_api import (
-    has_product_reference,
-    has_product_version_reference,
-)
+from modules.engineering.collaboration_contract import EngineeringCollaborators
 
 
-def is_base_info_editable(session: Session, product_id: int) -> bool:
-    return not has_product_reference(session, product_id)
+def is_base_info_editable(
+    session: Session,
+    product_id: int,
+    collaborators: EngineeringCollaborators,
+) -> bool:
+    return not collaborators.has_product_reference(session, product_id)
 
 
 def is_product_version_in_order(
     session: Session,
     product_id: int,
     product_version: int,
+    collaborators: EngineeringCollaborators,
 ) -> bool:
-    return has_product_version_reference(session, product_id, product_version)
+    return collaborators.has_product_version_reference(session, product_id, product_version)
 
 
 def is_product_version_in_production(
     session: Session,
     product_id: int,
     product_version: int,
+    collaborators: EngineeringCollaborators,
 ) -> bool:
-    product_bom_ids = session.scalars(
-        select(ProductBom.id).where(
-            ProductBom.product_id == product_id,
-            ProductBom.product_version == product_version,
-        )
-    ).all()
-    return has_production_items_for_boms(
+    return collaborators.has_product_version_production_reference(
         session,
-        product_bom_ids,
+        product_id,
+        product_version,
+    )
+
+
+def is_product_version_node_referenced(
+    session: Session,
+    product_id: int,
+    product_version: int,
+    collaborators: EngineeringCollaborators,
+) -> bool:
+    return (
+        is_product_version_in_order(session, product_id, product_version, collaborators)
+        or is_product_version_in_production(session, product_id, product_version, collaborators)
+        or collaborators.has_product_version_inventory_reference(
+            session,
+            product_id,
+            product_version,
+        )
     )
 
 
@@ -43,20 +55,17 @@ def is_product_version_editable(
     session: Session,
     product_id: int,
     product_version: int,
+    collaborators: EngineeringCollaborators,
 ) -> bool:
-    return not is_product_version_in_order(
-        session,
-        product_id,
-        product_version,
-    ) and not is_product_version_in_production(
-        session,
-        product_id,
-        product_version,
-    )
+    return not is_product_version_node_referenced(session, product_id, product_version, collaborators)
 
 
-def ensure_base_info_editable(session: Session, product_id: int) -> None:
-    if not is_base_info_editable(session, product_id):
+def ensure_base_info_editable(
+    session: Session,
+    product_id: int,
+    collaborators: EngineeringCollaborators,
+) -> None:
+    if not is_base_info_editable(session, product_id, collaborators):
         raise DomainError(
             "product_info_in_use",
             "产品已被客户订单引用，基础信息不允许修改",
@@ -68,16 +77,11 @@ def ensure_product_version_editable(
     session: Session,
     product_id: int,
     product_version: int,
+    collaborators: EngineeringCollaborators,
 ) -> None:
-    if is_product_version_in_order(session, product_id, product_version):
+    if is_product_version_node_referenced(session, product_id, product_version, collaborators):
         raise DomainError(
             "product_version_in_use",
-            "当前产品版本已被客户订单引用，请创建新版本后修改",
-            status_code=409,
-        )
-    if is_product_version_in_production(session, product_id, product_version):
-        raise DomainError(
-            "product_version_in_production",
-            "当前产品版本已有生产记录，不能修改或删除",
+            "当前产品版本已被业务数据引用，请创建新版本后修改",
             status_code=409,
         )

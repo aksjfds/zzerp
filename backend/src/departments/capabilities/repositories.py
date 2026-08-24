@@ -1,5 +1,5 @@
 from departments.contracts import CAP_REPOSITORIES
-from modules.production_core import api as production
+from modules.planning import api as planning
 
 
 class RepositoryCapability:
@@ -12,7 +12,7 @@ class RepositoryCapability:
         work_status: str,
     ) -> tuple[list[dict], int]:
         self.require_capability(CAP_REPOSITORIES)
-        return production.list_production_cards(
+        return planning.list_production_cards(
             self.descriptor.code,
             page,
             page_size,

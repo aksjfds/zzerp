@@ -6,7 +6,7 @@ import type {
   WorkerHistoryItem,
   WorkerOverviewItem,
   WorkerPaySummary,
-} from '@/features/workers/domain/types'
+} from '@/features/workers'
 import {
   createDepartmentWorker,
   queryDepartmentWorkerHistory,

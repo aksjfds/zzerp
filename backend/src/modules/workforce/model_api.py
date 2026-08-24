@@ -1,4 +1,4 @@
-"""Read-only ORM type surface for workforce persistence."""
+"""Read-only query-model surface for workforce persistence."""
 
 from modules.workforce.persistence import Worker
 

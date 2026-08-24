@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from domain.models import BomItemCommand
 from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
+from modules.engineering.route_projection import rebuild_product_route_tasks
 from modules.sales.customer_api import customer_ids_matching_name
 
 
@@ -133,6 +134,12 @@ class EngineeringProductRepository:
         else:
             process_flow.flow_json = flow_json
             process_flow.draft_flow_json = None
+        rebuild_product_route_tasks(
+            self.session,
+            product_id=product.id,
+            product_version=product_version,
+            flow_json=flow_json,
+        )
 
     def set_process_flow_draft(
         self, product: Product, product_version: int, flow_json: dict

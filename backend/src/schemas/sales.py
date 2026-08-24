@@ -2,6 +2,14 @@ from datetime import date
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from schemas.common import (
+    CustomerOrderStatus,
+    FlowNodeType,
+    ProductionItemType,
+    ProductionPlanStatus,
+)
+from schemas.engineering import ProcessFlowPayload
+
 
 class SalesModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -39,30 +47,17 @@ class CustomerOrderItemResponse(SalesModel):
     remark: str
 
 
-class CustomerOrderProductProgress(SalesModel):
-    customer_order_item_id: int
-    product_id: int
-    product_name: str
-    factory_code: str
-    total_quantity: int
-    completed_quantity: int
-    scrap_quantity: int
-    lost_quantity: int
-    unfinished_quantity: int
-    po_shortage_quantity: int
-
-
 class CustomerOrderResponse(SalesModel):
     id: int
     customer_order_no: str
     customer_id: int
     customer_name: str
-    status: str
+    status: CustomerOrderStatus
+    production_plan_status: ProductionPlanStatus | None = None
     can_edit: bool
     revision: int
     remark: str
     items: list[CustomerOrderItemResponse]
-    product_progress: list[CustomerOrderProductProgress] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
@@ -110,7 +105,7 @@ class ProductionPlanUpdate(SalesModel):
 class ProductionPlanItemResponse(SalesModel):
     id: int
     customer_order_item_id: int
-    item_type: str
+    item_type: ProductionItemType
     product_id: int
     product_version: int
     product_bom_id: int | None
@@ -152,7 +147,7 @@ class ProductionPlanInventoryDecomposition(SalesModel):
 class ProductionPlanInventoryItem(SalesModel):
     id: int
     customer_order_item_id: int
-    item_type: str
+    item_type: ProductionItemType
     product_id: int
     product_version: int
     product_bom_id: int | None
@@ -169,16 +164,55 @@ class ProductionPlanInventoryItem(SalesModel):
 class ProductionPlanResponse(SalesModel):
     id: int
     customer_order_id: int
-    status: str
+    status: ProductionPlanStatus
     revision: int
     product_summaries: list[ProductionPlanProductSummary]
     items: list[ProductionPlanItemResponse]
     inventory_items: list[ProductionPlanInventoryItem]
     confirmed_at: str | None
     confirmed_by: str | None
+    completed_at: str | None
+    completed_by: str | None
     created_at: str
     updated_at: str
 
 
 class ProductionPlanEnvelope(SalesModel):
     data: ProductionPlanResponse
+
+
+class ProductionNodeStat(SalesModel):
+    flow_node_id: str
+    node_type: FlowNodeType
+    current_quantity: int
+    entered_quantity: int
+    transferred_quantity: int
+    abnormal_quantity: int
+    output_quantity: int
+    input_details: dict[str, int]
+
+
+class ProductionEdgeStat(SalesModel):
+    flow_edge_id: str
+    transferred_quantity: int
+
+
+class CustomerOrderProductProduction(SalesModel):
+    customer_order_item_id: int
+    product_name: str
+    factory_code: str
+    product_version: int
+    order_quantity: int
+    process_flow: ProcessFlowPayload
+    node_stats: list[ProductionNodeStat]
+    edge_stats: list[ProductionEdgeStat]
+
+
+class CustomerOrderProductionResponse(SalesModel):
+    customer_order_id: int
+    status: CustomerOrderStatus
+    products: list[CustomerOrderProductProduction]
+
+
+class CustomerOrderProductionEnvelope(SalesModel):
+    data: CustomerOrderProductionResponse

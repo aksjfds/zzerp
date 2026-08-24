@@ -13,7 +13,7 @@ import { useProductSaveActions, type FlowEditorApi } from '../composables/usePro
 import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
 import { useProductVersionLoader } from '../composables/useProductVersionLoader'
 import { useProductVersionActions } from '../composables/useProductVersionActions'
-import { queryCustomers, type Customer } from '@/features/customers/api/customers'
+import { queryCustomers, type Customer } from '@/features/customers'
 
 const route = useRoute()
 const router = useRouter()

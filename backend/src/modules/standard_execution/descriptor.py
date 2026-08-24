@@ -8,11 +8,18 @@ MODULE = ModuleDescriptor(
         "procedure_price",
         "work_order_pay_detail",
     ),
-    collaborates_with=("engineering", "production_core", "organization", "quality"),
+    collaborates_with=(
+        "engineering",
+        "inventory",
+        "production_core",
+        "organization",
+        "quality",
+    ),
     collaboration_apis=(
-        "modules.standard_execution.model_api",
         "modules.standard_execution.pay_reference_api",
+        "modules.standard_execution.procedure_api",
         "modules.standard_execution.pricing_api",
         "modules.standard_execution.qc_api",
+        "modules.standard_execution.reference_api",
     ),
 )

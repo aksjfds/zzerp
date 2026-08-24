@@ -68,4 +68,16 @@ def resolve_workshop_procedure(
     return procedure
 
 
-__all__ = ["load_procedure_context", "resolve_workshop_procedure"]
+def delete_procedure(session: Session, procedure_id: int) -> bool:
+    procedure = session.get(Procedure, procedure_id, with_for_update=True)
+    if procedure is None:
+        return False
+    session.delete(procedure)
+    return True
+
+
+__all__ = [
+    "delete_procedure",
+    "load_procedure_context",
+    "resolve_workshop_procedure",
+]

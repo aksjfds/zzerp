@@ -3,18 +3,9 @@ from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
 from domain.time import BUSINESS_TIMEZONE, utc_now
-from modules.engineering.product_reference_api import get_product_references
-from modules.engineering.model_api import Product
 from modules.sales.persistence import Customer
 from modules.sales.persistence import CustomerOrder
 from modules.sales.persistence import CustomerOrderItem
-from modules.planning.api import (
-    cancel_order_plan,
-    confirm_order_plan,
-    rebuild_order_plan,
-)
-from modules.planning.model_api import ProductionPlan, ProductionPlanItem
-from modules.planning.plan_builder import planned_product_quantity
 from modules.sales.order_support import (
     ensure_expected_revision,
     order_not_found,
@@ -24,22 +15,13 @@ from modules.sales.order_support import (
     serialize_order,
 )
 from modules.sales.repository import CustomerOrderRepository
+from modules.sales.collaboration_contract import SalesEngineeringPort, SalesProductionPort
+from modules.sales.planning_contract import OrderPlanState, SalesPlanningPort
 from schemas.sales import CustomerOrderCreate, CustomerOrderUpdate
 from modules.errors import DomainError
-from modules.production_core.persistence import ProductionItem, ProductionMovement
-from modules.production_core.operational_api import load_product_flow, terminal_unit_quantity
 
 
-def _order_plan(session, order_id: int, *, for_update: bool = False):
-    statement = select(ProductionPlan).where(
-        ProductionPlan.customer_order_id == order_id
-    )
-    if for_update:
-        statement = statement.with_for_update()
-    return session.scalar(statement)
-
-
-def _production_plan_started(plan: ProductionPlan | None) -> bool:
+def _production_plan_started(plan: OrderPlanState | None) -> bool:
     return plan is not None and plan.confirmed_at is not None
 
 
@@ -47,30 +29,33 @@ def list_orders(
     page: int,
     page_size: int,
     *,
-    include_progress: bool = False,
     statuses: set[str] | None = None,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+    production: SalesProductionPort,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         repository = CustomerOrderRepository(session)
         orders = repository.list((page - 1) * page_size, page_size, statuses)
         product_ids = {item.product_id for order in orders for item in order.items}
-        products = get_product_references(session, product_ids)
-        plans_by_order_id = {
-            plan.customer_order_id: plan
-            for plan in session.scalars(
-                select(ProductionPlan).where(
-                ProductionPlan.customer_order_id.in_([order.id for order in orders])
-            )
-            )
-        } if orders else {}
+        products = engineering.get_product_references(session, product_ids)
+        plans_by_order_id = planning.order_plan_states(
+            session,
+            {order.id for order in orders},
+        )
         return [
             serialize_order(
                 session,
                 item,
                 products,
-                include_progress=include_progress,
+                production=production,
                 production_plan_started=_production_plan_started(
                     plans_by_order_id.get(item.id)
+                ),
+                production_plan_status=(
+                    plans_by_order_id[item.id].status
+                    if item.id in plans_by_order_id
+                    else None
                 ),
             )
             for item in orders
@@ -81,6 +66,10 @@ def list_order_progress_details(
     page: int,
     page_size: int,
     customer_id: int | None = None,
+    *,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+    production: SalesProductionPort,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         condition = CustomerOrder.customer_id == customer_id if customer_id is not None else True
@@ -90,68 +79,41 @@ def list_order_progress_details(
             .where(condition)
         ) or 0
         statement = (
-            select(CustomerOrderItem, CustomerOrder, Product)
+            select(CustomerOrderItem, CustomerOrder)
             .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
-            .join(Product, Product.id == CustomerOrderItem.product_id)
             .where(condition)
             .order_by(CustomerOrder.created_at.desc(), CustomerOrder.id.desc(), CustomerOrderItem.id)
             .offset((page - 1) * page_size)
             .limit(page_size)
         )
         rows = session.execute(statement).all()
-        order_item_ids = [item.id for item, _order, _product in rows]
-        plan_items_by_order_item: dict[int, list[ProductionPlanItem]] = {}
-        if order_item_ids:
-            for plan_item in session.scalars(
-                select(ProductionPlanItem).where(
-                    ProductionPlanItem.customer_order_item_id.in_(order_item_ids)
-                )
-            ):
-                plan_items_by_order_item.setdefault(
-                    plan_item.customer_order_item_id,
-                    [],
-                ).append(plan_item)
-        planned_quantity_by_item = {
-            order_item_id: planned_product_quantity(plan_items)
-            for order_item_id, plan_items in plan_items_by_order_item.items()
-        }
-        shipped_raw_by_item = {
-            order_item_id: shipped_raw
-            for order_item_id, shipped_raw in session.execute(
-                select(
-                    ProductionItem.customer_order_item_id,
-                    func.coalesce(func.sum(ProductionMovement.quantity), 0),
-                )
-                .join(
-                    ProductionMovement,
-                    ProductionMovement.production_item_id == ProductionItem.id,
-                )
-                .where(
-                    ProductionItem.customer_order_item_id.in_(order_item_ids),
-                    ProductionMovement.movement_type == "customer_shipment",
-                )
-                .group_by(ProductionItem.customer_order_item_id)
-            )
-        } if order_item_ids else {}
+        order_item_ids = [item.id for item, _order in rows]
+        products = engineering.get_product_references(
+            session,
+            {item.product_id for item, _order in rows},
+        )
+        planned_quantity_by_item = planning.planned_product_quantities(
+            session,
+            order_item_ids,
+        )
+        shipped_raw_by_item = production.order_item_shipped_quantities(
+            session,
+            order_item_ids,
+        )
         data = []
-        for item, order, product in rows:
+        for item, order in rows:
+            product = products[item.product_id]
             shipped_raw = int(shipped_raw_by_item.get(item.id, 0))
-            unit_quantity = 1
-            try:
-                flow, nodes = load_product_flow(session, item.product_id, item.product_version)
-                shipping = next(
-                    (node for node in nodes.values() if node.get("type") == "shipping"),
-                    None,
-                )
-                if shipping is not None:
-                    unit_quantity = terminal_unit_quantity(
-                        session,
-                        flow,
-                        nodes,
-                        shipping["id"],
-                    ) or 1
-            except DomainError:
-                pass
+            flow, nodes = production.load_product_flow(
+                session,
+                item.product_id,
+                item.product_version,
+            )
+            _shipping_node, unit_quantity = production.shipping_node_and_unit_quantity(
+                session,
+                flow,
+                nodes,
+            )
             shipped_quantity = min(shipped_raw // unit_quantity, item.quantity)
             data.append({
                 "customer_order_id": order.id,
@@ -171,27 +133,47 @@ def list_order_progress_details(
         return data, total
 
 
-def get_order(order_id: int) -> dict:
+def get_order(
+    order_id: int,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+    production: SalesProductionPort,
+) -> dict:
     with SessionLocal() as session:
         order = CustomerOrderRepository(session).get(order_id)
         if order is None:
             raise order_not_found()
-        plan = _order_plan(session, order.id)
+        plan = planning.order_plan_state(session, order.id)
+        products = engineering.get_product_references(
+            session,
+            {item.product_id for item in order.items},
+        )
         return serialize_order(
             session,
             order,
+            products,
+            production=production,
             production_plan_started=_production_plan_started(plan),
         )
 
 
-def create_order(payload: CustomerOrderCreate) -> dict:
+def create_order(
+    payload: CustomerOrderCreate,
+    engineering: SalesEngineeringPort,
+    production: SalesProductionPort,
+) -> dict:
     try:
         with SessionLocal.begin() as session:
             repository = CustomerOrderRepository(session)
             customer = session.get(Customer, payload.customer_id)
             if customer is None:
                 raise DomainError("customer_not_found", "所选客户不存在", path="customer_id")
-            products = resolve_order_products(session, payload.items, customer.id)
+            products = resolve_order_products(
+                session,
+                payload.items,
+                customer.id,
+                engineering,
+            )
             order = CustomerOrder(
                 customer_order_no=payload.customer_order_no,
                 customer=customer,
@@ -200,20 +182,31 @@ def create_order(payload: CustomerOrderCreate) -> dict:
             repository.add(order)
             replace_order_items(order, payload.items, products)
             session.flush()
-            result = serialize_order(session, order)
+            result = serialize_order(
+                session,
+                order,
+                products,
+                production=production,
+            )
         return result
     except IntegrityError as exc:
         raise_order_integrity_error(exc)
 
 
-def update_order(order_id: int, payload: CustomerOrderUpdate) -> dict:
+def update_order(
+    order_id: int,
+    payload: CustomerOrderUpdate,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+    production: SalesProductionPort,
+) -> dict:
     try:
         with SessionLocal.begin() as session:
             repository = CustomerOrderRepository(session)
             order = repository.get_for_update(order_id)
             if order is None:
                 raise order_not_found()
-            plan = _order_plan(session, order.id, for_update=True)
+            plan = planning.order_plan_state(session, order.id, for_update=True)
             if order.status != "draft" and not (
                 order.status == "cancelled" and not _production_plan_started(plan)
             ):
@@ -223,13 +216,17 @@ def update_order(order_id: int, payload: CustomerOrderUpdate) -> dict:
                 )
             ensure_expected_revision(order, payload.expected_revision)
             if plan is not None:
-                session.delete(plan)
-                session.flush()
+                planning.delete_order_plan(session, order.id)
             target_customer_id = payload.customer_id or order.customer_id
             customer = session.get(Customer, target_customer_id)
             if customer is None:
                 raise DomainError("customer_not_found", "所选客户不存在", path="customer_id")
-            products = resolve_order_products(session, payload.items, customer.id)
+            products = resolve_order_products(
+                session,
+                payload.items,
+                customer.id,
+                engineering,
+            )
             if payload.customer_order_no is not None:
                 order.customer_order_no = payload.customer_order_no
             order.customer = customer
@@ -239,7 +236,12 @@ def update_order(order_id: int, payload: CustomerOrderUpdate) -> dict:
             order.revision += 1
             replace_order_items(order, payload.items, products)
             session.flush()
-            return serialize_order(session, order)
+            return serialize_order(
+                session,
+                order,
+                products,
+                production=production,
+            )
     except IntegrityError as exc:
         raise_order_integrity_error(exc)
 
@@ -250,6 +252,9 @@ def change_status(
     expected_revision: int,
     *,
     actor_username: str,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+    production: SalesProductionPort,
 ) -> dict:
     with SessionLocal.begin() as session:
         repository = CustomerOrderRepository(session)
@@ -260,11 +265,11 @@ def change_status(
         if target == "confirmed":
             if order.status != "draft":
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许确认")
-            rebuild_order_plan(session, order)
+            planning.rebuild_order_plan(session, order)
         elif target == "cancelled":
             if order.status not in {"draft", "confirmed", "planned"}:
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许取消")
-            cancel_order_plan(session, order, actor_username)
+            planning.cancel_order_plan(session, order, actor_username)
         else:
             raise DomainError("invalid_customer_order_status", "不支持的订单状态操作")
         order.status = target
@@ -274,8 +279,13 @@ def change_status(
         return serialize_order(
             session,
             order,
+            engineering.get_product_references(
+                session,
+                {item.product_id for item in order.items},
+            ),
+            production=production,
             production_plan_started=_production_plan_started(
-                _order_plan(session, order.id)
+                planning.order_plan_state(session, order.id)
             ),
         )
 
@@ -286,6 +296,9 @@ def confirm_production_plan(
     plan_expected_revision: int,
     *,
     actor_username: str,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+    production: SalesProductionPort,
 ) -> dict:
     with SessionLocal.begin() as session:
         repository = CustomerOrderRepository(session)
@@ -298,7 +311,7 @@ def confirm_production_plan(
                 "production_plan_order_not_confirmed",
                 "只有已确认客户订单的生产计划允许确认",
             )
-        confirm_order_plan(
+        planning.confirm_order_plan(
             session,
             order,
             expected_revision=plan_expected_revision,
@@ -308,7 +321,15 @@ def confirm_production_plan(
         order.updated_at = utc_now()
         order.revision += 1
         session.flush()
-        return serialize_order(session, order)
+        return serialize_order(
+            session,
+            order,
+            engineering.get_product_references(
+                session,
+                {item.product_id for item in order.items},
+            ),
+            production=production,
+        )
 
 
 def delete_order(order_id: int, expected_revision: int) -> None:

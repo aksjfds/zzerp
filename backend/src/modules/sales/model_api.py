@@ -1,4 +1,4 @@
-"""Read-only ORM type surface for sales persistence."""
+"""Read-only query-model surface for sales persistence."""
 
 from modules.sales.persistence import Customer, CustomerOrder, CustomerOrderItem
 

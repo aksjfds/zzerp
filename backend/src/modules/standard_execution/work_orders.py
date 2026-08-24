@@ -1,6 +1,8 @@
 from sqlalchemy import select
 
 from database import SessionLocal
+from domain.identity import can_access_department
+from domain.production_types import COMPLETION_QC, WorkOrderCompletionAction
 from modules.errors import DomainError
 from modules.organization.context_api import ProcedureContext
 from modules.organization.read_api import get_department_ids_by_codes, get_department_views_by_ids
@@ -15,16 +17,19 @@ from modules.production_core.operational_api import (
     process_qc_node,
     record_movement,
     record_undoable_operation,
-    refresh_order_closed,
     refresh_qc_work_order_closed,
     rework_pending_quantities,
     serialize_batch,
     serialize_work_order,
 )
 from modules.production_core.ownership_api import add_repository_quantity
-from modules.production_core.transaction_api import load_production_item_context, load_work_order_context
+from modules.production_core.transaction_api import (
+    load_production_item_context,
+    load_work_order_context,
+    record_work_order_submission,
+)
 from modules.quality.inspection_api import list_inspection_batches, load_inspection_batch
-from modules.quality.ownership_api import create_inspection_batch
+from modules.quality.submission_api import create_inspection_batch
 from modules.standard_execution.pricing_api import attach_work_order_price
 from modules.standard_execution.procedures import material_key, procedure_department_id
 
@@ -37,6 +42,8 @@ def create_standard_order(
     procedure: ProcedureContext,
     quantity: int,
     worker_id: int | None,
+    worker_name: str | None,
+    created_by: str,
     remark: str | None,
 ) -> WorkOrderContext:
     order = create_order_record(
@@ -46,6 +53,8 @@ def create_standard_order(
         procedure=procedure,
         quantity=quantity,
         worker_id=worker_id,
+        worker_name=worker_name,
+        created_by=created_by,
         work_order_type="standard",
         remark=remark,
     )
@@ -71,7 +80,7 @@ def submit_standard_order(
     procedure: ProcedureContext,
     node: dict,
     quantity: int,
-    completion_action: str,
+    completion_action: WorkOrderCompletionAction,
 ) -> dict:
     if order.procedure_id != procedure.id or source.flow_node_id != node["id"]:
         raise DomainError("work_order_context_invalid", "工单与当前物料或工艺不一致")
@@ -81,7 +90,7 @@ def submit_standard_order(
     context, _ = node_context(session, production_item, node["id"])
     department_id = procedure_department_id(session, procedure)
     batch = None
-    if completion_action == "qc":
+    if completion_action == COMPLETION_QC:
         qc_node = process_qc_node(context.flow, context.nodes, node["id"])
         if qc_node is None:
             raise DomainError("work_order_qc_not_configured", "当前车间节点后未配置QC节点")
@@ -92,7 +101,7 @@ def submit_standard_order(
             session,
             work_order_id=order.id,
             submitted_quantity=quantity,
-            source_flow_node_id=node["id"],
+            execution_flow_node_id=node["id"],
         )
         target_flow_node_id = qc_node["id"]
         target_department_id = qc_department_id
@@ -101,7 +110,7 @@ def submit_standard_order(
             session,
             production_item_id=production_item.id,
             flow_node_id=node["id"],
-            source_flow_node_id=node["id"],
+            execution_flow_node_id=node["id"],
             department_id=department_id,
             quantity=quantity,
             source_work_order_id=order.id,
@@ -117,22 +126,21 @@ def submit_standard_order(
         target_flow_node_id=target_flow_node_id,
         source_department_id=source.department_id,
         target_department_id=target_department_id,
-        work_order_id=order.id,
-        work_order_batch_id=batch.id if batch else None,
+        work_order=order,
+        work_order_batch=batch,
     )
-    order.completed_quantity += quantity
-    order.processed_quantity = order.completed_quantity
+    record_work_order_submission(order, quantity)
     consume_order_source(session, order, source, quantity)
     session.flush()
     refresh_qc_work_order_closed(session, order)
-    refresh_order_closed(session, production_item)
     return serialize_work_order(session, order)
 
 
 def resubmit_standard_rework_batch(
     source_batch_id: int,
     quantity: int,
-    user_department: str,
+    user_department: str | None,
+    user_is_system: bool,
     actor_username: str,
 ) -> dict:
     with SessionLocal.begin() as session:
@@ -161,7 +169,11 @@ def resubmit_standard_rework_batch(
             raise DomainError("procedure_not_found", "工单工艺不存在")
         department_id = procedure_department_id(session, procedure)
         department = next(iter(get_department_views_by_ids(session, {department_id})), None)
-        if department is None or user_department not in {"sys", department.department_code}:
+        if department is None or not can_access_department(
+            user_department,
+            user_is_system,
+            department.department_code,
+        ):
             raise DomainError("department_access_denied", "无权提交返工送检", status_code=403)
         qc_node = process_qc_node(
             node_context(session, production_item, node["id"])[0].flow,
@@ -175,7 +187,7 @@ def resubmit_standard_rework_batch(
             session,
             work_order_id=order.id,
             submitted_quantity=quantity,
-            source_flow_node_id=node["id"],
+            execution_flow_node_id=node["id"],
             rework_source_batch_id=source_batch.id,
         )
         record_movement(
@@ -187,8 +199,8 @@ def resubmit_standard_rework_batch(
             target_flow_node_id=qc_node["id"],
             source_department_id=department_id,
             target_department_id=qc_department_id,
-            work_order_id=order.id,
-            work_order_batch_id=batch.id,
+            work_order=order,
+            work_order_batch=batch,
         )
         session.flush()
         record_undoable_operation(

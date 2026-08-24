@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query
 
 from authorization import ensure_department_access, require_any_permission
 from departments.contracts import (
@@ -9,6 +11,10 @@ from departments.contracts import (
 from departments.registry import department_api
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from modules.organization.api import list_workshops_by_department_code
+from departments.warehouse_orchestration import (
+    list_closed_surplus_positions,
+    store_position_in_warehouse,
+)
 from schemas.production import (
     DepartmentProductionProgressEnvelope,
     DepartmentSurplusInventoryEnvelope,
@@ -38,9 +44,6 @@ def department_surplus_inventory(
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
-    if department_code == "qc":
-        return {"data": []}
-    from modules.production_core.warehouse_storage import list_closed_surplus_positions
     return {"data": list_closed_surplus_positions(department_code)}
 
 
@@ -54,7 +57,6 @@ def department_warehouse_storage(
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     ensure_department_access(user, department_code)
-    from modules.production_core.warehouse_storage import store_position_in_warehouse
     return store_position_in_warehouse(
         department_code,
         payload.production_item_id,
@@ -129,16 +131,18 @@ def department_repositories(
     page_size: int = Query(default=50, gt=0, le=10000),
     keyword: str | None = Query(default=None, max_length=200),
     workshop_name: str | None = Query(default=None, max_length=200),
-    work_status: str = Query(
-        default="all",
-        pattern=(
-            "^(all|unprocessed|processing|processing_completed|qc|rework|completed)$"
-        ),
-    ),
+    work_status: Literal[
+        "all",
+        "unprocessed",
+        "processing",
+        "processing_completed",
+        "qc",
+        "rework",
+        "completed",
+    ] = Query(default="all"),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
-    if user["department"] not in {"sys", department_code}:
-        raise HTTPException(status_code=403, detail="无权访问该部门")
+    ensure_department_access(user, department_code)
     data, total = department_api(
         department_code,
         CAP_REPOSITORIES,
@@ -160,8 +164,7 @@ def department_workers(
     department_code: str,
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
-    if user["department"] not in {"sys", department_code}:
-        raise HTTPException(status_code=403, detail="无权访问该部门")
+    ensure_department_access(user, department_code)
     return {
         "data": department_api(
             department_code,
@@ -198,14 +201,12 @@ def department_worker_history_get(
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
-    try:
-        data = department_api(
+    return {
+        "data": department_api(
             department_code,
             CAP_WORKERS,
         ).worker_history(worker_id, month)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"data": data}
+    }
 
 
 @router.get(
@@ -219,14 +220,12 @@ def department_worker_pay_get(
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
-    try:
-        data = department_api(
+    return {
+        "data": department_api(
             department_code,
             CAP_WORKERS,
         ).worker_pay_summary(worker_id, month)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"data": data}
+    }
 
 
 @router.post(

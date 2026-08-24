@@ -55,7 +55,7 @@ onMounted(() => store.loadProducts(page.value, pageSize))
         <ElInput v-model="keyword" clearable placeholder="搜索当前页的客户、产品或型号" />
         <span>当前页 {{ filteredProducts.length }} 个，共 {{ productTotal }} 个产品</span>
       </div>
-      <ElTable v-loading="loading" :data="filteredProducts" border table-layout="auto">
+      <ElTable v-table-column-widths="'engineering.products'" v-loading="loading" :data="filteredProducts" border table-layout="auto">
         <ElTableColumn prop="customer_name" label="客户" min-width="150" />
         <ElTableColumn prop="product_name" label="名称" min-width="190" />
         <ElTableColumn prop="factory_code" label="厂编" min-width="140" />

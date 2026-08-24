@@ -20,12 +20,14 @@ from modules.production_core.work_order_commands import (
     create_order_record,
 )
 from modules.production_core.work_order_presenters import (
+    ProductionItemDisplayContext,
     item_display,
     production_item_name,
     serialize_batch,
     serialize_work_order,
 )
 from modules.production_core.work_order_progress import (
+    can_close_production_work_order,
     calculate_assembly_output_progress,
     calculate_work_order_progress,
     order_remaining_quantity,
@@ -35,29 +37,27 @@ from modules.production_core.work_order_progress import (
 )
 from modules.production_core.work_order_support import (
     consume_repository,
-    ensure_production_plan_active,
-    mark_order_planned,
     move_to_node,
     node_context,
     production_item_unit_quantity,
-    refresh_order_closed,
+    shipping_node_and_unit_quantity,
     target_department_id,
     terminal_unit_quantity,
 )
 
 __all__ = [
     "InventorySource",
+    "ProductionItemDisplayContext",
+    "can_close_production_work_order",
     "calculate_assembly_output_progress",
     "calculate_work_order_progress",
     "capture_operation_state",
     "consume_order_source",
     "consume_repository",
-    "ensure_production_plan_active",
     "create_order_record",
     "item_display",
     "load_product_flow",
     "load_production_flow",
-    "mark_order_planned",
     "move_to_node",
     "node_context",
     "order_remaining_quantity",
@@ -66,12 +66,12 @@ __all__ = [
     "production_item_unit_quantity",
     "record_movement",
     "record_undoable_operation",
-    "refresh_order_closed",
     "refresh_qc_work_order_closed",
     "rework_pending_by_order",
     "rework_pending_quantities",
     "serialize_batch",
     "serialize_work_order",
+    "shipping_node_and_unit_quantity",
     "target_department_id",
     "terminal_unit_quantity",
 ]

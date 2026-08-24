@@ -1,10 +1,9 @@
 """Authoritative ownership of persisted tables in the modular monolith.
 
 Ownership means schema evolution and write invariants belong to one module.
-ORM definitions live in the owning module's ``persistence.py``. Other modules
-may use explicitly registered shared-database read access during migration,
-but new write APIs must be added to the owner instead of creating a second
-writer.
+ORM definitions live in the owning module's ``persistence.py``. Exceptional
+shared-database reads must be explicitly registered, while every write API
+must remain with the owner instead of creating a second writer.
 """
 
 
@@ -18,6 +17,7 @@ TABLE_OWNERS = {
     "product_version": "engineering",
     "product_bom": "engineering",
     "product_process_flow": "engineering",
+    "product_route_task": "engineering",
     "department": "organization",
     "workshop": "organization",
     "procedure": "organization",
@@ -27,17 +27,19 @@ TABLE_OWNERS = {
     "repository": "production_core",
     "work_order": "production_core",
     "work_order_pay_detail": "standard_execution",
-    "work_order_material": "assembly",
-    "work_order_batch": "quality",
+    "work_order_material": "production_core",
+    "work_order_batch": "production_core",
     "production_movement": "production_core",
     "production_operation_undo": "production_core",
     "production_plan": "planning",
     "production_plan_item": "planning",
+    "production_route_task": "planning",
     "inventory_stock": "inventory",
     "inventory_reservation": "inventory",
     "inventory_receipt": "inventory",
     "inventory_transaction": "inventory",
     "finished_order_stock": "inventory",
+    "finished_goods_transaction": "inventory",
 }
 
 

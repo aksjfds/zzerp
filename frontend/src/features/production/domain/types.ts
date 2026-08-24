@@ -1,3 +1,13 @@
+export type RepositoryWorkStatus =
+  | 'unprocessed'
+  | 'processing'
+  | 'processing_completed'
+  | 'qc'
+  | 'rework'
+  | 'completed'
+export type WorkOrderStatus = 'open' | 'closed' | 'cancelled'
+export type QcDisposition = 'return' | 'release'
+
 export type ProcedureOption = {
   id: number
   workshop_id: number
@@ -43,7 +53,7 @@ export type RepositoryItem = {
   assembly_output_name: string | null
   delivery_date: string
   arrived_at: string | null
-  work_status: 'unprocessed' | 'processing' | 'processing_completed' | 'qc' | 'rework' | 'completed'
+  work_status: RepositoryWorkStatus
   can_create_work_order: boolean
 }
 
@@ -71,7 +81,7 @@ export type DepartmentSurplusInventoryItem = {
 export type RepositoryFilters = {
   keyword: string
   workshop_name: string | null
-  work_status: 'all' | RepositoryItem['work_status']
+  work_status: 'all' | RepositoryWorkStatus
 }
 
 export type WorkOrderBatch = {
@@ -88,7 +98,7 @@ export type WorkOrderBatch = {
   qc_worker_id: number | null
   qc_worker_name: string | null
   defect_reason: string | null
-  qualified_disposition: 'return' | 'release' | null
+  qualified_disposition: QcDisposition | null
   recorded_at: string | null
 }
 
@@ -111,6 +121,7 @@ export type WorkOrder = {
   part_name: string
   procedure_name: string
   work_order_name: string
+  created_by: string
   remark: string
   worker_id: number | null
   worker_name: string | null
@@ -129,7 +140,7 @@ export type WorkOrder = {
   rework_quantity: number
   scrap_quantity: number
   lost_quantity: number
-  status: 'open' | 'closed' | 'cancelled'
+  status: WorkOrderStatus
   created_at: string
   closed_at: string | null
   batches: WorkOrderBatch[]
@@ -174,5 +185,5 @@ export type QcInspectionPayload = {
   scrap_quantity: number
   lost_quantity: number
   defect_reason: string
-  qualified_disposition: 'return' | 'release' | null
+  qualified_disposition: QcDisposition | null
 }

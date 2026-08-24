@@ -1,6 +1,11 @@
-import type { FlowNodeType, ProcessFlow } from '@/shared/process-flow/types'
+import type { ProcessFlow } from '@/shared/process-flow/types'
+import type {
+  ProductionEdgeStat,
+  ProductionNodeStat,
+} from '@/shared/process-flow/productionProgress'
 
 export type CustomerOrderStatus = 'draft' | 'confirmed' | 'planned' | 'cancelled' | 'closed'
+export type ProductionPlanStatus = 'draft' | 'confirmed' | 'cancelled' | 'completed'
 
 export type CustomerOrderItem = {
   id?: number
@@ -19,11 +24,11 @@ export type CustomerOrder = {
   customer_id: number
   customer_name: string
   status: CustomerOrderStatus
+  production_plan_status: ProductionPlan['status'] | null
   can_edit: boolean
   revision: number
   remark: string
   items: CustomerOrderItem[]
-  product_progress: CustomerOrderProductProgress[]
   created_at: string
   updated_at: string
 }
@@ -42,19 +47,6 @@ export type CustomerOrderProgressDetail = {
   outstanding_quantity: number
   delivery_date: string
   remark: string
-}
-
-export type CustomerOrderProductProgress = {
-  customer_order_item_id: number
-  product_id: number
-  product_name: string
-  factory_code: string
-  total_quantity: number
-  completed_quantity: number
-  scrap_quantity: number
-  lost_quantity: number
-  unfinished_quantity: number
-  po_shortage_quantity: number
 }
 
 export type CustomerOrderPayload = {
@@ -88,7 +80,7 @@ export type ProductionPlanItem = {
 export type ProductionPlan = {
   id: number
   customer_order_id: number
-  status: 'draft' | 'confirmed' | 'cancelled'
+  status: ProductionPlanStatus
   revision: number
   product_summaries: Array<{
     customer_order_item_id: number
@@ -126,24 +118,13 @@ export type ProductionPlan = {
   }>
   confirmed_at: string | null
   confirmed_by: string | null
+  completed_at: string | null
+  completed_by: string | null
   created_at: string
   updated_at: string
 }
 
-export type ProductionNodeStat = {
-  flow_node_id: string
-  node_type: FlowNodeType
-  current_quantity: number
-  entered_quantity: number
-  transferred_quantity: number
-  abnormal_quantity: number
-  output_quantity: number
-  input_details: Record<string, number>
-}
-export type ProductionEdgeStat = {
-  flow_edge_id: string
-  transferred_quantity: number
-}
+export type { ProductionEdgeStat, ProductionNodeStat }
 export type CustomerOrderProduction = {
   customer_order_id: number
   status: CustomerOrderStatus

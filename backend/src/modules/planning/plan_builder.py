@@ -9,13 +9,15 @@ from sqlalchemy.orm import Session
 from domain.time import utc_now
 from modules.engineering.model_api import Product, ProductBom, ProductProcessFlow
 from modules.errors import DomainError
-from modules.inventory.identity import component_identity_key
+from modules.inventory.identity_api import component_identity_key
 from modules.inventory.reservation_api import available_plan_item_quantities
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
+from modules.planning.route_projection import rebuild_plan_route_tasks
 
 
 @dataclass(frozen=True, slots=True)
 class PlannedIdentity:
+    customer_order_id: int
     customer_order_item_id: int
     identity_key: str
     item_type: str
@@ -71,6 +73,7 @@ def rebuild_order_plan(session: Session, order) -> ProductionPlan:
         plan.revision += 1
     plan.updated_at = utc_now()
     session.flush()
+    rebuild_plan_route_tasks(session, plan)
     return plan
 
 
@@ -201,6 +204,7 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
     base_sort = order_index * 10000
     finished_node = shipping_nodes[0]
     result = [PlannedIdentity(
+        customer_order_id=order_item.customer_order_id,
         customer_order_item_id=order_item.id,
         identity_key=component_identity_key(
             department_code="finished",
@@ -231,6 +235,7 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
         name = node.get("assembly_name") or node.get("output_name") or "装配体"
         unit_requirement = max(int(node.get("output_pcs") or 1), 1)
         result.append(PlannedIdentity(
+            customer_order_id=order_item.customer_order_id,
             customer_order_item_id=order_item.id,
             identity_key=component_identity_key(
                 department_code="warehouse",
@@ -265,6 +270,7 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
             )
         node = part_routes[0]
         result.append(PlannedIdentity(
+            customer_order_id=order_item.customer_order_id,
             customer_order_item_id=order_item.id,
             identity_key=component_identity_key(
                 department_code="warehouse",

@@ -112,6 +112,7 @@ class ProductBom(Base):
         ForeignKeyConstraint(
             ["product_id", "product_version"],
             ["product_version.product_id", "product_version.version"],
+            name="fk_product_bom_version",
             ondelete="CASCADE",
         ),
         UniqueConstraint(
@@ -178,12 +179,55 @@ class ProductProcessFlow(Base):
         ForeignKeyConstraint(
             ["product_id", "product_version"],
             ["product_version.product_id", "product_version.version"],
+            name="fk_product_process_flow_version",
             ondelete="CASCADE",
         ),
         UniqueConstraint(
             "product_id", "product_version", name="uq_product_process_flow_version"
         ),
         CheckConstraint("product_version > 0", name="ck_process_flow_version"),
+        CheckConstraint(
+            "jsonb_typeof(flow_json) = 'object'",
+            name="ck_process_flow_json_object",
+        ),
+        CheckConstraint(
+            "flow_json ? 'schema_version'",
+            name="ck_process_flow_schema_version_present",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(flow_json->'schema_version') = 'number'",
+            name="ck_process_flow_schema_version_type",
+        ),
+        CheckConstraint(
+            "flow_json->>'schema_version' = '4'",
+            name="ck_process_flow_schema_version",
+        ),
+        CheckConstraint("flow_json ? 'nodes'", name="ck_process_flow_nodes_present"),
+        CheckConstraint(
+            "jsonb_typeof(flow_json->'nodes') = 'array'",
+            name="ck_process_flow_nodes_type",
+        ),
+        CheckConstraint("flow_json ? 'edges'", name="ck_process_flow_edges_present"),
+        CheckConstraint(
+            "jsonb_typeof(flow_json->'edges') = 'array'",
+            name="ck_process_flow_edges_type",
+        ),
+        CheckConstraint(
+            "draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json) = 'object'",
+            name="ck_process_flow_draft_object",
+        ),
+        CheckConstraint(
+            "draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '4'",
+            name="ck_process_flow_draft_schema_version",
+        ),
+        CheckConstraint(
+            "draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json->'nodes') = 'array'",
+            name="ck_process_flow_draft_nodes",
+        ),
+        CheckConstraint(
+            "draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json->'edges') = 'array'",
+            name="ck_process_flow_draft_edges",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -212,3 +256,72 @@ class ProductProcessFlow(Base):
         server_default=text("CURRENT_TIMESTAMP"),
     )
     product: Mapped[Product] = relationship(back_populates="process_flows")
+
+
+class ProductRouteTask(Base):
+    __tablename__ = "product_route_task"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_id", "product_version"],
+            ["product_version.product_id", "product_version.version"],
+            name="fk_product_route_task_version",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["product_bom_id", "product_id", "product_version"],
+            ["product_bom.id", "product_bom.product_id", "product_bom.product_version"],
+            name="fk_product_route_task_bom_version",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "origin_node_type IN ('part', 'assembly')",
+            name="ck_product_route_task_origin_type",
+        ),
+        CheckConstraint(
+            "(origin_node_type = 'part' AND product_bom_id IS NOT NULL) OR "
+            "(origin_node_type = 'assembly' AND product_bom_id IS NULL)",
+            name="ck_product_route_task_origin_scope",
+        ),
+        CheckConstraint(
+            "route_node_type IN ('process', 'assembly')",
+            name="ck_product_route_task_node_type",
+        ),
+        CheckConstraint("route_order >= 0", name="ck_product_route_task_order"),
+        UniqueConstraint(
+            "product_id", "product_version", "origin_flow_node_id", "route_flow_node_id",
+            name="uq_product_route_task_origin_node",
+        ),
+        Index(
+            "idx_product_route_task_department_page",
+            "workshop_id", "product_id", "product_version", "origin_flow_node_id", "route_order",
+        ),
+        Index(
+            "idx_product_route_task_item_code_trgm",
+            "origin_item_code",
+            postgresql_using="gin",
+            postgresql_ops={"origin_item_code": "gin_trgm_ops"},
+        ),
+        Index(
+            "idx_product_route_task_item_name_trgm",
+            "origin_item_name",
+            postgresql_using="gin",
+            postgresql_ops={"origin_item_name": "gin_trgm_ops"},
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    product_bom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    origin_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_node_type: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_item_code: Mapped[str] = mapped_column(Text, nullable=False)
+    origin_item_name: Mapped[str] = mapped_column(Text, nullable=False)
+    route_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    route_node_type: Mapped[str] = mapped_column(Text, nullable=False)
+    workshop_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("workshop.id"),
+        nullable=False,
+    )
+    route_order: Mapped[int] = mapped_column(Integer, nullable=False)

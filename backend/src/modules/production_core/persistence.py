@@ -11,6 +11,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    String,
     Text,
     TIMESTAMP,
     UniqueConstraint,
@@ -45,6 +46,13 @@ class ProductionItem(Base):
             name="fk_production_item_bom_version",
         ),
         CheckConstraint("product_version > 0", name="ck_production_item_version"),
+        UniqueConstraint(
+            "id",
+            "customer_order_item_id",
+            "product_id",
+            "product_version",
+            name="uq_production_item_context",
+        ),
         Index("idx_production_item_order_item", "customer_order_item_id"),
         Index("idx_production_item_bom", "product_bom_id"),
     )
@@ -141,6 +149,11 @@ class WorkOrder(Base):
             name="ck_work_order_cancelled_quantity",
         ),
         CheckConstraint(
+            "(status = 'open' AND completed_quantity < quantity) "
+            "OR repository_id IS NULL",
+            name="ck_work_order_repository_lifecycle",
+        ),
+        CheckConstraint(
             "(work_order_type = 'assembly' AND procedure_id IS NOT NULL "
             "AND source_flow_node_id IS NOT NULL) OR "
             "(work_order_type = 'standard' AND procedure_id IS NOT NULL "
@@ -157,6 +170,7 @@ class WorkOrder(Base):
             ["repository.id", "repository.production_item_id"],
             name="fk_work_order_repository_item",
         ),
+        UniqueConstraint("work_order_no", name="uq_work_order_no"),
         Index(
             "idx_work_order_worker_activity",
             "worker_id",
@@ -165,6 +179,18 @@ class WorkOrder(Base):
         ),
         Index("idx_work_order_repository", "repository_id"),
         Index("idx_work_order_production_item", "production_item_id"),
+        Index(
+            "idx_work_order_no_trgm",
+            "work_order_no",
+            postgresql_using="gin",
+            postgresql_ops={"work_order_no": "gin_trgm_ops"},
+        ),
+        Index(
+            "idx_work_order_name_trgm",
+            "work_order_name",
+            postgresql_using="gin",
+            postgresql_ops={"work_order_name": "gin_trgm_ops"},
+        ),
         Index(
             "idx_work_order_repository_open",
             "repository_id",
@@ -180,7 +206,7 @@ class WorkOrder(Base):
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    work_order_no: Mapped[str | None] = mapped_column(Text, nullable=True, unique=True)
+    work_order_no: Mapped[str | None] = mapped_column(Text, nullable=True)
     repository_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     production_item_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("production_item.id"), nullable=False
@@ -192,10 +218,12 @@ class WorkOrder(Base):
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     work_order_name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(50), nullable=False)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
     worker_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("worker.id"), nullable=True
     )
+    worker_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     processed_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
@@ -204,6 +232,130 @@ class WorkOrder(Base):
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
     closed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+
+
+class WorkOrderMaterial(Base):
+    __tablename__ = "work_order_material"
+    __table_args__ = (
+        CheckConstraint("quantity > 0", name="ck_work_order_material_quantity"),
+        ForeignKeyConstraint(
+            ["repository_id", "production_item_id"],
+            ["repository.id", "repository.production_item_id"],
+            name="fk_work_order_material_repository_item",
+        ),
+        Index("idx_work_order_material_production_item", "production_item_id"),
+        Index("idx_work_order_material_repository", "repository_id"),
+        UniqueConstraint(
+            "work_order_id",
+            "repository_id",
+            name="uq_work_order_material_repository",
+        ),
+        UniqueConstraint(
+            "id",
+            "work_order_id",
+            "production_item_id",
+            name="uq_work_order_material_movement_context",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("work_order.id", ondelete="CASCADE"), nullable=False
+    )
+    repository_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    production_item_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("production_item.id"), nullable=False
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_previous_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_department_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("department.id"), nullable=False
+    )
+    source_work_order_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+
+class WorkOrderBatch(Base):
+    __tablename__ = "work_order_batch"
+    __table_args__ = (
+        CheckConstraint("submitted_quantity > 0", name="ck_batch_submitted_positive"),
+        CheckConstraint(
+            "qualified_quantity IS NULL OR qualified_quantity >= 0",
+            name="ck_batch_qualified",
+        ),
+        CheckConstraint(
+            "rework_quantity IS NULL OR rework_quantity >= 0",
+            name="ck_batch_rework",
+        ),
+        CheckConstraint(
+            "scrap_quantity IS NULL OR scrap_quantity >= 0",
+            name="ck_batch_scrap",
+        ),
+        CheckConstraint(
+            "lost_quantity IS NULL OR lost_quantity >= 0",
+            name="ck_batch_lost",
+        ),
+        CheckConstraint(
+            "(recorded_at IS NULL AND qualified_quantity IS NULL "
+            "AND rework_quantity IS NULL AND scrap_quantity IS NULL "
+            "AND lost_quantity IS NULL AND qc_worker_id IS NULL "
+            "AND qc_worker_name IS NULL AND qualified_disposition IS NULL) OR "
+            "(recorded_at IS NOT NULL AND qualified_quantity IS NOT NULL "
+            "AND rework_quantity IS NOT NULL AND scrap_quantity IS NOT NULL "
+            "AND lost_quantity IS NOT NULL AND qc_worker_id IS NOT NULL "
+            "AND qc_worker_name IS NOT NULL "
+            "AND ((qualified_quantity = 0 AND qualified_disposition IS NULL) "
+            "OR (qualified_quantity > 0 AND qualified_disposition IN ('return', 'release'))) "
+            "AND qualified_quantity + rework_quantity + scrap_quantity "
+            "+ lost_quantity = submitted_quantity)",
+            name="ck_batch_inspection_complete",
+        ),
+        UniqueConstraint("id", "work_order_id", name="uq_work_order_batch_id_order"),
+        ForeignKeyConstraint(
+            ["rework_source_batch_id", "work_order_id"],
+            ["work_order_batch.id", "work_order_batch.work_order_id"],
+            name="fk_work_order_batch_rework_source",
+        ),
+        Index("idx_work_order_batch_order", "work_order_id"),
+        Index("idx_work_order_batch_rework_source", "rework_source_batch_id"),
+        Index(
+            "idx_work_order_batch_pending",
+            text("id DESC"),
+            "work_order_id",
+            postgresql_where=text("recorded_at IS NULL"),
+        ),
+        Index(
+            "idx_work_order_batch_history",
+            text("id DESC"),
+            postgresql_where=text("recorded_at IS NOT NULL"),
+        ),
+        Index(
+            "idx_work_order_batch_qc_worker_recorded",
+            "qc_worker_id",
+            text("recorded_at DESC"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("work_order.id", ondelete="CASCADE"), nullable=False
+    )
+    submitted_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    rework_source_batch_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    qualified_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    rework_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    scrap_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    lost_quantity: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    qc_worker_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("worker.id"), nullable=True
+    )
+    qc_worker_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    defect_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qualified_disposition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recorded_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
 
 
 class ProductionMovement(Base):
@@ -256,10 +408,26 @@ class ProductionMovement(Base):
             "AND work_order_batch_id IS NOT NULL)",
             name="ck_production_movement_context",
         ),
+        CheckConstraint(
+            "(movement_type IN ('assembly_input', 'assembly_input_restore') "
+            "AND work_order_material_id IS NOT NULL) OR "
+            "(movement_type NOT IN ('assembly_input', 'assembly_input_restore') "
+            "AND work_order_material_id IS NULL)",
+            name="ck_production_movement_assembly_material",
+        ),
         ForeignKeyConstraint(
             ["work_order_batch_id", "work_order_id"],
             ["work_order_batch.id", "work_order_batch.work_order_id"],
             name="fk_production_movement_batch_order",
+        ),
+        ForeignKeyConstraint(
+            ["work_order_material_id", "work_order_id", "production_item_id"],
+            [
+                "work_order_material.id",
+                "work_order_material.work_order_id",
+                "work_order_material.production_item_id",
+            ],
+            name="fk_production_movement_assembly_material_context",
         ),
         Index(
             "idx_production_movement_item_created",
@@ -294,10 +462,14 @@ class ProductionMovement(Base):
         ),
         Index(
             "uq_production_movement_assembly_input",
-            "work_order_id",
-            "production_item_id",
+            "work_order_material_id",
             unique=True,
             postgresql_where=text("movement_type = 'assembly_input'"),
+        ),
+        Index(
+            "idx_production_movement_assembly_material",
+            "work_order_material_id",
+            postgresql_where=text("work_order_material_id IS NOT NULL"),
         ),
         Index(
             "idx_production_movement_source_department",
@@ -334,6 +506,7 @@ class ProductionMovement(Base):
         BigInteger, ForeignKey("work_order.id"), nullable=True
     )
     work_order_batch_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    work_order_material_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )

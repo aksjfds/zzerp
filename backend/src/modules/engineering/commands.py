@@ -5,9 +5,14 @@ from database import SessionLocal
 from domain.engineering_products import validate_bom_identity, validate_expected_revision
 from domain.time import utc_now
 from modules.engineering.command_support import command_result, ensure_version_exists
+from modules.engineering.collaboration_contract import EngineeringCollaborators
 from modules.engineering.editability import (
     ensure_base_info_editable,
     ensure_product_version_editable,
+)
+from modules.engineering.flow_identity import (
+    ensure_priced_bom_items_retained,
+    ensure_priced_flow_node_identities_preserved,
 )
 from modules.engineering.flow_mapping import synchronize_part_metadata
 from modules.engineering.persistence import Product, ProductVersion
@@ -151,7 +156,11 @@ def create_product(payload: CreateProductPayload) -> dict:
         raise_integrity_error(exc)
 
 
-def update_product_info(product_id: int, payload: UpdateProductPayload) -> dict:
+def update_product_info(
+    product_id: int,
+    payload: UpdateProductPayload,
+    collaborators: EngineeringCollaborators,
+) -> dict:
     try:
         with SessionLocal.begin() as session:
             repository = EngineeringProductRepository(session)
@@ -174,7 +183,7 @@ def update_product_info(product_id: int, payload: UpdateProductPayload) -> dict:
             )
             if unchanged:
                 return command_result(repository, product)
-            ensure_base_info_editable(session, product.id)
+            ensure_base_info_editable(session, product.id, collaborators)
             if product.factory_code != payload.factory_code:
                 for flow_record in product.process_flows:
                     version_bom = {
@@ -210,6 +219,7 @@ def replace_product_bom(
     expected_revision: int,
     product_version: int,
     items: list[BomItemPayload],
+    collaborators: EngineeringCollaborators,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -220,7 +230,7 @@ def replace_product_bom(
             session.refresh(product, with_for_update=True)
             validate_expected_revision(product.revision, expected_revision)
             ensure_version_exists(product, product_version)
-            ensure_product_version_editable(session, product.id, product_version)
+            ensure_product_version_editable(session, product.id, product_version, collaborators)
             commands = bom_commands(items)
             retained_ids = validate_bom_identity(
                 commands,
@@ -229,6 +239,13 @@ def replace_product_bom(
                     for item in product.bom_items
                     if item.product_version == product_version
                 },
+            )
+            ensure_priced_bom_items_retained(
+                session,
+                product_id=product.id,
+                product_version=product_version,
+                retained_bom_ids=retained_ids,
+                collaborators=collaborators,
             )
             current_flow = None
             process_flow_record = next(
@@ -270,6 +287,7 @@ def update_product_process_flow(
     expected_revision: int,
     product_version: int,
     process_flow: ProcessFlowPayload,
+    collaborators: EngineeringCollaborators,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -280,7 +298,7 @@ def update_product_process_flow(
             session.refresh(product, with_for_update=True)
             validate_expected_revision(product.revision, expected_revision)
             ensure_version_exists(product, product_version)
-            ensure_product_version_editable(session, product.id, product_version)
+            ensure_product_version_editable(session, product.id, product_version, collaborators)
             flow = synchronize_part_metadata(
                 process_flow,
                 {
@@ -297,6 +315,22 @@ def update_product_process_flow(
                     for item in product.bom_items
                     if item.product_version == product_version
                 },
+            )
+            current_flow_record = next(
+                (
+                    item
+                    for item in product.process_flows
+                    if item.product_version == product_version
+                ),
+                None,
+            )
+            ensure_priced_flow_node_identities_preserved(
+                session,
+                product_id=product.id,
+                product_version=product_version,
+                current_flow=(current_flow_record.flow_json if current_flow_record else {}),
+                proposed_flow=validated,
+                collaborators=collaborators,
             )
             _ensure_workshops_exist(session, flow)
             _validate_flow_departments_and_workshops(session, flow)
@@ -320,6 +354,7 @@ def save_product_process_flow_draft(
     expected_revision: int,
     product_version: int,
     process_flow: ProcessFlowPayload,
+    collaborators: EngineeringCollaborators,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -330,7 +365,7 @@ def save_product_process_flow_draft(
             session.refresh(product, with_for_update=True)
             validate_expected_revision(product.revision, expected_revision)
             ensure_version_exists(product, product_version)
-            ensure_product_version_editable(session, product.id, product_version)
+            ensure_product_version_editable(session, product.id, product_version, collaborators)
             bom_items = {
                 item.id: (item.part_name, item.part_no)
                 for item in product.bom_items

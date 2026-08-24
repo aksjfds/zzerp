@@ -26,7 +26,7 @@ export function useProductionWorkOrderActions(
         `工单 ${item.work_order_no} · 整单送检`,
         { confirmButtonText: '全部送检', cancelButtonText: '取消' },
       )
-      await submitWorkOrder(item.id, quantity, 'qc')
+      await submitWorkOrder(item.id, 'qc')
       await onChanged()
       ElMessage.success('已送 QC 检验')
     } catch (error) {

@@ -67,7 +67,7 @@ export function createDirectResultAction(
           cancelButtonText: '取消',
         },
       )
-      await submitWorkOrder(item.id, available, 'direct')
+      await submitWorkOrder(item.id, 'direct')
       await onChanged()
       ElMessage.success('工单结果已确认')
     } catch (error) {

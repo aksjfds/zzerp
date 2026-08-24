@@ -1,6 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
-from authorization import require_any_permission
+from authorization import ensure_department_access, require_any_permission
 from domain.permissions import QC_INSPECT
 from schemas.production import (
     PendingQcListEnvelope,
@@ -24,8 +24,7 @@ def pending_qc_batches(
     keyword: str | None = Query(default=None, max_length=200),
     user: dict = Depends(require_any_permission(QC_INSPECT)),
 ):
-    if user["department"] not in {"sys", "qc"}:
-        raise HTTPException(status_code=403, detail="只有 QC 可以查看质检批次")
+    ensure_department_access(user, "qc")
     data, total = qc_department.list_qc_batches(
         page,
         page_size,
@@ -45,12 +44,12 @@ def qc_batch_inspect(
     payload: QcInspection,
     user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
 ):
-    if user["department"] not in {"sys", "qc"}:
-        raise HTTPException(status_code=403, detail="只有 QC 可以录入质检结果")
+    ensure_department_access(user, "qc")
     return {
         "data": qc_department.inspect_qc_batch(
             batch_id,
             payload,
             user["department"],
+            user["is_system"],
         )
     }

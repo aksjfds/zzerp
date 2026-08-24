@@ -1,12 +1,26 @@
 from collections import defaultdict
 
-from sqlalchemy import select, update
+from sqlalchemy import func, or_, select, update
 
 from database import SessionLocal
-from modules.engineering.pricing_api import get_product_pricing_view, list_current_product_pricing_views
+from domain.identity import can_access_department
+from modules.engineering.model_api import Product, ProductBom, ProductRouteTask
+from modules.engineering.pricing_api import get_product_pricing_view
 from modules.errors import DomainError
-from modules.organization.persistence import Department, Procedure, Workshop
-from modules.production_core.persistence import ProductionItem, WorkOrder
+from modules.organization.read_api import (
+    DepartmentView,
+    ProcedureRoute,
+    get_department_procedure_routes,
+    get_department_views_by_codes,
+    get_workshop_views,
+)
+from modules.organization.transaction_api import delete_procedure, resolve_workshop_procedure
+from modules.production_core.reference_api import (
+    has_standard_execution_order,
+    has_work_order_for_procedure,
+    list_standard_execution_config_keys,
+    list_standard_execution_order_ids,
+)
 from modules.standard_execution.persistence import ProcedurePrice, WorkOrderPayDetail
 from schemas.procedure_prices import ProcedurePriceUpdate
 
@@ -54,57 +68,77 @@ def list_procedure_prices(
     page: int,
     page_size: int,
     keyword: str | None,
-    user_department: str,
+    user_department: str | None,
+    user_is_system: bool,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
-        department = _department(session, department_code, user_department)
+        department = _department(
+            session,
+            department_code,
+            user_department,
+            user_is_system,
+        )
         workshops = {
-            item.id: item for item in session.scalars(
-                select(Workshop).where(Workshop.department_id == department.id)
-                .order_by(Workshop.workshop_name, Workshop.id)
+            item.id: item
+            for item in get_workshop_views(
+                session,
+                department_ids={department.id},
             )
         }
-        value = (keyword or "").strip().lower()
-        candidates: list[dict] = []
-        seen: set[tuple[int, int, str, str]] = set()
-        for product in list_current_product_pricing_views(session):
-            boms = {bom.id: bom for bom in product.boms}
-            for origin in (product.flow_json or {}).get("nodes", []):
-                if origin.get("type") not in {"part", "assembly"}:
-                    continue
-                bom = boms.get(origin.get("bom_item_id")) if origin.get("type") == "part" else None
-                if origin.get("type") == "part" and bom is None:
-                    continue
-                origin_id = str(origin.get("id") or "")
-                part_name = bom.part_name if bom else (origin.get("output_name") or origin.get("label") or "装配体")
-                part_no = bom.part_no if bom else part_name
-                searchable = " ".join((product.product_name, product.factory_code, part_name, part_no)).lower()
-                if value and value not in searchable:
-                    continue
-                for node in _reachable_workshop_nodes(product.flow_json or {}, origin_id):
-                    workshop = workshops.get(node.get("workshop_id"))
-                    if workshop is None:
-                        continue
-                    key = (product.product_id, product.product_version, origin_id, str(node["id"]))
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    candidates.append({
-                        "product": product, "bom": bom, "origin_id": origin_id,
-                        "flow_node_id": str(node["id"]), "workshop": workshop,
-                        "part_name": part_name, "part_no": part_no,
-                    })
-        total = len(candidates)
-        selected = candidates[(page - 1) * page_size:page * page_size]
+        workshop_ids_for_department = set(workshops)
+        candidate = (
+            select(ProductRouteTask, Product, ProductBom)
+            .join(Product, Product.id == ProductRouteTask.product_id)
+            .outerjoin(ProductBom, ProductBom.id == ProductRouteTask.product_bom_id)
+            .where(
+                ProductRouteTask.workshop_id.in_(workshop_ids_for_department),
+                Product.version == ProductRouteTask.product_version,
+            )
+        )
+        value = (keyword or "").strip()
+        if value:
+            pattern = f"%{value}%"
+            candidate = candidate.where(or_(
+                Product.product_name.ilike(pattern),
+                Product.factory_code.ilike(pattern),
+                ProductRouteTask.origin_item_name.ilike(pattern),
+                ProductRouteTask.origin_item_code.ilike(pattern),
+            ))
+        total = session.scalar(
+            select(func.count()).select_from(candidate.order_by(None).subquery())
+        ) or 0
+        candidate_rows = list(session.execute(
+            candidate
+            .order_by(
+                Product.updated_at.desc(),
+                Product.id.desc(),
+                ProductRouteTask.origin_flow_node_id,
+                ProductRouteTask.route_order,
+                ProductRouteTask.id,
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ))
+        selected = [
+            {
+                "product": product,
+                "bom": bom,
+                "origin_id": route.origin_flow_node_id,
+                "flow_node_id": route.route_flow_node_id,
+                "workshop": workshops[route.workshop_id],
+                "part_name": route.origin_item_name,
+                "part_no": route.origin_item_code,
+            }
+            for route, product, bom in candidate_rows
+        ]
         workshop_ids = {item["workshop"].id for item in selected}
-        procedures_by_workshop: dict[int, list[Procedure]] = defaultdict(list)
+        procedures_by_workshop: dict[int, list[ProcedureRoute]] = defaultdict(list)
         if workshop_ids:
-            for procedure in session.scalars(
-                select(Procedure).where(Procedure.workshop_id.in_(workshop_ids))
-                .order_by(Procedure.procedure_name, Procedure.id)
-            ):
+            for procedure in get_department_procedure_routes(session, department.id):
+                if procedure.workshop_id not in workshop_ids:
+                    continue
                 procedures_by_workshop[procedure.workshop_id].append(procedure)
-        product_ids = {item["product"].product_id for item in selected}
+        product_ids = {item["product"].id for item in selected}
         prices = list(session.scalars(
             select(ProcedurePrice).where(ProcedurePrice.product_id.in_(product_ids))
         )) if product_ids else []
@@ -112,13 +146,16 @@ def list_procedure_prices(
             (item.product_id, item.product_version, item.material_key, item.flow_node_id, item.procedure_id): item.unit_price
             for item in prices
         }
-        referenced = set(session.execute(
-            select(
-                ProductionItem.product_id, ProductionItem.product_version,
-                ProductionItem.origin_flow_node_id, WorkOrder.flow_node_id, WorkOrder.procedure_id,
-            ).join(WorkOrder, WorkOrder.production_item_id == ProductionItem.id)
-            .where(ProductionItem.product_id.in_(product_ids))
-        )) if product_ids else set()
+        procedure_ids = {
+            procedure.id
+            for procedures in procedures_by_workshop.values()
+            for procedure in procedures
+        }
+        referenced = list_standard_execution_config_keys(
+            session,
+            product_ids,
+            procedure_ids,
+        )
         data: list[dict] = []
         for item in selected:
             product, bom = item["product"], item["bom"]
@@ -126,8 +163,8 @@ def list_procedure_prices(
             material_key = _material_key(bom.id if bom else None, origin_id)
             procedure_data = []
             for procedure in procedures_by_workshop[item["workshop"].id]:
-                ref_key = (product.product_id, product.product_version, origin_id, flow_node_id, procedure.id)
-                price_key = (product.product_id, product.product_version, material_key, flow_node_id, procedure.id)
+                ref_key = (product.id, product.version, origin_id, flow_node_id, procedure.id)
+                price_key = (product.id, product.version, material_key, flow_node_id, procedure.id)
                 if price_key not in price_by_scope and ref_key not in referenced:
                     continue
                 procedure_data.append({
@@ -137,7 +174,7 @@ def list_procedure_prices(
                     "referenced": ref_key in referenced,
                 })
             data.append({
-                "product_id": product.product_id, "product_version": product.product_version,
+                "product_id": product.id, "product_version": product.version,
                 "product_name": product.product_name, "factory_code": product.factory_code,
                 "product_bom_id": bom.id if bom else None,
                 "origin_flow_node_id": origin_id, "flow_node_id": flow_node_id,
@@ -156,10 +193,16 @@ def update_procedure_price(
     origin_flow_node_id: str,
     flow_node_id: str,
     payload: ProcedurePriceUpdate,
-    user_department: str,
+    user_department: str | None,
+    user_is_system: bool,
 ) -> None:
     with SessionLocal.begin() as session:
-        department = _department(session, department_code, user_department)
+        department = _department(
+            session,
+            department_code,
+            user_department,
+            user_is_system,
+        )
         product = get_product_pricing_view(session, product_id, product_version)
         if product is None:
             raise DomainError("product_version_not_found", "产品版本不存在", status_code=404)
@@ -168,7 +211,10 @@ def update_procedure_price(
         reachable_ids = {str(item.get("id")) for item in _reachable_workshop_nodes(product.flow_json or {}, origin_flow_node_id)}
         if origin is None or node is None or flow_node_id not in reachable_ids:
             raise DomainError("procedure_price_route_invalid", "当前物料不经过该车间节点")
-        workshop = session.get(Workshop, node.get("workshop_id"), with_for_update=True)
+        workshop = next(iter(get_workshop_views(
+            session,
+            workshop_ids={node.get("workshop_id")},
+        )), None)
         if workshop is None or workshop.department_id != department.id:
             raise DomainError("procedure_price_workshop_invalid", "当前车间不属于该部门")
         bom_id = origin.get("bom_item_id") if origin.get("type") == "part" else None
@@ -179,6 +225,13 @@ def update_procedure_price(
             else "standard"
         )
         expected_input_mode = "multiple" if node.get("type") == "assembly" else "single"
+        scoped_order_ids = list_standard_execution_order_ids(
+            session,
+            product_id=product_id,
+            product_version=product_version,
+            origin_flow_node_id=origin_flow_node_id,
+            flow_node_id=flow_node_id,
+        )
         normalized: dict[str, tuple[int | None, object]] = {}
         for item in payload.procedures:
             name = item.procedure_name.strip()
@@ -196,20 +249,14 @@ def update_procedure_price(
         existing_by_procedure = {item.procedure_id: item for item in existing_prices}
         retained_ids: set[int] = set()
         for name, (procedure_id, unit_price) in normalized.items():
-            procedure = session.get(Procedure, procedure_id, with_for_update=True) if procedure_id else None
-            if procedure is None:
-                procedure = session.scalar(select(Procedure).where(
-                    Procedure.workshop_id == workshop.id,
-                    Procedure.procedure_name == name,
-                ).with_for_update())
-            if procedure is None:
-                procedure = Procedure(
-                    workshop_id=workshop.id, procedure_name=name,
-                    procedure_type=expected_type,
-                    input_mode=expected_input_mode,
-                )
-                session.add(procedure)
-                session.flush()
+            procedure = resolve_workshop_procedure(
+                session,
+                workshop_id=workshop.id,
+                procedure_id=procedure_id,
+                procedure_name=name if procedure_id is None else None,
+                input_mode=expected_input_mode,
+                procedure_type=expected_type,
+            )
             if (
                 procedure.workshop_id != workshop.id
                 or procedure.procedure_name != name
@@ -227,45 +274,47 @@ def update_procedure_price(
                 ))
             else:
                 price.unit_price = unit_price
-            session.execute(update(WorkOrderPayDetail).where(
-                WorkOrderPayDetail.procedure_id == procedure.id,
-                WorkOrderPayDetail.work_order_id.in_(
-                    select(WorkOrder.id).join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id).where(
-                        ProductionItem.product_id == product_id,
-                        ProductionItem.product_version == product_version,
-                        ProductionItem.origin_flow_node_id == origin_flow_node_id,
-                        WorkOrder.flow_node_id == flow_node_id,
-                    )
-                ),
-            ).values(unit_price=unit_price))
+            if scoped_order_ids:
+                session.execute(update(WorkOrderPayDetail).where(
+                    WorkOrderPayDetail.procedure_id == procedure.id,
+                    WorkOrderPayDetail.work_order_id.in_(scoped_order_ids),
+                ).values(unit_price=unit_price))
         for price in existing_prices:
             if price.procedure_id in retained_ids:
                 continue
-            referenced = session.scalar(select(WorkOrder.id).join(
-                ProductionItem, ProductionItem.id == WorkOrder.production_item_id
-            ).where(
-                ProductionItem.product_id == product_id,
-                ProductionItem.product_version == product_version,
-                ProductionItem.origin_flow_node_id == origin_flow_node_id,
-                WorkOrder.flow_node_id == flow_node_id,
-                WorkOrder.procedure_id == price.procedure_id,
-            ).limit(1))
-            if referenced is not None:
+            if has_standard_execution_order(
+                session,
+                product_id=product_id,
+                product_version=product_version,
+                origin_flow_node_id=origin_flow_node_id,
+                flow_node_id=flow_node_id,
+                procedure_id=price.procedure_id,
+            ):
                 raise DomainError("procedure_referenced", "已被工单引用的工艺不能删除")
-            procedure = session.get(Procedure, price.procedure_id, with_for_update=True)
+            procedure_id = price.procedure_id
             session.delete(price)
             session.flush()
-            if procedure is not None:
-                has_price = session.scalar(select(ProcedurePrice.id).where(ProcedurePrice.procedure_id == procedure.id).limit(1))
-                has_order = session.scalar(select(WorkOrder.id).where(WorkOrder.procedure_id == procedure.id).limit(1))
-                if has_price is None and has_order is None:
-                    session.delete(procedure)
+            has_price = session.scalar(
+                select(ProcedurePrice.id)
+                .where(ProcedurePrice.procedure_id == procedure_id)
+                .limit(1)
+            )
+            if (
+                has_price is None
+                and not has_work_order_for_procedure(session, procedure_id)
+            ):
+                delete_procedure(session, procedure_id)
 
 
-def _department(session, code: str, user_department: str) -> Department:
-    department = session.scalar(select(Department).where(Department.department_code == code))
+def _department(
+    session,
+    code: str,
+    user_department: str | None,
+    user_is_system: bool,
+) -> DepartmentView:
+    department = next(iter(get_department_views_by_codes(session, {code})), None)
     if department is None:
         raise DomainError("department_not_found", "部门不存在", status_code=404)
-    if user_department not in {"sys", code}:
+    if not can_access_department(user_department, user_is_system, code):
         raise DomainError("department_access_denied", "无权维护该部门配置", status_code=403)
     return department

@@ -1,4 +1,4 @@
-"""Read-only ORM type surface for organization persistence."""
+"""Read-only query-model surface for organization persistence."""
 
 from modules.organization.persistence import Department, Procedure, Workshop
 

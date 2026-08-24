@@ -1,6 +1,7 @@
 from modules.organization.context_api import ProcedureContext
 from modules.organization.read_api import get_workshop_routes
 from modules.errors import DomainError
+from domain.material_identity import production_item_material_key
 
 
 def procedure_department_id(session, procedure: ProcedureContext) -> int:
@@ -12,10 +13,7 @@ def procedure_department_id(session, procedure: ProcedureContext) -> int:
     return workshop.department_id
 
 
-def material_key(production_item) -> str:
-    if production_item.product_bom_id is not None:
-        return f"part:{production_item.product_bom_id}"
-    return f"assembly:{production_item.origin_flow_node_id}"
+material_key = production_item_material_key
 
 
 __all__ = ["material_key", "procedure_department_id"]

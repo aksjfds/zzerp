@@ -68,7 +68,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
         >保存 BOM</ElButton>
       </div>
     </div>
-    <ElTable :data="modelValue" border table-layout="auto" empty-text="请新增至少一条 BOM 明细">
+    <ElTable v-table-column-widths="'engineering.bom-editor'" :data="modelValue" border table-layout="auto" empty-text="请新增至少一条 BOM 明细">
       <ElTableColumn type="index" label="#" width="54" />
       <ElTableColumn label="配件名称" min-width="170">
         <template #default="{ row, $index }">

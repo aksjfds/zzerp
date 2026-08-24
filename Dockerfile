@@ -10,10 +10,10 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-COPY backend/requirements.txt backend/requirements-dev.txt /tmp/zzerp-requirements/
+COPY backend/requirements.txt /tmp/zzerp-requirements/
 
 RUN python -m pip install --no-cache-dir \
-        -r /tmp/zzerp-requirements/requirements-dev.txt \
+        -r /tmp/zzerp-requirements/requirements.txt \
     && python --version \
     && node --version \
     && pnpm --version \

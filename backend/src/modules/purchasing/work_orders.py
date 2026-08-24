@@ -1,3 +1,4 @@
+from domain.production_types import COMPLETION_QC, WorkOrderCompletionAction
 from modules.errors import DomainError
 from modules.organization.context_api import ProcedureContext
 from modules.organization.read_api import get_department_ids_by_codes
@@ -17,9 +18,9 @@ from modules.production_core.purchase_api import (
     finalize_purchase_submission,
     is_repository_source,
 )
-from modules.quality.ownership_api import create_inspection_batch
+from modules.quality.submission_api import create_inspection_batch
 from modules.standard_execution.pricing_api import attach_work_order_price
-from modules.standard_execution.procedures import material_key, procedure_department_id
+from modules.standard_execution.procedure_api import material_key, procedure_department_id
 
 
 def create_purchase_order(
@@ -30,6 +31,8 @@ def create_purchase_order(
     procedure: ProcedureContext,
     quantity: int,
     worker_id: int | None,
+    worker_name: str | None,
+    created_by: str,
     remark: str | None,
 ) -> WorkOrderContext:
     if not is_repository_source(source):
@@ -41,6 +44,8 @@ def create_purchase_order(
         procedure=procedure,
         quantity=quantity,
         worker_id=worker_id,
+        worker_name=worker_name,
+        created_by=created_by,
         work_order_type="purchase_receipt",
         remark=remark,
     )
@@ -67,7 +72,7 @@ def submit_purchase_order(
     context,
     node: dict,
     quantity: int,
-    completion_action: str,
+    completion_action: WorkOrderCompletionAction,
 ) -> dict:
     if procedure.procedure_type != "purchase_receipt":
         raise DomainError("work_order_type_invalid", "外购入库工单所属工艺无效")
@@ -78,7 +83,7 @@ def submit_purchase_order(
     batch = None
     target_flow_node_id = None
     target_department_id = None
-    if completion_action == "qc":
+    if completion_action == COMPLETION_QC:
         qc_node = process_qc_node(context.flow, context.nodes, node["id"])
         qc_department_id = get_department_ids_by_codes(session, {"qc"}).get("qc")
         if qc_node is None or qc_department_id is None:
@@ -87,7 +92,7 @@ def submit_purchase_order(
             session,
             work_order_id=order.id,
             submitted_quantity=quantity,
-            source_flow_node_id=order.source_flow_node_id,
+            execution_flow_node_id=node["id"],
         )
         target_flow_node_id = qc_node["id"]
         target_department_id = qc_department_id
@@ -113,8 +118,8 @@ def submit_purchase_order(
         target_flow_node_id=target_flow_node_id,
         source_department_id=source.department_id,
         target_department_id=target_department_id,
-        work_order_id=order.id,
-        work_order_batch_id=batch.id if batch else None,
+        work_order=order,
+        work_order_batch=batch,
     )
     return finalize_purchase_submission(
         session,

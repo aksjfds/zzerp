@@ -9,6 +9,7 @@ from domain.engineering_products import validate_expected_revision
 from domain.models import BomItemCommand
 from domain.time import utc_now
 from modules.engineering.persistence import ProductVersion
+from modules.engineering.collaboration_contract import EngineeringCollaborators
 from modules.engineering.command_support import command_result, product_versions
 from modules.engineering.editability import ensure_product_version_editable
 from modules.engineering.repository import EngineeringProductRepository
@@ -19,13 +20,13 @@ from modules.engineering.support import (
 )
 from modules.engineering.flow_mapping import synchronize_part_metadata
 from modules.errors import DomainError, product_not_found
-from modules.standard_execution.pricing_api import copy_product_version_prices
 from schemas.engineering import ProcessFlowPayload
 
 
 def create_product_version(
     product_id: int,
     expected_revision: int,
+    collaborators: EngineeringCollaborators,
     source_version: int | None = None,
 ) -> dict:
     try:
@@ -97,7 +98,7 @@ def create_product_version(
                 product.factory_code,
             ).model_dump(exclude_none=True)
             repository.set_process_flow(product, next_version, copied_flow)
-            copy_product_version_prices(
+            collaborators.copy_product_version_prices(
                 session,
                 product_id=product.id,
                 source_version=copy_from_version,
@@ -116,6 +117,7 @@ def delete_product_version(
     product_id: int,
     product_version: int,
     expected_revision: int,
+    collaborators: EngineeringCollaborators,
 ) -> dict | None:
     try:
         with SessionLocal.begin() as session:
@@ -128,7 +130,7 @@ def delete_product_version(
             versions = sorted(product_versions(product))
             if product_version not in versions:
                 raise product_not_found()
-            ensure_product_version_editable(session, product.id, product_version)
+            ensure_product_version_editable(session, product.id, product_version, collaborators)
             if len(versions) == 1:
                 repository.delete(product)
                 return None

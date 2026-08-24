@@ -1,21 +1,12 @@
 """Immutable worker references exposed to collaborating modules."""
 
-from dataclasses import dataclass
-
 from collections.abc import Collection
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from domain.workforce import WorkerReference
 from modules.workforce.persistence import Worker
-
-
-@dataclass(frozen=True, slots=True)
-class WorkerReference:
-    id: int
-    worker_name: str
-    department_id: int
-    workshop_id: int | None
 
 
 def get_worker_reference(

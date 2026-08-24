@@ -1,18 +1,19 @@
+from typing import Literal
+
 from fastapi import APIRouter, Depends, Query
 
 from authorization import ensure_department_access, require_any_permission
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
 from modules.inventory.api import (
-    issue_outbound_plan,
-    list_outbound_plans,
-    list_stocks,
-    list_transactions,
-)
-from modules.inventory.finished_goods_api import (
     confirm_finished_order_receipt,
     list_finished_order_stocks,
+    list_stocks,
+    list_transactions,
     ship_finished_order_item,
 )
+from departments.inventory_orchestration import issue_outbound_plan
+from modules.planning.api import list_outbound_plans
+from schemas.common import InventoryDepartmentCode
 from schemas.inventory import (
     InventoryIssueInput,
     InventoryOutboundPlanEnvelope,
@@ -30,7 +31,7 @@ router = APIRouter(prefix="/inventory", tags=["inventory"])
 
 @router.get("/finished-order-stocks", response_model=FinishedOrderStockEnvelope)
 def finished_order_stocks(
-    operation: str = Query(default="all", pattern="^(all|receipt|shipment)$"),
+    operation: Literal["all", "receipt", "shipment"] = Query(default="all"),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, "finished")
@@ -70,7 +71,7 @@ def finished_order_stock_ship(
 
 @router.get("/outbound-plans", response_model=InventoryOutboundPlanEnvelope)
 def inventory_outbound_plans(
-    department_code: str = Query(pattern="^(warehouse|finished)$"),
+    department_code: InventoryDepartmentCode = Query(),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
@@ -84,21 +85,17 @@ def inventory_outbound_issue(
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     ensure_department_access(user, payload.department_code)
-    quantities = {item.reservation_id: item.quantity for item in payload.items}
-    if len(quantities) != len(payload.items):
-        from modules.errors import DomainError
-        raise DomainError("duplicate_inventory_reservation", "出库项目不能重复", path="items")
     return issue_outbound_plan(
         production_plan_id,
         payload.department_code,
-        quantities,
+        [(item.reservation_id, item.quantity) for item in payload.items],
         user["username"],
     )
 
 
 @router.get("/stocks", response_model=InventoryStockEnvelope)
 def inventory_stocks(
-    department_code: str = Query(pattern="^(warehouse|finished)$"),
+    department_code: InventoryDepartmentCode = Query(),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
@@ -107,7 +104,7 @@ def inventory_stocks(
 
 @router.get("/transactions", response_model=InventoryTransactionEnvelope)
 def inventory_transactions(
-    department_code: str = Query(pattern="^(warehouse|finished)$"),
+    department_code: InventoryDepartmentCode = Query(),
     stock_id: int | None = Query(default=None, gt=0),
     limit: int = Query(default=200, gt=0, le=1000),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),

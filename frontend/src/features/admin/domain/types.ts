@@ -3,7 +3,7 @@ import type {
   WorkerOverviewDepartment,
   WorkerOverviewItem,
   WorkerPaySummary,
-} from '@/features/workers/domain/types'
+} from '@/features/workers'
 
 export type AdminWorker = WorkerOverviewItem
 export type AdminWorkerDepartment = WorkerOverviewDepartment

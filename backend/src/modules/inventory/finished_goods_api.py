@@ -9,21 +9,17 @@ from database import SessionLocal
 from domain.time import utc_now
 from modules.engineering.model_api import Product
 from modules.errors import DomainError
-from modules.inventory.identity import inventory_identity_key
 from modules.inventory.ownership_api import confirm_receipt, create_receipt
-from modules.inventory.persistence import FinishedOrderStock
+from modules.inventory.persistence import FinishedGoodsTransaction, FinishedOrderStock
 from modules.organization.read_api import get_department_ids_by_codes
-from modules.production_core.model_api import ProductionItem, ProductionMovement
+from modules.production_core.model_api import ProductionItem
 from modules.production_core.operational_api import (
     load_product_flow,
     record_movement,
-    refresh_order_closed,
     terminal_unit_quantity,
 )
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
-
-
-SHIPMENT_MOVEMENT_TYPES = ("customer_shipment",)
+from modules.sales.transaction_api import close_fully_shipped_order
 
 
 def register_pending_finished_goods(
@@ -97,19 +93,37 @@ def allocate_issued_finished_goods(
         shipping_node_id=shipping_node_id,
         quantity=quantity,
     )
+    before = lot.available_quantity
     lot.pending_quantity -= quantity
     lot.available_quantity += quantity
     lot.received_at = utc_now()
     lot.received_by = actor_username
     lot.revision += 1
     lot.updated_at = utc_now()
+    _record_finished_transaction(
+        session,
+        lot=lot,
+        transaction_type="finished_stock_issue",
+        raw_quantity=quantity,
+        raw_quantity_before=before,
+        raw_quantity_after=lot.available_quantity,
+        actor_username=actor_username,
+        reason="生产计划领用成品库存",
+    )
     session.flush()
     return lot
 
 
 def list_finished_order_stocks(operation: str) -> list[dict]:
     with SessionLocal() as session:
-        statement = select(FinishedOrderStock).join(
+        statement = select(
+            FinishedOrderStock,
+            CustomerOrderItem,
+            CustomerOrder,
+        ).join(
+            CustomerOrderItem,
+            CustomerOrderItem.id == FinishedOrderStock.customer_order_item_id,
+        ).join(
             CustomerOrder,
             CustomerOrder.id == FinishedOrderStock.customer_order_id,
         )
@@ -131,35 +145,33 @@ def list_finished_order_stocks(operation: str) -> list[dict]:
                     & (FinishedOrderStock.pending_quantity > 0)
                 )
             )
-        lots = list(session.scalars(
+        context_rows = list(session.execute(
             statement.order_by(
                 FinishedOrderStock.customer_order_id,
                 FinishedOrderStock.customer_order_item_id,
                 FinishedOrderStock.id,
             )
         ))
-        groups: dict[int, list[FinishedOrderStock]] = defaultdict(list)
-        for lot in lots:
-            groups[lot.customer_order_item_id].append(lot)
+        groups: dict[int, list[tuple[FinishedOrderStock, CustomerOrderItem, CustomerOrder]]] = defaultdict(list)
+        for lot, order_item, order in context_rows:
+            groups[lot.customer_order_item_id].append((lot, order_item, order))
         rows = []
-        for order_item_id, item_lots in groups.items():
-            order_item = session.get(CustomerOrderItem, order_item_id)
-            order = session.get(CustomerOrder, item_lots[0].customer_order_id)
-            if order_item is None or order is None:
-                continue
-            unit_quantity = item_lots[0].unit_quantity
-            shipped_raw = _shipped_raw_quantity(session, order_item_id, item_lots[0].flow_node_id)
+        for item_lots in groups.values():
+            first_lot, order_item, order = item_lots[0]
+            unit_quantity = first_lot.unit_quantity
+            lots = [item[0] for item in item_lots]
+            shipped_raw = sum(item.shipped_quantity for item in lots)
             rows.append({
                 "customer_order_id": order.id,
                 "customer_order_no": order.customer_order_no,
                 "order_status": order.status,
                 "customer_order_item_id": order_item.id,
-                "item_code": item_lots[0].item_code,
-                "item_name": item_lots[0].item_name,
-                "product_version": item_lots[0].product_version,
+                "item_code": first_lot.item_code,
+                "item_name": first_lot.item_name,
+                "product_version": first_lot.product_version,
                 "required_quantity": order_item.quantity,
-                "pending_quantity": sum(item.pending_quantity for item in item_lots) // unit_quantity,
-                "available_quantity": sum(item.available_quantity for item in item_lots) // unit_quantity,
+                "pending_quantity": sum(item.pending_quantity for item in lots) // unit_quantity,
+                "available_quantity": sum(item.available_quantity for item in lots) // unit_quantity,
                 "shipped_quantity": shipped_raw // unit_quantity,
                 "outstanding_quantity": max(order_item.quantity - shipped_raw // unit_quantity, 0),
             })
@@ -169,6 +181,20 @@ def list_finished_order_stocks(operation: str) -> list[dict]:
 def confirm_finished_order_receipt(customer_order_item_id: int, actor_username: str) -> dict:
     result = None
     with SessionLocal.begin() as session:
+        order_item = session.get(
+            CustomerOrderItem,
+            customer_order_item_id,
+            with_for_update=True,
+        )
+        if order_item is None:
+            raise DomainError("customer_order_item_not_found", "订单产品不存在", status_code=404)
+        customer_order = session.get(
+            CustomerOrder,
+            order_item.customer_order_id,
+            with_for_update=True,
+        )
+        if customer_order is None:
+            raise DomainError("customer_order_not_found", "客户订单不存在", status_code=409)
         lots = list(session.scalars(
             select(FinishedOrderStock)
             .where(
@@ -180,20 +206,18 @@ def confirm_finished_order_receipt(customer_order_item_id: int, actor_username: 
         ))
         if not lots:
             raise DomainError("finished_goods_pending_not_found", "没有待确认入库的成品", status_code=404)
-        customer_order = session.get(CustomerOrder, lots[0].customer_order_id, with_for_update=True)
-        if customer_order is None:
-            raise DomainError("customer_order_not_found", "客户订单不存在", status_code=409)
+        production_items = _production_items_for_lots(session, lots)
         finished_department_id = _finished_department_id(session)
-        refresh_item = None
         for lot in lots:
             quantity = lot.pending_quantity
+            before = lot.available_quantity
             lot.pending_quantity = 0
             lot.available_quantity += quantity
             lot.received_at = utc_now()
             lot.received_by = actor_username
             lot.revision += 1
             lot.updated_at = utc_now()
-            production_item = session.get(ProductionItem, lot.production_item_id)
+            production_item = production_items.get(lot.production_item_id)
             if production_item is None:
                 raise DomainError("production_item_not_found", "成品生产记录不存在", status_code=409)
             record_movement(
@@ -206,10 +230,17 @@ def confirm_finished_order_receipt(customer_order_item_id: int, actor_username: 
                 source_department_id=finished_department_id,
                 target_department_id=finished_department_id,
             )
-            refresh_item = production_item
+            _record_finished_transaction(
+                session,
+                lot=lot,
+                transaction_type="finished_receipt",
+                raw_quantity=quantity,
+                raw_quantity_before=before,
+                raw_quantity_after=lot.available_quantity,
+                actor_username=actor_username,
+                reason=f"订单 {customer_order.customer_order_no} 成品入库",
+            )
         session.flush()
-        if refresh_item is not None:
-            refresh_order_closed(session, refresh_item, actor_username)
         if customer_order.status == "closed":
             transfer_order_finished_surplus(session, customer_order, actor_username)
         session.flush()
@@ -243,8 +274,9 @@ def ship_finished_order_item(
         ))
         if not lots:
             raise DomainError("finished_goods_unavailable", "成品部没有可发货数量", status_code=409)
+        production_items = _production_items_for_lots(session, lots)
         unit_quantity = lots[0].unit_quantity
-        shipped_products = _shipped_raw_quantity(session, order_item.id, lots[0].flow_node_id) // unit_quantity
+        shipped_products = sum(item.shipped_quantity for item in lots) // unit_quantity
         outstanding = max(order_item.quantity - shipped_products, 0)
         if quantity > outstanding:
             raise DomainError("finished_shipment_exceeds_order", "发货数量不能超过订单剩余需求")
@@ -253,7 +285,6 @@ def ship_finished_order_item(
             raise DomainError("finished_goods_unavailable", "成品部可发货数量不足", status_code=409)
         remaining = required_raw
         finished_department_id = _finished_department_id(session)
-        refresh_item = None
         for lot in lots:
             allocated = min(lot.available_quantity, remaining)
             if allocated <= 0:
@@ -264,7 +295,7 @@ def ship_finished_order_item(
             lot.last_shipped_by = actor_username
             lot.revision += 1
             lot.updated_at = utc_now()
-            production_item = session.get(ProductionItem, lot.production_item_id)
+            production_item = production_items.get(lot.production_item_id)
             if production_item is None:
                 raise DomainError("production_item_not_found", "成品生产记录不存在", status_code=409)
             record_movement(
@@ -277,13 +308,21 @@ def ship_finished_order_item(
                 source_department_id=finished_department_id,
                 target_department_id=finished_department_id,
             )
-            refresh_item = production_item
+            _record_finished_transaction(
+                session,
+                lot=lot,
+                transaction_type="customer_shipment",
+                raw_quantity=allocated,
+                raw_quantity_before=lot.available_quantity + allocated,
+                raw_quantity_after=lot.available_quantity,
+                actor_username=actor_username,
+                reason=f"订单 {order.customer_order_no} 发货",
+            )
             remaining -= allocated
             if remaining == 0:
                 break
         session.flush()
-        if refresh_item is not None:
-            refresh_order_closed(session, refresh_item, actor_username)
+        _close_order_if_fully_shipped(session, order, actor_username)
         session.flush()
         result = _serialize_order_item(session, customer_order_item_id)
     return result
@@ -311,15 +350,6 @@ def transfer_order_finished_surplus(
             continue
         receipt = create_receipt(
             session,
-            identity_key=inventory_identity_key(
-                department_code="finished",
-                item_type="finished_product",
-                product_id=lot.product_id,
-                product_version=lot.product_version,
-                product_bom_id=None,
-                flow_node_id=lot.flow_node_id,
-                completed_flow_node_id=lot.flow_node_id,
-            ),
             department_code="finished",
             item_type="finished_product",
             product_id=lot.product_id,
@@ -331,13 +361,62 @@ def transfer_order_finished_surplus(
             item_name=lot.item_name,
             quantity=product_quantity,
             source_customer_order_id=customer_order.id,
+            source_customer_order_item_id=lot.customer_order_item_id,
             source_production_item_id=lot.production_item_id,
         )
         confirm_receipt(session, receipt.id, actor_username, "订单成品结余自动入库")
+        _record_finished_transaction(
+            session,
+            lot=lot,
+            transaction_type="finished_surplus_transfer",
+            raw_quantity=lot.available_quantity,
+            raw_quantity_before=lot.available_quantity,
+            raw_quantity_after=0,
+            actor_username=actor_username,
+            reason=f"订单 {customer_order.customer_order_no} 成品结余转库存",
+        )
         lot.transferred_quantity += lot.available_quantity
         lot.available_quantity = 0
         lot.revision += 1
         lot.updated_at = utc_now()
+
+
+def _close_order_if_fully_shipped(
+    session: Session,
+    customer_order: CustomerOrder,
+    actor_username: str,
+) -> None:
+    if customer_order.status != "planned":
+        return
+    shipping_states = list(session.execute(
+        select(
+            CustomerOrderItem.quantity,
+            func.coalesce(func.sum(FinishedOrderStock.shipped_quantity), 0),
+            func.max(FinishedOrderStock.unit_quantity),
+        )
+        .outerjoin(
+            FinishedOrderStock,
+            FinishedOrderStock.customer_order_item_id == CustomerOrderItem.id,
+        )
+        .where(CustomerOrderItem.customer_order_id == customer_order.id)
+        .group_by(CustomerOrderItem.id, CustomerOrderItem.quantity)
+        .order_by(CustomerOrderItem.id)
+    ))
+    if any(unit_quantity is None for _, _, unit_quantity in shipping_states):
+        return
+    if not _all_order_items_shipped(shipping_states):
+        return
+    transfer_order_finished_surplus(session, customer_order, actor_username)
+    close_fully_shipped_order(session, customer_order.id)
+
+
+def _all_order_items_shipped(
+    shipping_states: list[tuple[int, int, int]],
+) -> bool:
+    return bool(shipping_states) and all(
+        shipped_raw >= required_quantity * unit_quantity
+        for required_quantity, shipped_raw, unit_quantity in shipping_states
+    )
 
 
 def _serialize_order_item(session: Session, customer_order_item_id: int) -> dict:
@@ -351,7 +430,7 @@ def _serialize_order_item(session: Session, customer_order_item_id: int) -> dict
     if not lots or order_item is None or order is None:
         raise DomainError("finished_order_stock_not_found", "订单成品记录不存在", status_code=404)
     unit_quantity = lots[0].unit_quantity
-    shipped_raw = _shipped_raw_quantity(session, customer_order_item_id, lots[0].flow_node_id)
+    shipped_raw = sum(item.shipped_quantity for item in lots)
     return {
         "customer_order_id": order.id,
         "customer_order_no": order.customer_order_no,
@@ -368,16 +447,38 @@ def _serialize_order_item(session: Session, customer_order_item_id: int) -> dict
     }
 
 
-def _shipped_raw_quantity(session: Session, order_item_id: int, shipping_node_id: str) -> int:
-    return int(session.scalar(
-        select(func.coalesce(func.sum(ProductionMovement.quantity), 0))
-        .join(ProductionItem, ProductionItem.id == ProductionMovement.production_item_id)
-        .where(
-            ProductionItem.customer_order_item_id == order_item_id,
-            ProductionMovement.movement_type.in_(SHIPMENT_MOVEMENT_TYPES),
-            ProductionMovement.target_flow_node_id == shipping_node_id,
-        )
-    ) or 0)
+def _record_finished_transaction(
+    session: Session,
+    *,
+    lot: FinishedOrderStock,
+    transaction_type: str,
+    raw_quantity: int,
+    raw_quantity_before: int,
+    raw_quantity_after: int,
+    actor_username: str,
+    reason: str,
+) -> None:
+    session.add(FinishedGoodsTransaction(
+        finished_order_stock_id=lot.id,
+        transaction_type=transaction_type,
+        quantity=raw_quantity // lot.unit_quantity,
+        quantity_before=raw_quantity_before // lot.unit_quantity,
+        quantity_after=raw_quantity_after // lot.unit_quantity,
+        actor_username=actor_username,
+        reason=reason,
+    ))
+
+
+def _production_items_for_lots(
+    session: Session,
+    lots: list[FinishedOrderStock],
+) -> dict[int, ProductionItem]:
+    return {
+        item.id: item
+        for item in session.scalars(select(ProductionItem).where(
+            ProductionItem.id.in_({lot.production_item_id for lot in lots})
+        ))
+    }
 
 
 def _finished_department_id(session: Session) -> int:

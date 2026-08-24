@@ -1,5 +1,5 @@
 from departments.contracts import CAP_PURCHASING
-from modules.production_core import api as production
+from departments.work_order_orchestration import create_work_order
 
 
 class PurchasingCapability:
@@ -11,14 +11,17 @@ class PurchasingCapability:
         quantity: int,
         worker_id: int | None,
         remark: str | None,
+        actor_username: str,
     ) -> dict:
         self.require_capability(CAP_PURCHASING)
-        return production.create_work_order(
+        return create_work_order(
             repository_id,
             procedure_id,
             procedure_name,
             quantity,
             worker_id,
             remark,
+            actor_username,
             self.descriptor.code,
+            False,
         )

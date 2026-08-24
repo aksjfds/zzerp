@@ -7,9 +7,9 @@ import type {
   ProductionPlan,
 } from '../domain/types'
 
-export async function queryCustomerOrders(page = 1, pageSize = 50, includeProgress = false) {
+export async function queryCustomerOrders(page = 1, pageSize = 50) {
   const response = await service.get<{ data: CustomerOrder[]; total: number }>('/customer-orders', {
-    params: { page, page_size: pageSize, include_progress: includeProgress || undefined },
+    params: { page, page_size: pageSize },
   })
   return { items: response.data.data, total: response.data.total }
 }
@@ -103,6 +103,18 @@ export async function confirmProductionPlan(
         plan_expected_revision: planExpectedRevision,
       },
     },
+  )
+  return response.data.data
+}
+
+export async function completeProductionPlan(
+  orderId: number,
+  expectedRevision: number,
+) {
+  const response = await service.post<{ data: ProductionPlan }>(
+    `/customer-orders/${orderId}/production-plan/complete`,
+    null,
+    { params: { expected_revision: expectedRevision } },
   )
   return response.data.data
 }

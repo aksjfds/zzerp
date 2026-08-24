@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
+import { printElement } from '@/shared/printing/printFrame'
 import type { WorkOrder } from '../domain/types'
 
 const props = defineProps<{
@@ -8,6 +9,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
+const sheetRef = ref<HTMLElement>()
 
 type InspectionRow = {
   label: string
@@ -19,30 +21,34 @@ type InspectionRow = {
   returned: number | ''
 }
 
-const inspectionLabels = ['首批', '返修1', '返修2', '返修3', '返修4', '返修5', '返修6']
-const inspectionRows = computed<InspectionRow[]>(() => inspectionLabels.map((label, index) => {
-  const batch = props.item?.batches[index]
-  if (!batch || batch.qualified_quantity === null) {
+const inspectionRows = computed<InspectionRow[]>(() => {
+  const batches = props.item?.batches ?? []
+  const rowCount = Math.max(batches.length, 7)
+  return Array.from({ length: rowCount }, (_, index) => {
+    const batch = batches[index]
+    const label = index === 0 ? '首批' : `返修${index}`
+    if (!batch || batch.qualified_quantity === null) {
+      return {
+        label,
+        ok: '',
+        ng: '',
+        qcWorker: '',
+        date: '',
+        defectReason: '',
+        returned: '',
+      }
+    }
     return {
       label,
-      ok: '',
-      ng: '',
-      qcWorker: '',
-      date: '',
-      defectReason: '',
-      returned: '',
+      ok: batch.qualified_quantity,
+      ng: Math.max(batch.submitted_quantity - batch.qualified_quantity, 0),
+      qcWorker: batch.qc_worker_name || '',
+      date: batch.recorded_at?.slice(0, 10) || '',
+      defectReason: batch.defect_reason || '',
+      returned: batch.rework_quantity ?? 0,
     }
-  }
-  return {
-    label,
-    ok: batch.qualified_quantity,
-    ng: Math.max(batch.submitted_quantity - batch.qualified_quantity, 0),
-    qcWorker: batch?.qc_worker_name || '',
-    date: batch?.recorded_at?.slice(0, 10) || '',
-    defectReason: batch?.defect_reason || '',
-    returned: batch.rework_quantity ?? 0,
-  }
-}))
+  })
+})
 
 function inspectionRow(index: number): InspectionRow {
   return inspectionRows.value[index] ?? {
@@ -57,28 +63,13 @@ function inspectionRow(index: number): InspectionRow {
 }
 
 function print() {
-  const sheet = document.querySelector<HTMLElement>('.polish-print-sheet')
+  const sheet = sheetRef.value
   if (!sheet) return
 
-  document
-    .querySelectorAll<HTMLIFrameElement>('iframe[data-polish-print-frame]')
-    .forEach(frame => frame.remove())
-
-  const frame = document.createElement('iframe')
-  frame.dataset.polishPrintFrame = 'true'
-  frame.setAttribute('aria-hidden', 'true')
-  frame.style.position = 'fixed'
-  frame.style.left = '-12000px'
-  frame.style.top = '0'
-  frame.style.width = '1120px'
-  frame.style.height = '800px'
-  frame.style.border = '0'
-
-  const styles = [...document.head.querySelectorAll('style, link[rel="stylesheet"]')]
-    .map(node => node.outerHTML)
-    .join('')
-  const printOverrides = `
-    <style>
+  printElement(sheet, {
+    width: '1120px',
+    height: '800px',
+    pageStyle: `
       @page { size: A4 landscape; margin: 12mm; }
       html, body {
         width: auto !important;
@@ -98,30 +89,8 @@ function print() {
         margin: 0 !important;
         overflow: visible !important;
       }
-    </style>
-  `
-
-  frame.addEventListener('load', () => {
-    const printWindow = frame.contentWindow
-    if (!printWindow) {
-      frame.remove()
-      return
-    }
-    printWindow.addEventListener('afterprint', () => frame.remove(), { once: true })
-    printWindow.focus()
-    printWindow.print()
-  }, { once: true })
-
-  frame.srcdoc = `<!doctype html>
-    <html>
-      <head>
-        <base href="${document.baseURI}">
-        ${styles}
-        ${printOverrides}
-      </head>
-      <body>${sheet.outerHTML}</body>
-    </html>`
-  document.body.appendChild(frame)
+    `,
+  })
 }
 </script>
 
@@ -137,7 +106,7 @@ function print() {
       : 'polish-print-overlay'"
     @update:model-value="emit('update:modelValue', $event)"
   >
-    <article v-if="item" class="polish-print-sheet">
+    <article v-if="item" ref="sheetRef" class="polish-print-sheet">
       <h1>磨房计件单</h1>
 
       <section class="document-info">
@@ -285,11 +254,26 @@ function print() {
         </tbody>
       </table>
 
+      <table v-if="inspectionRows.length > 7" class="inspection-appendix">
+        <thead>
+          <tr>
+            <th>次数</th><th>OK</th><th>NG</th><th>QC签字</th><th>日期</th><th>不良原因</th><th>实退</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in inspectionRows.slice(7)" :key="row.label">
+            <td>{{ row.label }}</td><td>{{ row.ok }}</td><td>{{ row.ng }}</td>
+            <td>{{ row.qcWorker }}</td><td>{{ row.date }}</td>
+            <td>{{ row.defectReason }}</td><td>{{ row.returned }}</td>
+          </tr>
+        </tbody>
+      </table>
+
       <footer>
         <span>领料人：{{ item.worker_name || '' }}</span>
         <span>QC主管确认：</span>
         <span>结单日期：</span>
-        <span>制单人：董凤</span>
+        <span>制单人：{{ item.created_by }}</span>
       </footer>
     </article>
 
@@ -409,6 +393,21 @@ h1 {
 .work-record .quantity {
   font-size: 24px;
   font-weight: 700;
+}
+
+.inspection-appendix {
+  width: 100%;
+  margin-top: 8px;
+  border-collapse: collapse;
+  break-before: auto;
+  font-size: 13px;
+}
+
+.inspection-appendix th,
+.inspection-appendix td {
+  padding: 5px;
+  border: 1px solid #000;
+  text-align: center;
 }
 
 .vertical-label {

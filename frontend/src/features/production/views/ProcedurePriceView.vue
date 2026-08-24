@@ -5,12 +5,12 @@ import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { PRODUCTION_PERMISSIONS } from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
-import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import {
   queryProcedurePrices,
   saveProcedurePrices,
-  type ProcedurePriceScope,
 } from '../api/procedurePrices'
+import type { ProcedurePriceScope } from '../domain/procedurePrices'
 
 const props = withDefaults(defineProps<{ embedded?: boolean; departmentCode?: string }>(), {
   embedded: false,
@@ -28,6 +28,7 @@ const authStore = useAuthStore()
 const departmentCode = computed(() => String(
   props.departmentCode || route.params.departmentCode || route.meta.departmentCode || '',
 ))
+const departmentName = computed(() => authStore.department || departmentCode.value || '生产部门')
 const canManage = computed(() => authStore.hasPermission(PRODUCTION_PERMISSIONS.manage))
 const items = ref<ProcedurePriceScope[]>([])
 const loading = ref(false)
@@ -94,7 +95,7 @@ async function save() {
   try {
     await saveProcedurePrices(departmentCode.value, scope, draft.value.map((item, index) => ({
       procedure_id: item.procedure_id,
-      procedure_name: names[index],
+      procedure_name: names[index]!,
       unit_price: item.unit_price,
     })))
     dialogVisible.value = false
@@ -112,12 +113,12 @@ onMounted(load)
 
 <template>
   <component :is="embedded ? 'section' : 'main'" :class="{ 'procedure-price-page': !embedded }">
-    <DepartmentPageHeader v-if="!embedded" page-title="工艺与单价配置" description="按产品、版本、物料和车间维护可选工艺及计件单价。" @refresh="load" />
+    <DepartmentPageHeader v-if="!embedded" :department-name="departmentName" page-title="工艺与单价配置" description="按产品、版本、物料和车间维护可选工艺及计件单价。" @refresh="load" />
     <section class="filter-bar">
       <ElInput v-model="keyword" clearable placeholder="搜索产品或物料" @keyup.enter="search" @clear="search" />
       <ElButton type="primary" @click="search">查询</ElButton>
     </section>
-    <ElTable v-loading="loading" :data="items" border stripe table-layout="auto" empty-text="暂无可配置项">
+    <ElTable v-table-column-widths="'production.procedure-prices'" v-loading="loading" :data="items" border stripe table-layout="auto" empty-text="暂无可配置项">
       <ElTableColumn label="产品 / 物料" min-width="260">
         <template #default="{ row }"><strong>{{ title(row) }}</strong><div>V{{ row.product_version }} · {{ row.part_no }}</div></template>
       </ElTableColumn>

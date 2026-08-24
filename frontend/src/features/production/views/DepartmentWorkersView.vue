@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
-import WorkerOverview from '@/features/workers/components/WorkerOverview.vue'
-import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import { WorkerOverview } from '@/features/workers'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import CreateWorkerDialog from '../components/CreateWorkerDialog.vue'
 import { useDepartmentWorkers } from '../composables/useDepartmentWorkers'
 import '../styles/workspace.css'

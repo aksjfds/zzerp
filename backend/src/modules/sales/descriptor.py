@@ -6,16 +6,13 @@ MODULE = ModuleDescriptor(
     public_api="modules.sales.api",
     owns=("customer", "customer_order", "customer_order_item"),
     collaborates_with=(
-        "engineering",
-        "organization",
-        "planning",
-        "production_core",
-        "quality",
-        "standard_execution",
     ),
     collaboration_apis=(
+        "modules.sales.command_api",
+        "modules.sales.planning_contract",
         "modules.sales.customer_api",
         "modules.sales.model_api",
         "modules.sales.reference_api",
+        "modules.sales.transaction_api",
     ),
 )

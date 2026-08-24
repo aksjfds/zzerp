@@ -5,6 +5,7 @@ import { getApiErrorDetail } from '@/api/request'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
 import ProductionPlanEditor from '../components/ProductionPlanEditor.vue'
 import {
+  completeProductionPlan,
   confirmProductionPlan,
   queryProductionPlanOrders,
 } from '../api/customerOrders'
@@ -24,6 +25,7 @@ const activeOrder = ref<CustomerOrder>()
 const activePlan = ref<ProductionPlan>()
 const editor = ref<PlanEditorApi>()
 const confirming = ref(false)
+const completing = ref(false)
 const savingDraft = ref(false)
 const planInvalid = ref(true)
 
@@ -37,6 +39,16 @@ const statusTypes = {
   planned: 'warning',
   closed: 'warning',
 } as const
+
+function orderPlanStatusLabel(order: CustomerOrder) {
+  if (order.production_plan_status === 'completed') return '生产计划已完成'
+  return statusLabels[order.status] || order.status
+}
+
+function orderPlanStatusType(order: CustomerOrder) {
+  if (order.production_plan_status === 'completed') return 'success'
+  return statusTypes[order.status as keyof typeof statusTypes]
+}
 
 async function load() {
   loading.value = true
@@ -92,6 +104,29 @@ async function confirmPlan() {
   }
 }
 
+async function completePlan() {
+  const order = activeOrder.value
+  const plan = activePlan.value
+  if (!order || !plan || plan.status !== 'confirmed') return
+  try {
+    await ElMessageBox.confirm(
+      '完成后不能再开新工单，订单结单状态不受影响。是否完成该生产计划？',
+      '完成生产计划',
+      { type: 'warning', confirmButtonText: '确认完成' },
+    )
+    completing.value = true
+    activePlan.value = await completeProductionPlan(order.id, plan.revision)
+    ElMessage.success('生产计划已完成')
+    await load()
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(getApiErrorDetail(error)?.message || '生产计划完成失败')
+    }
+  } finally {
+    completing.value = false
+  }
+}
+
 onMounted(load)
 defineExpose({ load })
 </script>
@@ -105,7 +140,7 @@ defineExpose({ load })
       </div>
       <ElButton :loading="loading" @click="load">刷新</ElButton>
     </div>
-    <ElTable v-loading="loading" :data="orders" border stripe table-layout="auto">
+    <ElTable v-table-column-widths="'sales.production-plans'" v-loading="loading" :data="orders" border stripe table-layout="auto">
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="150" />
       <ElTableColumn prop="customer_name" label="客户名称" min-width="150" />
       <ElTableColumn label="产品" min-width="260">
@@ -117,8 +152,8 @@ defineExpose({ load })
       </ElTableColumn>
       <ElTableColumn label="状态" min-width="200">
         <template #default="{ row }">
-          <ElTag :type="statusTypes[row.status as keyof typeof statusTypes]" effect="light">
-            {{ statusLabels[row.status] || row.status }}
+          <ElTag :type="orderPlanStatusType(row)" effect="light">
+            {{ orderPlanStatusLabel(row) }}
           </ElTag>
         </template>
       </ElTableColumn>
@@ -157,7 +192,7 @@ defineExpose({ load })
       <template #footer>
         <div class="dialog-actions">
           <ElButton
-            :disabled="savingDraft || confirming"
+            :disabled="savingDraft || confirming || completing"
             @click="dialogVisible = false"
           >关闭</ElButton>
           <div v-if="activeOrder?.status === 'confirmed'" class="dialog-primary-actions">
@@ -175,6 +210,13 @@ defineExpose({ load })
               @click="confirmPlan"
             >保存并确认</ElButton>
           </div>
+          <ElButton
+            v-else-if="activePlan?.status === 'confirmed'"
+            v-permission="ORDER_PERMISSIONS.confirm"
+            type="success"
+            :loading="completing"
+            @click="completePlan"
+          >完成生产计划</ElButton>
         </div>
       </template>
     </ElDialog>

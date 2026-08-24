@@ -456,7 +456,11 @@ def _month_bounds(month: str) -> tuple[datetime, datetime]:
         year, month_number = (int(item) for item in month.split("-", 1))
         start = datetime(year, month_number, 1, tzinfo=BUSINESS_TIMEZONE)
     except ValueError as exc:
-        raise ValueError("月份格式不正确") from exc
+        raise DomainError(
+            "invalid_worker_month",
+            "月份格式不正确",
+            path="month",
+        ) from exc
     if month_number == 12:
         end = datetime(year + 1, 1, 1, tzinfo=BUSINESS_TIMEZONE)
     else:

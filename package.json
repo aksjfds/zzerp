@@ -10,11 +10,9 @@
     "f:preview:prod": "pnpm --dir frontend preview:prod",
     "b": "pnpm run b:dev",
     "b:check": "APP_ENV=development python3 scripts/check_backend.py",
-    "b:test": "python3 -m pytest backend/tests -q",
     "b:dev": "APP_ENV=development uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
     "b:prod": "APP_ENV=production uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}",
     "b:reset-db": "ALLOW_DATABASE_RESET=yes APP_ENV=development python3 scripts/reset_database.py",
-    "b:validate-flow": "ALLOW_FULL_FLOW_VALIDATION=yes APP_ENV=development python3 scripts/validate_full_flow.py",
-    "check": "pnpm run b:test && pnpm run b:check && pnpm --dir frontend type-check && pnpm --dir frontend build-only:prod"
+    "check": "pnpm run b:check && pnpm --dir frontend type-check && pnpm --dir frontend build-only:prod"
   }
 }

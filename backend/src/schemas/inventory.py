@@ -1,5 +1,13 @@
 from pydantic import BaseModel, ConfigDict, Field
 
+from schemas.common import (
+    CustomerOrderStatus,
+    InventoryDepartmentCode,
+    InventoryTransactionType,
+    InventoryTransactionSourceType,
+    ProductionItemType,
+)
+
 
 class InventoryModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -7,8 +15,8 @@ class InventoryModel(BaseModel):
 
 class InventoryStockResponse(InventoryModel):
     id: int
-    department_code: str
-    item_type: str
+    department_code: InventoryDepartmentCode
+    item_type: ProductionItemType
     product_id: int
     product_version: int
     product_bom_id: int | None
@@ -29,9 +37,11 @@ class InventoryStockEnvelope(InventoryModel):
 
 class InventoryTransactionResponse(InventoryModel):
     id: int
-    inventory_stock_id: int
+    source_type: InventoryTransactionSourceType
+    source_id: int
+    inventory_stock_id: int | None
     production_plan_id: int | None
-    transaction_type: str
+    transaction_type: InventoryTransactionType
     quantity: int
     quantity_before: int
     quantity_after: int
@@ -56,7 +66,7 @@ class InventoryIssueItemInput(InventoryModel):
 
 
 class InventoryIssueInput(InventoryModel):
-    department_code: str = Field(pattern="^(warehouse|finished)$")
+    department_code: InventoryDepartmentCode
     items: list[InventoryIssueItemInput] = Field(min_length=1, max_length=5000)
 
 
@@ -74,7 +84,7 @@ class InventoryOutboundPlanResponse(InventoryModel):
     production_plan_id: int
     customer_order_id: int
     customer_order_no: str
-    department_code: str
+    department_code: InventoryDepartmentCode
     items: list[InventoryOutboundItemResponse]
 
 
@@ -85,7 +95,7 @@ class InventoryOutboundPlanEnvelope(InventoryModel):
 class FinishedOrderStockResponse(InventoryModel):
     customer_order_id: int
     customer_order_no: str
-    order_status: str
+    order_status: CustomerOrderStatus
     customer_order_item_id: int
     item_code: str
     item_name: str

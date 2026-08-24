@@ -10,6 +10,7 @@ from modules.organization.api import (
     list_workshop_routes,
 )
 from schemas.organization import (
+    DepartmentModuleResponse,
     DepartmentResponse,
     ProcedureResponse,
     WorkshopResponse,
@@ -20,7 +21,7 @@ from schemas.organization import (
 router = APIRouter(tags=["organization"])
 
 
-@router.get("/department-modules")
+@router.get("/department-modules", response_model=list[DepartmentModuleResponse])
 def department_modules(
     _: dict = Depends(require_any_permission(PRODUCT_VIEW, "production:view")),
 ):

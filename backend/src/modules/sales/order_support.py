@@ -1,15 +1,11 @@
 from sqlalchemy.exc import IntegrityError
 
+from domain.product import ProductReference
 from domain.time import business_iso
-from modules.engineering.product_reference_api import (
-    ProductReference,
-    get_product_references,
-    resolve_order_product_references,
-)
+from modules.sales.collaboration_contract import SalesEngineeringPort, SalesProductionPort
 from modules.sales.persistence import CustomerOrder, CustomerOrderItem
 from schemas.sales import CustomerOrderItemInput
 from modules.errors import DomainError
-from modules.production_core.sales_api import order_item_progress
 
 
 def order_not_found() -> DomainError:
@@ -30,12 +26,12 @@ def serialize_order(
     order: CustomerOrder,
     products: dict[int, ProductReference] | None = None,
     *,
-    include_progress: bool = False,
+    production: SalesProductionPort,
     production_plan_started: bool = False,
+    production_plan_status: str | None = None,
 ) -> dict:
     if products is None:
-        product_ids = {item.product_id for item in order.items}
-        products = get_product_references(session, product_ids)
+        raise DomainError("product_context_missing", "订单产品资料不完整")
     item_rows = [
         {
             "id": item.id,
@@ -49,30 +45,19 @@ def serialize_order(
         }
         for item in order.items
     ]
-    progress_rows = []
-    if include_progress:
-        for item in order.items:
-            progress = order_item_progress(
-                session,
-                item,
-                order_status=order.status,
-            )
-            progress["product_name"] = products[item.product_id].product_name
-            progress["factory_code"] = products[item.product_id].factory_code
-            progress_rows.append(progress)
     return {
         "id": order.id,
         "customer_order_no": order.customer_order_no,
         "customer_id": order.customer_id,
         "customer_name": order.customer.customer_name,
         "status": order.status,
+        "production_plan_status": production_plan_status,
         "can_edit": order.status == "draft" or (
             order.status == "cancelled" and not production_plan_started
         ),
         "revision": order.revision,
         "remark": order.remark or "",
         "items": item_rows,
-        "product_progress": progress_rows,
         "created_at": business_iso(order.created_at),
         "updated_at": business_iso(order.updated_at),
     }
@@ -82,6 +67,7 @@ def resolve_order_products(
     session,
     items: list[CustomerOrderItemInput],
     customer_id: int,
+    engineering: SalesEngineeringPort,
 ) -> dict[int, ProductReference]:
     if len({item.product_id for item in items}) != len(items):
         raise DomainError(
@@ -90,7 +76,7 @@ def resolve_order_products(
             path="items",
         )
     product_ids = {item.product_id for item in items}
-    return resolve_order_product_references(
+    return engineering.resolve_order_product_references(
         session,
         product_ids,
         customer_id,

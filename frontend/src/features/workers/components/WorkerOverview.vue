@@ -97,6 +97,7 @@ function money(value: MoneyValue | null | undefined) {
       <ElTabs v-model="detailView" class="worker-detail-tabs">
         <ElTabPane label="工作记录" name="history">
           <ElTable
+            v-table-column-widths="'workers.history'"
             v-loading="historyLoading"
             :data="history"
             border
@@ -135,7 +136,7 @@ function money(value: MoneyValue | null | undefined) {
               :closable="false"
               title="部分历史工单没有计件单价快照，未计入工资总额"
             />
-            <ElTable :data="paySummary?.items || []" border table-layout="auto" empty-text="本月暂无计件工资">
+            <ElTable v-table-column-widths="'workers.pay-summary'" :data="paySummary?.items || []" border table-layout="auto" empty-text="本月暂无计件工资">
               <ElTableColumn prop="item_name" label="加工配件" min-width="220" />
               <ElTableColumn prop="qualified_quantity" label="合格数量" width="100" align="right" />
               <ElTableColumn label="单件工资" width="110" align="right">

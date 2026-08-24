@@ -25,6 +25,7 @@ class Worker(Base):
         ForeignKeyConstraint(
             ["workshop_id", "department_id"],
             ["workshop.id", "workshop.department_id"],
+            name="fk_worker_workshop_department",
         ),
         Index("idx_worker_department_name", "department_id", "worker_name", "id"),
         Index(

@@ -11,7 +11,9 @@ class AssemblyCapability:
         quantity: int,
         worker_id: int | None,
         remark: str | None,
-        actor_department: str,
+        actor_username: str,
+        actor_department: str | None,
+        actor_is_system: bool,
     ) -> dict:
         self.require_capability(CAP_ASSEMBLY)
         return assembly.create_assembly_work_order(
@@ -21,5 +23,7 @@ class AssemblyCapability:
             quantity,
             worker_id,
             remark,
+            actor_username,
             actor_department,
+            actor_is_system,
         )

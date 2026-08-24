@@ -70,7 +70,7 @@ onMounted(load)
       </div>
       <ElButton @click="load">刷新</ElButton>
     </div>
-    <ElTable :data="items" border stripe table-layout="auto" empty-text="暂无结单后留存物料">
+    <ElTable v-table-column-widths="'production.surplus-inventory'" :data="items" border stripe table-layout="auto" empty-text="暂无结单后留存物料">
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="140" />
       <ElTableColumn label="产品" min-width="190">
         <template #default="{ row }">

@@ -7,7 +7,15 @@ outside this module.
 
 from sqlalchemy import select
 
-from modules.production_core.persistence import ProductionItem, Repository, WorkOrder
+from domain.production_types import WORK_ORDER_ASSEMBLY
+from modules.organization.context_api import ProcedureContext
+from modules.production_core.persistence import (
+    ProductionItem,
+    Repository,
+    WorkOrder,
+    WorkOrderMaterial,
+)
+from modules.production_core.work_order_rules import validate_work_order_procedure
 
 
 def create_production_item(
@@ -31,28 +39,73 @@ def create_production_item(
     return item
 
 
+def create_work_order_material(
+    session,
+    *,
+    work_order_id: int,
+    repository_id: int,
+    production_item_id: int,
+    quantity: int,
+    source_flow_node_id: str,
+    source_previous_flow_node_id: str,
+    source_department_id: int,
+    source_work_order_id: int | None,
+) -> WorkOrderMaterial:
+    material = WorkOrderMaterial(
+        work_order_id=work_order_id,
+        repository_id=repository_id,
+        production_item_id=production_item_id,
+        quantity=quantity,
+        source_flow_node_id=source_flow_node_id,
+        source_previous_flow_node_id=source_previous_flow_node_id,
+        source_department_id=source_department_id,
+        source_work_order_id=source_work_order_id,
+    )
+    session.add(material)
+    return material
+
+
+def assign_work_order_material_repository(
+    material: WorkOrderMaterial,
+    repository_id: int | None,
+) -> None:
+    material.repository_id = repository_id
+
+
+def assign_work_order_repository(
+    order: WorkOrder,
+    repository_id: int | None,
+) -> None:
+    order.repository_id = repository_id
+
+
 def create_assembly_work_order_record(
     session,
     *,
     production_item_id: int,
-    procedure_id: int,
+    procedure: ProcedureContext,
     flow_node_id: str,
     work_order_name: str,
+    created_by: str,
     worker_id: int | None,
+    worker_name: str | None,
     quantity: int,
     remark: str | None,
     repository_id: int | None = None,
 ) -> WorkOrder:
+    validate_work_order_procedure(procedure, WORK_ORDER_ASSEMBLY)
     order = WorkOrder(
         repository_id=repository_id,
         production_item_id=production_item_id,
-        procedure_id=procedure_id,
+        procedure_id=procedure.id,
         work_order_type="assembly",
         flow_node_id=flow_node_id,
         source_flow_node_id=flow_node_id,
         work_order_name=work_order_name,
+        created_by=created_by,
         remark=(remark or "").strip() or None,
         worker_id=worker_id,
+        worker_name=worker_name,
         quantity=quantity,
     )
     session.add(order)
@@ -101,6 +154,9 @@ def add_repository_quantity(
 
 __all__ = [
     "add_repository_quantity",
+    "assign_work_order_material_repository",
+    "assign_work_order_repository",
     "create_assembly_work_order_record",
     "create_production_item",
+    "create_work_order_material",
 ]

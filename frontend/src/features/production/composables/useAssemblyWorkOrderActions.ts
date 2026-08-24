@@ -26,7 +26,7 @@ export function useAssemblyWorkOrderActions(
         '装配工单 · 整单送检',
         { confirmButtonText: '全部送检', cancelButtonText: '取消' },
       )
-      await submitWorkOrder(item.id, quantity, 'qc')
+      await submitWorkOrder(item.id, 'qc')
       await onChanged()
       ElMessage.success('装配产出已送 QC')
     } catch (error) {

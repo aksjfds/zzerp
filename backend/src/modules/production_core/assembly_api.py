@@ -5,6 +5,7 @@ from collections.abc import Collection
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from domain.production_types import WORK_ORDER_STATUS_CLOSED
 from domain.time import utc_now
 from modules.engineering.model_api import ProductBom
 from modules.production_core.context_api import (
@@ -117,7 +118,7 @@ def record_assembly_output(
 ) -> None:
     order.completed_quantity += completed_quantity
     if close_order:
-        order.status = "closed"
+        order.status = WORK_ORDER_STATUS_CLOSED
         order.closed_at = utc_now()
 
 

@@ -1,9 +1,14 @@
+import type { CustomerOrderStatus } from '@/features/customer-orders'
+
 export type InventoryDepartment = 'warehouse' | 'finished'
+export type InventoryItemType = 'part' | 'assembly' | 'finished_product'
+export type InventoryTransactionSource = 'inventory_stock' | 'finished_order_stock'
+export type FinishedOrderStatus = Extract<CustomerOrderStatus, 'planned' | 'closed'>
 
 export type InventoryStock = {
   id: number
   department_code: InventoryDepartment
-  item_type: 'part' | 'assembly' | 'finished_product'
+  item_type: InventoryItemType
   item_code: string
   item_name: string
   product_version: number
@@ -35,6 +40,9 @@ export type InventoryOutboundPlan = {
 
 export type InventoryTransaction = {
   id: number
+  source_type: InventoryTransactionSource
+  source_id: number
+  inventory_stock_id: number | null
   transaction_type: string
   quantity: number
   quantity_before: number
@@ -53,7 +61,7 @@ export type InventoryTransaction = {
 export type FinishedOrderStock = {
   customer_order_id: number
   customer_order_no: string
-  order_status: 'planned' | 'closed'
+  order_status: FinishedOrderStatus
   customer_order_item_id: number
   item_code: string
   item_name: string

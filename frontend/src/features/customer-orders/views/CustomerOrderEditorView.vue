@@ -6,7 +6,7 @@ import { getApiErrorDetail } from '@/api/request'
 import { queryOrderProduct, queryOrderProducts, type OrderProduct } from '../api/orderProducts'
 import { createCustomerOrder, queryCustomerOrder, updateCustomerOrder } from '../api/customerOrders'
 import type { CustomerOrderItem, CustomerOrderPayload } from '../domain/types'
-import { queryCustomers, type Customer } from '@/features/customers/api/customers'
+import { queryCustomers, type Customer } from '@/features/customers'
 import { useAuthStore } from '@/stores/auth'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
 
@@ -178,7 +178,7 @@ onMounted(async () => {
     </section>
     <section class="card" :class="{ readonly: readOnly }">
       <div class="heading"><h2>产品明细</h2><ElButton v-if="!readOnly" :disabled="!form.customer_id" @click="addItem">新增产品</ElButton></div>
-      <ElTable :data="form.items" border table-layout="auto">
+      <ElTable v-table-column-widths="'sales.order-editor-items'" :data="form.items" border table-layout="auto">
         <ElTableColumn label="产品" min-width="220">
           <template #default="{ row }">
             <span v-if="readOnly" class="readonly-value">{{ productLabel(row.product_id) }}</span>

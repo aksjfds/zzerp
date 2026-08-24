@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import DepartmentPageHeader from '@/features/production/components/DepartmentPageHeader.vue'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import {
   queryFinishedOrderStocks,
   receiveFinishedOrderStock,
@@ -106,6 +106,7 @@ defineExpose({ load })
       <ElButton @click="load">刷新</ElButton>
     </div>
     <ElTable
+      v-table-column-widths="'finished.order-operations'"
       v-loading="loading"
       :data="visibleRows"
       border

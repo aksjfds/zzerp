@@ -1,21 +1,10 @@
 import { service } from '@/api/request'
 import type {
-  RepositoryFilters,
   RepositoryItem,
   DepartmentSurplusInventoryItem,
   WorkerItem,
 } from '../domain/types'
-
-export type DepartmentRepositoryQuery = RepositoryFilters & {
-  page: number
-  page_size: number
-}
-
-export type RepositoryWorkshop = {
-  id: number
-  department_id: number
-  workshop_name: string
-}
+import type { DepartmentRepositoryQuery, RepositoryWorkshop } from '../domain/repositories'
 
 export async function queryDepartmentRepositoryWorkshops(
   departmentCode: string,

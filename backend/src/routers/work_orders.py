@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
-from authorization import require_any_permission
+from authorization import ensure_department_access, require_any_permission
+from departments.work_order_commands import create_department_source_work_order
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
 from schemas.production import (
     AssemblyWorkOrderCreate,
@@ -14,17 +15,16 @@ from schemas.production import (
 )
 from departments.contracts import (
     CAP_ASSEMBLY,
-    CAP_PURCHASING,
-    CAP_STANDARD_EXECUTION,
     CAP_WORK_ORDERS,
 )
-from departments.registry import department_api, department_api_for_any
-from modules.production_core.api import (
+from departments.registry import department_api
+from departments.work_order_orchestration import (
     cancel_work_order,
-    create_work_order,
     register_purchase_arrival,
     resubmit_work_order_rework_batch,
     submit_work_order,
+)
+from modules.production_core.api import (
     undo_production_operation,
 )
 
@@ -49,8 +49,7 @@ def department_work_orders(
     ),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
-    if user["department"] not in {"sys", department_code}:
-        raise HTTPException(status_code=403, detail="无权访问该部门")
+    ensure_department_access(user, department_code)
     data, total = department_api(
         department_code,
         CAP_WORK_ORDERS,
@@ -69,30 +68,18 @@ def work_order_create(
     payload: WorkOrderCreate,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
-    if user["department"] == "sys":
-        data = create_work_order(
-            payload.repository_id,
-            payload.procedure_id,
-            payload.procedure_name,
-            payload.quantity,
-            payload.worker_id,
-            payload.remark,
-            user["department"],
-        )
-    else:
-        data = department_api_for_any(
-            user["department"],
-            (CAP_STANDARD_EXECUTION, CAP_PURCHASING),
-        ).create_source_work_order(
-            payload.repository_id,
-            payload.procedure_id,
-            payload.procedure_name,
-            payload.quantity,
-            payload.worker_id,
-            payload.remark,
-        )
     return {
-        "data": data
+        "data": create_department_source_work_order(
+            actor_department=user["department"],
+            actor_is_system=user["is_system"],
+            repository_id=payload.repository_id,
+            procedure_id=payload.procedure_id,
+            procedure_name=payload.procedure_name,
+            quantity=payload.quantity,
+            worker_id=payload.worker_id,
+            remark=payload.remark,
+            actor_username=user["username"],
+        )
     }
 
 
@@ -101,8 +88,7 @@ def assembly_work_order_create(
     payload: AssemblyWorkOrderCreate,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
-    if user["department"] not in {"sys", "assembly"}:
-        raise HTTPException(status_code=403, detail="只有装配部可以开装配工单")
+    ensure_department_access(user, "assembly")
     return {
         "data": department_api(
             "assembly",
@@ -114,7 +100,9 @@ def assembly_work_order_create(
             payload.quantity,
             payload.worker_id,
             payload.remark,
+            user["username"],
             user["department"],
+            user["is_system"],
         )
     }
 
@@ -128,9 +116,9 @@ def work_order_submit(
     return {
         "data": submit_work_order(
             work_order_id,
-            payload.quantity,
             payload.completion_action,
             user["department"],
+            user["is_system"],
             user["username"],
         )
     }
@@ -150,6 +138,7 @@ def purchase_arrival_register(
             work_order_id,
             payload.quantity,
             user["department"],
+            user["is_system"],
             user["username"],
         )
     }
@@ -169,6 +158,7 @@ def work_order_batch_rework_submit(
             batch_id,
             payload.quantity,
             user["department"],
+            user["is_system"],
             user["username"],
         )
     }
@@ -186,6 +176,7 @@ def production_operation_undo(
         "data": undo_production_operation(
             operation_id,
             user["department"],
+            user["is_system"],
             user["username"],
         )
     }
@@ -196,4 +187,10 @@ def work_order_cancel(
     work_order_id: int,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
-    return {"data": cancel_work_order(work_order_id, user["department"])}
+    return {
+        "data": cancel_work_order(
+            work_order_id,
+            user["department"],
+            user["is_system"],
+        )
+    }

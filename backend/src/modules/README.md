@@ -9,14 +9,14 @@ repositories or the database session directly.
 
 Business implementations and data-access repositories live in their owning
 module packages. The old top-level `services` and `repositories` source files
-have been removed. Architecture tests reject legacy imports and require those
-layers to remain absent.
+have been removed. Static architecture review requires those layers to remain
+absent.
 
 ORM class definitions live in each owner's `persistence.py`. Files under the
 top-level `models` package have been removed. Owning modules import persistence
-classes directly; foreign modules use the owner's `model_api.py` under the
-explicit read-access manifest. Architecture tests verify that the physical
-file owner, `TABLE_OWNERS` declaration and imports agree.
+classes directly; an exceptional foreign ORM read uses the owner's
+`model_api.py`. Static architecture review must verify that the physical file
+owner, `TABLE_OWNERS` declaration and public model surfaces agree.
 
 Department packages under `departments/` own department capabilities and
 presentation policies. Shared inventory, movement and work-order state remains
@@ -29,13 +29,14 @@ create copies of the production state machine.
 - `organization`: departments, workshops and procedures.
 - `engineering`: products, versions, BOM and process flow.
 - `sales`: customers and customer orders.
-- `production_core`: production items, inventory, movement ledger and work-order orchestration.
-- `standard_execution`: workshop procedures, piece rates and standard work orders.
+- `production_core`: production items, repositories, movement ledger and shared work-order state.
+- `standard_execution`: procedure prices, pay details and standard work-order execution.
 - `purchasing`: purchase receipt work orders.
 - `assembly`: assembly work orders and material allocation.
 - `quality`: inspections and QC release.
+- `inventory`: inventory stock, reservations, receipts, transactions and finished-goods stock.
 - `workforce`: worker administration, history and pay projections.
-- `planning`: PMC and other cross-module read models.
+- `planning`: production plans, PMC and other cross-module read models.
 
 ## Dependency rules
 
@@ -57,22 +58,59 @@ create copies of the production state machine.
    response and event DTOs; it must not expose ORM-backed transaction objects.
 
 `modules/ownership.py` declares exactly one authoritative owner for every ORM
-table. Architecture tests require the ownership map to remain exhaustive,
-reject foreign-owned ORM construction, and ensure every cross-module API
-dependency is declared by the caller's descriptor.
+table. Static architecture review requires the ownership map to match the
+physical ORM definitions, rejects cross-module persistence imports, and checks
+that every `model_api.py` is declared by its owning descriptor.
 
-Shared-database read coupling is exceptional and explicit:
-`modules/read_access.py` lists every foreign table each module currently reads.
-Architecture tests require the manifest and actual ORM imports to match exactly.
-The same tests build the local Python import graph and reject file-level cycles.
-New collaboration queries should be owned by the data-owning module and return
-scalars or immutable projections. A `model_api.py` grant is reserved for an ORM
-relationship or a measured joined-query need that cannot yet use such a contract.
-Only `planning` (cross-domain reporting) and `production_core` (the production
-state machine and transaction orchestrator) currently hold grants. Other
-modules must request batched projections from each data owner and compose them
-without importing foreign ORM tables.
+Shared-database read coupling is exceptional and explicit. New collaboration
+queries should be owned by the data-owning module and return scalars or
+immutable projections. A foreign `model_api.py` import is reserved for an ORM
+relationship or a measured joined-query need that cannot yet use such a
+contract; it must not be used to write a foreign-owned record.
 When an in-transaction workflow must pass an existing runtime object, the owner
 publishes a persistence-free structural protocol in `context_api.py`; mutations
-still go through an owner command API. Architecture tests keep these protocol
-surfaces independent from SQLAlchemy and persistence modules.
+still go through an owner command API. These protocol surfaces must remain
+independent from SQLAlchemy and persistence modules.
+
+## Registered cross-domain read models
+
+Cross-domain ORM joins are limited to the following read-model owners. These
+files may import declared foreign `model_api.py` surfaces for set-based reads;
+they may not construct or mutate foreign-owned records.
+
+| Read model | Owner | Purpose |
+| --- | --- | --- |
+| `planning.department_progress` | planning | ordinary department task list |
+| `planning.current_production_cards` / `historical_production_cards` / `production_card_listing` | planning | production workbench card queries and orchestration |
+| `planning.production_progress_detail` | planning | department task detail drawer |
+| `planning.order_status_view` / `sales_progress_api` | planning | sales order production summaries and flow status |
+| `planning.inventory_outbound` | planning | production-plan inventory outbound view |
+| `inventory.api` | inventory | inventory stock and ledger presentation |
+| `inventory.finished_goods_api` | inventory | finished-goods receiving, shipment and presentation |
+| `production_core.work_order_queries` / `work_order_presenters` | production_core | owner work-order query and response mapping |
+| `quality.workforce_api` | quality | immutable QC activity projection for workforce |
+| `workforce.workers` | workforce | worker history and pay projection |
+
+The following transaction paths have registered foreign ORM reads because the
+shared SQL transaction must lock or join existing context. They are not foreign
+writers: all construction and mutation is delegated to the owning `*_api.py`.
+
+| Transaction path | Foreign read purpose |
+| --- | --- |
+| `assembly.work_orders` | lock production material allocations and inspect workshop context |
+| `planning.plan_builder` / `plan_api` / `route_projection` / `execution_api` | bind the order's immutable product version, validate inventory/production completion and derive its route |
+| `production_core.flow` / `lifecycle` / `inventory_api` / `assembly_api` | resolve immutable order-version flow and initialize owner production records |
+| `production_core.repositories` / `work_order_commands` / `work_order_support` | validate source, workshop and procedure context before owner writes |
+| `production_core.operation_undo` | lock the source order context while reversing owner movements |
+| `quality.inspection_api` / `submission_api` | no direct ORM dependency remains; QC batch reads and writes go through `production_core.qc_api` |
+
+Any new foreign ORM construction or attribute mutation is a boundary violation,
+even if the class was imported through `model_api.py`.
+
+`production_route_task` is a planning-owned deterministic projection of
+`production_plan_item` onto the bound product-version flow. It stores only the
+route node, workshop and order within the route; department remains derived
+from the workshop owner. Planned quantity,
+arrival, completion, work-order and QC state remain in their authoritative
+tables. The projection is rebuilt in the same transaction whenever a draft plan
+is rebuilt or edited; plan confirmation does not create a second route.

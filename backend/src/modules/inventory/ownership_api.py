@@ -15,7 +15,6 @@ from modules.inventory.persistence import (
 def create_receipt(
     session: Session,
     *,
-    identity_key: str,
     department_code: str,
     item_type: str,
     product_id: int,
@@ -27,6 +26,7 @@ def create_receipt(
     item_name: str,
     quantity: int,
     source_customer_order_id: int | None = None,
+    source_customer_order_item_id: int | None = None,
     source_production_item_id: int | None = None,
 ) -> InventoryReceipt:
     if quantity <= 0:
@@ -38,7 +38,6 @@ def create_receipt(
     if not valid_location:
         raise DomainError("inventory_receipt_location_invalid", "库存类型与入库部门不匹配")
     receipt = InventoryReceipt(
-        identity_key=identity_key,
         department_code=department_code,
         item_type=item_type,
         product_id=product_id,
@@ -50,6 +49,7 @@ def create_receipt(
         item_name=item_name,
         quantity=quantity,
         source_customer_order_id=source_customer_order_id,
+        source_customer_order_item_id=source_customer_order_item_id,
         source_production_item_id=source_production_item_id,
     )
     session.add(receipt)
@@ -70,12 +70,19 @@ def confirm_receipt(
         raise DomainError("inventory_receipt_not_pending", "该入库记录已处理", status_code=409)
     stock = session.scalar(
         select(InventoryStock)
-        .where(InventoryStock.identity_key == receipt.identity_key)
+        .where(
+            InventoryStock.department_code == receipt.department_code,
+            InventoryStock.item_type == receipt.item_type,
+            InventoryStock.product_id == receipt.product_id,
+            InventoryStock.product_version == receipt.product_version,
+            InventoryStock.product_bom_id == receipt.product_bom_id,
+            InventoryStock.flow_node_id == receipt.flow_node_id,
+            InventoryStock.completed_flow_node_id == receipt.completed_flow_node_id,
+        )
         .with_for_update()
     )
     if stock is None:
         stock = InventoryStock(
-            identity_key=receipt.identity_key,
             department_code=receipt.department_code,
             item_type=receipt.item_type,
             product_id=receipt.product_id,

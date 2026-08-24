@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue'
-import DepartmentPageHeader from '../components/DepartmentPageHeader.vue'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
 import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import AssemblyGroupCards from '../components/AssemblyGroupCards.vue'
@@ -41,7 +41,13 @@ onMounted(load)
 <template>
   <main class="production-page">
     <DepartmentPageHeader department-name="装配部" description="装配任务及装配部所属加工工艺。" @refresh="refresh" />
-    <DepartmentSectionTabs department-code="assembly">
+    <DepartmentSectionTabs
+      department-code="assembly"
+      show-inventory
+      show-workers
+      show-progress
+      show-procedure-prices
+    >
     <RepositoryFilterBar
       :workshops="workshops"
       mode="assembly"

@@ -21,17 +21,21 @@ from database import Base
 
 class Department(Base):
     __tablename__ = "department"
+    __table_args__ = (
+        UniqueConstraint("department_name", name="uq_department_name"),
+        UniqueConstraint("department_code", name="uq_department_code"),
+    )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    department_name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
-    department_code: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    department_name: Mapped[str] = mapped_column(Text, nullable=False)
+    department_code: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class Workshop(Base):
     __tablename__ = "workshop"
     __table_args__ = (
-        UniqueConstraint("id", "department_id"),
-        UniqueConstraint("department_id", "workshop_name"),
+        UniqueConstraint("id", "department_id", name="uq_workshop_department_context"),
+        UniqueConstraint("department_id", "workshop_name", name="uq_workshop_name"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -52,7 +56,7 @@ class Procedure(Base):
             "input_mode IN ('single', 'multiple')",
             name="ck_procedure_input_mode",
         ),
-        UniqueConstraint("workshop_id", "procedure_name"),
+        UniqueConstraint("workshop_id", "procedure_name", name="uq_procedure_name"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)

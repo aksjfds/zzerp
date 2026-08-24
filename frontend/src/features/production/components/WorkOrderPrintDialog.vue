@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { workOrderStatusLabel } from '../domain/workOrderStatus'
 import type { WorkOrder } from '../domain/types'
 
 const props = defineProps<{
@@ -13,11 +14,7 @@ const typeLabel = computed(() => ({
   purchase_receipt: '外购入库工单',
   assembly: '装配工单',
 }[props.item?.work_order_type || 'standard']))
-const statusLabel = computed(() => ({
-  open: '进行中',
-  closed: '已结单',
-  cancelled: '已取消',
-}[props.item?.status || 'open']))
+const statusLabel = computed(() => workOrderStatusLabel(props.item?.status || 'open'))
 
 function print() {
   window.print()
@@ -69,7 +66,7 @@ function print() {
       </section>
 
       <footer>
-        <div>制单：________________</div>
+        <div>制单：{{ item.created_by }}</div>
         <div>领单：________________</div>
         <div>审核：________________</div>
       </footer>

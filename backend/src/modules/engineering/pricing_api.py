@@ -4,7 +4,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from modules.engineering.persistence import (
@@ -59,38 +59,6 @@ def _bom_views(
     return result
 
 
-def list_current_product_pricing_views(
-    session: Session,
-) -> list[ProductPricingView]:
-    rows = list(
-        session.execute(
-            select(Product, ProductProcessFlow.flow_json)
-            .join(
-                ProductProcessFlow,
-                and_(
-                    ProductProcessFlow.product_id == Product.id,
-                    ProductProcessFlow.product_version == Product.version,
-                ),
-            )
-            .order_by(Product.updated_at.desc(), Product.id.desc())
-        )
-    )
-    keys = {(product.id, product.version) for product, _ in rows}
-    boms = _bom_views(session, keys)
-    return [
-        ProductPricingView(
-            product_id=product.id,
-            product_version=product.version,
-            product_name=product.product_name,
-            factory_code=product.factory_code,
-            updated_at=product.updated_at,
-            flow_json=flow_json,
-            boms=tuple(boms.get((product.id, product.version), ())),
-        )
-        for product, flow_json in rows
-    ]
-
-
 def get_product_pricing_view(
     session: Session,
     product_id: int,
@@ -122,5 +90,4 @@ __all__ = [
     "PricingBomView",
     "ProductPricingView",
     "get_product_pricing_view",
-    "list_current_product_pricing_views",
 ]

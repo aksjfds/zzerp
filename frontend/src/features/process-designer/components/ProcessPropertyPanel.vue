@@ -2,7 +2,7 @@
 import type { FlowEdge, FlowNode } from '../domain/types'
 import type { WorkshopRouteOption } from '@/api/organization'
 
-defineProps<{
+const props = defineProps<{
   node: FlowNode | null
   edge: FlowEdge | null
   workshops: WorkshopRouteOption[]
@@ -11,6 +11,11 @@ defineProps<{
 const emit = defineEmits<{
   updateAssembly: [label: string, output_name: string, output_pcs: number]
 }>()
+
+function workshopName(node: FlowNode | null) {
+  if (!node || (node.type !== 'process' && node.type !== 'assembly')) return ''
+  return props.workshops.find(item => item.id === node.workshop_id)?.workshop_name || node.label
+}
 </script>
 
 <template>
@@ -18,7 +23,7 @@ const emit = defineEmits<{
     <template v-if="node?.type === 'process'">
       <h3>工序节点</h3>
       <label>车间</label>
-      <ElInput :model-value="workshops.find(item => item.id === node.workshop_id)?.workshop_name || node.label" disabled />
+      <ElInput :model-value="workshopName(node)" disabled />
       <p>具体加工工艺由该车间开工单时选择。</p>
     </template>
     <template v-else-if="node?.type === 'qc'">
@@ -32,7 +37,7 @@ const emit = defineEmits<{
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>
       <label>车间</label>
-      <ElInput :model-value="workshops.find(item => item.id === node.workshop_id)?.workshop_name || node.label" disabled />
+      <ElInput :model-value="workshopName(node)" disabled />
       <label>装配体名称</label>
       <ElInput :model-value="node.output_name" disabled placeholder="根据输入配件自动生成" />
       <label>系统编号</label>

@@ -62,15 +62,11 @@ export async function createAssemblyWorkOrder(
 
 export async function submitWorkOrder(
   workOrderId: number,
-  quantity: number,
   completionAction: CompletionAction,
 ) {
   const response = await service.post<{ data: WorkOrder }>(
     `/work-orders/${workOrderId}/submissions`,
-    {
-      quantity,
-      completion_action: completionAction,
-    },
+    { completion_action: completionAction },
   )
   return response.data.data
 }

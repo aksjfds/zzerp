@@ -6,10 +6,13 @@ from typing import Iterable
 
 from sqlalchemy import select
 
+from domain.production_types import (
+    REWORK_TRACKED_WORK_ORDER_TYPES,
+    WORK_ORDER_STATUS_CLOSED,
+    WORK_ORDER_STATUS_OPEN,
+)
 from domain.time import utc_now
-from domain.production_types import REWORK_TRACKED_WORK_ORDER_TYPES
-from modules.quality.model_api import WorkOrderBatch
-from modules.production_core.persistence import WorkOrder
+from modules.production_core.persistence import WorkOrder, WorkOrderBatch
 
 
 @dataclass(frozen=True)
@@ -193,19 +196,28 @@ def calculate_assembly_output_progress(
 def refresh_qc_work_order_closed(session, order: WorkOrder) -> bool:
     if (
         order.work_order_type not in REWORK_TRACKED_WORK_ORDER_TYPES
-        or order.status != "open"
+        or order.status != WORK_ORDER_STATUS_OPEN
     ):
         return False
     batches = list(session.scalars(
         select(WorkOrderBatch).where(WorkOrderBatch.work_order_id == order.id)
     ).all())
     progress = calculate_work_order_progress(order, batches)
-    if (
-        order.completed_quantity == order.quantity
-        and progress.pending_qc_quantity == 0
-        and progress.rework_pending_quantity == 0
-    ):
-        order.status = "closed"
+    if can_close_production_work_order(order, progress):
+        order.status = WORK_ORDER_STATUS_CLOSED
         order.closed_at = utc_now()
         return True
     return False
+
+
+def can_close_production_work_order(
+    order: WorkOrder,
+    progress: WorkOrderProgress,
+) -> bool:
+    """Return whether standard or assembly execution has fully settled."""
+    return (
+        order.work_order_type in REWORK_TRACKED_WORK_ORDER_TYPES
+        and order.status == "open"
+        and order.completed_quantity == order.quantity
+        and progress.can_complete
+    )

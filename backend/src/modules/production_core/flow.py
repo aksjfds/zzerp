@@ -32,17 +32,24 @@ class ProductionFlowContext:
         return name, name
 
 
-def load_product_flow(session, product_id: int, product_version: int) -> tuple[dict, dict[str, dict]]:
-    cache = session.info.setdefault("product_process_flow_cache", {})
+def load_product_flow(
+    session,
+    product_id: int,
+    product_version: int,
+    flow_cache: dict[tuple[int, int], ProductProcessFlow] | None = None,
+) -> tuple[dict, dict[str, dict]]:
     key = (product_id, product_version)
-    if key not in cache:
-        cache[key] = session.scalar(
+    if flow_cache is not None and key in flow_cache:
+        record = flow_cache[key]
+    else:
+        record = session.scalar(
             select(ProductProcessFlow).where(
                 ProductProcessFlow.product_id == product_id,
                 ProductProcessFlow.product_version == product_version,
             )
         )
-    record = cache[key]
+        if flow_cache is not None and record is not None:
+            flow_cache[key] = record
     if record is None:
         raise DomainError("production_context_missing", "生产资料不完整")
     flow = record.flow_json
@@ -177,20 +184,30 @@ def next_execution_node(
 def load_production_flow(
     session,
     production_item: ProductionItem,
+    *,
+    flow_cache: dict[tuple[int, int], ProductProcessFlow] | None = None,
+    order_items: dict[int, CustomerOrderItem] | None = None,
+    bom_items: dict[int, ProductBom] | None = None,
 ) -> ProductionFlowContext:
-    order_item = session.get(
-        CustomerOrderItem,
-        production_item.customer_order_item_id,
-    )
+    order_item = (
+        order_items.get(production_item.customer_order_item_id)
+        if order_items is not None else None
+    ) or session.get(
+            CustomerOrderItem,
+            production_item.customer_order_item_id,
+        )
     if order_item is None:
         raise DomainError("production_context_missing", "生产订单明细不存在")
-    bom_item = (
-        session.get(ProductBom, production_item.product_bom_id)
-        if production_item.product_bom_id else None
-    )
+    bom_item = None
+    if production_item.product_bom_id is not None:
+        bom_item = (
+            bom_items.get(production_item.product_bom_id)
+            if bom_items is not None else None
+        ) or session.get(ProductBom, production_item.product_bom_id)
     flow, nodes = load_product_flow(
         session,
         order_item.product_id,
         order_item.product_version,
+        flow_cache,
     )
     return ProductionFlowContext(order_item, bom_item, flow, nodes)

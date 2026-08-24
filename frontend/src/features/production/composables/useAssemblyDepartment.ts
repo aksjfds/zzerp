@@ -10,7 +10,7 @@ import { useAssemblyWorkOrderActions } from './useAssemblyWorkOrderActions'
 import { useProductionWorkOrderActions } from './useProductionWorkOrderActions'
 
 export function useAssemblyDepartment() {
-  const workspace = useDepartmentWorkspace('assembly', true)
+  const workspace = useDepartmentWorkspace('assembly', true, true)
   const assembly = useAssemblyGroups(workspace.items)
   const workOrderScope = computed<WorkOrderQueryScope | null>(() => {
     const item = workspace.selectedRepository.value

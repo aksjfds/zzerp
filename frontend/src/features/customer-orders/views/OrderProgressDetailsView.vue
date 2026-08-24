@@ -9,8 +9,9 @@ import type {
   CustomerOrderProgressDetail,
   CustomerOrderProduction,
 } from '../domain/types'
-import { queryCustomers, type Customer } from '@/features/customers/api/customers'
-import ProductionFlowViewer from '@/shared/process-flow/productionViewer'
+import { queryCustomers, type Customer } from '@/features/customers'
+import { useWorkshopDepartmentCodes } from '@/features/departments'
+import ProductionFlowViewer from '@/shared/process-flow/ProductionFlowViewer.vue'
 
 const loading = ref(false)
 const rows = ref<CustomerOrderProgressDetail[]>([])
@@ -24,6 +25,7 @@ const flowVisible = ref(false)
 const flowLoading = ref(false)
 const flowRow = ref<CustomerOrderProgressDetail>()
 const flowProduct = ref<CustomerOrderProduction['products'][number]>()
+const { workshopDepartmentCodes } = useWorkshopDepartmentCodes()
 
 async function viewProductionFlow(row: CustomerOrderProgressDetail) {
   flowRow.value = row
@@ -102,6 +104,7 @@ defineExpose({ load })
       </ElSelect>
     </div>
     <ElTable
+      v-table-column-widths="'sales.progress-details'"
       v-loading="loading"
       :data="rows"
       border
@@ -152,6 +155,7 @@ defineExpose({ load })
           :flow="flowProduct.process_flow"
           :stats="flowProduct.node_stats"
           :edge-stats="flowProduct.edge_stats"
+          :workshop-department-codes="workshopDepartmentCodes"
         />
         <ElEmpty v-else-if="!flowLoading" description="该产品尚未生成生产流程" />
       </div>

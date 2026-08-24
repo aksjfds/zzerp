@@ -1,4 +1,6 @@
 import type { Router } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { getApiErrorDetail } from '@/api/request'
 import { useAuthStore } from '@/stores/auth'
 import { getDefaultDashboardPath } from './defaultRoute'
 
@@ -7,7 +9,12 @@ export function setupRouterGuard(router: Router) {
     const authStore = useAuthStore()
 
     if (!authStore.initialized && to.path !== '/login') {
-      await authStore.refreshUser()
+      try {
+        await authStore.refreshUser()
+      } catch (error) {
+        ElMessage.error(getApiErrorDetail(error)?.message || '登录状态校验失败')
+        return false
+      }
     }
 
     if (to.meta.requiresAuth && !authStore.isLoggedIn) {

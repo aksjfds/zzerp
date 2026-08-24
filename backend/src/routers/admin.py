@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Query
 
 from authorization import require_any_permission
 from domain.permissions import PRODUCTION_VIEW
@@ -26,11 +26,7 @@ def admin_worker_history(
     month: str = Query(pattern=r"^\d{4}-\d{2}$"),
     _user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
-    try:
-        data = worker_history(worker_id, month)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"data": data}
+    return {"data": worker_history(worker_id, month)}
 
 
 @router.get("/workers/{worker_id}/pay", response_model=AdminWorkerPayEnvelope)
@@ -39,8 +35,4 @@ def admin_worker_pay(
     month: str = Query(pattern=r"^\d{4}-\d{2}$"),
     _user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
-    try:
-        data = worker_pay_summary(worker_id, month)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return {"data": data}
+    return {"data": worker_pay_summary(worker_id, month)}

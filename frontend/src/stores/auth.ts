@@ -1,4 +1,5 @@
 import { computed, ref } from 'vue'
+import { isAxiosError } from 'axios'
 import { defineStore } from 'pinia'
 import { login as loginApi, logout as logoutApi, queryCurrentUser } from '@/api/auth'
 import type { LoginPayload, UserProfile } from '@/types/auth'
@@ -34,9 +35,12 @@ export const useAuthStore = defineStore('auth', () => {
       const profile = await queryCurrentUser()
       user.value = profile
       return profile
-    } catch {
-      user.value = null
-      return null
+    } catch (error) {
+      if (isAxiosError(error) && error.response?.status === 401) {
+        user.value = null
+        return null
+      }
+      throw error
     } finally {
       initialized.value = true
     }

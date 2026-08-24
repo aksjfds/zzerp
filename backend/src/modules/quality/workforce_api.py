@@ -7,7 +7,7 @@ from datetime import datetime
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from modules.quality.persistence import WorkOrderBatch
+from modules.production_core.model_api import WorkOrderBatch
 
 
 @dataclass(frozen=True, slots=True)

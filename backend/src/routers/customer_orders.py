@@ -13,11 +13,12 @@ from schemas.sales import (
     CustomerOrderEnvelope,
     CustomerOrderListEnvelope,
     CustomerOrderProgressDetailEnvelope,
+    CustomerOrderProductionEnvelope,
     CustomerOrderUpdate,
     ProductionPlanEnvelope,
     ProductionPlanUpdate,
 )
-from modules.sales.api import (
+from departments.sales_orchestration import (
     change_status,
     confirm_production_plan,
     create_order,
@@ -28,7 +29,7 @@ from modules.sales.api import (
     list_order_progress_details,
     update_order,
 )
-from modules.planning.api import get_order_plan, update_order_plan
+from modules.planning.api import complete_order_plan, get_order_plan, update_order_plan
 
 
 router = APIRouter(prefix="/customer-orders", tags=["customer-orders"])
@@ -38,10 +39,9 @@ router = APIRouter(prefix="/customer-orders", tags=["customer-orders"])
 def customer_order_list(
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
-    include_progress: bool = Query(default=False),
     _: dict = Depends(require_any_permission(ORDER_VIEW)),
 ):
-    data, total = list_orders(page, page_size, include_progress=include_progress)
+    data, total = list_orders(page, page_size)
     return {"data": data, "total": total}
 
 
@@ -86,7 +86,10 @@ def customer_order_detail(
     return {"data": get_order(order_id)}
 
 
-@router.get("/{order_id}/production-status")
+@router.get(
+    "/{order_id}/production-status",
+    response_model=CustomerOrderProductionEnvelope,
+)
 def customer_order_production_status(
     order_id: int,
     _: dict = Depends(require_any_permission(ORDER_VIEW)),
@@ -108,12 +111,15 @@ def customer_order_production_plan_update(
     payload: ProductionPlanUpdate,
     _: dict = Depends(require_any_permission(ORDER_EDIT, csrf=True)),
 ):
-    quantities = {item.id: item.planned_production_quantity for item in payload.items}
-    if len(quantities) != len(payload.items):
-        from modules.errors import DomainError
-        raise DomainError("duplicate_production_plan_item", "生产计划项目不能重复", path="items")
     return {
-        "data": update_order_plan(order_id, payload.expected_revision, quantities)
+        "data": update_order_plan(
+            order_id,
+            payload.expected_revision,
+            [
+                (item.id, item.planned_production_quantity)
+                for item in payload.items
+            ],
+        )
     }
 
 
@@ -154,6 +160,21 @@ def customer_order_production_plan_confirm(
             order_id,
             expected_revision,
             plan_expected_revision,
+            actor_username=user["username"],
+        )
+    }
+
+
+@router.post("/{order_id}/production-plan/complete", response_model=ProductionPlanEnvelope)
+def customer_order_production_plan_complete(
+    order_id: int,
+    expected_revision: int = Query(gt=0),
+    user: dict = Depends(require_any_permission(ORDER_CONFIRM, csrf=True)),
+):
+    return {
+        "data": complete_order_plan(
+            order_id,
+            expected_revision,
             actor_username=user["username"],
         )
     }

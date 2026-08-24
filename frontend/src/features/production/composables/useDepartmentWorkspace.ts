@@ -5,15 +5,18 @@ import {
   queryDepartmentRepositoryWorkshops,
   queryDepartmentWorkers,
 } from '../api/departmentRepositories'
-import type { RepositoryWorkshop } from '../api/departmentRepositories'
+import type { RepositoryWorkshop } from '../domain/repositories'
 import type { RepositoryFilters, RepositoryItem, WorkerItem } from '../domain/types'
-import { departmentSupports } from '@/features/departments/registry'
 
 const EMPTY_FILTERS = (): RepositoryFilters => ({
   keyword: '', workshop_name: null, work_status: 'all',
 })
 
-export function useDepartmentWorkspace(departmentCode: string, loadWorkers = false) {
+export function useDepartmentWorkspace(
+  departmentCode: string,
+  loadWorkers = false,
+  groupSourcesByProductionItem = false,
+) {
   const loading = ref(false)
   const items = ref<RepositoryItem[]>([])
   const workers = ref<WorkerItem[]>([])
@@ -63,7 +66,7 @@ export function useDepartmentWorkspace(departmentCode: string, loadWorkers = fal
         item.production_item_id === selectedBeforeLoad.production_item_id
         && item.flow_node_id === selectedBeforeLoad.flow_node_id
         && (
-          departmentSupports(departmentCode, 'assembly')
+          groupSourcesByProductionItem
           || item.source_flow_node_id === selectedBeforeLoad.source_flow_node_id
         )
       )))
