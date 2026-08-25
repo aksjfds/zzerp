@@ -4,7 +4,7 @@ from sqlalchemy import select
 
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
 from modules.planning.plan_builder import planned_product_quantity, rebuild_order_plan
-from modules.sales.planning_contract import OrderPlanState
+from modules.sales.context_api import OrderPlanState
 
 
 def order_plan_states(

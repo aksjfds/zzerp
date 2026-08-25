@@ -75,7 +75,7 @@ def _list_assembly_production_progress(
             .join(Workshop, Workshop.id == ProductionRouteTask.workshop_id)
             .where(
                 Workshop.department_id == assembly_department.id,
-                ProductionPlan.status.in_(("draft", "confirmed")),
+                ProductionPlan.status.in_(("draft", "confirmed", "completed")),
                 CustomerOrder.status != "cancelled",
                 ProductionPlanItem.item_type == "assembly",
                 ProductionPlanItem.planned_production_quantity > 0,

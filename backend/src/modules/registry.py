@@ -5,7 +5,6 @@ from modules.inventory.descriptor import MODULE as INVENTORY
 from modules.organization.descriptor import MODULE as ORGANIZATION
 from modules.planning.descriptor import MODULE as PLANNING
 from modules.production_core.descriptor import MODULE as PRODUCTION_CORE
-from modules.purchasing.descriptor import MODULE as PURCHASING
 from modules.quality.descriptor import MODULE as QUALITY
 from modules.sales.descriptor import MODULE as SALES
 from modules.standard_execution.descriptor import MODULE as STANDARD_EXECUTION
@@ -22,7 +21,6 @@ MODULES = {
         SALES,
         PRODUCTION_CORE,
         STANDARD_EXECUTION,
-        PURCHASING,
         ASSEMBLY,
         QUALITY,
         WORKFORCE,

@@ -48,18 +48,25 @@ def _calculate_order_item_state(
     pending_qc_by_node: dict[str, int] = defaultdict(int)
     for movement in movements:
         batch = batches_by_id.get(movement.work_order_batch_id)
+        result_pending_destination = (
+            batch is not None
+            and batch.recorded_at is not None
+            and (batch.qualified_quantity or 0) > 0
+            and batch.destination_decided_at is None
+        )
         if (
             batch is not None
-            and batch.recorded_at is None
+            and (batch.recorded_at is None or result_pending_destination)
             and movement.target_flow_node_id
             and movement.movement_type in {
                 "process",
-                "purchase_receipt",
                 "assembly_output",
             }
         ):
             pending_qc_by_node[movement.target_flow_node_id] += (
-                batch.submitted_quantity
+                int(batch.qualified_quantity or 0)
+                if result_pending_destination
+                else batch.submitted_quantity
             )
 
     current_by_node: dict[str, int] = defaultdict(int)
@@ -141,7 +148,7 @@ def _calculate_order_item_state(
             and (
                 movement.target_flow_node_id is not None
                 or movement.work_order_batch_id is None
-                or movement.movement_type == "qc_qualified"
+                or movement.movement_type in {"qc_qualified", "qc_inventory"}
             )
         )
         if (

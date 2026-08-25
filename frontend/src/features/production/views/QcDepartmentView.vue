@@ -13,6 +13,8 @@ const {
   batches,
   changePage,
   changeView,
+  decideDestination,
+  decidingBatchId,
   dialogVisible,
   load,
   loading,
@@ -42,10 +44,10 @@ function applySearch() {
   <main class="production-page">
     <DepartmentPageHeader
       department-name="QC部门"
-      description="录入工单质检结果，并决定合格品返回当前车间或放行下一节点。"
+      description="先录入工单质检结果，再决定合格品返回、放行或入库。"
       @refresh="refresh"
     />
-    <DepartmentSectionTabs department-code="qc" show-inventory show-workers>
+    <DepartmentSectionTabs department-code="qc" show-workers>
     <section class="qc-filter-bar">
       <ElInput
         v-model="searchText"
@@ -65,7 +67,9 @@ function applySearch() {
         :items="batches"
         :loading="loading"
         :history="activeView === 'history'"
+        :deciding-batch-id="decidingBatchId"
         @inspect="openInspection"
+        @decide="decideDestination"
       />
       <ElPagination
         v-model:current-page="page"

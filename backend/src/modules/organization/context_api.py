@@ -13,11 +13,5 @@ class ProcedureContext(Protocol):
     @property
     def procedure_name(self) -> str: ...
 
-    @property
-    def procedure_type(self) -> str: ...
-
-    @property
-    def input_mode(self) -> str: ...
-
 
 __all__ = ["ProcedureContext"]

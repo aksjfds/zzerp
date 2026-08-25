@@ -6,6 +6,7 @@ from domain.production_types import (
     QC_SUPPORTED_WORK_ORDER_TYPES,
     REWORK_TRACKED_WORK_ORDER_TYPES,
     WORK_ORDER_STATUS_OPEN,
+    QcQualifiedDestination,
 )
 from domain.workforce import WorkerReference
 from modules.errors import DomainError
@@ -19,7 +20,10 @@ from modules.production_core.context_api import (
     ProductionItemContext,
     WorkOrderContext,
 )
-from modules.production_core.flow_api import ProductionFlowContext
+from modules.production_core.flow_api import (
+    ProductionFlowContext,
+    qc_qualified_destinations,
+)
 from modules.production_core.operational_api import (
     node_context,
     process_qc_node,
@@ -31,10 +35,11 @@ from modules.production_core.qc_api import (
     load_qc_production_item,
     load_qc_work_order,
     record_qc_batch_result,
+    record_qc_batch_destination,
 )
 from modules.quality.inspection_api import load_inspection_batch
 from modules.quality.inspection_rules import validate_inspection_result
-from modules.quality.routing_contract import QcRoutingStrategy
+from modules.quality.routing_api import QcRoutingStrategy
 from schemas.production import QcInspection
 
 
@@ -49,6 +54,21 @@ class PreparedInspection:
     flow_node: dict
     qc_department_id: int
     qc_worker: WorkerReference
+
+
+@dataclass(frozen=True)
+class PreparedDestination:
+    session: Session
+    batch: InspectionBatchContext
+    order: WorkOrderContext
+    production_item: ProductionItemContext
+    procedure: ProcedureContext
+    flow_context: ProductionFlowContext
+    flow_node: dict
+    qc_flow_node_id: str
+    qc_department_id: int
+    destination: QcQualifiedDestination
+    already_decided: bool
 
 
 def prepare_inspection(
@@ -163,7 +183,7 @@ def _load_execution_context(
     return production_item, context, node, procedure
 
 
-def complete_inspection(
+def record_inspection_result(
     prepared: PreparedInspection,
     payload: QcInspection,
     routing: QcRoutingStrategy,
@@ -180,31 +200,6 @@ def complete_inspection(
     routing.validate_context(session, order, procedure)
     qc_node = process_qc_node(context.flow, context.nodes, node["id"])
     qc_flow_node_id = qc_node["id"] if qc_node is not None else node["id"]
-    if payload.qualified_quantity:
-        route_result = routing.route_qualified(
-            session,
-            order=order,
-            batch=batch,
-            production_item=production_item,
-            procedure=procedure,
-            context=context,
-            node=node,
-            quantity=payload.qualified_quantity,
-            qualified_disposition=payload.qualified_disposition,
-        )
-        record_movement(
-            session,
-            production_item=production_item,
-            quantity=payload.qualified_quantity,
-            movement_type="qc_qualified",
-            source_flow_node_id=qc_flow_node_id,
-            target_flow_node_id=route_result.target_flow_node_id,
-            source_department_id=qc_department_id,
-            target_department_id=route_result.target_department_id,
-            work_order=order,
-            work_order_batch=batch,
-        )
-
     if payload.rework_quantity:
         route_result = routing.route_rework(
             session,
@@ -251,7 +246,6 @@ def complete_inspection(
     session.flush()
     record_qc_batch_result(
         batch,
-        qualified_disposition=payload.qualified_disposition,
         qualified_quantity=payload.qualified_quantity,
         rework_quantity=payload.rework_quantity,
         scrap_quantity=payload.scrap_quantity,
@@ -268,6 +262,96 @@ def complete_inspection(
         rework_pending_quantity=payload.rework_quantity,
         track_rework=order.work_order_type in REWORK_TRACKED_WORK_ORDER_TYPES,
     )
+
+
+def prepare_qualified_destination(
+    session: Session,
+    batch_id: int,
+    destination: QcQualifiedDestination,
+) -> PreparedDestination:
+    batch, order = _load_locked_inspection(session, batch_id)
+    if batch.recorded_at is None:
+        raise DomainError("qc_result_required", "请先录入 QC 结果", status_code=409)
+    if not batch.qualified_quantity:
+        raise DomainError("qc_destination_not_required", "该批次没有待处理合格品", status_code=409)
+    if batch.destination_decided_at is not None:
+        if batch.qualified_destination != destination:
+            raise DomainError("qc_destination_conflict", "该批次合格品去向已经确定", status_code=409)
+        already_decided = True
+    else:
+        already_decided = False
+
+    production_item, context, node, procedure = _load_execution_context(session, order)
+    allowed = qc_qualified_destinations(context.flow, context.nodes, node["id"])
+    if destination not in allowed:
+        raise DomainError("qc_destination_invalid", "当前批次不支持所选合格品去向", status_code=409)
+    qc_department_id = get_department_ids_by_codes(session, {"qc"}).get("qc")
+    if qc_department_id is None:
+        raise DomainError("department_not_found", "QC 部门不存在")
+    qc_node = process_qc_node(context.flow, context.nodes, node["id"])
+    return PreparedDestination(
+        session=session,
+        batch=batch,
+        order=order,
+        production_item=production_item,
+        procedure=procedure,
+        flow_context=context,
+        flow_node=node,
+        qc_flow_node_id=qc_node["id"] if qc_node is not None else node["id"],
+        qc_department_id=qc_department_id,
+        destination=destination,
+        already_decided=already_decided,
+    )
+
+
+def route_qualified_destination(
+    prepared: PreparedDestination,
+    routing: QcRoutingStrategy,
+) -> None:
+    routing.validate_context(prepared.session, prepared.order, prepared.procedure)
+    route_result = routing.route_qualified(
+        prepared.session,
+        order=prepared.order,
+        batch=prepared.batch,
+        production_item=prepared.production_item,
+        procedure=prepared.procedure,
+        context=prepared.flow_context,
+        node=prepared.flow_node,
+        quantity=prepared.batch.qualified_quantity or 0,
+        destination=prepared.destination,
+    )
+    record_movement(
+        prepared.session,
+        production_item=prepared.production_item,
+        quantity=prepared.batch.qualified_quantity or 0,
+        movement_type="qc_qualified",
+        source_flow_node_id=prepared.qc_flow_node_id,
+        target_flow_node_id=route_result.target_flow_node_id,
+        source_department_id=prepared.qc_department_id,
+        target_department_id=route_result.target_department_id,
+        work_order=prepared.order,
+        work_order_batch=prepared.batch,
+    )
+
+
+def finalize_qualified_destination(
+    prepared: PreparedDestination,
+    actor_username: str,
+) -> dict:
+    prepared.session.flush()
+    record_qc_batch_destination(
+        prepared.batch,
+        destination=prepared.destination,
+        actor_username=actor_username,
+    )
+    prepared.session.flush()
+    refresh_qc_work_order_closed(prepared.session, prepared.order)
+    prepared.session.flush()
+    return serialize_batch(prepared.batch)
+
+
+def serialize_decided_destination(prepared: PreparedDestination) -> dict:
+    return serialize_batch(prepared.batch)
 
 
 def _record_loss(

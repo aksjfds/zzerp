@@ -2,7 +2,7 @@ from sqlalchemy.exc import IntegrityError
 
 from domain.product import ProductReference
 from domain.time import business_iso
-from modules.sales.collaboration_contract import SalesEngineeringPort, SalesProductionPort
+from modules.sales.context_api import SalesEngineeringPort, SalesProductionPort
 from modules.sales.persistence import CustomerOrder, CustomerOrderItem
 from schemas.sales import CustomerOrderItemInput
 from modules.errors import DomainError

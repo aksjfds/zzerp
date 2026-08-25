@@ -120,7 +120,7 @@ class WorkOrder(Base):
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_work_order_quantity_positive"),
         CheckConstraint(
-            "work_order_type IN ('standard', 'purchase_receipt', 'assembly')",
+            "work_order_type IN ('standard', 'assembly')",
             name="ck_work_order_type",
         ),
         CheckConstraint(
@@ -159,10 +159,7 @@ class WorkOrder(Base):
             "(work_order_type = 'standard' AND procedure_id IS NOT NULL "
             "AND source_flow_node_id IS NOT NULL "
             "AND (status <> 'open' OR completed_quantity = quantity "
-            "OR repository_id IS NOT NULL)) OR "
-            "(work_order_type = 'purchase_receipt' AND procedure_id IS NOT NULL "
-            "AND source_flow_node_id IS NOT NULL "
-            "AND (status <> 'open' OR repository_id IS NOT NULL))",
+            "OR repository_id IS NOT NULL))",
             name="ck_work_order_type_source",
         ),
         ForeignKeyConstraint(
@@ -296,16 +293,26 @@ class WorkOrderBatch(Base):
             name="ck_batch_lost",
         ),
         CheckConstraint(
+            "destination_decided_by IS NULL OR (destination_decided_by = "
+            "btrim(destination_decided_by) AND destination_decided_by <> '')",
+            name="ck_batch_destination_actor",
+        ),
+        CheckConstraint(
             "(recorded_at IS NULL AND qualified_quantity IS NULL "
             "AND rework_quantity IS NULL AND scrap_quantity IS NULL "
             "AND lost_quantity IS NULL AND qc_worker_id IS NULL "
-            "AND qc_worker_name IS NULL AND qualified_disposition IS NULL) OR "
+            "AND qc_worker_name IS NULL AND qualified_destination IS NULL "
+            "AND destination_decided_at IS NULL AND destination_decided_by IS NULL) OR "
             "(recorded_at IS NOT NULL AND qualified_quantity IS NOT NULL "
             "AND rework_quantity IS NOT NULL AND scrap_quantity IS NOT NULL "
             "AND lost_quantity IS NOT NULL AND qc_worker_id IS NOT NULL "
             "AND qc_worker_name IS NOT NULL "
-            "AND ((qualified_quantity = 0 AND qualified_disposition IS NULL) "
-            "OR (qualified_quantity > 0 AND qualified_disposition IN ('return', 'release'))) "
+            "AND ((qualified_quantity = 0 AND qualified_destination IS NULL "
+            "AND destination_decided_at IS NULL AND destination_decided_by IS NULL) "
+            "OR (qualified_quantity > 0 AND ((qualified_destination IS NULL "
+            "AND destination_decided_at IS NULL AND destination_decided_by IS NULL) "
+            "OR (qualified_destination IN ('return', 'release', 'inventory') "
+            "AND destination_decided_at IS NOT NULL AND destination_decided_by IS NOT NULL)))) "
             "AND qualified_quantity + rework_quantity + scrap_quantity "
             "+ lost_quantity = submitted_quantity)",
             name="ck_batch_inspection_complete",
@@ -322,7 +329,10 @@ class WorkOrderBatch(Base):
             "idx_work_order_batch_pending",
             text("id DESC"),
             "work_order_id",
-            postgresql_where=text("recorded_at IS NULL"),
+            postgresql_where=text(
+                "recorded_at IS NULL OR (qualified_quantity > 0 "
+                "AND destination_decided_at IS NULL)"
+            ),
         ),
         Index(
             "idx_work_order_batch_history",
@@ -352,7 +362,11 @@ class WorkOrderBatch(Base):
     )
     qc_worker_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     defect_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    qualified_disposition: Mapped[str | None] = mapped_column(Text, nullable=True)
+    qualified_destination: Mapped[str | None] = mapped_column(Text, nullable=True)
+    destination_decided_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    destination_decided_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     recorded_at: Mapped[datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
@@ -364,7 +378,8 @@ class ProductionMovement(Base):
         CheckConstraint("quantity > 0", name="ck_production_movement_quantity_positive"),
         CheckConstraint(
             "movement_type IN ('initial', 'process', 'assembly_input', "
-            "'assembly_output', 'purchase_receipt', 'qc_qualified', 'qc_rework', "
+            "'assembly_output', 'qc_qualified', 'qc_inventory', "
+            "'production_inventory', 'qc_rework', "
             "'inventory_issue', 'finished_receipt', "
             "'customer_shipment', 'assembly_input_restore', 'scrap', 'lost')",
             name="ck_production_movement_type",
@@ -382,7 +397,7 @@ class ProductionMovement(Base):
             "AND source_flow_node_id IS NOT NULL AND target_flow_node_id IS NOT NULL "
             "AND source_department_id IS NOT NULL AND target_department_id IS NOT NULL "
             "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
-            "(movement_type IN ('process', 'purchase_receipt', 'assembly_output') "
+            "(movement_type IN ('process', 'assembly_output') "
             "AND source_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "
             "AND work_order_id IS NOT NULL) OR "
@@ -398,6 +413,14 @@ class ProductionMovement(Base):
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND target_department_id IS NOT NULL "
             "AND work_order_id IS NOT NULL AND work_order_batch_id IS NOT NULL) OR "
+            "(movement_type = 'qc_inventory' AND source_flow_node_id IS NOT NULL "
+            "AND target_flow_node_id IS NULL AND source_department_id IS NOT NULL "
+            "AND target_department_id IS NOT NULL "
+            "AND work_order_id IS NOT NULL AND work_order_batch_id IS NOT NULL) OR "
+            "(movement_type = 'production_inventory' "
+            "AND source_flow_node_id IS NOT NULL AND target_flow_node_id IS NULL "
+            "AND source_department_id IS NOT NULL AND target_department_id IS NOT NULL "
+            "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
             "(movement_type = 'qc_rework' AND source_flow_node_id IS NOT NULL "
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND target_department_id IS NOT NULL "
@@ -414,6 +437,13 @@ class ProductionMovement(Base):
             "(movement_type NOT IN ('assembly_input', 'assembly_input_restore') "
             "AND work_order_material_id IS NULL)",
             name="ck_production_movement_assembly_material",
+        ),
+        CheckConstraint(
+            "(movement_type = 'production_inventory' "
+            "AND warehouse_operation_id IS NOT NULL) OR "
+            "(movement_type <> 'production_inventory' "
+            "AND warehouse_operation_id IS NULL)",
+            name="ck_production_movement_warehouse_operation",
         ),
         ForeignKeyConstraint(
             ["work_order_batch_id", "work_order_id"],
@@ -457,7 +487,16 @@ class ProductionMovement(Base):
             unique=True,
             postgresql_where=text(
                 "work_order_batch_id IS NOT NULL AND movement_type IN "
-                "('process', 'purchase_receipt', 'assembly_output')"
+                "('process', 'assembly_output')"
+            ),
+        ),
+        Index(
+            "uq_production_movement_batch_qualified_destination",
+            "work_order_batch_id",
+            unique=True,
+            postgresql_where=text(
+                "work_order_batch_id IS NOT NULL AND movement_type IN "
+                "('qc_qualified', 'qc_inventory')"
             ),
         ),
         Index(
@@ -465,6 +504,12 @@ class ProductionMovement(Base):
             "work_order_material_id",
             unique=True,
             postgresql_where=text("movement_type = 'assembly_input'"),
+        ),
+        Index(
+            "uq_production_movement_warehouse_operation",
+            "warehouse_operation_id",
+            unique=True,
+            postgresql_where=text("warehouse_operation_id IS NOT NULL"),
         ),
         Index(
             "idx_production_movement_assembly_material",
@@ -507,6 +552,11 @@ class ProductionMovement(Base):
     )
     work_order_batch_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     work_order_material_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    warehouse_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("warehouse_operation.id"),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
@@ -516,7 +566,7 @@ class ProductionOperationUndo(Base):
     __tablename__ = "production_operation_undo"
     __table_args__ = (
         CheckConstraint(
-            "operation_type IN ('purchase_arrival', 'submission', 'rework_submission')",
+            "operation_type IN ('submission', 'rework_submission')",
             name="ck_production_operation_undo_type",
         ),
         CheckConstraint(

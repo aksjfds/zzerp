@@ -1,13 +1,15 @@
 import { ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { queryDepartmentWorkers } from '../api/departmentRepositories'
 import {
+  decideQcDestination,
   inspectQcBatch,
   queryPendingQcBatches,
 } from '../api/qc'
 import type {
   PendingQcBatch,
+  QcDestination,
   QcInspectionPayload,
   WorkerItem,
 } from '../domain/types'
@@ -23,6 +25,7 @@ export function useQcDepartment() {
   const pageSize = 50
   const dialogVisible = ref(false)
   const submitting = ref(false)
+  const decidingBatchId = ref<number | null>(null)
   const keyword = ref('')
   let loadSequence = 0
 
@@ -89,6 +92,33 @@ export function useQcDepartment() {
     }
   }
 
+  async function decideDestination(batch: PendingQcBatch, destination: QcDestination) {
+    const labels: Record<QcDestination, string> = {
+      return: '返回当前车间',
+      release: '放行下一节点',
+      inventory: '存入仓库',
+    }
+    try {
+      await ElMessageBox.confirm(
+        `确认将 ${batch.qualified_quantity || 0} 件合格品${labels[destination]}？确认后不能更改。`,
+        '确认合格品去向',
+        { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+    decidingBatchId.value = batch.id
+    try {
+      await decideQcDestination(batch.id, destination)
+      await loadBatches()
+      ElMessage.success('合格品去向已确认')
+    } catch (error) {
+      ElMessage.error(getApiErrorDetail(error)?.message || '合格品去向确认失败')
+    } finally {
+      decidingBatchId.value = null
+    }
+  }
+
   async function refresh() {
     page.value = 1
     await Promise.all([loadBatches(), loadWorkers()])
@@ -121,6 +151,8 @@ export function useQcDepartment() {
     batches,
     changePage,
     changeView,
+    decideDestination,
+    decidingBatchId,
     dialogVisible,
     load,
     loadBatches,

@@ -1,8 +1,6 @@
-from typing import Literal, Self
+from pydantic import Field
 
-from pydantic import Field, model_validator
-
-from domain.production_types import QcQualifiedDisposition
+from domain.production_types import QcQualifiedDestination
 from schemas.production_base import ProductionModel
 
 
@@ -13,13 +11,10 @@ class QcInspection(ProductionModel):
     scrap_quantity: int = Field(ge=0)
     lost_quantity: int = Field(ge=0)
     defect_reason: str | None = None
-    qualified_disposition: QcQualifiedDisposition | None = None
 
-    @model_validator(mode="after")
-    def validate_disposition(self) -> Self:
-        if (self.qualified_quantity > 0) != (self.qualified_disposition is not None):
-            raise ValueError("存在合格数量时必须且只能选择一个合格品去向")
-        return self
+
+class QcDestinationInput(ProductionModel):
+    destination: QcQualifiedDestination
 
 
 class WorkOrderBatchResponse(ProductionModel):
@@ -36,7 +31,9 @@ class WorkOrderBatchResponse(ProductionModel):
     qc_worker_id: int | None
     qc_worker_name: str | None
     defect_reason: str | None
-    qualified_disposition: Literal["return", "release"] | None
+    qualified_destination: QcQualifiedDestination | None
+    destination_decided_at: str | None
+    destination_decided_by: str | None
     recorded_at: str | None
 
 
@@ -52,6 +49,7 @@ class PendingQcResponse(WorkOrderBatchResponse):
     part_no: str
     part_name: str
     work_order_name: str
+    allowed_destinations: list[QcQualifiedDestination]
 
 
 class PendingQcListEnvelope(ProductionModel):

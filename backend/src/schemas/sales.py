@@ -118,8 +118,7 @@ class ProductionPlanItemResponse(SalesModel):
     available_inventory_quantity: int
     net_required_quantity: int
     planned_production_quantity: int
-    reserved_inventory_quantity: int
-    issued_inventory_quantity: int
+    deducted_inventory_quantity: int
 
 
 class ProductionPlanProductSummary(SalesModel):
@@ -155,9 +154,10 @@ class ProductionPlanInventoryItem(SalesModel):
     item_code: str
     item_name: str
     completed_node_label: str
+    warehouse_code: str
+    warehouse_name: str
     current_inventory_quantity: int
-    reserved_inventory_quantity: int
-    issued_inventory_quantity: int
+    planned_deduction_quantity: int
     decomposition: ProductionPlanInventoryDecomposition
 
 

@@ -9,7 +9,7 @@ from database import SessionLocal
 from domain.time import utc_now
 from modules.engineering.model_api import Product
 from modules.errors import DomainError
-from modules.inventory.ownership_api import confirm_receipt, create_receipt
+from modules.inventory.ownership_api import receive_finished_surplus
 from modules.inventory.persistence import FinishedGoodsTransaction, FinishedOrderStock
 from modules.organization.read_api import get_department_ids_by_codes
 from modules.production_core.model_api import ProductionItem
@@ -108,7 +108,7 @@ def allocate_issued_finished_goods(
         raw_quantity_before=before,
         raw_quantity_after=lot.available_quantity,
         actor_username=actor_username,
-        reason="生产计划领用成品库存",
+        reason="生产计划确认直接扣减成品库存",
     )
     session.flush()
     return lot
@@ -348,23 +348,19 @@ def transfer_order_finished_surplus(
         product_quantity = lot.available_quantity // lot.unit_quantity
         if product_quantity <= 0:
             continue
-        receipt = create_receipt(
+        receive_finished_surplus(
             session,
-            department_code="finished",
-            item_type="finished_product",
             product_id=lot.product_id,
             product_version=lot.product_version,
-            product_bom_id=None,
             flow_node_id=lot.flow_node_id,
             completed_flow_node_id=lot.flow_node_id,
             item_code=lot.item_code,
             item_name=lot.item_name,
             quantity=product_quantity,
-            source_customer_order_id=customer_order.id,
-            source_customer_order_item_id=lot.customer_order_item_id,
             source_production_item_id=lot.production_item_id,
+            actor_username=actor_username,
+            reason="订单成品结余自动入库",
         )
-        confirm_receipt(session, receipt.id, actor_username, "订单成品结余自动入库")
         _record_finished_transaction(
             session,
             lot=lot,

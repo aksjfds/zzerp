@@ -7,7 +7,6 @@ outside this module.
 
 from sqlalchemy import select
 
-from domain.production_types import WORK_ORDER_ASSEMBLY
 from modules.organization.context_api import ProcedureContext
 from modules.production_core.persistence import (
     ProductionItem,
@@ -15,7 +14,6 @@ from modules.production_core.persistence import (
     WorkOrder,
     WorkOrderMaterial,
 )
-from modules.production_core.work_order_rules import validate_work_order_procedure
 
 
 def create_production_item(
@@ -93,7 +91,6 @@ def create_assembly_work_order_record(
     remark: str | None,
     repository_id: int | None = None,
 ) -> WorkOrder:
-    validate_work_order_procedure(procedure, WORK_ORDER_ASSEMBLY)
     order = WorkOrder(
         repository_id=repository_id,
         production_item_id=production_item_id,

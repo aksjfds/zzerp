@@ -117,6 +117,16 @@ def _validate_flow_departments_and_workshops(
                     path="process_flow.nodes",
                     element_id=node.id,
                 )
+            expected_node_type = (
+                "assembly" if workshop.input_mode == "multiple" else "process"
+            )
+            if node.type != expected_node_type:
+                raise DomainError(
+                    "workshop_input_mode_mismatch",
+                    f"流程节点“{node.label}”与车间的单路/多路类型不一致，请重新拖入节点",
+                    path="process_flow.nodes",
+                    element_id=node.id,
+                )
         if node.type == "assembly":
             workshop = workshops.get(node.workshop_id)
             if workshop is None or workshop.department_id != department_ids.get("assembly"):

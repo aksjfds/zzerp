@@ -1,6 +1,6 @@
 import type { RepositoryItem } from './types'
 
-type CardMode = 'production' | 'purchase' | 'assembly'
+type CardMode = 'production' | 'assembly'
 
 const statusLabels: Record<CardMode, Record<RepositoryItem['work_status'], string>> = {
   production: {
@@ -10,14 +10,6 @@ const statusLabels: Record<CardMode, Record<RepositoryItem['work_status'], strin
     qc: '进行中',
     rework: '进行中',
     completed: '已完成',
-  },
-  purchase: {
-    unprocessed: '待采购',
-    processing: '采购中',
-    processing_completed: '到货完成',
-    qc: '质检中',
-    rework: '返工中',
-    completed: '已入库',
   },
   assembly: {
     unprocessed: '未装配',

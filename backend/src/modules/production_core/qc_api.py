@@ -97,7 +97,6 @@ def create_qc_batch(
 def record_qc_batch_result(
     batch,
     *,
-    qualified_disposition: str | None,
     qualified_quantity: int,
     rework_quantity: int,
     scrap_quantity: int,
@@ -106,7 +105,6 @@ def record_qc_batch_result(
     qc_worker_name: str,
     defect_reason: str | None,
 ) -> None:
-    batch.qualified_disposition = qualified_disposition
     batch.qualified_quantity = qualified_quantity
     batch.rework_quantity = rework_quantity
     batch.scrap_quantity = scrap_quantity
@@ -117,6 +115,17 @@ def record_qc_batch_result(
     batch.recorded_at = utc_now()
 
 
+def record_qc_batch_destination(
+    batch,
+    *,
+    destination: str,
+    actor_username: str,
+) -> None:
+    batch.qualified_destination = destination
+    batch.destination_decided_at = utc_now()
+    batch.destination_decided_by = actor_username
+
+
 __all__ = [
     "create_qc_batch",
     "list_qc_batches",
@@ -124,5 +133,6 @@ __all__ = [
     "load_qc_production_item",
     "load_qc_work_order",
     "record_qc_batch_result",
+    "record_qc_batch_destination",
     "rework_submitted_quantity",
 ]

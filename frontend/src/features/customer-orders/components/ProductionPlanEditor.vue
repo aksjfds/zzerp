@@ -140,7 +140,7 @@ onMounted(load)
       <div class="plan-heading">
         <div>
           <h2>库存</h2>
-          <p>展示当前未被其他计划占用的库存；确认生产计划时系统会重新核算。</p>
+          <p>展示当前库存；确认生产计划时系统会重新读取并直接扣减。</p>
         </div>
       </div>
       <ElEmpty v-if="!loading && !inventoryGroups.length" description="暂无相关产品库存" />
@@ -201,11 +201,13 @@ onMounted(load)
           <ElTableColumn prop="item_code" label="编号" min-width="130" />
           <ElTableColumn prop="item_name" label="名称" min-width="170" />
           <ElTableColumn prop="completed_node_label" label="完成状态" min-width="120">
-            <template #default="{ row }">{{ row.completed_node_label === '—' ? '—' : `${row.completed_node_label}完` }}</template>
+            <template #default="{ row }">{{ row.completed_node_label }}</template>
+          </ElTableColumn>
+          <ElTableColumn label="仓库" min-width="120">
+            <template #default="{ row }">{{ row.warehouse_code === '—' ? '—' : `${row.warehouse_code} · ${row.warehouse_name}` }}</template>
           </ElTableColumn>
           <ElTableColumn prop="current_inventory_quantity" label="当前可用库存" width="120" align="right" />
-          <ElTableColumn prop="reserved_inventory_quantity" label="本计划占用" width="110" align="right" />
-          <ElTableColumn prop="issued_inventory_quantity" label="本计划已出库" width="120" align="right" />
+          <ElTableColumn prop="planned_deduction_quantity" label="确认时扣减" width="110" align="right" />
         </ElTable>
       </section>
     </section>
@@ -214,7 +216,7 @@ onMounted(load)
       <div class="plan-heading">
         <div>
           <h2>生产计划</h2>
-          <p>填写各配件的新生产数量；确认时系统重新计算需求并占用可用库存。</p>
+          <p>填写各配件的新生产数量；确认时系统重新计算需求并直接扣减可用库存。</p>
         </div>
       </div>
       <ElEmpty v-if="!loading && !groups.length" description="暂无生产计划项目" />

@@ -6,12 +6,8 @@ import type { RepositoryFilters, RepositoryItem, WorkOrderQueryScope } from '../
 import { useDepartmentWorkspace } from './useDepartmentWorkspace'
 import { useWorkOrderList } from './useWorkOrders'
 import { useProductionWorkOrderActions } from './useProductionWorkOrderActions'
-import { usePurchaseWorkOrderActions } from './usePurchaseWorkOrderActions'
 
-export function useProductionDepartment(
-  departmentCode: string,
-  mode: 'production' | 'purchase' = 'production',
-) {
+export function useProductionDepartment(departmentCode: string) {
   const workspace = useDepartmentWorkspace(departmentCode, true)
   const workOrderScope = computed<WorkOrderQueryScope | null>(() => {
     const item = workspace.selectedRepository.value
@@ -72,7 +68,7 @@ export function useProductionDepartment(
       )
       dialogVisible.value = false
       await reloadWorkspace()
-      ElMessage.success(mode === 'purchase' ? '外购入库单已创建' : '工单已创建')
+      ElMessage.success('工单已创建')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
     } finally {
@@ -103,9 +99,7 @@ export function useProductionDepartment(
     activeRepository, applyFilters, changeRepositoryPage, dialogVisible,
     load, loadDetails, openWorkOrder, reloadWorkspace, refresh,
     saveWorkOrder, selectRepository, submitting,
-    workOrderActions: mode === 'production'
-      ? useProductionWorkOrderActions(reloadWorkspace)
-      : usePurchaseWorkOrderActions(reloadWorkspace),
+    workOrderActions: useProductionWorkOrderActions(reloadWorkspace),
     workOrderList, workspace,
   }
 }

@@ -27,19 +27,21 @@ def resolve_workshop_procedure(
     workshop_id: int,
     procedure_id: int | None,
     procedure_name: str | None,
-    input_mode: str,
-    procedure_type: str = "standard",
+    required_input_mode: str,
 ) -> ProcedureContext:
     workshop = session.get(Workshop, workshop_id)
     if workshop is None:
         raise DomainError("workshop_not_found", "当前流程车间不存在")
+    if workshop.input_mode != required_input_mode:
+        raise DomainError(
+            "workshop_input_mode_invalid",
+            "当前车间不适用于所选流程节点",
+        )
     normalized_name = (procedure_name or "").strip()
     if procedure_id is not None:
         procedure = session.get(Procedure, procedure_id, with_for_update=True)
         if procedure is None or procedure.workshop_id != workshop_id:
             raise DomainError("procedure_workshop_invalid", "所选工艺不属于当前车间")
-        if procedure.procedure_type != procedure_type or procedure.input_mode != input_mode:
-            raise DomainError("procedure_input_mode_invalid", "所选工艺不适用于当前流程节点")
         return procedure
     if not normalized_name:
         raise DomainError("procedure_required", "请选择已有工艺或填写新工艺")
@@ -54,14 +56,10 @@ def resolve_workshop_procedure(
         .with_for_update()
     )
     if procedure is not None:
-        if procedure.procedure_type != procedure_type or procedure.input_mode != input_mode:
-            raise DomainError("procedure_input_mode_invalid", "同名工艺不适用于当前流程节点")
         return procedure
     procedure = Procedure(
         workshop_id=workshop_id,
         procedure_name=normalized_name,
-        procedure_type=procedure_type,
-        input_mode=input_mode,
     )
     session.add(procedure)
     session.flush()

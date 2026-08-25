@@ -46,10 +46,9 @@ def serialize_plan(session: Session, plan: ProductionPlan) -> dict:
                 "estimated_inventory_quantity": item.estimated_inventory_quantity,
                 "net_required_quantity": item.net_required_quantity,
                 "planned_production_quantity": item.planned_production_quantity,
-                "reserved_inventory_quantity": item.reserved_inventory_quantity,
-                "issued_inventory_quantity": item.issued_inventory_quantity,
+                "deducted_inventory_quantity": item.deducted_inventory_quantity,
                 "available_inventory_quantity": max(
-                    item.estimated_inventory_quantity - item.reserved_inventory_quantity,
+                    item.estimated_inventory_quantity - item.deducted_inventory_quantity,
                     0,
                 ) if plan.status != "draft" else item.estimated_inventory_quantity,
             }
@@ -64,4 +63,3 @@ def serialize_plan(session: Session, plan: ProductionPlan) -> dict:
         "created_at": business_iso(plan.created_at),
         "updated_at": business_iso(plan.updated_at),
     }
-

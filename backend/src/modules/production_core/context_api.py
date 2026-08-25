@@ -7,6 +7,8 @@ modules depend only on these fields so persistence classes remain private.
 from datetime import datetime
 from typing import Protocol
 
+from domain.production_types import QcQualifiedDestination
+
 
 class InventorySourceContext(Protocol):
     @property
@@ -71,7 +73,9 @@ class InspectionBatchContext(Protocol):
     rework_source_batch_id: int | None
     submitted_quantity: int
     rework_quantity: int | None
-    qualified_disposition: str | None
+    qualified_quantity: int | None
+    qualified_destination: QcQualifiedDestination | None
+    destination_decided_at: datetime | None
     recorded_at: datetime | None
 
 

@@ -1,7 +1,7 @@
 import { service } from '@/api/request'
 import type {
   RepositoryItem,
-  DepartmentSurplusInventoryItem,
+  ProductionPositionStorageCandidate,
   WorkerItem,
 } from '../domain/types'
 import type { DepartmentRepositoryQuery, RepositoryWorkshop } from '../domain/repositories'
@@ -34,27 +34,28 @@ export async function queryDepartmentWorkers(departmentCode: string) {
   return response.data.data
 }
 
-export async function queryDepartmentSurplusInventory(departmentCode: string) {
-  const response = await service.get<{ data: DepartmentSurplusInventoryItem[] }>(
-    `/departments/${departmentCode}/surplus-inventory`,
+export async function queryProductionPositionStorageCandidates(departmentCode: string) {
+  const response = await service.get<{ data: ProductionPositionStorageCandidate[] }>(
+    `/departments/${departmentCode}/warehouse-candidates`,
   )
   return response.data.data
 }
 
-export async function storePositionInWarehouse(
+export async function storeProductionPosition(
   departmentCode: string,
-  item: DepartmentSurplusInventoryItem,
+  item: ProductionPositionStorageCandidate,
   quantity: number,
 ) {
   const response = await service.post<{
-    inventory_stock_id: number
+    operation_group_no: string
+    warehouse_stock_id: number
     quantity: number
-    completed_flow_node_id: string
-    completed_node_label: string
-  }>(`/departments/${departmentCode}/warehouse-storage`, {
+    completion_status: string
+  }>(`/departments/${departmentCode}/warehouse-candidates/storage`, {
     production_item_id: item.production_item_id,
     flow_node_id: item.flow_node_id,
     source_flow_node_id: item.source_flow_node_id,
+    position_version: item.position_version,
     quantity,
   })
   return response.data

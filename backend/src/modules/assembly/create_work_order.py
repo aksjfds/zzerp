@@ -82,7 +82,7 @@ def create_assembly_work_order(
             workshop_id=workshop_id,
             procedure_id=procedure_id,
             procedure_name=procedure_name,
-            input_mode="multiple",
+            required_input_mode="multiple",
         )
         continuation = (
             len(repositories) == 1

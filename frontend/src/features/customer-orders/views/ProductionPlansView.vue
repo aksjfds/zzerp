@@ -82,15 +82,22 @@ async function saveDraft() {
 async function confirmPlan() {
   const order = activeOrder.value
   if (!order || order.status !== 'confirmed') return
+  confirming.value = true
   try {
+    const saved = await editor.value?.save({ silent: true })
+    if (!saved) return
+    const deductions = saved.inventory_items.filter(item => item.planned_deduction_quantity > 0)
+    const deductionDetails = deductions.length
+      ? deductions.map(item => (
+          `${item.item_code} / ${item.completed_node_label} / `
+          + `${item.warehouse_code} ${item.warehouse_name}：${item.planned_deduction_quantity} 件`
+        )).join('；')
+      : '本计划不使用现有库存'
     await ElMessageBox.confirm(
-      '确认生产计划后，系统会重新核算并占用库存，同时初始化生产流程。是否继续？',
+      `确认时将再次读取库存并直接扣减，成功后不能取消生产计划。${deductionDetails}。是否继续？`,
       '确认生产计划',
       { type: 'warning' },
     )
-    confirming.value = true
-    const saved = await editor.value?.save({ silent: true })
-    if (!saved) return
     await confirmProductionPlan(order.id, order.revision, saved.revision)
     ElMessage.success('生产计划已确认并进入生产')
     dialogVisible.value = false
@@ -110,7 +117,7 @@ async function completePlan() {
   if (!order || !plan || plan.status !== 'confirmed') return
   try {
     await ElMessageBox.confirm(
-      '完成后不能再开新工单，订单结单状态不受影响。是否完成该生产计划？',
+      '完成仅更新生产计划的管理状态，现有工单和后续开单仍可继续，且计划不能取消。是否继续？',
       '完成生产计划',
       { type: 'warning', confirmButtonText: '确认完成' },
     )

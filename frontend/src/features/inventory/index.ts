@@ -1,1 +1,1 @@
-export { default as InventoryDepartmentView } from './views/InventoryDepartmentView.vue'
+export { default as FinishedInventoryView } from './views/FinishedInventoryView.vue'

@@ -2,11 +2,9 @@ from typing import Literal, TypeAlias
 
 
 WORK_ORDER_STANDARD = "standard"
-WORK_ORDER_PURCHASE_RECEIPT = "purchase_receipt"
 WORK_ORDER_ASSEMBLY = "assembly"
 WORK_ORDER_TYPES = frozenset({
     WORK_ORDER_STANDARD,
-    WORK_ORDER_PURCHASE_RECEIPT,
     WORK_ORDER_ASSEMBLY,
 })
 
@@ -22,8 +20,12 @@ WORK_ORDER_STATUSES = frozenset({
 COMPLETION_DIRECT = "direct"
 COMPLETION_QC = "qc"
 
+QC_DESTINATION_RETURN = "return"
+QC_DESTINATION_RELEASE = "release"
+QC_DESTINATION_INVENTORY = "inventory"
+
 WorkOrderCompletionAction: TypeAlias = Literal["direct", "qc"]
-QcQualifiedDisposition: TypeAlias = Literal["return", "release"]
+QcQualifiedDestination: TypeAlias = Literal["return", "release", "inventory"]
 
 QC_SUPPORTED_WORK_ORDER_TYPES = WORK_ORDER_TYPES
 REWORK_TRACKED_WORK_ORDER_TYPES = frozenset({
@@ -33,14 +35,12 @@ REWORK_TRACKED_WORK_ORDER_TYPES = frozenset({
 
 WORK_ORDER_MOVEMENT_TYPES = {
     "process": WORK_ORDER_STANDARD,
-    "purchase_receipt": WORK_ORDER_PURCHASE_RECEIPT,
     "assembly_input": WORK_ORDER_ASSEMBLY,
     "assembly_input_restore": WORK_ORDER_ASSEMBLY,
     "assembly_output": WORK_ORDER_ASSEMBLY,
 }
 WORK_ORDER_SUBMISSION_MOVEMENT_TYPES = frozenset({
     "process",
-    "purchase_receipt",
     "assembly_input",
     "assembly_output",
 })

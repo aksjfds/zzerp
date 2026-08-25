@@ -219,11 +219,6 @@ def update_procedure_price(
             raise DomainError("procedure_price_workshop_invalid", "当前车间不属于该部门")
         bom_id = origin.get("bom_item_id") if origin.get("type") == "part" else None
         material_key = _material_key(bom_id, origin_flow_node_id)
-        expected_type = (
-            "purchase_receipt"
-            if department.department_code == "purchasing"
-            else "standard"
-        )
         expected_input_mode = "multiple" if node.get("type") == "assembly" else "single"
         scoped_order_ids = list_standard_execution_order_ids(
             session,
@@ -254,14 +249,11 @@ def update_procedure_price(
                 workshop_id=workshop.id,
                 procedure_id=procedure_id,
                 procedure_name=name if procedure_id is None else None,
-                input_mode=expected_input_mode,
-                procedure_type=expected_type,
+                required_input_mode=expected_input_mode,
             )
             if (
                 procedure.workshop_id != workshop.id
                 or procedure.procedure_name != name
-                or procedure.procedure_type != expected_type
-                or procedure.input_mode != expected_input_mode
             ):
                 raise DomainError("procedure_workshop_invalid", "所选工艺不属于当前车间")
             retained_ids.add(procedure.id)

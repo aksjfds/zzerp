@@ -4,15 +4,23 @@ defineProps<{
   items: PendingQcBatch[]
   loading: boolean
   history?: boolean
+  decidingBatchId?: number | null
 }>()
 defineEmits<{
   inspect: [batch: PendingQcBatch]
+  decide: [batch: PendingQcBatch, destination: PendingQcBatch['allowed_destinations'][number]]
 }>()
 
 function itemName(batch: PendingQcBatch) {
   return batch.part_no === batch.part_name
     ? batch.part_name
     : `${batch.part_no} - ${batch.part_name}`
+}
+
+const destinationLabels = {
+  return: '返回当前车间',
+  release: '放行下一节点',
+  inventory: '存入仓库',
 }
 </script>
 <template>
@@ -28,13 +36,40 @@ function itemName(batch: PendingQcBatch) {
         <p>{{ batch.qc_worker_name }}</p>
         <p>{{ batch.recorded_at }}</p>
         <p v-if="batch.defect_reason">不良原因：{{ batch.defect_reason }}</p>
-        <p v-if="batch.qualified_quantity">合格品去向：{{ batch.qualified_disposition === 'return' ? '返回当前车间' : '放行下一节点' }}</p>
+        <p v-if="batch.qualified_destination">
+          合格品去向：{{ destinationLabels[batch.qualified_destination] }}
+          · {{ batch.destination_decided_by }} · {{ batch.destination_decided_at }}
+        </p>
+        <p v-else-if="batch.qualified_quantity">QC 结果已保存，合格品待决定去向</p>
       </template>
-      <ElButton v-else-if="!history" type="primary" size="small" @click="$emit('inspect', batch)">录入 QC 结果</ElButton>
+      <ElButton
+        v-if="!history && !batch.recorded_at"
+        type="primary"
+        size="small"
+        @click="$emit('inspect', batch)"
+      >录入 QC 结果</ElButton>
+      <div
+        v-if="!history && batch.recorded_at && batch.qualified_quantity && !batch.qualified_destination"
+        class="dispatch-row"
+      >
+        <span>请选择合格品去向</span>
+        <div>
+          <ElButton
+            v-for="destination in batch.allowed_destinations"
+            :key="destination"
+            :type="destination === 'inventory' ? 'success' : 'primary'"
+            plain
+            size="small"
+            :loading="decidingBatchId === batch.id"
+            :disabled="decidingBatchId !== null && decidingBatchId !== batch.id"
+            @click="$emit('decide', batch, destination)"
+          >{{ destinationLabels[destination] }}</ElButton>
+        </div>
+      </div>
     </article>
     <ElEmpty
       v-if="!loading && !items.length"
-      :description="history ? '暂无历史质检记录' : '暂无待检批次'"
+      :description="history ? '暂无历史质检记录' : '暂无待处理批次'"
       :image-size="64"
     />
   </div>

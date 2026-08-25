@@ -10,8 +10,8 @@ from domain.time import utc_now
 from modules.engineering.model_api import Product, ProductBom, ProductProcessFlow
 from modules.errors import DomainError
 from modules.inventory.identity_api import component_identity_key
-from modules.inventory.reservation_api import available_plan_item_quantities
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
+from modules.planning.plan_stock_view import plan_item_available_quantities
 from modules.planning.route_projection import rebuild_plan_route_tasks
 
 
@@ -52,7 +52,7 @@ def rebuild_order_plan(session: Session, order) -> ProductionPlan:
     definitions: list[PlannedIdentity] = []
     for order_index, order_item in enumerate(order.items):
         definitions.extend(_order_item_definitions(session, order_item, order_index))
-    availability = available_plan_item_quantities(session, definitions)
+    availability = plan_item_available_quantities(session, definitions)
     definitions = _apply_flow_inventory(session, definitions, availability)
     for definition in definitions:
         estimated = min(
@@ -78,7 +78,7 @@ def rebuild_order_plan(session: Session, order) -> ProductionPlan:
 
 
 def refresh_plan_availability(session: Session, plan: ProductionPlan) -> None:
-    availability = available_plan_item_quantities(session, plan.items)
+    availability = plan_item_available_quantities(session, plan.items)
     groups: dict[int, list[ProductionPlanItem]] = {}
     for item in plan.items:
         groups.setdefault(item.customer_order_item_id, []).append(item)

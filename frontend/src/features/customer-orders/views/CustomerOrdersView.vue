@@ -101,7 +101,7 @@ async function editOrder(order: CustomerOrder) {
 
 function hasMoreActions(order: CustomerOrder) {
   return (
-    ['draft', 'confirmed', 'planned'].includes(order.status)
+    ['draft', 'confirmed'].includes(order.status)
     && authStore.hasPermission(ORDER_PERMISSIONS.cancel)
   ) || (
     order.status === 'draft'
@@ -174,7 +174,7 @@ defineExpose({ load: loadOrders })
                 <template #dropdown>
                   <ElDropdownMenu>
                     <ElDropdownItem
-                      v-if="['draft', 'confirmed', 'planned'].includes(row.status)"
+                      v-if="['draft', 'confirmed'].includes(row.status)"
                       v-permission="ORDER_PERMISSIONS.cancel"
                       command="cancel"
                     >取消订单</ElDropdownItem>

@@ -81,9 +81,7 @@ class ProcessNodeModel extends RectNodeModel {
     const departmentCode = this.properties.departmentCode
     const colors = departmentCode === 'outsource'
       ? [materialColors.flowOutsourceContainer, materialColors.flowOutsource]
-      : departmentCode === 'purchasing'
-        ? [materialColors.flowPurchasingContainer, materialColors.flowPurchasing]
-        : [materialColors.flowProductionContainer, materialColors.flowProduction]
+      : [materialColors.flowProductionContainer, materialColors.flowProduction]
     return {
       ...super.getNodeStyle(),
       fill: colors[0],

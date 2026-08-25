@@ -6,6 +6,7 @@ export type WorkshopRouteOption = {
   department_name: string
   department_code: string
   workshop_name: string
+  input_mode: 'single' | 'multiple'
 }
 
 export async function queryWorkshopRoutes() {

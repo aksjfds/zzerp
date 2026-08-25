@@ -4,6 +4,7 @@ from authorization import ensure_department_access, require_any_permission
 from domain.permissions import QC_INSPECT
 from schemas.production import (
     PendingQcListEnvelope,
+    QcDestinationInput,
     QcInspection,
     WorkOrderBatchEnvelope,
 )
@@ -49,6 +50,27 @@ def qc_batch_inspect(
         "data": qc_department.inspect_qc_batch(
             batch_id,
             payload,
+            user["department"],
+            user["is_system"],
+        )
+    }
+
+
+@router.post(
+    "/work-order-batches/{batch_id}/destination",
+    response_model=WorkOrderBatchEnvelope,
+)
+def qc_batch_destination(
+    batch_id: int,
+    payload: QcDestinationInput,
+    user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
+):
+    ensure_department_access(user, "qc")
+    return {
+        "data": qc_department.decide_qc_destination(
+            batch_id,
+            payload,
+            user["username"],
             user["department"],
             user["is_system"],
         )

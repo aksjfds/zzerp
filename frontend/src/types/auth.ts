@@ -1,4 +1,4 @@
-export type UserDepartment = 'assembly' | 'business' | 'cnc' | 'engineering' | 'finished' | 'outsource' | 'pmc' | 'polish' | 'purchasing' | 'qc' | 'stamp' | 'warehouse'
+export type UserDepartment = 'assembly' | 'business' | 'cnc' | 'engineering' | 'finished' | 'outsource' | 'pmc' | 'polish' | 'qc' | 'stamp' | 'warehouse'
 
 export type UserProfile = {
   id: number

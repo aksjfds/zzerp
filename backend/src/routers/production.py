@@ -12,12 +12,14 @@ from departments.registry import department_api
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from modules.organization.api import list_workshops_by_department_code
 from departments.warehouse_orchestration import (
-    list_closed_surplus_positions,
-    store_position_in_warehouse,
+    list_completed_plan_positions,
+    store_completed_plan_position,
 )
 from schemas.production import (
     DepartmentProductionProgressEnvelope,
-    DepartmentSurplusInventoryEnvelope,
+    ProductionPositionStorageInput,
+    ProductionPositionStorageListEnvelope,
+    ProductionPositionStorageResponse,
     DepartmentWorkerCreate,
     DepartmentWorkerEnvelope,
     DepartmentWorkerHistoryEnvelope,
@@ -25,8 +27,6 @@ from schemas.production import (
     DepartmentWorkerPayEnvelope,
     RepositoryListEnvelope,
     ProductionProgressItemDetailResponse,
-    WarehouseStorageInput,
-    WarehouseStorageResponse,
     WorkerListEnvelope,
 )
 from schemas.organization import WorkshopResponse
@@ -36,32 +36,33 @@ router = APIRouter(tags=["production"])
 
 
 @router.get(
-    "/departments/{department_code}/surplus-inventory",
-    response_model=DepartmentSurplusInventoryEnvelope,
+    "/departments/{department_code}/warehouse-candidates",
+    response_model=ProductionPositionStorageListEnvelope,
 )
-def department_surplus_inventory(
+def department_warehouse_candidates(
     department_code: str,
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
-    return {"data": list_closed_surplus_positions(department_code)}
+    return {"data": list_completed_plan_positions(department_code)}
 
 
 @router.post(
-    "/departments/{department_code}/warehouse-storage",
-    response_model=WarehouseStorageResponse,
+    "/departments/{department_code}/warehouse-candidates/storage",
+    response_model=ProductionPositionStorageResponse,
 )
-def department_warehouse_storage(
+def department_position_warehouse_storage(
     department_code: str,
-    payload: WarehouseStorageInput,
+    payload: ProductionPositionStorageInput,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     ensure_department_access(user, department_code)
-    return store_position_in_warehouse(
+    return store_completed_plan_position(
         department_code,
         payload.production_item_id,
         payload.flow_node_id,
         payload.source_flow_node_id,
+        payload.position_version,
         payload.quantity,
         user["username"],
     )

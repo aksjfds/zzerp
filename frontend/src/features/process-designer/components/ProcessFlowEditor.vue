@@ -57,7 +57,7 @@ function dragWorkshop(workshop: WorkshopRouteOption) {
   canvas.value?.dragProcess(
     workshop.id,
     workshop.workshop_name,
-    workshop.department_code === 'assembly',
+    workshop.input_mode === 'multiple',
     workshop.department_code,
   )
 }

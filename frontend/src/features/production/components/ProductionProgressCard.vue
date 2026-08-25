@@ -23,7 +23,7 @@ defineProps<{
         <div class="card-title-row">
           <h3>{{ card.card_name }}</h3>
           <ElTag size="small" type="info" effect="plain">
-            {{ card.card_type === 'assembly' ? '装配' : card.card_type === 'purchase' ? '外购' : '加工' }}
+            {{ card.card_type === 'assembly' ? '装配' : '加工' }}
           </ElTag>
         </div>
         <p>{{ card.department_name }} · {{ displayWorkshopName(card.workshop_name) }} · {{ card.procedure_name }}</p>

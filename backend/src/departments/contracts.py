@@ -5,7 +5,6 @@ CAP_REPOSITORIES = "repositories"
 CAP_WORK_ORDERS = "work_orders"
 CAP_WORKERS = "workers"
 CAP_STANDARD_EXECUTION = "standard_execution"
-CAP_PURCHASING = "purchasing"
 CAP_ASSEMBLY = "assembly"
 CAP_QUALITY = "quality"
 CAP_SPECIAL_PRINTING = "special_printing"
@@ -24,7 +23,6 @@ CAPABILITY_METHODS = {
         "create_worker",
     ),
     CAP_STANDARD_EXECUTION: ("create_source_work_order",),
-    CAP_PURCHASING: ("create_source_work_order",),
     CAP_ASSEMBLY: ("create_assembly_work_order",),
     CAP_QUALITY: ("list_qc_batches", "inspect_qc_batch"),
     CAP_SPECIAL_PRINTING: ("printing_profile",),

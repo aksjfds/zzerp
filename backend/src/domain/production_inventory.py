@@ -16,7 +16,6 @@ class IssuedPlanItem:
 
 @dataclass(frozen=True, slots=True)
 class IssuedInventoryStock:
-    reservation_id: int
     production_plan_item_id: int
     stock_id: int
     product_id: int
@@ -26,8 +25,31 @@ class IssuedInventoryStock:
     quantity: int
     quantity_before: int
     quantity_after: int
-    reserved_before: int
-    reserved_after: int
 
 
-__all__ = ["IssuedInventoryStock", "IssuedPlanItem"]
+@dataclass(frozen=True, slots=True)
+class FinishedInventoryStockSnapshot:
+    id: int
+    product_id: int
+    product_version: int
+    flow_node_id: str
+    completed_flow_node_id: str
+    item_code: str
+    item_name: str
+    quantity: int
+
+
+@dataclass(frozen=True, slots=True)
+class FinishedStockLookup:
+    identity_key: str
+    product_id: int
+    product_version: int
+    flow_node_id: str
+
+
+__all__ = [
+    "FinishedInventoryStockSnapshot",
+    "FinishedStockLookup",
+    "IssuedInventoryStock",
+    "IssuedPlanItem",
+]

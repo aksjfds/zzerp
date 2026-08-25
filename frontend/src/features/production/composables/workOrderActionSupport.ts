@@ -4,7 +4,6 @@ import { cancelWorkOrder, submitWorkOrder, undoProductionOperation } from '../ap
 import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 
 export interface WorkOrderActions {
-  registerArrival: (item: WorkOrder) => Promise<void>
   submitQc: (item: WorkOrder) => Promise<void>
   submitDirectResult: (item: WorkOrder) => Promise<void>
   resubmitQc: (item: WorkOrder, batch: WorkOrderBatch) => Promise<void>
@@ -77,5 +76,3 @@ export function createDirectResultAction(
     }
   }
 }
-
-export async function ignoreWorkOrderAction() {}

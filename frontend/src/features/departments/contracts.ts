@@ -5,7 +5,6 @@ export type DepartmentCapability =
   | 'work_orders'
   | 'workers'
   | 'standard_execution'
-  | 'purchasing'
   | 'assembly'
   | 'quality'
   | 'special_printing'

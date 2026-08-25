@@ -6,7 +6,7 @@ export type RepositoryWorkStatus =
   | 'rework'
   | 'completed'
 export type WorkOrderStatus = 'open' | 'closed' | 'cancelled'
-export type QcDisposition = 'return' | 'release'
+export type QcDestination = 'return' | 'release' | 'inventory'
 
 export type ProcedureOption = {
   id: number
@@ -14,8 +14,6 @@ export type ProcedureOption = {
   department_name: string
   department_code: string
   procedure_name: string
-  procedure_type: 'standard' | 'purchase_receipt'
-  input_mode: 'single' | 'multiple'
 }
 
 export type RepositoryItem = {
@@ -57,10 +55,8 @@ export type RepositoryItem = {
   can_create_work_order: boolean
 }
 
-export type DepartmentSurplusInventoryItem = {
+export type ProductionPositionStorageCandidate = {
   key: string
-  source_kind: 'production' | 'qc'
-  batch_id: number | null
   production_item_id: number
   customer_order_no: string
   product_code: string
@@ -74,8 +70,9 @@ export type DepartmentSurplusInventoryItem = {
   source_flow_node_id: string
   current_node_label: string
   completed_flow_node_id: string
-  completed_node_label: string
-  quantity: number
+  completion_status: string
+  available_quantity: number
+  position_version: string
 }
 
 export type RepositoryFilters = {
@@ -98,7 +95,9 @@ export type WorkOrderBatch = {
   qc_worker_id: number | null
   qc_worker_name: string | null
   defect_reason: string | null
-  qualified_disposition: QcDisposition | null
+  qualified_destination: QcDestination | null
+  destination_decided_at: string | null
+  destination_decided_by: string | null
   recorded_at: string | null
 }
 
@@ -110,7 +109,7 @@ export type WorkOrder = {
   procedure_id: number
   flow_node_id: string
   source_flow_node_id: string | null
-  work_order_type: 'standard' | 'purchase_receipt' | 'assembly'
+  work_order_type: 'standard' | 'assembly'
   qc_available: boolean
   direct_result_allowed: boolean
   input_production_item_ids: number[]
@@ -147,7 +146,7 @@ export type WorkOrder = {
   undo_operation: {
     id: number
     work_order_batch_id: number | null
-    operation_type: 'purchase_arrival' | 'submission' | 'rework_submission'
+    operation_type: 'submission' | 'rework_submission'
     operation_label: string
     actor_username: string
     created_at: string
@@ -162,6 +161,7 @@ export type PendingQcBatch = WorkOrderBatch & {
   part_no: string
   part_name: string
   work_order_name: string
+  allowed_destinations: QcDestination[]
 }
 
 export type CompletionAction = 'direct' | 'qc'
@@ -185,5 +185,4 @@ export type QcInspectionPayload = {
   scrap_quantity: number
   lost_quantity: number
   defect_reason: string
-  qualified_disposition: QcDisposition | null
 }

@@ -24,9 +24,17 @@ def record_movement(
     work_order: WorkOrderContext | None = None,
     work_order_batch: InspectionBatchContext | None = None,
     work_order_material_id: int | None = None,
+    warehouse_operation_id: int | None = None,
 ) -> ProductionMovement | None:
     if quantity <= 0:
         return None
+    if (movement_type == "production_inventory") != (
+        warehouse_operation_id is not None
+    ):
+        raise DomainError(
+            "production_movement_warehouse_operation_invalid",
+            "生产位置入库流水缺少唯一仓库操作",
+        )
     _validate_work_order_movement(
         production_item=production_item,
         quantity=quantity,
@@ -48,6 +56,7 @@ def record_movement(
             work_order_batch.id if work_order_batch is not None else None
         ),
         work_order_material_id=work_order_material_id,
+        warehouse_operation_id=warehouse_operation_id,
     )
     session.add(movement)
     return movement
@@ -90,6 +99,7 @@ def _validate_work_order_movement(
             )
     elif work_order is not None and movement_type not in {
         "qc_qualified",
+        "qc_inventory",
         "qc_rework",
         "scrap",
         "lost",
@@ -101,7 +111,13 @@ def _validate_work_order_movement(
 
     if (
         work_order is not None
-        and movement_type in {"qc_qualified", "qc_rework", "scrap", "lost"}
+        and movement_type in {
+            "qc_qualified",
+            "qc_inventory",
+            "qc_rework",
+            "scrap",
+            "lost",
+        }
         and production_item.id != work_order.production_item_id
     ):
         raise DomainError(
@@ -116,7 +132,7 @@ def _validate_work_order_movement(
                 "生产流水批次不属于当前工单",
             )
         if (
-            movement_type in {"process", "purchase_receipt", "assembly_output"}
+            movement_type in {"process", "assembly_output"}
             and quantity != work_order_batch.submitted_quantity
         ):
             raise DomainError(

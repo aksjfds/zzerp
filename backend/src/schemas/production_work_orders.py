@@ -47,10 +47,6 @@ class WorkOrderSubmission(ProductionModel):
     completion_action: WorkOrderCompletionAction
 
 
-class PurchaseArrival(ProductionModel):
-    quantity: int = Field(gt=0)
-
-
 class ReworkSubmission(ProductionModel):
     quantity: int = Field(gt=0)
 
@@ -58,7 +54,7 @@ class ReworkSubmission(ProductionModel):
 class ProductionUndoOperationResponse(ProductionModel):
     id: int
     work_order_batch_id: int | None
-    operation_type: Literal["purchase_arrival", "submission", "rework_submission"]
+    operation_type: Literal["submission", "rework_submission"]
     operation_label: str
     actor_username: str
     created_at: str
@@ -72,7 +68,7 @@ class WorkOrderResponse(ProductionModel):
     procedure_id: int
     flow_node_id: str
     source_flow_node_id: str | None
-    work_order_type: Literal["standard", "purchase_receipt", "assembly"]
+    work_order_type: Literal["standard", "assembly"]
     qc_available: bool
     direct_result_allowed: bool
     input_production_item_ids: list[int]

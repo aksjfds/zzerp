@@ -15,8 +15,12 @@ from modules.sales.order_support import (
     serialize_order,
 )
 from modules.sales.repository import CustomerOrderRepository
-from modules.sales.collaboration_contract import SalesEngineeringPort, SalesProductionPort
-from modules.sales.planning_contract import OrderPlanState, SalesPlanningPort
+from modules.sales.context_api import (
+    OrderPlanState,
+    SalesEngineeringPort,
+    SalesPlanningPort,
+    SalesProductionPort,
+)
 from schemas.sales import CustomerOrderCreate, CustomerOrderUpdate
 from modules.errors import DomainError
 
@@ -267,7 +271,7 @@ def change_status(
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许确认")
             planning.rebuild_order_plan(session, order)
         elif target == "cancelled":
-            if order.status not in {"draft", "confirmed", "planned"}:
+            if order.status not in {"draft", "confirmed"}:
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许取消")
             planning.cancel_order_plan(session, order, actor_username)
         else:

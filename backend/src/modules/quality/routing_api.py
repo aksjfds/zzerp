@@ -1,8 +1,9 @@
-"""Stable, persistence-free contract for QC disposition routing."""
+"""Stable, persistence-free contract for QC destination routing."""
 
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from domain.production_types import QcQualifiedDestination
 from modules.organization.context_api import ProcedureContext
 from modules.production_core.context_api import (
     InspectionBatchContext,
@@ -41,7 +42,7 @@ class QcRoutingStrategy(Protocol):
         context: Any,
         node: dict,
         quantity: int,
-        qualified_disposition: str | None,
+        destination: QcQualifiedDestination,
     ) -> QualifiedRouteResult: ...
 
     def route_rework(

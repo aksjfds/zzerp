@@ -106,6 +106,11 @@ def calculate_work_order_progress(
     batch_list = list(batches)
     completed_batches = [batch for batch in batch_list if batch.recorded_at is not None]
     pending_batches = [batch for batch in batch_list if batch.recorded_at is None]
+    destination_pending_quantity = sum(
+        batch.qualified_quantity or 0
+        for batch in completed_batches
+        if batch.qualified_quantity and batch.destination_decided_at is None
+    )
     initial_batches = [
         batch for batch in batch_list if batch.rework_source_batch_id is None
     ]
@@ -127,10 +132,17 @@ def calculate_work_order_progress(
         ready_for_qc_quantity=ready_for_qc,
         initial_processing_quantity=initial_processing,
         processing_quantity=initial_processing + rework_pending,
-        pending_qc_quantity=sum(batch.submitted_quantity for batch in pending_batches),
+        pending_qc_quantity=(
+            sum(batch.submitted_quantity for batch in pending_batches)
+            + destination_pending_quantity
+        ),
         direct_quantity=direct_quantity,
         qualified_quantity=direct_quantity
-        + sum(batch.qualified_quantity or 0 for batch in completed_batches),
+        + sum(
+            batch.qualified_quantity or 0
+            for batch in completed_batches
+            if batch.destination_decided_at is not None
+        ),
         rework_quantity=sum(batch.rework_quantity or 0 for batch in completed_batches),
         rework_pending_quantity=rework_pending,
         scrap_quantity=sum(batch.scrap_quantity or 0 for batch in completed_batches),
@@ -149,6 +161,11 @@ def calculate_assembly_output_progress(
     batch_list = list(batches)
     pending_batches = [batch for batch in batch_list if batch.recorded_at is None]
     completed_batches = [batch for batch in batch_list if batch.recorded_at is not None]
+    destination_pending_quantity = sum(
+        batch.qualified_quantity or 0
+        for batch in completed_batches
+        if batch.qualified_quantity and batch.destination_decided_at is None
+    )
     initial_batches = [
         batch for batch in batch_list if batch.rework_source_batch_id is None
     ]
@@ -175,11 +192,14 @@ def calculate_assembly_output_progress(
             max(order.quantity - operated_quantity, 0) * unit_quantity
             + rework_pending
         ),
-        pending_qc_quantity=sum(
-            batch.submitted_quantity for batch in pending_batches
+        pending_qc_quantity=(
+            sum(batch.submitted_quantity for batch in pending_batches)
+            + destination_pending_quantity
         ),
         qualified_quantity=direct_quantity + sum(
-            batch.qualified_quantity or 0 for batch in completed_batches
+            batch.qualified_quantity or 0
+            for batch in completed_batches
+            if batch.destination_decided_at is not None
         ),
         rework_quantity=sum(
             batch.rework_quantity or 0 for batch in completed_batches

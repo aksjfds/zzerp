@@ -49,7 +49,7 @@ class ProductionProgressWorkOrderResponse(ProductionModel):
 
 class ProductionProgressProcedureCardResponse(ProductionModel):
     card_key: str
-    card_type: Literal["process", "assembly", "purchase"]
+    card_type: Literal["process", "assembly"]
     sort_order: int
     flow_node_id: str
     procedure_id: int | None

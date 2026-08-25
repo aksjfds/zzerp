@@ -21,6 +21,7 @@ class WorkshopView:
     id: int
     department_id: int
     workshop_name: str
+    input_mode: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +31,7 @@ class WorkshopRoute:
     department_id: int
     department_name: str
     department_code: str
+    input_mode: str
 
     @property
     def id(self) -> int:
@@ -43,16 +45,12 @@ class ProcedureView:
     department_name: str
     department_code: str
     procedure_name: str
-    procedure_type: str
-    input_mode: str
 
 
 @dataclass(frozen=True, slots=True)
 class ProcedureRoute:
     procedure_id: int
     procedure_name: str
-    procedure_type: str
-    input_mode: str
     workshop_id: int
     department_id: int
 
@@ -124,6 +122,7 @@ def get_workshop_views(
         Workshop.id,
         Workshop.department_id,
         Workshop.workshop_name,
+        Workshop.input_mode,
     )
     if department_ids is not None:
         if not department_ids:
@@ -141,6 +140,7 @@ def get_workshop_views(
             id=row.id,
             department_id=row.department_id,
             workshop_name=row.workshop_name,
+            input_mode=row.input_mode,
         )
         for row in rows
     ]
@@ -157,6 +157,7 @@ def get_workshop_routes(
             Workshop.id,
             Workshop.workshop_name,
             Workshop.department_id,
+            Workshop.input_mode,
             Department.department_name,
             Department.department_code,
         )
@@ -172,6 +173,7 @@ def get_workshop_routes(
             department_id=row.department_id,
             department_name=row.department_name,
             department_code=row.department_code,
+            input_mode=row.input_mode,
         )
         for row in rows
     }
@@ -185,8 +187,6 @@ def get_procedure_views(session: Session) -> list[ProcedureView]:
             Department.department_name,
             Department.department_code,
             Procedure.procedure_name,
-            Procedure.procedure_type,
-            Procedure.input_mode,
         )
         .join(Workshop, Workshop.id == Procedure.workshop_id)
         .join(Department, Department.id == Workshop.department_id)
@@ -199,8 +199,6 @@ def get_procedure_views(session: Session) -> list[ProcedureView]:
             department_name=row.department_name,
             department_code=row.department_code,
             procedure_name=row.procedure_name,
-            procedure_type=row.procedure_type,
-            input_mode=row.input_mode,
         )
         for row in rows
     ]
@@ -216,8 +214,6 @@ def get_procedure_routes(
         select(
             Procedure.id,
             Procedure.procedure_name,
-            Procedure.procedure_type,
-            Procedure.input_mode,
             Procedure.workshop_id,
             Workshop.department_id,
         )
@@ -228,8 +224,6 @@ def get_procedure_routes(
         row.id: ProcedureRoute(
             procedure_id=row.id,
             procedure_name=row.procedure_name,
-            procedure_type=row.procedure_type,
-            input_mode=row.input_mode,
             workshop_id=row.workshop_id,
             department_id=row.department_id,
         )
@@ -240,23 +234,17 @@ def get_procedure_routes(
 def get_department_procedure_routes(
     session: Session,
     department_id: int,
-    *,
-    procedure_type: str | None = None,
 ) -> list[ProcedureRoute]:
     statement = (
         select(
             Procedure.id,
             Procedure.procedure_name,
-            Procedure.procedure_type,
-            Procedure.input_mode,
             Procedure.workshop_id,
             Workshop.department_id,
         )
         .join(Workshop, Workshop.id == Procedure.workshop_id)
         .where(Workshop.department_id == department_id)
     )
-    if procedure_type is not None:
-        statement = statement.where(Procedure.procedure_type == procedure_type)
     rows = session.execute(
         statement.order_by(Procedure.procedure_name, Procedure.id)
     )
@@ -264,8 +252,6 @@ def get_department_procedure_routes(
         ProcedureRoute(
             procedure_id=row.id,
             procedure_name=row.procedure_name,
-            procedure_type=row.procedure_type,
-            input_mode=row.input_mode,
             workshop_id=row.workshop_id,
             department_id=row.department_id,
         )

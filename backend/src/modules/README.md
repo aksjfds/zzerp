@@ -31,10 +31,9 @@ create copies of the production state machine.
 - `sales`: customers and customer orders.
 - `production_core`: production items, repositories, movement ledger and shared work-order state.
 - `standard_execution`: procedure prices, pay details and standard work-order execution.
-- `purchasing`: purchase receipt work orders.
 - `assembly`: assembly work orders and material allocation.
 - `quality`: inspections and QC release.
-- `inventory`: inventory stock, reservations, receipts, transactions and finished-goods stock.
+- `inventory`: temporary warehouse stock and operations, cross-order finished stock and immutable ledgers.
 - `workforce`: worker administration, history and pay projections.
 - `planning`: production plans, PMC and other cross-module read models.
 
@@ -84,8 +83,7 @@ they may not construct or mutate foreign-owned records.
 | `planning.current_production_cards` / `historical_production_cards` / `production_card_listing` | planning | production workbench card queries and orchestration |
 | `planning.production_progress_detail` | planning | department task detail drawer |
 | `planning.order_status_view` / `sales_progress_api` | planning | sales order production summaries and flow status |
-| `planning.inventory_outbound` | planning | production-plan inventory outbound view |
-| `inventory.api` | inventory | inventory stock and ledger presentation |
+| `inventory.api` | inventory | temporary warehouse and finished-inventory presentation |
 | `inventory.finished_goods_api` | inventory | finished-goods receiving, shipment and presentation |
 | `production_core.work_order_queries` / `work_order_presenters` | production_core | owner work-order query and response mapping |
 | `quality.workforce_api` | quality | immutable QC activity projection for workforce |

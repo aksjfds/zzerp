@@ -87,8 +87,10 @@ class ProductionPlanItem(Base):
         CheckConstraint("estimated_inventory_quantity >= 0", name="ck_plan_item_estimated_stock"),
         CheckConstraint("net_required_quantity >= 0", name="ck_plan_item_net_required"),
         CheckConstraint("planned_production_quantity >= 0", name="ck_plan_item_planned"),
-        CheckConstraint("reserved_inventory_quantity >= 0", name="ck_plan_item_reserved"),
-        CheckConstraint("issued_inventory_quantity >= 0", name="ck_plan_item_issued"),
+        CheckConstraint(
+            "deducted_inventory_quantity >= 0",
+            name="ck_plan_item_deducted_inventory",
+        ),
         UniqueConstraint(
             "production_plan_id",
             "customer_order_item_id",
@@ -148,8 +150,7 @@ class ProductionPlanItem(Base):
     estimated_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     net_required_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     planned_production_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    reserved_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    issued_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deducted_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
     plan: Mapped[ProductionPlan] = relationship(back_populates="items")
     route_tasks: Mapped[list[ProductionRouteTask]] = relationship(

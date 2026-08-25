@@ -6,7 +6,6 @@ import {
   createCancelWorkOrderAction,
   createDirectResultAction,
   createUndoProductionOperationAction,
-  ignoreWorkOrderAction,
   type WorkOrderActions,
 } from './workOrderActionSupport'
 
@@ -58,7 +57,6 @@ export function useAssemblyWorkOrderActions(
   return {
     cancel: createCancelWorkOrderAction(onChanged),
     resubmitQc,
-    registerArrival: ignoreWorkOrderAction,
     submitQc,
     submitDirectResult: createDirectResultAction(onChanged, '装配'),
     undo: createUndoProductionOperationAction(onChanged),

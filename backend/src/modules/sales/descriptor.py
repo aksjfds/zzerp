@@ -9,7 +9,7 @@ MODULE = ModuleDescriptor(
     ),
     collaboration_apis=(
         "modules.sales.command_api",
-        "modules.sales.planning_contract",
+        "modules.sales.context_api",
         "modules.sales.customer_api",
         "modules.sales.model_api",
         "modules.sales.reference_api",

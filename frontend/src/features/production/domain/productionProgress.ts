@@ -50,7 +50,7 @@ export type ProductionProgressWorkOrder = {
 
 export type ProductionProgressProcedureCard = {
   card_key: string
-  card_type: 'process' | 'assembly' | 'purchase'
+  card_type: 'process' | 'assembly'
   sort_order: number
   flow_node_id: string
   procedure_id: number | null

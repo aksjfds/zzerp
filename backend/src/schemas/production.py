@@ -4,12 +4,12 @@ Contracts are owned by focused modules; this facade preserves existing imports.
 """
 
 from schemas.production_inventory import (
-    DepartmentSurplusInventoryEnvelope,
-    DepartmentSurplusInventoryItem,
+    ProductionPositionStorageCandidate,
+    ProductionPositionStorageInput,
+    ProductionPositionStorageListEnvelope,
+    ProductionPositionStorageResponse,
     RepositoryListEnvelope,
     RepositoryResponse,
-    WarehouseStorageInput,
-    WarehouseStorageResponse,
 )
 from schemas.production_progress import (
     AssemblyMaterialArrivalResponse,
@@ -22,6 +22,7 @@ from schemas.production_progress import (
 from schemas.production_quality import (
     PendingQcListEnvelope,
     PendingQcResponse,
+    QcDestinationInput,
     QcInspection,
     WorkOrderBatchEnvelope,
     WorkOrderBatchResponse,
@@ -30,7 +31,6 @@ from schemas.production_work_orders import (
     AssemblyMaterialInput,
     AssemblyWorkOrderCreate,
     ProductionUndoOperationResponse,
-    PurchaseArrival,
     ReworkSubmission,
     WorkOrderCreate,
     WorkOrderEnvelope,

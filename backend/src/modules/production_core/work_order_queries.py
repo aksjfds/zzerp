@@ -3,7 +3,6 @@ from sqlalchemy import case, exists, func, or_, select
 from database import SessionLocal
 from domain.production_types import (
     WORK_ORDER_ASSEMBLY,
-    WORK_ORDER_PURCHASE_RECEIPT,
     WORK_ORDER_STANDARD,
 )
 from modules.organization.model_api import Department, Procedure, Workshop
@@ -25,6 +24,7 @@ from modules.production_core.work_order_presenters import (
     serialize_work_order,
     work_order_context,
 )
+from modules.production_core.flow_api import qc_qualified_destinations
 
 
 def list_department_work_orders(
@@ -58,10 +58,7 @@ def list_department_work_orders(
             )
             if department_code == "assembly"
             else (
-                (WorkOrder.work_order_type.in_((
-                    WORK_ORDER_STANDARD,
-                    WORK_ORDER_PURCHASE_RECEIPT,
-                )))
+                (WorkOrder.work_order_type == WORK_ORDER_STANDARD)
                 & (Workshop.department_id == department.id)
             )
         )
@@ -97,10 +94,20 @@ def list_qc_batches(
         statement = select(WorkOrderBatch).join(
             WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id
         )
+        destination_pending = (
+            (WorkOrderBatch.recorded_at.is_not(None))
+            & (WorkOrderBatch.qualified_quantity > 0)
+            & (WorkOrderBatch.destination_decided_at.is_(None))
+        )
         if history:
-            statement = statement.where(WorkOrderBatch.recorded_at.is_not(None))
+            statement = statement.where(
+                WorkOrderBatch.recorded_at.is_not(None),
+                ~destination_pending,
+            )
         else:
-            statement = statement.where(WorkOrderBatch.recorded_at.is_(None))
+            statement = statement.where(
+                (WorkOrderBatch.recorded_at.is_(None)) | destination_pending
+            )
         if production_item_id is not None:
             statement = statement.where(_related_to_production_item(production_item_id))
         normalized_keyword = (keyword or "").strip().lower()
@@ -162,7 +169,10 @@ def list_qc_batches(
             order = orders.get(batch.work_order_id)
             if order is None:
                 continue
-            is_active = batch.recorded_at is None
+            is_active = batch.recorded_at is None or (
+                (batch.qualified_quantity or 0) > 0
+                and batch.destination_decided_at is None
+            )
             if (history and not is_active) or (not history and is_active):
                 item = _serialize_pending_batch(session, batch, context)
                 visible.append(item)
@@ -239,7 +249,7 @@ def _serialize_pending_batch(
     context: WorkOrderPresenterContext,
 ) -> dict:
     order = session.get(WorkOrder, batch.work_order_id)
-    customer_order, _, production_item, _ = work_order_context(
+    customer_order, _, production_item, flow_context = work_order_context(
         session,
         order,
         context,
@@ -255,6 +265,19 @@ def _serialize_pending_batch(
             "part_no": part_no,
             "part_name": part_name,
             "work_order_name": order.work_order_name,
+            "allowed_destinations": list(
+                qc_qualified_destinations(
+                    flow_context.flow,
+                    flow_context.nodes,
+                    order.flow_node_id,
+                )
+            )
+            if (
+                batch.recorded_at is not None
+                and batch.qualified_quantity
+                and batch.destination_decided_at is None
+            )
+            else [],
         }
     )
     return data

@@ -2,21 +2,17 @@ from __future__ import annotations
 
 """Production-plan commands and transaction boundaries."""
 
-from sqlalchemy import select
 from sqlalchemy.orm import Session
 from database import SessionLocal
 from domain.time import utc_now
 from modules.errors import DomainError
-from modules.inventory.model_api import InventoryReservation
 from modules.planning.execution_contract import PlanExecutionCollaborators
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
+from modules.planning.plan_confirmation import deduct_plan_inventory
 from modules.planning.plan_builder import planned_finished_quantity, refresh_plan_availability
 from modules.planning.route_projection import rebuild_plan_route_tasks
-from modules.production_core.model_api import ProductionItem, WorkOrder
-from modules.sales.model_api import CustomerOrderItem
 from modules.planning.plan_access import _ensure_revision, _load_plan
 from modules.planning.plan_mapper import serialize_plan
-from modules.planning.plan_reservations import _reserve_and_validate_plan_item, _reserve_flow_items
 from modules.planning.plan_validation import _validate_product_output
 
 def get_order_plan(order_id: int) -> dict:
@@ -94,22 +90,12 @@ def confirm_order_plan(
                 f"{supported_quantity} 件，少于订单需求 {finished.gross_required_quantity} 件",
                 path="items",
             )
-        _reserve_and_validate_plan_item(session, plan, finished, actor_username, collaborators)
-        for item in items:
-            if item.item_type != "finished_product":
-                item.gross_required_quantity = 0
-                item.estimated_inventory_quantity = 0
-                item.net_required_quantity = 0
-                item.reserved_inventory_quantity = 0
-        _reserve_flow_items(
-            session,
-            plan,
-            items,
-            finished.flow_node_id,
-            finished.net_required_quantity,
-            actor_username,
-            collaborators,
-        )
+    issued_rows = deduct_plan_inventory(
+        session,
+        plan,
+        actor_username,
+        collaborators,
+    )
     part_quantities = {
         (item.customer_order_item_id, item.product_bom_id, item.flow_node_id):
             item.planned_production_quantity
@@ -117,6 +103,13 @@ def confirm_order_plan(
         if item.item_type == "part" and item.product_bom_id is not None
     }
     collaborators.initialize_order_production(session, order, part_quantities=part_quantities)
+    for plan_item, stock in issued_rows:
+        collaborators.accept_issued_inventory(
+            session,
+            plan_item,
+            stock,
+            actor_username,
+        )
     plan.status = "confirmed"
     plan.confirmed_at = utc_now()
     plan.confirmed_by = actor_username
@@ -127,23 +120,19 @@ def confirm_order_plan(
 def cancel_order_plan(
     session: Session,
     order,
-    actor_username: str,
-    collaborators: PlanExecutionCollaborators,
+    _actor_username: str,
 ) -> None:
     plan = _load_plan(session, order.id, for_update=True)
     if plan is None:
         return
     if plan.status == "cancelled":
         return
-    if plan.status == "completed":
+    if plan.status in {"confirmed", "completed"}:
         raise DomainError(
-            "production_plan_completed",
-            "已完成的生产计划不能取消",
+            "production_plan_inventory_deducted",
+            "生产计划已扣减库存，不能取消",
             status_code=409,
         )
-    collaborators.release_plan_reservations(session, plan.id, actor_username)
-    if order.status != "draft":
-        collaborators.cancel_order_production(session, order)
     plan.status = "cancelled"
     plan.updated_at = utc_now()
     plan.revision += 1
@@ -164,34 +153,6 @@ def complete_order_plan(
                 status_code=409,
             )
         _ensure_revision(plan, expected_revision)
-        unfinished_order_id = session.scalar(
-            select(WorkOrder.id)
-            .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
-            .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-            .where(
-                CustomerOrderItem.customer_order_id == order_id,
-                WorkOrder.status == "open",
-            )
-            .limit(1)
-        )
-        if unfinished_order_id is not None:
-            raise DomainError(
-                "production_plan_has_open_work_orders",
-                "仍有未结工单，不能完成生产计划",
-                status_code=409,
-            )
-        pending_reservation_id = session.scalar(
-            select(InventoryReservation.id).where(
-                InventoryReservation.production_plan_id == plan.id,
-                InventoryReservation.status == "reserved",
-            ).limit(1)
-        )
-        if pending_reservation_id is not None:
-            raise DomainError(
-                "production_plan_has_reserved_inventory",
-                "仍有已占用但未出库的库存，不能完成生产计划",
-                status_code=409,
-            )
         plan.status = "completed"
         plan.completed_at = utc_now()
         plan.completed_by = actor_username

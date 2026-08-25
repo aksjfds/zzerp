@@ -19,7 +19,6 @@ from modules.errors import DomainError
 from modules.organization.model_api import Department, Procedure
 from modules.organization.transaction_api import resolve_workshop_procedure
 from modules.planning.execution_api import ensure_production_plan_active
-from modules.production_core.flow_api import process_qc_node
 from modules.production_core.model_api import WorkOrder, WorkOrderBatch
 from modules.production_core.operational_api import (
     capture_operation_state,
@@ -35,7 +34,6 @@ from modules.production_core.transaction_api import (
     validate_completion_action,
     validate_worker,
 )
-from modules.purchasing.api import create_purchase_order, submit_purchase_order
 from modules.sales.transaction_api import mark_order_planned
 from modules.standard_execution.api import (
     create_standard_order,
@@ -88,12 +86,7 @@ def create_work_order(
             workshop_id=workshop_id,
             procedure_id=procedure_id,
             procedure_name=procedure_name,
-            input_mode="single",
-            procedure_type=(
-                "purchase_receipt"
-                if department.department_code == "purchasing"
-                else "standard"
-            ),
+            required_input_mode="single",
         )
         if source.department_id != procedure_department_id(session, procedure):
             raise DomainError(
@@ -113,15 +106,7 @@ def create_work_order(
             "created_by": actor_username,
             "remark": remark,
         }
-        if procedure.procedure_type == "standard":
-            order = create_standard_order(**common)
-        elif procedure.procedure_type == "purchase_receipt":
-            order = create_purchase_order(**common)
-        else:
-            raise DomainError(
-                "work_order_procedure_type_invalid",
-                "当前工艺不支持开工单",
-            )
+        order = create_standard_order(**common)
         mark_order_planned(session, production_item.customer_order_item_id)
         order.work_order_no = f"WO-{business_now():%Y%m%d}-{order.id:06d}"
         session.flush()
@@ -168,7 +153,7 @@ def submit_work_order(
                 actor_username=actor_username,
             )
             return serialize_work_order(session, order)
-        if order.work_order_type not in {"standard", "purchase_receipt"}:
+        if order.work_order_type != "standard":
             raise DomainError("work_order_type_invalid", "工单类型无效")
         source, production_item = load_order_source(session, order)
         if (
@@ -190,7 +175,7 @@ def submit_work_order(
                 "无权操作该工单",
                 status_code=403,
             )
-        flow_context, node = node_context(
+        _flow_context, node = node_context(
             session,
             production_item,
             order.flow_node_id,
@@ -208,22 +193,7 @@ def submit_work_order(
             "quantity": quantity,
             "completion_action": completion_action,
         }
-        if order.work_order_type == "standard":
-            submit_standard_order(**common)
-        else:
-            if (
-                completion_action == COMPLETION_QC
-                and process_qc_node(
-                    flow_context.flow,
-                    flow_context.nodes,
-                    node["id"],
-                ) is None
-            ):
-                raise DomainError(
-                    "work_order_qc_not_configured",
-                    "当前外购节点未配置QC",
-                )
-            submit_purchase_order(context=flow_context, **common)
+        submit_standard_order(**common)
         record_undoable_operation(
             session,
             order,
@@ -234,55 +204,6 @@ def submit_work_order(
                 if completion_action == COMPLETION_QC
                 else "撤回加工结果"
             ),
-            department_code=department.department_code,
-            actor_username=actor_username,
-        )
-        return serialize_work_order(session, order)
-
-
-def register_purchase_arrival(
-    work_order_id: int,
-    quantity: int,
-    user_department: str | None,
-    user_is_system: bool,
-    actor_username: str,
-) -> dict:
-    with SessionLocal.begin() as session:
-        order = session.get(WorkOrder, work_order_id, with_for_update=True)
-        if order is None:
-            raise DomainError("work_order_not_found", "工单不存在", status_code=404)
-        if order.status != "open" or order.work_order_type != "purchase_receipt":
-            raise DomainError(
-                "purchase_arrival_order_invalid",
-                "只有开放的外购工单可以登记到货",
-            )
-        before = capture_operation_state(session, order)
-        remaining = order.quantity - order.processed_quantity
-        if quantity <= 0 or quantity > remaining:
-            raise DomainError(
-                "work_order_processing_quantity_exceeded",
-                "到货数量超过工单待到货数量",
-            )
-        source, _production_item = load_order_source(session, order)
-        department = session.get(Department, source.department_id)
-        if department is None or not can_access_department(
-            user_department,
-            user_is_system,
-            department.department_code,
-        ):
-            raise DomainError(
-                "department_access_denied",
-                "无权操作该工单",
-                status_code=403,
-            )
-        order.processed_quantity += quantity
-        session.flush()
-        record_undoable_operation(
-            session,
-            order,
-            before,
-            operation_type="purchase_arrival",
-            operation_label="撤回到货登记",
             department_code=department.department_code,
             actor_username=actor_username,
         )
@@ -343,7 +264,6 @@ def cancel_work_order(
 __all__ = [
     "cancel_work_order",
     "create_work_order",
-    "register_purchase_arrival",
     "resubmit_work_order_rework_batch",
     "submit_work_order",
 ]

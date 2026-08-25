@@ -3,7 +3,7 @@ from sqlalchemy import select
 from database import SessionLocal
 from modules.organization.model_api import Department, Procedure, Workshop
 from modules.planning.reference_api import (
-    list_confirmed_assembly_plan_quantities,
+    list_executable_assembly_plan_quantities,
 )
 from modules.production_core.model_api import (
     ProductionItem,
@@ -78,8 +78,7 @@ def list_production_cards(
                 work_status,
                 _fulfilled_assembly_positions(session, cards),
             )
-        if department_code != "purchasing":
-            _simplify_production_card_statuses(cards)
+        _simplify_production_card_statuses(cards)
         return filter_and_paginate_cards(
             cards,
             page,
@@ -112,7 +111,7 @@ def _fulfilled_assembly_positions(
     planned = {
         (order_item_id, flow_node_id): planned_quantity
         for order_item_id, flow_node_id, planned_quantity
-        in list_confirmed_assembly_plan_quantities(session, order_item_ids)
+        in list_executable_assembly_plan_quantities(session, order_item_ids)
         if (order_item_id, flow_node_id) in positions
     }
     if not planned:
@@ -197,7 +196,6 @@ def _current_positions(session, department: Department) -> set[tuple]:
             .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
             .where(
                 Workshop.department_id == department.id,
-                Procedure.procedure_type == "standard",
                 WorkOrderBatch.recorded_at.is_(None),
             )
             .distinct()

@@ -78,7 +78,6 @@ def build_progress_card(
     )
     card_type = (
         "assembly" if node.get("type") == "assembly"
-        else "purchase" if procedure and procedure.procedure_type == "purchase_receipt"
         else "process"
     )
     card_name = procedure.procedure_name if procedure else "尚未开工单"

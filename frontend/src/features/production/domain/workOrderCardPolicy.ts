@@ -1,6 +1,6 @@
 import type { WorkOrder, WorkOrderBatch } from './types'
 
-export type WorkOrderMode = 'production' | 'purchase' | 'assembly'
+export type WorkOrderMode = 'production' | 'assembly'
 export type WorkOrderStatusType = 'primary' | 'success' | 'info' | 'warning'
 
 export interface WorkOrderMetric {

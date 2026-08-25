@@ -102,7 +102,9 @@ def capture_operation_state(
                 "qc_worker_id": batch.qc_worker_id,
                 "qc_worker_name": batch.qc_worker_name,
                 "defect_reason": batch.defect_reason,
-                "qualified_disposition": batch.qualified_disposition,
+                "qualified_destination": batch.qualified_destination,
+                "destination_decided_at": _iso(batch.destination_decided_at),
+                "destination_decided_by": batch.destination_decided_by,
                 "recorded_at": _iso(batch.recorded_at),
             }
             for batch in batches

@@ -5,12 +5,16 @@ from __future__ import annotations
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from modules.engineering.model_api import ProductBom
-from modules.inventory.reservation_api import plan_item_stocks, plan_reservation_totals
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
-from modules.production_core.flow_api import completed_node_display_label, load_product_flow
+from modules.planning.plan_stock_view import (
+    completion_status_priority,
+    load_plan_item_stocks,
+)
+from modules.production_core.flow_api import load_product_flow
 
 def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[dict]:
-    stock_groups = plan_item_stocks(session, plan.items)
+    flow_cache: dict = {}
+    stock_groups = load_plan_item_stocks(session, plan.items, flow_cache)
     bom_ids = {
         item.product_bom_id
         for item in plan.items
@@ -27,10 +31,14 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
     }
     incoming_by_product: dict[tuple[int, int], dict[str, list[str]]] = {}
     reachable_bom_cache: dict[tuple[int, int, str], set[int]] = {}
-    reservation_totals = plan_reservation_totals(session, plan.id)
     rows: list[dict] = []
     for item in plan.items:
-        _flow, nodes = load_product_flow(session, item.product_id, item.product_version)
+        _flow, nodes = load_product_flow(
+            session,
+            item.product_id,
+            item.product_version,
+            flow_cache,
+        )
         product_key = (item.product_id, item.product_version)
         if product_key not in incoming_by_product:
             incoming: dict[str, list[str]] = {}
@@ -40,7 +48,20 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
                 if source_id and target_id:
                     incoming.setdefault(target_id, []).append(source_id)
             incoming_by_product[product_key] = incoming
-        stocks = stock_groups.get(item.identity_key, [])
+        stocks = list(stock_groups.get(item.identity_key, ()))
+        if item.item_type in {"part", "assembly"}:
+            priority = {
+                status: index
+                for index, status in enumerate(
+                    completion_status_priority(session, item, flow_cache)
+                )
+            }
+            stocks.sort(key=lambda stock: (
+                priority.get(stock.completion_status, len(priority)),
+                stock.stock_id,
+            ))
+        else:
+            stocks.sort(key=lambda stock: stock.stock_id)
         item_name = item.item_name
         if item.item_type == "part" and item.product_bom_id is not None:
             bom_item = bom_by_id.get(item.product_bom_id)
@@ -51,7 +72,8 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
                 item,
                 None,
                 "—",
-                0,
+                "—",
+                "—",
                 0,
                 0,
                 item_name,
@@ -66,24 +88,24 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
                 ),
             ))
             continue
+        remaining_deduction = (
+            item.estimated_inventory_quantity if plan.status == "draft" else 0
+        )
         for stock in stocks:
-            reserved, issued = reservation_totals.get((item.id, stock.id), (0, 0))
+            deduction = min(remaining_deduction, stock.quantity)
+            remaining_deduction -= deduction
             rows.append(_inventory_item_row(
                 item,
-                stock.id,
-                completed_node_display_label(
-                    _flow,
-                    nodes,
-                    stock.flow_node_id,
-                    stock.completed_flow_node_id,
-                ),
-                max(stock.quantity - stock.reserved_quantity, 0),
-                reserved,
-                issued,
+                stock.stock_id,
+                stock.completion_status,
+                stock.warehouse_code,
+                stock.warehouse_name,
+                stock.quantity,
+                deduction,
                 item_name,
                 _inventory_decomposition(
                     item,
-                    max(stock.quantity - stock.reserved_quantity, 0),
+                    stock.quantity,
                     nodes,
                     incoming_by_product[product_key],
                     requirements,
@@ -97,9 +119,10 @@ def _inventory_item_row(
     item: ProductionPlanItem,
     stock_id: int | None,
     completed_node_label: str,
+    warehouse_code: str,
+    warehouse_name: str,
     available: int,
-    reserved: int,
-    issued: int,
+    planned_deduction: int,
     item_name: str | None = None,
     decomposition: dict | None = None,
 ) -> dict:
@@ -114,9 +137,10 @@ def _inventory_item_row(
         "item_code": item.item_code,
         "item_name": item_name or item.item_name,
         "completed_node_label": completed_node_label,
+        "warehouse_code": warehouse_code,
+        "warehouse_name": warehouse_name,
         "current_inventory_quantity": available,
-        "reserved_inventory_quantity": reserved,
-        "issued_inventory_quantity": issued,
+        "planned_deduction_quantity": planned_deduction,
         "decomposition": decomposition or {
             "finished_equivalent_quantity": 0,
             "parts": [],

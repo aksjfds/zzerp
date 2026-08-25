@@ -104,7 +104,6 @@ function updateNode(nodeId: string, label: string, property: Parameters<typeof u
 function focusElement(elementId?: string) {
   if (!instance.value || !elementId || !instance.value.getModelById(elementId)) return
   instance.value.selectElementById(elementId)
-  instance.value.focusOn(elementId)
 }
 
 defineExpose({

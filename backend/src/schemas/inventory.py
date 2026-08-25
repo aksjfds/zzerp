@@ -1,11 +1,21 @@
+from datetime import date, datetime
+
 from pydantic import BaseModel, ConfigDict, Field
+
+from domain.warehouse import (
+    WarehouseCode,
+    WarehouseItemType,
+    WarehouseName,
+    WarehouseOperationSourceType,
+    WarehouseOperationStatus,
+    WarehouseOperationType,
+    WarehouseUnit,
+)
 
 from schemas.common import (
     CustomerOrderStatus,
-    InventoryDepartmentCode,
-    InventoryTransactionType,
-    InventoryTransactionSourceType,
-    ProductionItemType,
+    FinishedInventoryTransactionType,
+    FinishedInventoryTransactionSourceType,
 )
 
 
@@ -13,40 +23,98 @@ class InventoryModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class InventoryStockResponse(InventoryModel):
+class WarehouseStockResponse(InventoryModel):
     id: int
-    department_code: InventoryDepartmentCode
-    item_type: ProductionItemType
+    item_code: str
+    item_name: str
+    product_version: int
+    item_type: WarehouseItemType
+    specification: str
+    inventory_unit: WarehouseUnit
+    warehouse_code: WarehouseCode
+    warehouse_name: WarehouseName
+    quantity: int
+    completion_status: str
+    last_inbound_date: date | None
+    last_outbound_date: date | None
+
+
+class WarehouseStockEnvelope(InventoryModel):
+    data: list[WarehouseStockResponse]
+
+
+class WarehouseOperationResponse(InventoryModel):
+    id: int
+    operation_group_no: str
+    operation_no: str
+    operation_type: WarehouseOperationType
+    source_type: WarehouseOperationSourceType
+    production_plan_id: int | None
+    production_plan_item_id: int | None
+    work_order_id: int | None
+    work_order_batch_id: int | None
+    production_item_id: int | None
+    warehouse_stock_id: int | None
+    item_code: str
+    item_name: str
+    product_version: int
+    item_type: WarehouseItemType
+    specification: str
+    inventory_unit: WarehouseUnit
+    warehouse_code: WarehouseCode
+    warehouse_name: WarehouseName
+    completion_status: str
+    quantity: int
+    quantity_before: int | None
+    quantity_after: int | None
+    status: WarehouseOperationStatus
+    actor_username: str
+    error_message: str | None
+    created_at: datetime
+    executed_at: datetime | None
+    manual_reviewed_at: datetime | None
+    manual_reviewed_by: str | None
+    manual_review_note: str | None
+    can_review: bool
+
+
+class WarehouseOperationEnvelope(InventoryModel):
+    data: list[WarehouseOperationResponse]
+
+
+class WarehouseOperationReviewInput(InventoryModel):
+    operation_group_no: str = Field(min_length=1)
+    review_note: str = Field(min_length=1)
+
+
+class FinishedInventoryStockResponse(InventoryModel):
+    id: int
     product_id: int
     product_version: int
-    product_bom_id: int | None
     flow_node_id: str
     completed_flow_node_id: str
     completed_node_label: str
     item_code: str
     item_name: str
     quantity: int
-    reserved_quantity: int
     available_quantity: int
     revision: int
 
 
-class InventoryStockEnvelope(InventoryModel):
-    data: list[InventoryStockResponse]
+class FinishedInventoryStockEnvelope(InventoryModel):
+    data: list[FinishedInventoryStockResponse]
 
 
-class InventoryTransactionResponse(InventoryModel):
+class FinishedInventoryTransactionResponse(InventoryModel):
     id: int
-    source_type: InventoryTransactionSourceType
+    source_type: FinishedInventoryTransactionSourceType
     source_id: int
-    inventory_stock_id: int | None
+    finished_inventory_stock_id: int | None
     production_plan_id: int | None
-    transaction_type: InventoryTransactionType
+    transaction_type: FinishedInventoryTransactionType
     quantity: int
     quantity_before: int
     quantity_after: int
-    reserved_before: int
-    reserved_after: int
     actor_username: str
     reason: str
     created_at: str
@@ -56,40 +124,8 @@ class InventoryTransactionResponse(InventoryModel):
     completed_node_label: str = ""
 
 
-class InventoryTransactionEnvelope(InventoryModel):
-    data: list[InventoryTransactionResponse]
-
-
-class InventoryIssueItemInput(InventoryModel):
-    reservation_id: int = Field(gt=0)
-    quantity: int = Field(ge=0)
-
-
-class InventoryIssueInput(InventoryModel):
-    department_code: InventoryDepartmentCode
-    items: list[InventoryIssueItemInput] = Field(min_length=1, max_length=5000)
-
-
-class InventoryOutboundItemResponse(InventoryModel):
-    reservation_id: int
-    item_code: str
-    item_name: str
-    reserved_quantity: int
-    issued_quantity: int
-    remaining_quantity: int
-    completed_node_label: str
-
-
-class InventoryOutboundPlanResponse(InventoryModel):
-    production_plan_id: int
-    customer_order_id: int
-    customer_order_no: str
-    department_code: InventoryDepartmentCode
-    items: list[InventoryOutboundItemResponse]
-
-
-class InventoryOutboundPlanEnvelope(InventoryModel):
-    data: list[InventoryOutboundPlanResponse]
+class FinishedInventoryTransactionEnvelope(InventoryModel):
+    data: list[FinishedInventoryTransactionResponse]
 
 
 class FinishedOrderStockResponse(InventoryModel):

@@ -7,12 +7,10 @@ from modules.production_core.flow_api import assembly_material_key
 def _workshop_procedures(
     procedure_views,
     workshop_id: int | None,
-    procedure_type: str,
-    input_mode: str,
 ):
     if workshop_id is None:
         return []
-    return procedure_views.get((workshop_id, procedure_type, input_mode), [])
+    return procedure_views.get(workshop_id, [])
 
 def _material_source_name(context, production_item) -> str:
     current_id = production_item.origin_flow_node_id

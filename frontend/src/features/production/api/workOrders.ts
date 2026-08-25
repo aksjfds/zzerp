@@ -71,14 +71,6 @@ export async function submitWorkOrder(
   return response.data.data
 }
 
-export async function registerPurchaseArrival(workOrderId: number, quantity: number) {
-  const response = await service.post<{ data: WorkOrder }>(
-    `/work-orders/${workOrderId}/purchase-arrivals`,
-    { quantity },
-  )
-  return response.data.data
-}
-
 export async function resubmitReworkBatch(batchId: number, quantity: number) {
   const response = await service.post<{ data: WorkOrder['batches'][number] }>(
     `/work-order-batches/${batchId}/rework-submissions`,

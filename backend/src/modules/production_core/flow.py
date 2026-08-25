@@ -6,6 +6,7 @@ from modules.engineering.model_api import ProductBom, ProductProcessFlow
 from modules.production_core.persistence import ProductionItem
 from modules.sales.model_api import CustomerOrderItem
 from modules.errors import DomainError
+from modules.production_core.completion_status import material_completion_status
 
 
 @dataclass(frozen=True)
@@ -155,10 +156,19 @@ def completed_node_display_label(
     origin_flow_node_id: str,
     completed_flow_node_id: str,
 ) -> str:
-    completed_label = str(
-        nodes.get(completed_flow_node_id, {}).get("label", completed_flow_node_id)
-    )
-    return completed_label
+    origin = nodes.get(origin_flow_node_id)
+    if (
+        origin is not None
+        and origin.get("type") == "shipping"
+        and completed_flow_node_id == origin_flow_node_id
+    ):
+        return str(origin.get("label") or "成品")
+    return material_completion_status(
+        flow,
+        nodes,
+        origin_flow_node_id,
+        completed_flow_node_id,
+    ).completion_status
 
 
 def process_qc_node(
@@ -168,6 +178,35 @@ def process_qc_node(
 ) -> dict | None:
     target = normal_target(flow, nodes, process_node_id)
     return target if target and target.get("type") == "qc" else None
+
+
+def qc_qualified_destinations(
+    flow: dict,
+    nodes: dict[str, dict],
+    process_node_id: str,
+) -> tuple[str, ...]:
+    """Return server-authoritative destinations for qualified material."""
+    target = qc_release_target(flow, nodes, process_node_id)
+    destinations = ["return"]
+    if target is not None:
+        destinations.append("release")
+    if target is None or target.get("type") != "shipping":
+        destinations.append("inventory")
+    return tuple(destinations)
+
+
+def qc_release_target(
+    flow: dict,
+    nodes: dict[str, dict],
+    process_node_id: str,
+) -> dict | None:
+    """Resolve the release target for configured or ad-hoc QC."""
+    qc_node = process_qc_node(flow, nodes, process_node_id)
+    return normal_target(
+        flow,
+        nodes,
+        qc_node["id"] if qc_node is not None else process_node_id,
+    )
 
 
 def next_execution_node(

@@ -20,7 +20,6 @@ const inspection = reactive<QcInspectionPayload>({
   scrap_quantity: 0,
   lost_quantity: 0,
   defect_reason: '',
-  qualified_disposition: 'release',
 })
 
 watch(() => [props.modelValue, props.batch] as const, ([visible, batch]) => {
@@ -32,7 +31,6 @@ watch(() => [props.modelValue, props.batch] as const, ([visible, batch]) => {
     scrap_quantity: 0,
     lost_quantity: 0,
     defect_reason: '',
-    qualified_disposition: 'release',
   })
 })
 
@@ -54,11 +52,6 @@ function submit() {
     ElMessage.warning('存在返工、报废或遗失数量时必须填写不良原因')
     return
   }
-  if (inspection.qualified_quantity > 0 && !inspection.qualified_disposition) {
-    ElMessage.warning('请选择合格品返回当前车间或放行下一节点')
-    return
-  }
-  if (inspection.qualified_quantity === 0) inspection.qualified_disposition = null
   emit('submit', { ...inspection })
 }
 </script>
@@ -77,12 +70,6 @@ function submit() {
       <ElFormItem label="报废"><ElInputNumber v-model="inspection.scrap_quantity" :min="0" /></ElFormItem>
       <ElFormItem label="遗失"><ElInputNumber v-model="inspection.lost_quantity" :min="0" /></ElFormItem>
     </div>
-    <ElFormItem v-if="inspection.qualified_quantity > 0" label="合格品去向" required>
-      <ElRadioGroup v-model="inspection.qualified_disposition">
-        <ElRadio value="return">返回当前车间继续加工</ElRadio>
-        <ElRadio value="release">放行到下一节点</ElRadio>
-      </ElRadioGroup>
-    </ElFormItem>
     <ElFormItem
       label="不良原因"
       :required="inspection.rework_quantity + inspection.scrap_quantity + inspection.lost_quantity > 0"

@@ -6,7 +6,6 @@ import RepositoryFilterBar from '../components/RepositoryFilterBar.vue'
 import RepositoryCards from '../components/RepositoryCards.vue'
 import WorkOrderCards from '../components/WorkOrderCards.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
-import PurchaseWorkOrderDialog from '../components/PurchaseWorkOrderDialog.vue'
 import { useProductionDepartment } from '../composables/useProductionDepartment'
 import '../styles/workspace.css'
 
@@ -14,10 +13,9 @@ const props = withDefaults(defineProps<{
   departmentCode: string
   departmentName: string
   description: string
-  mode?: 'production' | 'purchase'
   specialPrinting?: boolean
-}>(), { mode: 'production', specialPrinting: false })
-const controller = useProductionDepartment(props.departmentCode, props.mode)
+}>(), { specialPrinting: false })
+const controller = useProductionDepartment(props.departmentCode)
 const { workspace, workOrderList, workOrderActions } = controller
 const {
   items, loading, pageSize,
@@ -51,12 +49,12 @@ onMounted(load)
       show-inventory
       show-workers
       show-progress
-      :show-procedure-prices="mode === 'production'"
+      show-procedure-prices
       @configuration-saved="reloadWorkspace"
     >
     <RepositoryFilterBar
       :workshops="workshops"
-      :mode="mode"
+      mode="production"
       @search="applyFilters"
     />
     <section class="production-workspace production-workspace--viewport">
@@ -65,7 +63,6 @@ onMounted(load)
           :items="items"
           :loading="loading"
           :selected-key="selectedCardKey"
-          :mode="mode"
           allow-work-order
           @select="selectRepository"
           @create-work-order="openWorkOrder"
@@ -77,9 +74,8 @@ onMounted(load)
           v-if="showSelectedWorkOrders"
           :items="workOrders"
           :loading="detailLoading"
-          :mode="mode"
+          mode="production"
           :special-printing="specialPrinting"
-          @register-arrival="workOrderActions.registerArrival"
           @submit-qc="workOrderActions.submitQc"
           @submit-direct-result="workOrderActions.submitDirectResult"
           @resubmit-qc="workOrderActions.resubmitQc"
@@ -103,18 +99,9 @@ onMounted(load)
       </div>
     </section>
     <CreateWorkOrderDialog
-      v-if="mode === 'production'"
       v-model="dialogVisible"
       :item="activeRepository"
       :workers="workOrderWorkers"
-      :submitting="submitting"
-      @submit="saveWorkOrder"
-    />
-    <PurchaseWorkOrderDialog
-      v-else
-      v-model="dialogVisible"
-      :item="activeRepository"
-      :workers="workers"
       :submitting="submitting"
       @submit="saveWorkOrder"
     />

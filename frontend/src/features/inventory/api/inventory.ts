@@ -1,47 +1,50 @@
 import { service } from '@/api/request'
 import type {
-  InventoryDepartment,
-  InventoryOutboundPlan,
-  InventoryStock,
-  InventoryTransaction,
+  FinishedInventoryStock,
+  FinishedInventoryTransaction,
   FinishedOrderStock,
+  WarehouseOperation,
+  WarehouseOperationStatus,
+  WarehouseStock,
 } from '../domain/types'
 
-export async function queryStocks(departmentCode: InventoryDepartment) {
-  const response = await service.get<{ data: InventoryStock[] }>('/inventory/stocks', {
-    params: { department_code: departmentCode },
-  })
+export async function queryWarehouseStocks() {
+  const response = await service.get<{ data: WarehouseStock[] }>(
+    '/inventory/warehouse-stocks',
+  )
   return response.data.data
 }
 
-export async function queryOutboundPlans(departmentCode: InventoryDepartment) {
-  const response = await service.get<{ data: InventoryOutboundPlan[] }>('/inventory/outbound-plans', {
-    params: { department_code: departmentCode },
-  })
-  return response.data.data.map(plan => ({
-    ...plan,
-    items: plan.items.map(item => ({ ...item, issue_quantity: 0 })),
-  }))
-}
-
-export async function issueOutboundPlan(plan: InventoryOutboundPlan) {
-  const response = await service.post<InventoryOutboundPlan>(
-    `/inventory/outbound-plans/${plan.production_plan_id}/issue`,
-    {
-      department_code: plan.department_code,
-      items: plan.items.map(item => ({
-        reservation_id: item.reservation_id,
-        quantity: item.issue_quantity || 0,
-      })),
-    },
+export async function queryWarehouseOperations(status?: WarehouseOperationStatus) {
+  const response = await service.get<{ data: WarehouseOperation[] }>(
+    '/inventory/warehouse-operations',
+    { params: { status } },
   )
-  return response.data
+  return response.data.data
 }
 
-export async function queryTransactions(departmentCode: InventoryDepartment) {
-  const response = await service.get<{ data: InventoryTransaction[] }>('/inventory/transactions', {
-    params: { department_code: departmentCode },
-  })
+export async function reviewWarehouseOperation(
+  operationGroupNo: string,
+  reviewNote: string,
+) {
+  const response = await service.post<{ data: WarehouseOperation[] }>(
+    '/inventory/warehouse-operations/review',
+    { operation_group_no: operationGroupNo, review_note: reviewNote },
+  )
+  return response.data.data
+}
+
+export async function queryFinishedInventoryStocks() {
+  const response = await service.get<{ data: FinishedInventoryStock[] }>(
+    '/inventory/finished-stocks',
+  )
+  return response.data.data
+}
+
+export async function queryFinishedInventoryTransactions() {
+  const response = await service.get<{ data: FinishedInventoryTransaction[] }>(
+    '/inventory/finished-transactions',
+  )
   return response.data.data
 }
 

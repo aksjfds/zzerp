@@ -91,7 +91,7 @@ def _current_cards(
         )
         .where(
             Repository.department_id == department.id,
-            ProductionPlan.status == "confirmed",
+            ProductionPlan.status.in_(("confirmed", "completed")),
         )
     )
     # Assembly filters are applied only after complete material groups are built.
@@ -127,9 +127,7 @@ def _current_cards(
     )
     procedure_views = {}
     for item in get_procedure_views(session):
-        procedure_views.setdefault(
-            (item.workshop_id, item.procedure_type, item.input_mode), []
-        ).append(item)
+        procedure_views.setdefault(item.workshop_id, []).append(item)
     display_context = ProductionItemDisplayContext(
         production_items={row.ProductionItem.id: row.ProductionItem for row in rows},
         order_items={row.CustomerOrderItem.id: row.CustomerOrderItem for row in rows},
@@ -205,12 +203,6 @@ def _current_card(
     procedures = _workshop_procedures(
         procedure_views,
         workshop.id if workshop else None,
-        (
-            "purchase_receipt"
-            if department.department_code == "purchasing"
-            else "standard"
-        ),
-        "multiple" if node.get("type") == "assembly" else "single",
     )
     part_no, part_name = context.item_name(production_item)
     if context.bom_item is None:

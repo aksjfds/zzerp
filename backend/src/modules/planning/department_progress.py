@@ -75,7 +75,7 @@ def list_standard_department_progress(
             .where(
                 Workshop.department_id == department.id,
                 ProductionRouteTask.route_node_type == "process",
-                ProductionPlan.status.in_(("draft", "confirmed")),
+                ProductionPlan.status.in_(("draft", "confirmed", "completed")),
                 CustomerOrder.status != "cancelled",
                 ProductionPlanItem.item_type.in_(("part", "assembly")),
                 ProductionPlanItem.planned_production_quantity > 0,

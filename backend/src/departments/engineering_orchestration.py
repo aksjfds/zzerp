@@ -1,4 +1,5 @@
 from modules.engineering import command_api as engineering
+from modules.engineering.api import get_product as query_product
 from modules.inventory import reference_api as inventory_references
 from modules.production_core import reference_api as production_references
 from modules.sales import reference_api as sales_references
@@ -21,6 +22,10 @@ class _EngineeringCollaborators:
 
 
 COLLABORATORS = _EngineeringCollaborators()
+
+
+def get_product(product_id, version=None):
+    return query_product(product_id, version, COLLABORATORS)
 
 
 def update_product_info(product_id, payload):
@@ -60,6 +65,7 @@ def delete_product_version(product_id, product_version, expected_revision):
 __all__ = [
     "create_product_version",
     "delete_product_version",
+    "get_product",
     "replace_product_bom",
     "save_product_process_flow_draft",
     "update_product_info",

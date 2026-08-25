@@ -7,7 +7,6 @@ from modules.planning.production_progress_detail import (
     get_department_production_progress_item,
 )
 from modules.planning.production_card_listing import list_production_cards
-from modules.planning.inventory_outbound import list_outbound_plans
 from modules.planning.plan_api import (
     complete_order_plan,
     get_order_plan,
@@ -21,7 +20,6 @@ __all__ = [
     "get_order_plan",
     "get_department_production_progress_item",
     "list_department_production_progress",
-    "list_outbound_plans",
     "list_production_cards",
     "planned_product_quantity",
     "rebuild_order_plan",

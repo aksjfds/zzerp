@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import DepartmentWorkersView from '../views/DepartmentWorkersView.vue'
 import DepartmentProductionProgressView from '../views/DepartmentProductionProgressView.vue'
 import ProcedurePriceView from '../views/ProcedurePriceView.vue'
-import DepartmentSurplusInventoryView from '../views/DepartmentSurplusInventoryView.vue'
+import ProductionPositionStorageView from '../views/ProductionPositionStorageView.vue'
 
 const props = defineProps<{
   departmentCode: string
@@ -96,11 +96,11 @@ async function switchTab(tab: DepartmentTab) {
     </ElTabPane>
     <ElTabPane
       v-if="availableTabs.includes('inventory')"
-      label="库存"
+      label="物料入库"
       name="inventory"
       lazy
     >
-      <DepartmentSurplusInventoryView :department-code="departmentCode" />
+      <ProductionPositionStorageView :department-code="departmentCode" />
     </ElTabPane>
   </ElTabs>
 </template>

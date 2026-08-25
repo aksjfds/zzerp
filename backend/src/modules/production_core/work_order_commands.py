@@ -5,7 +5,6 @@ from sqlalchemy import select
 from domain.production_types import (
     COMPLETION_DIRECT,
     COMPLETION_QC,
-    WORK_ORDER_PURCHASE_RECEIPT,
     WORK_ORDER_STATUS_CANCELLED,
     WORK_ORDER_STATUS_OPEN,
     WORK_ORDER_TYPES,
@@ -18,7 +17,6 @@ from modules.production_core.context_api import WorkOrderContext
 from modules.production_core.persistence import ProductionItem, Repository, WorkOrder
 from modules.errors import DomainError
 from modules.production_core.work_order_progress import order_has_submissions, order_remaining_quantity
-from modules.production_core.work_order_rules import validate_work_order_procedure
 from modules.production_core.work_order_support import consume_repository
 
 
@@ -48,13 +46,6 @@ def prepare_full_submission(
             "work_order_full_quantity_required",
             "工单必须一次处理全部数量",
         )
-    if order.work_order_type == WORK_ORDER_PURCHASE_RECEIPT:
-        if order.processed_quantity != order.quantity:
-            raise DomainError(
-                "work_order_full_quantity_required",
-                "外购工单必须全部到货后整单填写结果或送检",
-            )
-        return
     if order.processed_quantity != 0:
         raise DomainError(
             "work_order_submission_state_invalid",
@@ -78,7 +69,6 @@ def create_order_record(
 ) -> WorkOrder:
     if quantity <= 0:
         raise DomainError("work_order_quantity_invalid", "工单数量必须大于 0")
-    validate_work_order_procedure(procedure, work_order_type)
     repository_id = source.id if isinstance(source, Repository) else None
     reserved = reserved_source_quantity(session, repository_id)
     if quantity > source.quantity - reserved:

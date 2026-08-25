@@ -4,7 +4,6 @@ import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 import type { WorkOrderMode } from '../domain/workOrderCardPolicy'
 import { assemblyWorkOrderCardPolicy } from '../domain/assemblyWorkOrderCardPolicy'
 import { productionWorkOrderCardPolicy } from '../domain/productionWorkOrderCardPolicy'
-import { purchaseWorkOrderCardPolicy } from '../domain/purchaseWorkOrderCardPolicy'
 import PolishWorkOrderPrintDialog from './PolishWorkOrderPrintDialog.vue'
 import WorkOrderPrintDialog from './WorkOrderPrintDialog.vue'
 
@@ -15,7 +14,6 @@ const props = withDefaults(defineProps<{
   specialPrinting?: boolean
 }>(), { mode: 'production' })
 const emit = defineEmits<{
-  registerArrival: [item: WorkOrder]
   submitQc: [item: WorkOrder]
   submitDirectResult: [item: WorkOrder]
   resubmitQc: [item: WorkOrder, batch: WorkOrderBatch]
@@ -25,7 +23,6 @@ const emit = defineEmits<{
 
 const policies = {
   production: productionWorkOrderCardPolicy,
-  purchase: purchaseWorkOrderCardPolicy,
   assembly: assemblyWorkOrderCardPolicy,
 }
 const policy = computed(() => policies[props.mode])
@@ -115,12 +112,6 @@ function qcResultType(batch: WorkOrderBatch): 'success' | 'info' | 'warning' | '
       </div>
       <div class="work-order-actions">
         <div class="primary-actions">
-          <ElButton
-            v-if="mode === 'purchase' && item.status === 'open' && item.processing_quantity > 0"
-            type="primary"
-            size="small"
-            @click="emit('registerArrival', item)"
-          >登记到货</ElButton>
           <ElButton
             v-if="policy.showInitialQc(item)"
             type="warning"

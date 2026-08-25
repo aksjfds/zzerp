@@ -14,12 +14,11 @@ from schemas.engineering import (
 from modules.engineering.api import (
     create_product,
     delete_product,
-    get_product,
     list_product_versions,
     list_products,
 )
 from departments.engineering_orchestration import (
-    create_product_version, delete_product_version, replace_product_bom,
+    create_product_version, delete_product_version, get_product, replace_product_bom,
     save_product_process_flow_draft, update_product_info,
     update_product_process_flow,
 )

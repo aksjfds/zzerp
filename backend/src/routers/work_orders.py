@@ -10,7 +10,6 @@ from schemas.production import (
     WorkOrderBatchEnvelope,
     WorkOrderEnvelope,
     WorkOrderListEnvelope,
-    PurchaseArrival,
     WorkOrderSubmission,
 )
 from departments.contracts import (
@@ -20,7 +19,6 @@ from departments.contracts import (
 from departments.registry import department_api
 from departments.work_order_orchestration import (
     cancel_work_order,
-    register_purchase_arrival,
     resubmit_work_order_rework_batch,
     submit_work_order,
 )
@@ -117,26 +115,6 @@ def work_order_submit(
         "data": submit_work_order(
             work_order_id,
             payload.completion_action,
-            user["department"],
-            user["is_system"],
-            user["username"],
-        )
-    }
-
-
-@router.post(
-    "/work-orders/{work_order_id}/purchase-arrivals",
-    response_model=WorkOrderEnvelope,
-)
-def purchase_arrival_register(
-    work_order_id: int,
-    payload: PurchaseArrival,
-    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
-):
-    return {
-        "data": register_purchase_arrival(
-            work_order_id,
-            payload.quantity,
             user["department"],
             user["is_system"],
             user["username"],

@@ -34,6 +34,10 @@ class Department(Base):
 class Workshop(Base):
     __tablename__ = "workshop"
     __table_args__ = (
+        CheckConstraint(
+            "input_mode IN ('single', 'multiple')",
+            name="ck_workshop_input_mode",
+        ),
         UniqueConstraint("id", "department_id", name="uq_workshop_department_context"),
         UniqueConstraint("department_id", "workshop_name", name="uq_workshop_name"),
     )
@@ -43,19 +47,12 @@ class Workshop(Base):
         BigInteger, ForeignKey("department.id"), nullable=False
     )
     workshop_name: Mapped[str] = mapped_column(Text, nullable=False)
+    input_mode: Mapped[str] = mapped_column(Text, nullable=False, default="single")
 
 
 class Procedure(Base):
     __tablename__ = "procedure"
     __table_args__ = (
-        CheckConstraint(
-            "procedure_type IN ('standard', 'purchase_receipt')",
-            name="ck_procedure_type",
-        ),
-        CheckConstraint(
-            "input_mode IN ('single', 'multiple')",
-            name="ck_procedure_input_mode",
-        ),
         UniqueConstraint("workshop_id", "procedure_name", name="uq_procedure_name"),
     )
 
@@ -64,5 +61,3 @@ class Procedure(Base):
         BigInteger, ForeignKey("workshop.id"), nullable=False
     )
     procedure_name: Mapped[str] = mapped_column(Text, nullable=False)
-    procedure_type: Mapped[str] = mapped_column(Text, nullable=False, default="standard")
-    input_mode: Mapped[str] = mapped_column(Text, nullable=False, default="single")

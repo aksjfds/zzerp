@@ -1,7 +1,7 @@
 from departments.contracts import CAP_QUALITY
-from departments.qc_orchestration import inspect_qc_batch
+from departments.qc_orchestration import decide_qc_destination, inspect_qc_batch
 from modules.quality import api as quality
-from schemas.production import QcInspection
+from schemas.production import QcDestinationInput, QcInspection
 
 
 class QualityCapability:
@@ -33,6 +33,23 @@ class QualityCapability:
         return inspect_qc_batch(
             batch_id,
             payload,
+            actor_department,
+            actor_is_system,
+        )
+
+    def decide_qc_destination(
+        self,
+        batch_id: int,
+        payload: QcDestinationInput,
+        actor_username: str,
+        actor_department: str | None,
+        actor_is_system: bool,
+    ) -> dict:
+        self.require_capability(CAP_QUALITY)
+        return decide_qc_destination(
+            batch_id,
+            payload,
+            actor_username,
             actor_department,
             actor_is_system,
         )

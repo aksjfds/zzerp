@@ -1,7 +1,7 @@
 """Application-level dispatch for department-owned work-order creation."""
 
-from departments.contracts import CAP_PURCHASING, CAP_STANDARD_EXECUTION
-from departments.registry import department_api_for_any
+from departments.contracts import CAP_STANDARD_EXECUTION
+from departments.registry import department_api
 from departments.work_order_orchestration import create_work_order
 from modules.errors import DomainError
 
@@ -36,9 +36,9 @@ def create_department_source_work_order(
             "账号未绑定部门",
             status_code=403,
         )
-    return department_api_for_any(
+    return department_api(
         actor_department,
-        (CAP_STANDARD_EXECUTION, CAP_PURCHASING),
+        CAP_STANDARD_EXECUTION,
     ).create_source_work_order(
         repository_id,
         procedure_id,

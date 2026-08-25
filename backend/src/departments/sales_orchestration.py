@@ -3,8 +3,16 @@
 from modules.engineering import product_reference_api as engineering
 from modules.planning import sales_api as planning
 from modules.planning import plan_api as planning_commands
-from modules.inventory import reservation_api as inventory_reservations
+from modules.inventory.finished_goods_api import (
+    allocate_issued_finished_goods,
+    register_pending_finished_goods,
+)
+from modules.inventory.plan_stock_api import withdraw_finished_plan_stock
+from modules.inventory.warehouse_api import withdraw_c01_stock
 from modules.production_core import api as production_lifecycle
+from modules.production_core.inventory_api import (
+    accept_issued_inventory as accept_inventory_into_production,
+)
 from modules.production_core import operational_api as production_operations
 from modules.planning import sales_progress_api as planning_progress
 from modules.sales import command_api as sales
@@ -24,14 +32,22 @@ production = SalesProductionAdapter()
 
 
 class PlanningExecutionAdapter:
-    reserve_plan_item = staticmethod(inventory_reservations.reserve_plan_item)
-    release_plan_reservations = staticmethod(
-        inventory_reservations.release_plan_reservations
-    )
+    withdraw_warehouse_stock = staticmethod(withdraw_c01_stock)
+    withdraw_finished_plan_stock = staticmethod(withdraw_finished_plan_stock)
     initialize_order_production = staticmethod(
         production_lifecycle.initialize_order_production
     )
-    cancel_order_production = staticmethod(production_lifecycle.cancel_order_production)
+
+    @staticmethod
+    def accept_issued_inventory(session, plan_item, stock, actor_username):
+        return accept_inventory_into_production(
+            session,
+            plan_item,
+            stock,
+            actor_username,
+            register_pending_finished_goods=register_pending_finished_goods,
+            allocate_issued_finished_goods=allocate_issued_finished_goods,
+        )
 
 
 plan_execution = PlanningExecutionAdapter()
@@ -53,7 +69,7 @@ class SalesPlanningAdapter:
     @staticmethod
     def cancel_order_plan(session, order, actor_username):
         return planning_commands.cancel_order_plan(
-            session, order, actor_username, plan_execution
+            session, order, actor_username
         )
 
 

@@ -8,6 +8,6 @@ export const warehouseDepartment: DepartmentModule = {
   routePath: '/warehouse',
   routeName: 'warehouse-department',
   requiredPermission: PRODUCTION_PERMISSIONS.view,
-  component: () => import('@/features/inventory/views/InventoryDepartmentView.vue'),
+  component: () => import('@/features/inventory/views/WarehouseDepartmentView.vue'),
   capabilities: ['inventory'],
 }

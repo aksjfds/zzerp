@@ -43,7 +43,9 @@ def serialize_batch(
         "qc_worker_id": batch.qc_worker_id,
         "qc_worker_name": batch.qc_worker_name,
         "defect_reason": batch.defect_reason,
-        "qualified_disposition": batch.qualified_disposition,
+        "qualified_destination": batch.qualified_destination,
+        "destination_decided_at": business_iso(batch.destination_decided_at),
+        "destination_decided_by": batch.destination_decided_by,
         "recorded_at": business_iso(batch.recorded_at),
     }
 

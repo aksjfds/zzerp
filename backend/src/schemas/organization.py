@@ -16,7 +16,6 @@ DepartmentCapability = Literal[
     "work_orders",
     "workers",
     "standard_execution",
-    "purchasing",
     "assembly",
     "quality",
     "special_printing",
@@ -43,6 +42,7 @@ class WorkshopResponse(OrganizationModel):
     id: int
     department_id: int
     workshop_name: str
+    input_mode: Literal["single", "multiple"]
 
 
 class WorkshopRouteResponse(WorkshopResponse):
@@ -56,5 +56,3 @@ class ProcedureResponse(OrganizationModel):
     department_name: str
     department_code: str
     procedure_name: str
-    procedure_type: Literal["standard", "purchase_receipt"]
-    input_mode: Literal["single", "multiple"]

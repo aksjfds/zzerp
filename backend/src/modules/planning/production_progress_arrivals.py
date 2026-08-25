@@ -9,7 +9,6 @@ ARRIVAL_MOVEMENT_TYPES = {
     "initial",
     "inventory_issue",
     "process",
-    "purchase_receipt",
     "assembly_output",
 }
 QC_FORWARD_MOVEMENT_TYPES = {"qc_qualified"}

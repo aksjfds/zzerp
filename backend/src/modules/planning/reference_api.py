@@ -8,11 +8,11 @@ from sqlalchemy.orm import Session
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
 
 
-def list_confirmed_assembly_plan_quantities(
+def list_executable_assembly_plan_quantities(
     session: Session,
     customer_order_item_ids: Collection[int],
 ) -> list[tuple[int, str, int]]:
-    """Return confirmed assembly quantities without exposing planning models."""
+    """Return confirmed or completed plan quantities for assembly execution."""
     if not customer_order_item_ids:
         return []
     return [
@@ -28,7 +28,7 @@ def list_confirmed_assembly_plan_quantities(
                 ProductionPlan.id == ProductionPlanItem.production_plan_id,
             )
             .where(
-                ProductionPlan.status == "confirmed",
+                ProductionPlan.status.in_(("confirmed", "completed")),
                 ProductionPlanItem.item_type == "assembly",
                 ProductionPlanItem.customer_order_item_id.in_(
                     customer_order_item_ids
@@ -38,4 +38,4 @@ def list_confirmed_assembly_plan_quantities(
     ]
 
 
-__all__ = ["list_confirmed_assembly_plan_quantities"]
+__all__ = ["list_executable_assembly_plan_quantities"]

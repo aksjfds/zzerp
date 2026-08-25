@@ -73,8 +73,7 @@ export type ProductionPlanItem = {
   available_inventory_quantity: number
   net_required_quantity: number
   planned_production_quantity: number
-  reserved_inventory_quantity: number
-  issued_inventory_quantity: number
+  deducted_inventory_quantity: number
 }
 
 export type ProductionPlan = {
@@ -103,9 +102,10 @@ export type ProductionPlan = {
     item_code: string
     item_name: string
     completed_node_label: string
+    warehouse_code: string
+    warehouse_name: string
     current_inventory_quantity: number
-    reserved_inventory_quantity: number
-    issued_inventory_quantity: number
+    planned_deduction_quantity: number
     decomposition: {
       finished_equivalent_quantity: number
       parts: Array<{

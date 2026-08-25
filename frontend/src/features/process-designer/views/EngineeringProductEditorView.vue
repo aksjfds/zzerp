@@ -58,6 +58,7 @@ const productId = computed(() => {
 })
 const mode = computed(() => route.query.mode === 'view' ? 'view' : 'edit')
 const canEditProduct = computed(() => authStore.hasPermission(PRODUCT_PERMISSIONS.edit))
+const editableDirty = computed(() => mode.value === 'edit' && allDirty.value)
 
 const baseRules: FormRules<ProductFields> = {
   customer_name: [{ required: true, whitespace: true, message: '请输入客户名称', trigger: 'blur' }],
@@ -140,10 +141,10 @@ const {
   productId,
   router,
   store,
-  versionDirty: allDirty,
+  versionDirty: editableDirty,
 })
 const selectedVersion = computed(() => form.version || currentVersion.value)
-const pageDirty = computed(() => !loadingProduct.value && allDirty.value)
+const pageDirty = computed(() => !loadingProduct.value && editableDirty.value)
 const baseReadOnly = computed(() => Boolean(
   mode.value === 'view'
   || !canEditProduct.value

@@ -1,49 +1,121 @@
-"""Public API for cross-order inventory queries and production-plan issues."""
+"""Public HTTP-facing inventory queries and finished-goods operations."""
+
+from collections.abc import Sequence
+from dataclasses import asdict
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
+from domain.warehouse import WarehouseOperationSnapshot, WarehouseOperationStatus
 from modules.inventory.finished_goods_api import (
     confirm_finished_order_receipt,
     list_finished_order_stocks,
     ship_finished_order_item,
 )
 from modules.inventory.persistence import (
-    InventoryStock,
-    InventoryTransaction,
+    FinishedInventoryStock,
+    FinishedInventoryTransaction,
     FinishedGoodsTransaction,
+    FinishedOrderStock,
+)
+from modules.inventory.warehouse_api import (
+    list_warehouse_operations as list_operation_snapshots,
+    list_warehouse_stocks as list_stock_snapshots,
+    review_uncertain_warehouse_operation,
 )
 from modules.production_core.flow_api import completed_node_display_label, load_product_flow
 from modules.sales.model_api import CustomerOrder
-from modules.inventory.persistence import FinishedOrderStock
 
 
-def list_stocks(department_code: str | None = None) -> list[dict]:
+def list_temporary_warehouse_stocks() -> list[dict]:
     with SessionLocal() as session:
-        statement = select(InventoryStock).order_by(InventoryStock.item_code, InventoryStock.id)
-        if department_code:
-            statement = statement.where(InventoryStock.department_code == department_code)
+        return [
+            asdict(stock)
+            for stock in list_stock_snapshots(session)
+        ]
+
+
+def list_project_warehouse_operations(
+    status: WarehouseOperationStatus | None = None,
+    limit: int = 200,
+) -> list[dict]:
+    with SessionLocal() as session:
+        operations = list_operation_snapshots(
+            session,
+            status=status,
+            limit=limit,
+        )
+        return _serialize_warehouse_operations(operations)
+
+
+def review_project_warehouse_operation(
+    operation_group_no: str,
+    reviewer_username: str,
+    review_note: str,
+) -> list[dict]:
+    with SessionLocal.begin() as session:
+        return _serialize_warehouse_operations(
+            review_uncertain_warehouse_operation(
+                session,
+                operation_group_no=operation_group_no,
+                reviewer_username=reviewer_username,
+                review_note=review_note,
+            )
+        )
+
+
+def _serialize_warehouse_operations(
+    operations: Sequence[WarehouseOperationSnapshot],
+) -> list[dict]:
+    reviewable_by_group: dict[str, int] = {}
+    for operation in operations:
+        if operation.status != "uncertain" or operation.manual_reviewed_at is not None:
+            continue
+        current = reviewable_by_group.get(operation.operation_group_no)
+        if current is None or operation.id < current:
+            reviewable_by_group[operation.operation_group_no] = operation.id
+    return [
+        {
+            **asdict(operation),
+            "can_review": (
+                reviewable_by_group.get(operation.operation_group_no) == operation.id
+            ),
+        }
+        for operation in operations
+    ]
+
+
+def list_finished_inventory_stocks() -> list[dict]:
+    with SessionLocal() as session:
+        statement = select(FinishedInventoryStock).order_by(
+            FinishedInventoryStock.item_code,
+            FinishedInventoryStock.id,
+        )
         stocks = list(session.scalars(statement))
         flow_contexts = _load_stock_flow_contexts(session, stocks)
         return [_serialize_stock(item, flow_contexts) for item in stocks]
 
 
-def list_transactions(
-    department_code: str,
+def list_finished_inventory_transactions(
     stock_id: int | None = None,
     limit: int = 200,
 ) -> list[dict]:
     with SessionLocal() as session:
         statement = (
-            select(InventoryTransaction)
-            .join(InventoryStock, InventoryStock.id == InventoryTransaction.inventory_stock_id)
-            .where(InventoryStock.department_code == department_code)
+            select(FinishedInventoryTransaction)
+            .join(
+                FinishedInventoryStock,
+                FinishedInventoryStock.id
+                == FinishedInventoryTransaction.finished_inventory_stock_id,
+            )
         )
         if stock_id:
-            statement = statement.where(InventoryTransaction.inventory_stock_id == stock_id)
-        statement = statement.order_by(InventoryTransaction.id.desc()).limit(limit)
-        result_rows = list(session.execute(statement.add_columns(InventoryStock)))
+            statement = statement.where(
+                FinishedInventoryTransaction.finished_inventory_stock_id == stock_id
+            )
+        statement = statement.order_by(FinishedInventoryTransaction.id.desc()).limit(limit)
+        result_rows = list(session.execute(statement.add_columns(FinishedInventoryStock)))
         flow_contexts = _load_stock_flow_contexts(
             session,
             [stock for _, stock in result_rows],
@@ -51,16 +123,14 @@ def list_transactions(
         rows = [
             {
                 "id": item.id,
-                "source_type": "inventory_stock",
+                "source_type": "finished_inventory_stock",
                 "source_id": stock.id,
-                "inventory_stock_id": item.inventory_stock_id,
+                "finished_inventory_stock_id": item.finished_inventory_stock_id,
                 "production_plan_id": item.production_plan_id,
                 "transaction_type": item.transaction_type,
                 "quantity": item.quantity,
                 "quantity_before": item.quantity_before,
                 "quantity_after": item.quantity_after,
-                "reserved_before": item.reserved_before,
-                "reserved_after": item.reserved_after,
                 "actor_username": item.actor_username,
                 "reason": item.reason or "",
                 "created_at": item.created_at.isoformat(),
@@ -71,8 +141,7 @@ def list_transactions(
             }
             for item, stock in result_rows
         ]
-        if department_code == "finished":
-            rows.extend(_finished_order_transactions(session, limit))
+        rows.extend(_finished_order_transactions(session, limit))
         return sorted(
             rows,
             key=lambda item: (item["created_at"], item["id"]),
@@ -102,14 +171,12 @@ def _finished_order_transactions(session: Session, limit: int) -> list[dict]:
             "id": transaction.id,
             "source_type": "finished_order_stock",
             "source_id": lot.id,
-            "inventory_stock_id": None,
+            "finished_inventory_stock_id": None,
             "production_plan_id": None,
             "transaction_type": transaction.transaction_type,
             "quantity": transaction.quantity,
             "quantity_before": transaction.quantity_before,
             "quantity_after": transaction.quantity_after,
-            "reserved_before": 0,
-            "reserved_after": 0,
             "actor_username": transaction.actor_username,
             "reason": transaction.reason or "",
             "created_at": transaction.created_at.isoformat(),
@@ -122,7 +189,7 @@ def _finished_order_transactions(session: Session, limit: int) -> list[dict]:
 
 def _load_stock_flow_contexts(
     session: Session,
-    stocks: list[InventoryStock],
+    stocks: list[FinishedInventoryStock],
 ) -> dict[tuple[int, int], tuple[dict, dict[str, dict]]]:
     return {
         key: load_product_flow(session, *key)
@@ -131,7 +198,7 @@ def _load_stock_flow_contexts(
 
 
 def _completed_node_label(
-    item: InventoryStock,
+    item: FinishedInventoryStock,
     flow_contexts: dict[tuple[int, int], tuple[dict, dict[str, dict]]],
 ) -> str:
     flow, nodes = flow_contexts[(item.product_id, item.product_version)]
@@ -144,24 +211,20 @@ def _completed_node_label(
 
 
 def _serialize_stock(
-    item: InventoryStock,
+    item: FinishedInventoryStock,
     flow_contexts: dict[tuple[int, int], tuple[dict, dict[str, dict]]],
 ) -> dict:
     return {
         "id": item.id,
-        "department_code": item.department_code,
-        "item_type": item.item_type,
         "product_id": item.product_id,
         "product_version": item.product_version,
-        "product_bom_id": item.product_bom_id,
         "flow_node_id": item.flow_node_id,
         "completed_flow_node_id": item.completed_flow_node_id,
         "completed_node_label": _completed_node_label(item, flow_contexts),
         "item_code": item.item_code,
         "item_name": item.item_name,
         "quantity": item.quantity,
-        "reserved_quantity": item.reserved_quantity,
-        "available_quantity": item.quantity - item.reserved_quantity,
+        "available_quantity": item.quantity,
         "revision": item.revision,
     }
 
@@ -169,7 +232,10 @@ def _serialize_stock(
 __all__ = [
     "confirm_finished_order_receipt",
     "list_finished_order_stocks",
-    "list_stocks",
-    "list_transactions",
+    "list_project_warehouse_operations",
+    "list_finished_inventory_stocks",
+    "list_temporary_warehouse_stocks",
+    "list_finished_inventory_transactions",
+    "review_project_warehouse_operation",
     "ship_finished_order_item",
 ]

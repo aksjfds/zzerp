@@ -24,7 +24,6 @@ MODULE = ModuleDescriptor(
     collaboration_apis=(
         "modules.planning.execution_api",
         "modules.planning.execution_contract",
-        "modules.planning.issue_api",
         "modules.planning.plan_api",
         "modules.planning.reference_api",
         "modules.planning.sales_api",

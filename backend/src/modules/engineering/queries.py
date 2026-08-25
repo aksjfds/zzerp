@@ -1,4 +1,5 @@
 from database import SessionLocal
+from modules.engineering.collaboration_contract import EngineeringCollaborators
 from modules.engineering.editability import (
     is_base_info_editable,
     is_product_version_editable,
@@ -46,7 +47,11 @@ def list_products(
         return data, repository.count(keyword, customer_id)
 
 
-def get_product(product_id: int, version: int | None = None) -> dict:
+def get_product(
+    product_id: int,
+    version: int | None,
+    collaborators: EngineeringCollaborators,
+) -> dict:
     with SessionLocal() as session:
         product = EngineeringProductRepository(session).get(product_id)
         if product is None:
@@ -64,8 +69,17 @@ def get_product(product_id: int, version: int | None = None) -> dict:
             customer_name=customer_names[product.customer_id],
             order_ready=readiness.ready,
             order_ready_reason=readiness.reason,
-            base_info_editable=is_base_info_editable(session, product_id),
-            version_editable=is_product_version_editable(session, product_id, requested_version),
+            base_info_editable=is_base_info_editable(
+                session,
+                product_id,
+                collaborators,
+            ),
+            version_editable=is_product_version_editable(
+                session,
+                product_id,
+                requested_version,
+                collaborators,
+            ),
         )
 
 

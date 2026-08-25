@@ -1,4 +1,4 @@
-"""Accept cross-order stock issued to a confirmed production plan."""
+"""Inject inventory deducted during production-plan confirmation into production."""
 
 from sqlalchemy import select
 
@@ -18,13 +18,13 @@ from modules.sales.model_api import CustomerOrderItem
 def accept_issued_inventory(
     session,
     plan_item: IssuedPlanItem,
-    inventory_stock: IssuedInventoryStock,
+    deducted_stock: IssuedInventoryStock,
     actor_username: str,
     *,
     register_pending_finished_goods,
     allocate_issued_finished_goods,
 ) -> None:
-    quantity = inventory_stock.quantity
+    quantity = deducted_stock.quantity
     if quantity <= 0:
         return
     order_item = session.get(CustomerOrderItem, plan_item.customer_order_item_id)
@@ -46,14 +46,14 @@ def accept_issued_inventory(
     target, source_node_id = _resume_target(
         flow,
         nodes,
-        inventory_stock.completed_flow_node_id,
+        deducted_stock.completed_flow_node_id,
     )
     if target is None:
         raise DomainError("inventory_issue_target_missing", "库存项目没有可进入的后续节点", status_code=409)
     production_item = _load_or_create_production_item(
         session,
         plan_item,
-        inventory_stock.flow_node_id,
+        deducted_stock.flow_node_id,
     )
     if target.get("type") == "shipping":
         department_id = move_to_node(

@@ -1,226 +1,317 @@
-"""Store physical parts or assemblies from their current production node."""
-
-from sqlalchemy import select
+"""Application orchestration for completed-plan production-position storage."""
 
 from database import SessionLocal
-from modules.engineering.model_api import Product, ProductBom
-from modules.errors import DomainError
-from modules.inventory.ownership_api import confirm_receipt, create_receipt
-from modules.organization.model_api import Department
-from modules.production_core.model_api import ProductionItem, Repository
-from modules.production_core.operational_api import (
-    consume_repository,
-    load_production_flow,
-    production_item_name,
+from domain.warehouse import (
+    WAREHOUSE_OPERATION_SUCCEEDED,
+    WAREHOUSE_SOURCE_PRODUCTION_POSITION,
+    WarehouseOperationContext,
 )
-from modules.production_core.reference_api import reserved_repository_quantities
-from modules.sales.model_api import CustomerOrder, CustomerOrderItem
+from modules.errors import DomainError
+from modules.inventory.warehouse_api import (
+    WarehouseInboundRequest,
+    list_warehouse_operations,
+    receive_c01_stock,
+)
+from modules.organization.read_api import (
+    DepartmentView,
+    get_department_ids_by_codes,
+    get_department_views_by_codes,
+)
+from modules.planning.execution_api import (
+    completed_plan_order_item_ids,
+    ensure_production_plan_completed,
+)
+from modules.production_core.position_inventory_api import (
+    ProductionPositionCandidate,
+    consume_position_for_warehouse,
+    department_position_order_item_ids,
+    get_available_production_position,
+    list_available_production_positions,
+    lock_production_position,
+    position_inventory_movement_matches,
+)
 
 
-def list_closed_surplus_positions(department_code: str) -> list[dict]:
+def list_completed_plan_positions(department_code: str) -> list[dict]:
     if department_code == "qc":
         return []
     with SessionLocal() as session:
-        department = session.scalar(select(Department).where(
-            Department.department_code == department_code
-        ))
-        if department is None:
-            raise DomainError("department_not_found", "部门不存在", status_code=404)
-        repositories = list(session.scalars(
-            select(Repository)
-            .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
-            .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
-            .join(CustomerOrder, CustomerOrder.id == CustomerOrderItem.customer_order_id)
-            .where(
-                Repository.department_id == department.id,
-                CustomerOrder.status == "closed",
-            )
-            .order_by(Repository.id)
-        ))
-        repository_reserved = reserved_repository_quantities(
-            session, [item.id for item in repositories]
-        )
-        grouped: dict[tuple[int, str, str], int] = {}
-        for item in repositories:
-            key = (item.production_item_id, item.flow_node_id, item.source_flow_node_id)
-            grouped[key] = grouped.get(key, 0) + max(
-                item.quantity - repository_reserved.get(item.id, 0), 0
-            )
+        department = _department(session, department_code)
+        order_item_ids = department_position_order_item_ids(session, department.id)
+        completed_ids = completed_plan_order_item_ids(session, order_item_ids)
         return [
-            _serialize_closed_position(session, department_code, key, quantity)
-            for key, quantity in grouped.items()
-            if quantity > 0
+            _serialize_candidate(candidate)
+            for candidate in list_available_production_positions(
+                session,
+                department_id=department.id,
+                department_code=department_code,
+                completed_order_item_ids=completed_ids,
+            )
         ]
 
 
-def _serialize_closed_position(
-    session,
-    department_code: str,
-    key: tuple[int, str, str],
-    quantity: int,
-) -> dict:
-    production_item_id, flow_node_id, source_flow_node_id = key
-    production_item = session.get(ProductionItem, production_item_id)
-    context = load_production_flow(session, production_item)
-    order = session.get(CustomerOrder, context.order_item.customer_order_id)
-    product = session.get(Product, production_item.product_id)
-    item_type, item_code, item_name = production_item_inventory_identity(
-        session, production_item
-    )
-    completed_node_id = _completed_node_id(
-        context.flow, context.nodes, source_flow_node_id
-    )
-    return {
-        "key": f"position:{production_item_id}:{flow_node_id}:{source_flow_node_id}",
-        "source_kind": "production",
-        "batch_id": None,
-        "production_item_id": production_item_id,
-        "customer_order_no": order.customer_order_no,
-        "product_code": product.factory_code,
-        "product_name": product.product_name,
-        "product_version": production_item.product_version,
-        "item_type": item_type,
-        "item_code": item_code,
-        "item_name": item_name,
-        "department_code": department_code,
-        "flow_node_id": flow_node_id,
-        "source_flow_node_id": source_flow_node_id,
-        "current_node_label": context.nodes.get(flow_node_id, {}).get("label", flow_node_id),
-        "completed_flow_node_id": completed_node_id,
-        "completed_node_label": context.nodes.get(completed_node_id, {}).get(
-            "label", completed_node_id
-        ),
-        "quantity": quantity,
-    }
-
-
-def store_position_in_warehouse(
+def store_completed_plan_position(
     department_code: str,
     production_item_id: int,
     flow_node_id: str,
     source_flow_node_id: str,
+    position_version: str,
     quantity: int,
     actor_username: str,
 ) -> dict:
-    if quantity <= 0:
-        raise DomainError("warehouse_storage_quantity_invalid", "入库数量必须大于0")
+    operation_group_no = _operation_group_no(
+        department_code,
+        production_item_id,
+        flow_node_id,
+        source_flow_node_id,
+        position_version,
+        quantity,
+    )
     with SessionLocal.begin() as session:
-        department = session.scalar(select(Department).where(
-            Department.department_code == department_code
-        ))
-        production_item = session.get(ProductionItem, production_item_id, with_for_update=True)
-        if department is None or production_item is None:
-            raise DomainError("warehouse_storage_source_missing", "当前生产位置不存在", status_code=404)
-        context = load_production_flow(session, production_item)
-        customer_order = session.get(CustomerOrder, context.order_item.customer_order_id)
-        if customer_order is None or customer_order.status != "closed":
+        existing = _existing_storage_result(
+            session,
+            operation_group_no,
+            production_item_id,
+        )
+        if existing is not None:
+            return existing
+        department = _department(session, department_code)
+        candidate = get_available_production_position(
+            session,
+            department_id=department.id,
+            department_code=department_code,
+            production_item_id=production_item_id,
+            flow_node_id=flow_node_id,
+            source_flow_node_id=source_flow_node_id,
+        )
+        if candidate is None:
             raise DomainError(
-                "warehouse_storage_order_not_closed",
-                "客户订单结单后才能将多余物料存入仓库",
+                "warehouse_storage_source_empty",
+                "当前生产位置没有可入库数量",
                 status_code=409,
             )
-        current_node = context.nodes.get(flow_node_id)
-        if current_node is None:
-            raise DomainError("warehouse_storage_node_invalid", "当前流程节点不存在", status_code=409)
-        repositories = list(session.scalars(
-            select(Repository).where(
-                Repository.production_item_id == production_item.id,
-                Repository.flow_node_id == flow_node_id,
-                Repository.source_flow_node_id == source_flow_node_id,
-                Repository.department_id == department.id,
-            ).order_by(Repository.id).with_for_update()
-        ))
-        repository_reserved = reserved_repository_quantities(
-            session,
-            [item.id for item in repositories],
-        )
-        available = sum(
-            max(item.quantity - repository_reserved.get(item.id, 0), 0)
-            for item in repositories
-        )
-        if quantity > available:
+        if candidate.position_version != position_version:
+            raise DomainError(
+                "warehouse_storage_position_changed",
+                "当前生产位置数量已变化，请刷新后重试",
+                status_code=409,
+            )
+        if quantity > candidate.available_quantity:
             raise DomainError(
                 "warehouse_storage_quantity_exceeds_available",
-                f"最多可存入仓库 {available} 件",
+                f"最多可存入仓库 {candidate.available_quantity} 件",
                 status_code=409,
             )
-
-        completed_node_id = _completed_node_id(context.flow, context.nodes, source_flow_node_id)
-        item_type, item_code, item_name = production_item_inventory_identity(session, production_item)
-        receipt = create_receipt(
+        ensure_production_plan_completed(
             session,
-            department_code="warehouse",
-            item_type=item_type,
-            product_id=production_item.product_id,
-            product_version=production_item.product_version,
-            product_bom_id=production_item.product_bom_id,
-            flow_node_id=production_item.origin_flow_node_id,
-            completed_flow_node_id=completed_node_id,
-            item_code=item_code,
-            item_name=item_name,
-            quantity=quantity,
-            source_customer_order_id=context.order_item.customer_order_id,
-            source_customer_order_item_id=context.order_item.id,
-            source_production_item_id=production_item.id,
+            candidate.customer_order_item_id,
         )
-        remaining = quantity
-        for repository in repositories:
-            allocated = min(
-                max(repository.quantity - repository_reserved.get(repository.id, 0), 0),
-                remaining,
+        result = receive_c01_stock(
+            session,
+            WarehouseInboundRequest(
+                operation_group_no=operation_group_no,
+                context=WarehouseOperationContext(
+                    source_type=WAREHOUSE_SOURCE_PRODUCTION_POSITION,
+                    production_item_id=production_item_id,
+                ),
+                item_code=candidate.item_code,
+                item_name=candidate.item_name,
+                product_version=candidate.product_version,
+                item_type=candidate.item_type,
+                completion_status=candidate.completion_status,
+                quantity=quantity,
+                actor_username=actor_username,
+            ),
+        )
+        if result.status != WAREHOUSE_OPERATION_SUCCEEDED or len(result.operations) != 1:
+            raise DomainError(
+                "warehouse_inbound_failed",
+                result.error_message or "仓库入库未成功，请核对后重试",
+                status_code=409,
             )
-            if allocated:
-                consume_repository(session, repository, allocated)
-                remaining -= allocated
-            if not remaining:
-                break
-        warehouse_stock = confirm_receipt(
-            session, receipt.id, actor_username, "生产节点存入仓库"
+        operation = result.operations[0]
+        if operation.warehouse_stock_id is None:
+            raise DomainError(
+                "warehouse_inbound_result_invalid",
+                "仓库入库结果不完整",
+                status_code=409,
+            )
+        try:
+            locked = lock_production_position(
+                session,
+                department_id=department.id,
+                department_code=department_code,
+                production_item_id=production_item_id,
+                flow_node_id=flow_node_id,
+                source_flow_node_id=source_flow_node_id,
+                position_version=position_version,
+                quantity=quantity,
+            )
+        except DomainError as error:
+            if error.code != "warehouse_storage_position_changed":
+                raise
+            replayed = _completed_storage_replay(
+                session,
+                operation_group_no,
+                production_item_id,
+            )
+            if replayed is not None:
+                return replayed
+            raise
+        warehouse_department_id = get_department_ids_by_codes(
+            session,
+            {"warehouse"},
+        ).get("warehouse")
+        if warehouse_department_id is None:
+            raise DomainError("department_not_found", "仓库部门不存在")
+        consume_position_for_warehouse(
+            session,
+            locked,
+            quantity=quantity,
+            warehouse_department_id=warehouse_department_id,
+            warehouse_operation_id=operation.id,
         )
         session.flush()
-        return {
-            "inventory_stock_id": warehouse_stock.id,
-            "quantity": quantity,
-            "completed_flow_node_id": completed_node_id,
-            "completed_node_label": context.nodes.get(completed_node_id, {}).get("label", completed_node_id),
-        }
+        return _storage_response(operation)
 
 
-def _completed_node_id(flow: dict, nodes: dict[str, dict], source_node_id: str) -> str:
-    source = nodes.get(source_node_id)
-    if source is None:
-        raise DomainError("warehouse_storage_state_invalid", "无法确定物料完成状态", status_code=409)
-    if source.get("type") != "qc":
-        return source_node_id
-    incoming = [
-        edge.get("source_node_id")
-        for edge in flow.get("edges", [])
-        if edge.get("target_node_id") == source_node_id
-    ]
-    if len(incoming) != 1 or incoming[0] not in nodes:
-        raise DomainError("warehouse_storage_state_invalid", "无法确定 QC 对应的完成节点", status_code=409)
-    return incoming[0]
-
-
-def production_item_inventory_identity(
-    session,
-    production_item: ProductionItem,
-) -> tuple[str, str, str]:
-    if production_item.product_bom_id is not None:
-        bom = session.get(ProductBom, production_item.product_bom_id)
-        if bom is None:
-            raise DomainError("warehouse_storage_item_invalid", "配件资料不存在", status_code=409)
-        return "part", bom.part_no, bom.part_name
-    name = production_item_name(session, production_item, set())
-    origin = load_production_flow(session, production_item).nodes.get(
-        production_item.origin_flow_node_id, {}
+def _department(session, department_code: str) -> DepartmentView:
+    department = next(
+        iter(get_department_views_by_codes(session, {department_code})),
+        None,
     )
-    code = origin.get("assembly_code") or name
-    return "assembly", code, name
+    if department is None:
+        raise DomainError("department_not_found", "部门不存在", status_code=404)
+    return department
+
+
+def _serialize_candidate(candidate: ProductionPositionCandidate) -> dict:
+    return {
+        "key": (
+            f"position:{candidate.production_item_id}:"
+            f"{candidate.flow_node_id}:{candidate.source_flow_node_id}"
+        ),
+        "production_item_id": candidate.production_item_id,
+        "customer_order_no": candidate.customer_order_no,
+        "product_code": candidate.product_code,
+        "product_name": candidate.product_name,
+        "product_version": candidate.product_version,
+        "item_type": candidate.item_type,
+        "item_code": candidate.item_code,
+        "item_name": candidate.item_name,
+        "department_code": candidate.department_code,
+        "flow_node_id": candidate.flow_node_id,
+        "source_flow_node_id": candidate.source_flow_node_id,
+        "current_node_label": candidate.current_node_label,
+        "completed_flow_node_id": candidate.completed_flow_node_id,
+        "completion_status": candidate.completion_status,
+        "available_quantity": candidate.available_quantity,
+        "position_version": candidate.position_version,
+    }
+
+
+def _operation_group_no(
+    department_code: str,
+    production_item_id: int,
+    flow_node_id: str,
+    source_flow_node_id: str,
+    position_version: str,
+    quantity: int,
+) -> str:
+    return (
+        f"position:{department_code}:{production_item_id}:{flow_node_id}:"
+        f"{source_flow_node_id}:{position_version}:quantity:{quantity}"
+    )
+
+
+def _existing_storage_result(
+    session,
+    operation_group_no: str,
+    production_item_id: int,
+) -> dict | None:
+    operation = _storage_operation(
+        session,
+        operation_group_no,
+        production_item_id,
+    )
+    if operation is None:
+        return None
+    if operation.status != WAREHOUSE_OPERATION_SUCCEEDED:
+        raise DomainError(
+            "warehouse_operation_incomplete",
+            operation.error_message or "仓库操作尚未明确成功，请核对后处理",
+            status_code=409,
+        )
+    if not position_inventory_movement_matches(
+        session,
+        warehouse_operation_id=operation.id,
+        production_item_id=production_item_id,
+    ):
+        raise DomainError(
+            "warehouse_operation_inconsistent",
+            "仓库操作与生产位置流水不一致，请核对后处理",
+            status_code=409,
+        )
+    return _storage_response(operation)
+
+
+def _completed_storage_replay(
+    session,
+    operation_group_no: str,
+    production_item_id: int,
+) -> dict | None:
+    operation = _storage_operation(
+        session,
+        operation_group_no,
+        production_item_id,
+    )
+    if operation is None:
+        return None
+    if (
+        operation.status != WAREHOUSE_OPERATION_SUCCEEDED
+        or not position_inventory_movement_matches(
+            session,
+            warehouse_operation_id=operation.id,
+            production_item_id=production_item_id,
+        )
+    ):
+        return None
+    return _storage_response(operation)
+
+
+def _storage_operation(
+    session,
+    operation_group_no: str,
+    production_item_id: int,
+):
+    operations = list_warehouse_operations(
+        session,
+        operation_group_no=operation_group_no,
+        limit=2,
+    )
+    if not operations:
+        return None
+    if len(operations) != 1:
+        raise DomainError("warehouse_operation_conflict", "仓库操作记录不唯一", status_code=409)
+    operation = operations[0]
+    if (
+        operation.source_type != WAREHOUSE_SOURCE_PRODUCTION_POSITION
+        or operation.production_item_id != production_item_id
+    ):
+        raise DomainError("warehouse_operation_conflict", "仓库操作业务上下文冲突", status_code=409)
+    return operation
+
+
+def _storage_response(operation) -> dict:
+    return {
+        "operation_group_no": operation.operation_group_no,
+        "warehouse_stock_id": operation.warehouse_stock_id,
+        "quantity": operation.quantity,
+        "completion_status": operation.completion_status,
+    }
 
 
 __all__ = [
-    "list_closed_surplus_positions",
-    "production_item_inventory_identity",
-    "store_position_in_warehouse",
+    "list_completed_plan_positions",
+    "store_completed_plan_position",
 ]

@@ -6,7 +6,7 @@ import { repositoryStatusLabel } from '../domain/repositoryWorkStatus'
 
 const props = withDefaults(defineProps<{
   workshops: RepositoryWorkshop[]
-  mode?: 'production' | 'purchase' | 'assembly'
+  mode?: 'production' | 'assembly'
 }>(), { mode: 'production' })
 
 const emit = defineEmits<{
@@ -51,9 +51,8 @@ onBeforeUnmount(() => clearTimeout(timer))
       <template v-else>
         <ElOption :label="repositoryStatusLabel('unprocessed', props.mode)" value="unprocessed" />
         <ElOption :label="repositoryStatusLabel('processing', props.mode)" value="processing" />
-        <ElOption v-if="props.mode === 'purchase'" :label="repositoryStatusLabel('processing_completed', props.mode)" value="processing_completed" />
         <ElOption :label="repositoryStatusLabel('qc', props.mode)" value="qc" />
-        <ElOption v-if="props.mode !== 'purchase'" :label="repositoryStatusLabel('rework', props.mode)" value="rework" />
+        <ElOption :label="repositoryStatusLabel('rework', props.mode)" value="rework" />
         <ElOption :label="repositoryStatusLabel('completed', props.mode)" value="completed" />
       </template>
     </ElSelect>

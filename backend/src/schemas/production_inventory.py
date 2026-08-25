@@ -54,24 +54,23 @@ class RepositoryListEnvelope(ProductionModel):
     total: int
 
 
-class WarehouseStorageInput(ProductionModel):
+class ProductionPositionStorageInput(ProductionModel):
     production_item_id: int = Field(gt=0)
     flow_node_id: str = Field(min_length=1, max_length=200)
     source_flow_node_id: str = Field(min_length=1, max_length=200)
+    position_version: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
     quantity: int = Field(gt=0)
 
 
-class WarehouseStorageResponse(ProductionModel):
-    inventory_stock_id: int
+class ProductionPositionStorageResponse(ProductionModel):
+    operation_group_no: str
+    warehouse_stock_id: int
     quantity: int
-    completed_flow_node_id: str
-    completed_node_label: str
+    completion_status: str
 
 
-class DepartmentSurplusInventoryItem(ProductionModel):
+class ProductionPositionStorageCandidate(ProductionModel):
     key: str
-    source_kind: Literal["production", "qc"]
-    batch_id: int | None
     production_item_id: int
     customer_order_no: str
     product_code: str
@@ -85,9 +84,10 @@ class DepartmentSurplusInventoryItem(ProductionModel):
     source_flow_node_id: str
     current_node_label: str
     completed_flow_node_id: str
-    completed_node_label: str
-    quantity: int
+    completion_status: str
+    available_quantity: int
+    position_version: str
 
 
-class DepartmentSurplusInventoryEnvelope(ProductionModel):
-    data: list[DepartmentSurplusInventoryItem]
+class ProductionPositionStorageListEnvelope(ProductionModel):
+    data: list[ProductionPositionStorageCandidate]

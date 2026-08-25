@@ -18,7 +18,7 @@ const fixedDepartments = [
   { departmentCode: 'finished', departmentName: '成品部' },
 ]
 const departmentOrder = [
-  'stamp', 'cnc', 'polish', 'outsource', 'purchasing', 'qc', 'assembly', 'finished',
+  'stamp', 'cnc', 'polish', 'outsource', 'qc', 'assembly', 'finished',
 ]
 const departmentGroups = computed<DepartmentGroup[]>(() => {
   const groups = new Map<string, DepartmentGroup>()
@@ -47,7 +47,6 @@ function fixedNodeCount(code: string) {
 }
 function workshopColorClass(workshop: WorkshopRouteOption) {
   if (workshop.department_code === 'outsource') return 'outsource'
-  if (workshop.department_code === 'purchasing') return 'purchase'
   if (workshop.department_code === 'assembly') return 'assembly'
   return 'process'
 }
@@ -121,7 +120,7 @@ const emit = defineEmits<{
         >
           <span class="drag-handle" aria-hidden="true">⠿</span>
           <span class="item-content"><strong>{{ workshop.workshop_name }}</strong></span>
-          <span class="item-kind">{{ workshop.department_code === 'assembly' ? '多路' : '车间' }}</span>
+          <span class="item-kind">{{ workshop.input_mode === 'multiple' ? '多路' : '单路' }}</span>
         </button>
         <button v-if="group.departmentCode === 'qc'" class="palette-item qc" type="button" title="拖动 QC 到画布" @mousedown="emit('dragQc')">
           <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>QC</strong></span><span class="item-kind">QC</span>
@@ -146,7 +145,6 @@ const emit = defineEmits<{
 .group-mark { width: 4px; height: 14px; flex: 0 0 auto; border-radius: 999px; background: var(--flow-production); }
 .part-mark { background: var(--md-primary); }
 .department-outsource .group-mark { background: var(--flow-outsource); }
-.department-purchasing .group-mark { background: var(--flow-purchasing); }
 .department-qc .group-mark { background: var(--flow-qc); }
 .department-assembly .group-mark { background: var(--flow-assembly); }
 .department-finished .group-mark { background: var(--flow-finished); }
@@ -165,7 +163,6 @@ const emit = defineEmits<{
 .palette-item.part { border-color: var(--md-primary); background: var(--md-primary-container); }
 .palette-item.process { border-color: var(--flow-production); background: var(--flow-production-container); }
 .palette-item.outsource { border-color: var(--flow-outsource); background: var(--flow-outsource-container); }
-.palette-item.purchase { border-color: var(--flow-purchasing); background: var(--flow-purchasing-container); }
 .palette-item.qc { border-color: var(--flow-qc); background: var(--flow-qc-container); }
 .palette-item.shipping { border-color: var(--flow-finished); background: var(--flow-finished-container); }
 .palette-item.assembly { border-color: var(--flow-assembly); background: var(--flow-assembly-container); }

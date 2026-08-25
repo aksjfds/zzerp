@@ -3,7 +3,6 @@ from departments.cnc.api import API as CNC
 from departments.finished.api import API as FINISHED
 from departments.outsource.api import API as OUTSOURCE
 from departments.polish.api import API as POLISH
-from departments.purchasing.api import API as PURCHASING
 from departments.qc.api import API as QC
 from departments.stamp.api import API as STAMP
 from departments.warehouse.api import API as WAREHOUSE
@@ -17,7 +16,6 @@ DEPARTMENT_MODULES = {
         CNC,
         POLISH,
         OUTSOURCE,
-        PURCHASING,
         FINISHED,
         WAREHOUSE,
         ASSEMBLY,
@@ -52,13 +50,4 @@ def department_api(
         ) from exc
     if required_capability is not None:
         module.require_capability(required_capability)
-    return module
-
-
-def department_api_for_any(
-    department_code: str,
-    required_capabilities: tuple[str, ...],
-):
-    module = department_api(department_code)
-    module.require_one_of(*required_capabilities)
     return module

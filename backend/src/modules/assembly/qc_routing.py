@@ -1,3 +1,4 @@
+from domain.production_types import QcQualifiedDestination
 from modules.errors import DomainError
 from modules.inventory.finished_goods_api import register_pending_finished_goods
 from modules.organization.context_api import ProcedureContext
@@ -7,9 +8,10 @@ from modules.production_core.context_api import (
     ProductionItemContext,
     WorkOrderContext,
 )
-from modules.production_core.operational_api import move_to_node, process_qc_node
+from modules.production_core.flow_api import process_qc_node, qc_release_target
+from modules.production_core.operational_api import move_to_node
 from modules.production_core.ownership_api import add_repository_quantity
-from modules.quality.routing_contract import QualifiedRouteResult, ReworkRouteResult
+from modules.quality.routing_api import QualifiedRouteResult, ReworkRouteResult
 
 
 def validate_context(
@@ -34,10 +36,10 @@ def route_qualified(
     context,
     node: dict,
     quantity: int,
-    qualified_disposition: str | None,
+    destination: QcQualifiedDestination,
 ) -> QualifiedRouteResult:
     assembly_department_id = get_department_ids_by_codes(session, {"assembly"}).get("assembly")
-    if qualified_disposition == "return":
+    if destination == "return":
         if assembly_department_id is None:
             raise DomainError("department_not_found", "装配部不存在")
         add_repository_quantity(
@@ -50,20 +52,18 @@ def route_qualified(
             source_work_order_id=order.id,
         )
         return QualifiedRouteResult(node["id"], assembly_department_id)
-    if qualified_disposition != "release":
+    if destination != "release":
         raise DomainError("qc_disposition_required", "请选择合格品返回当前车间或放行下一节点")
     qc_node = process_qc_node(context.flow, context.nodes, node["id"])
-    if qc_node is None:
-        raise DomainError("work_order_qc_not_configured", "装配节点后未配置有效QC节点")
-    target = context.normal_target(qc_node["id"])
+    target = qc_release_target(context.flow, context.nodes, node["id"])
     if target is None:
-        raise DomainError("qc_target_missing", "QC节点没有后续流程节点")
+        raise DomainError("qc_target_missing", "当前装配节点没有可放行的后续流程节点")
     department_id = move_to_node(
         session,
         production_item,
         target,
         quantity,
-        qc_node["id"],
+        qc_node["id"] if qc_node is not None else node["id"],
         source_work_order_id=order.id,
     )
     if department_id is None:

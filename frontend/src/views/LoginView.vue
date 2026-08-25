@@ -19,7 +19,6 @@ const accounts = [
   { username: 'cnc', name: '机加部', description: '机加工艺生产' },
   { username: 'polish', name: '表面处理部', description: '表面处理工艺生产' },
   { username: 'outsource', name: '外协部', description: '蚀字、电镀外协工单' },
-  { username: 'purchasing', name: '采购部', description: '外购物料与到货处理' },
   { username: 'qc', name: 'QC部门', description: '质量检验与放行' },
   { username: 'assembly', name: '装配部', description: '装配生产' },
   { username: 'finished', name: '成品部', description: '成品入库与订单发货' },

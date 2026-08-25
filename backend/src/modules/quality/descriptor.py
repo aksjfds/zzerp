@@ -13,7 +13,7 @@ MODULE = ModuleDescriptor(
         "modules.quality.command_api",
         "modules.quality.inspection_api",
         "modules.quality.submission_api",
-        "modules.quality.routing_contract",
+        "modules.quality.routing_api",
         "modules.quality.workforce_api",
     ),
 )

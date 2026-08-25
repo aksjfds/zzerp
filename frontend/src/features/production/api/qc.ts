@@ -1,6 +1,7 @@
 import { service } from '@/api/request'
 import type {
   PendingQcBatch,
+  QcDestination,
   QcInspectionPayload,
   WorkOrderBatch,
 } from '../domain/types'
@@ -31,6 +32,14 @@ export async function inspectQcBatch(batchId: number, payload: QcInspectionPaylo
   const response = await service.post<{ data: WorkOrderBatch }>(
     `/qc/work-order-batches/${batchId}/inspection`,
     payload,
+  )
+  return response.data.data
+}
+
+export async function decideQcDestination(batchId: number, destination: QcDestination) {
+  const response = await service.post<{ data: WorkOrderBatch }>(
+    `/qc/work-order-batches/${batchId}/destination`,
+    { destination },
   )
   return response.data.data
 }
