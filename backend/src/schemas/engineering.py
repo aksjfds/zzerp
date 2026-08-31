@@ -37,8 +37,12 @@ class QcNodePayload(FlowNodeBase):
     type: Literal["qc"]
 
 
-class ShippingNodePayload(FlowNodeBase):
-    type: Literal["shipping"]
+class SupplierProcessingNodePayload(FlowNodeBase):
+    type: Literal["supplier_processing"]
+
+
+class FinishedInboundNodePayload(FlowNodeBase):
+    type: Literal["finished_inbound"]
 
 
 class AssemblyNodePayload(FlowNodeBase):
@@ -52,7 +56,12 @@ class AssemblyNodePayload(FlowNodeBase):
 
 
 FlowNodePayload = Annotated[
-    PartNodePayload | ProcessNodePayload | QcNodePayload | ShippingNodePayload | AssemblyNodePayload,
+    PartNodePayload
+    | ProcessNodePayload
+    | QcNodePayload
+    | SupplierProcessingNodePayload
+    | FinishedInboundNodePayload
+    | AssemblyNodePayload,
     Field(discriminator="type"),
 ]
 
@@ -73,7 +82,7 @@ class FlowEdgePayload(ContractModel):
 
 
 class ProcessFlowPayload(ContractModel):
-    schema_version: Literal[4] = 4
+    schema_version: Literal[5] = 5
     nodes: list[FlowNodePayload] = Field(default_factory=list, max_length=500)
     edges: list[FlowEdgePayload] = Field(default_factory=list, max_length=2000)
 

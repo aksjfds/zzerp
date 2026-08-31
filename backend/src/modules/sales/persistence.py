@@ -87,6 +87,11 @@ class CustomerOrderItem(Base):
         UniqueConstraint(
             "id",
             "customer_order_id",
+            name="uq_customer_order_item_order",
+        ),
+        UniqueConstraint(
+            "id",
+            "customer_order_id",
             "product_id",
             "product_version",
             name="uq_customer_order_item_context",

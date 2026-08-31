@@ -1,21 +1,17 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends
 
 from authorization import ensure_department_access, require_any_permission
 from departments.work_order_commands import create_department_source_work_order
-from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
+from domain.permissions import PRODUCTION_MANAGE
 from schemas.production import (
     AssemblyWorkOrderCreate,
     ReworkSubmission,
     WorkOrderCreate,
     WorkOrderBatchEnvelope,
     WorkOrderEnvelope,
-    WorkOrderListEnvelope,
     WorkOrderSubmission,
 )
-from departments.contracts import (
-    CAP_ASSEMBLY,
-    CAP_WORK_ORDERS,
-)
+from departments.contracts import CAP_ASSEMBLY
 from departments.registry import department_api
 from departments.work_order_orchestration import (
     cancel_work_order,
@@ -30,37 +26,6 @@ from modules.production_core.api import (
 router = APIRouter(tags=["work-orders"])
 
 
-@router.get(
-    "/departments/{department_code}/work-orders",
-    response_model=WorkOrderListEnvelope,
-)
-def department_work_orders(
-    department_code: str,
-    page: int = Query(default=1, gt=0),
-    page_size: int = Query(default=50, gt=0, le=200),
-    production_item_id: int | None = Query(default=None, gt=0),
-    flow_node_id: str | None = Query(default=None, min_length=1, max_length=200),
-    source_flow_node_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=200,
-    ),
-    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
-):
-    ensure_department_access(user, department_code)
-    data, total = department_api(
-        department_code,
-        CAP_WORK_ORDERS,
-    ).list_work_orders(
-        page=page,
-        page_size=page_size,
-        production_item_id=production_item_id,
-        flow_node_id=flow_node_id,
-        source_flow_node_id=source_flow_node_id,
-    )
-    return {"data": data, "total": total}
-
-
 @router.post("/work-orders", response_model=WorkOrderEnvelope)
 def work_order_create(
     payload: WorkOrderCreate,
@@ -73,6 +38,7 @@ def work_order_create(
             repository_id=payload.repository_id,
             procedure_id=payload.procedure_id,
             procedure_name=payload.procedure_name,
+            is_temporary=payload.is_temporary,
             quantity=payload.quantity,
             worker_id=payload.worker_id,
             remark=payload.remark,
@@ -95,6 +61,7 @@ def assembly_work_order_create(
             [item.model_dump() for item in payload.materials],
             payload.procedure_id,
             payload.procedure_name,
+            payload.is_temporary,
             payload.quantity,
             payload.worker_id,
             payload.remark,

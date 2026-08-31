@@ -9,5 +9,5 @@ export const assemblyDepartment: DepartmentModule = {
   routeName: 'assembly-department',
   requiredPermission: PRODUCTION_PERMISSIONS.view,
   component: () => import('@/features/production/views/AssemblyDepartmentView.vue'),
-  capabilities: ['repositories', 'work_orders', 'workers', 'standard_execution', 'assembly', 'production_progress'],
+  capabilities: ['production_workbench', 'workers', 'standard_execution', 'assembly', 'production_progress'],
 }

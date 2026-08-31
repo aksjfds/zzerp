@@ -1,4 +1,4 @@
-"""Direct inventory deduction for a locked draft production plan."""
+"""Inventory allocation for a locked draft production plan."""
 
 from sqlalchemy.orm import Session
 
@@ -18,7 +18,7 @@ from modules.planning.plan_stock_view import (
 )
 
 
-def deduct_plan_inventory(
+def allocate_plan_inventory(
     session: Session,
     plan: ProductionPlan,
     actor_username: str,
@@ -32,13 +32,13 @@ def deduct_plan_inventory(
             continue
         plan_item = _issued_plan_item(item)
         if item.item_type == "finished_product":
-            stocks = collaborators.withdraw_finished_plan_stock(
+            allocated = collaborators.reserve_finished_plan_stock(
                 session,
                 production_plan_id=plan.id,
                 plan_item=plan_item,
                 requested_quantity=quantity,
-                actor_username=actor_username,
             )
+            stocks = ()
         else:
             stocks = _withdraw_material_stock(
                 session,
@@ -50,14 +50,14 @@ def deduct_plan_inventory(
                 collaborators,
                 flow_cache,
             )
-        deducted = sum(stock.quantity for stock in stocks)
-        if deducted != quantity:
+            allocated = sum(stock.quantity for stock in stocks)
+        if allocated != quantity:
             raise DomainError(
-                "production_plan_inventory_result_invalid",
-                "库存扣减结果与生产计划不一致",
+                "production_plan_inventory_allocation_invalid",
+                "库存分配结果与生产计划不一致",
                 status_code=409,
             )
-        item.deducted_inventory_quantity += deducted
+        item.allocated_inventory_quantity += allocated
         issued_rows.extend((plan_item, stock) for stock in stocks)
     return tuple(issued_rows)
 
@@ -139,4 +139,4 @@ def _issued_plan_item(item: ProductionPlanItem) -> IssuedPlanItem:
     )
 
 
-__all__ = ["deduct_plan_inventory"]
+__all__ = ["allocate_plan_inventory"]

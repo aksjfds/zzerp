@@ -1,6 +1,6 @@
 from domain.production_types import QcQualifiedDestination
 from modules.errors import DomainError
-from modules.inventory.finished_goods_api import register_pending_finished_goods
+from modules.inventory.finished_receipt_api import register_pending_finished_receipt
 from modules.organization.context_api import ProcedureContext
 from modules.production_core.context_api import (
     InspectionBatchContext,
@@ -65,12 +65,14 @@ def route_qualified(
     )
     if department_id is None:
         raise DomainError("qc_target_missing", "QC节点没有后续流程节点")
-    if target.get("type") == "shipping":
-        register_pending_finished_goods(
+    if target.get("type") == "finished_inbound":
+        register_pending_finished_receipt(
             session,
-            production_item=production_item,
-            shipping_node_id=target["id"],
-            quantity=quantity,
+            work_order_batch_id=batch.id,
+            product_id=production_item.product_id,
+            product_version=production_item.product_version,
+            inbound_node_id=target["id"],
+            released_quantity=quantity,
         )
     return QualifiedRouteResult(target["id"], department_id)
 

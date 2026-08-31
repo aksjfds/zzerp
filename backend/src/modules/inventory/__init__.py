@@ -1,1 +1,1 @@
-"""Cross-order warehouse and finished-goods inventory."""
+"""Temporary non-finished warehouse and unified finished-stock inventory."""

@@ -10,8 +10,8 @@ MODULE = ModuleDescriptor(
         "production_route_task",
         "department_task_read_model",
         "order_production_read_model",
-        "production_card_read_model",
         "production_progress_detail_read_model",
+        "production_workbench_read_model",
     ),
     collaborates_with=(
         "engineering",
@@ -19,6 +19,7 @@ MODULE = ModuleDescriptor(
         "organization",
         "production_core",
         "sales",
+        "standard_execution",
         "workforce",
     ),
     collaboration_apis=(
@@ -28,5 +29,6 @@ MODULE = ModuleDescriptor(
         "modules.planning.reference_api",
         "modules.planning.sales_api",
         "modules.planning.sales_progress_api",
+        "modules.planning.supplier_processing_api",
     ),
 )

@@ -2,7 +2,7 @@ from typing import Literal, Self
 
 from pydantic import Field, model_validator
 
-from domain.production_types import WorkOrderCompletionAction
+from domain.production_types import WorkOrderCompletionAction, WorkOrderType
 from schemas.common import WorkOrderStatus
 from schemas.production_base import ProductionModel
 from schemas.production_quality import WorkOrderBatchResponse
@@ -12,14 +12,19 @@ class WorkOrderCreate(ProductionModel):
     repository_id: int = Field(gt=0)
     procedure_id: int | None = Field(default=None, gt=0)
     procedure_name: str | None = Field(default=None, max_length=200)
+    is_temporary: bool
     quantity: int = Field(gt=0)
     worker_id: int | None = Field(default=None, gt=0)
     remark: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def validate_source(self) -> Self:
-        if (self.procedure_id is None) == (not (self.procedure_name or "").strip()):
-            raise ValueError("procedure_id 和 procedure_name 必须且只能提供一个")
+        has_name = bool((self.procedure_name or "").strip())
+        if self.is_temporary:
+            if self.procedure_id is not None or not has_name:
+                raise ValueError("临时工单必须且只能填写临时工艺名称")
+        elif self.procedure_id is None or has_name:
+            raise ValueError("普通工单必须且只能选择已配置工艺")
         return self
 
 
@@ -32,14 +37,19 @@ class AssemblyWorkOrderCreate(ProductionModel):
     materials: list[AssemblyMaterialInput] = Field(min_length=1)
     procedure_id: int | None = Field(default=None, gt=0)
     procedure_name: str | None = Field(default=None, max_length=200)
+    is_temporary: bool
     quantity: int = Field(gt=0)
     worker_id: int | None = Field(default=None, gt=0)
     remark: str | None = Field(default=None, max_length=1000)
 
     @model_validator(mode="after")
     def validate_procedure(self) -> Self:
-        if (self.procedure_id is None) == (not (self.procedure_name or "").strip()):
-            raise ValueError("procedure_id 和 procedure_name 必须且只能提供一个")
+        has_name = bool((self.procedure_name or "").strip())
+        if self.is_temporary:
+            if self.procedure_id is not None or not has_name:
+                raise ValueError("临时工单必须且只能填写临时工艺名称")
+        elif self.procedure_id is None or has_name:
+            raise ValueError("普通工单必须且只能选择已配置工艺")
         return self
 
 
@@ -65,10 +75,13 @@ class WorkOrderResponse(ProductionModel):
     work_order_no: str
     repository_id: int | None
     production_item_id: int
-    procedure_id: int
+    procedure_id: int | None
     flow_node_id: str
     source_flow_node_id: str | None
-    work_order_type: Literal["standard", "assembly"]
+    work_order_type: WorkOrderType
+    is_temporary: bool
+    supplier_name: str | None
+    supplier_process_name: str | None
     qc_available: bool
     direct_result_allowed: bool
     input_production_item_ids: list[int]
@@ -107,8 +120,3 @@ class WorkOrderResponse(ProductionModel):
 
 class WorkOrderEnvelope(ProductionModel):
     data: WorkOrderResponse
-
-
-class WorkOrderListEnvelope(ProductionModel):
-    data: list[WorkOrderResponse]
-    total: int

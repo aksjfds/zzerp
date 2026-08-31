@@ -199,7 +199,7 @@ class ProductProcessFlow(Base):
             name="ck_process_flow_schema_version_type",
         ),
         CheckConstraint(
-            "flow_json->>'schema_version' = '4'",
+            "flow_json->>'schema_version' = '5'",
             name="ck_process_flow_schema_version",
         ),
         CheckConstraint("flow_json ? 'nodes'", name="ck_process_flow_nodes_present"),
@@ -217,7 +217,7 @@ class ProductProcessFlow(Base):
             name="ck_process_flow_draft_object",
         ),
         CheckConstraint(
-            "draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '4'",
+            "draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '5'",
             name="ck_process_flow_draft_schema_version",
         ),
         CheckConstraint(
@@ -240,8 +240,8 @@ class ProductProcessFlow(Base):
     flow_json: Mapped[dict[str, Any]] = mapped_column(
         JSON_TYPE,
         nullable=False,
-        default=lambda: {"schema_version": 4, "nodes": [], "edges": []},
-        server_default=text("'{\"schema_version\": 4, \"nodes\": [], \"edges\": []}'"),
+        default=lambda: {"schema_version": 5, "nodes": [], "edges": []},
+        server_default=text("'{\"schema_version\": 5, \"nodes\": [], \"edges\": []}'"),
     )
     draft_flow_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSON_TYPE,
@@ -273,6 +273,11 @@ class ProductRouteTask(Base):
             name="fk_product_route_task_bom_version",
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["workshop_id", "department_id"],
+            ["workshop.id", "workshop.department_id"],
+            name="fk_product_route_task_workshop_department",
+        ),
         CheckConstraint(
             "origin_node_type IN ('part', 'assembly')",
             name="ck_product_route_task_origin_type",
@@ -283,8 +288,15 @@ class ProductRouteTask(Base):
             name="ck_product_route_task_origin_scope",
         ),
         CheckConstraint(
-            "route_node_type IN ('process', 'assembly')",
+            "route_node_type IN ('process', 'assembly', 'supplier_processing')",
             name="ck_product_route_task_node_type",
+        ),
+        CheckConstraint(
+            "(route_node_type IN ('process', 'assembly') "
+            "AND workshop_id IS NOT NULL) OR "
+            "(route_node_type = 'supplier_processing' "
+            "AND workshop_id IS NULL AND origin_node_type = 'part')",
+            name="ck_product_route_task_execution_scope",
         ),
         CheckConstraint("route_order >= 0", name="ck_product_route_task_order"),
         UniqueConstraint(
@@ -293,7 +305,11 @@ class ProductRouteTask(Base):
         ),
         Index(
             "idx_product_route_task_department_page",
-            "workshop_id", "product_id", "product_version", "origin_flow_node_id", "route_order",
+            "department_id", "product_id", "product_version", "origin_flow_node_id", "route_order",
+        ),
+        Index(
+            "idx_product_route_task_workshop",
+            "workshop_id", "product_id", "product_version",
         ),
         Index(
             "idx_product_route_task_item_code_trgm",
@@ -319,9 +335,8 @@ class ProductRouteTask(Base):
     origin_item_name: Mapped[str] = mapped_column(Text, nullable=False)
     route_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     route_node_type: Mapped[str] = mapped_column(Text, nullable=False)
-    workshop_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("workshop.id"),
-        nullable=False,
+    workshop_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    department_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("department.id"), nullable=False
     )
     route_order: Mapped[int] = mapped_column(Integer, nullable=False)

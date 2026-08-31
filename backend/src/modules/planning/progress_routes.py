@@ -15,7 +15,7 @@ def progress_route_nodes(
     while current and current["id"] not in visited:
         visited.add(current["id"])
         route.append(current)
-        if current.get("type") in {"assembly", "shipping"}:
+        if current.get("type") in {"assembly", "finished_inbound"}:
             break
         current = _normal_target(flow, nodes, current["id"])
     return route

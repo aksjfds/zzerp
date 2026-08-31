@@ -3,11 +3,37 @@ from __future__ import annotations
 """Customer-order production status calculations."""
 
 from collections import defaultdict
+from dataclasses import dataclass
+
+from domain.production_types import (
+    WORK_ORDER_STATUS_CANCELLED,
+    WORK_ORDER_SUPPLIER_PROCESSING,
+)
+from modules.errors import DomainError
 from modules.production_core.model_api import Repository
 from modules.sales.model_api import CustomerOrderItem
 from modules.production_core.flow_api import assembly_material_key
-from modules.production_core.operational_api import production_item_name, rework_pending_by_order
+from modules.production_core.operational_api import (
+    calculate_supplier_processing_qc_progress,
+    production_item_name,
+    rework_pending_by_order,
+)
 from modules.planning.order_production_context import OrderProductionReadContext
+
+
+@dataclass(frozen=True, slots=True)
+class _SupplierProgressProjection:
+    source_node_id: str
+    supplier_node_id: str
+    qc_node_id: str
+    source_edge_id: str
+    qc_edge_id: str
+    task_quantity: int
+    inspected_quantity: int
+    remaining_qualified_quantity: int
+    pending_destination_quantity: int
+    abnormal_quantity: int
+
 
 def _calculate_order_item_state(
     context: OrderProductionReadContext,
@@ -44,6 +70,21 @@ def _calculate_order_item_state(
         for work_order in work_orders
         for batch in context.batches_by_order.get(work_order.id, [])
     ]
+    finished_receipt_states = [
+        context.finished_receipts_by_batch[batch.id]
+        for batch in work_order_batches
+        if batch.id in context.finished_receipts_by_batch
+    ]
+    pending_finished_quantity = sum(
+        quantity
+        for status, quantity in finished_receipt_states
+        if status == "pending"
+    )
+    received_finished_quantity = sum(
+        quantity
+        for status, quantity in finished_receipt_states
+        if status == "received"
+    )
     batches_by_id = {batch.id: batch for batch in work_order_batches}
     pending_qc_by_node: dict[str, int] = defaultdict(int)
     for movement in movements:
@@ -107,7 +148,16 @@ def _calculate_order_item_state(
             held_qc_by_node[movement.target_flow_node_id] += movement.quantity
     for flow_node_id, quantity in held_qc_by_node.items():
         current_by_node[flow_node_id] += max(quantity, 0)
-    pending_rework = rework_pending_by_order(work_order_batches)
+    rework_tracked_order_ids = {
+        order.id
+        for order in work_orders
+        if order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING
+    }
+    pending_rework = rework_pending_by_order(
+        batch
+        for batch in work_order_batches
+        if batch.work_order_id in rework_tracked_order_ids
+    )
     pending_rework_by_node: dict[str, int] = defaultdict(int)
     for work_order in work_orders:
         quantity = pending_rework.get(work_order.id, 0)
@@ -127,6 +177,41 @@ def _calculate_order_item_state(
         (edge["source_node_id"], edge["target_node_id"]): edge["id"]
         for edge in flow.get("edges", [])
     }
+    target_node_ids_by_source: dict[str, list[str]] = defaultdict(list)
+    for edge in flow.get("edges", []):
+        target_node_ids_by_source[edge["source_node_id"]].append(
+            edge["target_node_id"]
+        )
+
+    supplier_projections = _supplier_progress_projections(
+        work_orders=work_orders,
+        batches_by_order=context.batches_by_order,
+        nodes=nodes,
+        target_node_ids_by_source=target_node_ids_by_source,
+        edge_id_by_nodes=edge_id_by_nodes,
+    )
+    for projection in supplier_projections:
+        entered_by_node[projection.supplier_node_id] += projection.task_quantity
+        current_by_node[
+            projection.supplier_node_id
+        ] += projection.remaining_qualified_quantity
+        transferred_by_node[
+            projection.supplier_node_id
+        ] += projection.inspected_quantity
+        abnormal_by_node[
+            projection.supplier_node_id
+        ] += projection.abnormal_quantity
+
+        transferred_by_node[projection.source_node_id] += projection.task_quantity
+        transferred_by_edge[projection.source_edge_id] += projection.task_quantity
+        transferred_by_edge[
+            projection.qc_edge_id
+        ] += projection.inspected_quantity
+        current_by_node[
+            projection.qc_node_id
+        ] += projection.pending_destination_quantity
+        abnormal_by_node[projection.qc_node_id] += projection.abnormal_quantity
+
     for movement in movements:
         movement_order = work_order_by_id.get(movement.work_order_id)
         if (
@@ -244,6 +329,9 @@ def _calculate_order_item_state(
         elif node_type == "process":
             abnormal = process_abnormal_by_node[node_id]
             entered, transferred = process_totals_by_node[node_id]
+        elif node_type == WORK_ORDER_SUPPLIER_PROCESSING:
+            entered = entered_by_node[node_id]
+            transferred = transferred_by_node[node_id]
         elif node_type == "qc":
             entered, transferred = qc_totals_by_node[node_id]
         elif node_type == "assembly":
@@ -296,10 +384,11 @@ def _calculate_order_item_state(
                 min(source_capacities, default=0)
                 + pending_rework_by_node[node_id]
             )
-        elif node_type == "shipping":
+        elif node_type == "finished_inbound":
+            entered = pending_finished_quantity + received_finished_quantity
+            current = pending_finished_quantity
+            transferred = received_finished_quantity
             output_quantity = entered
-            transferred = entered
-            current = 0
         stats.append(
             {
                 "flow_node_id": node_id,
@@ -309,6 +398,16 @@ def _calculate_order_item_state(
                 "transferred_quantity": transferred,
                 "abnormal_quantity": abnormal,
                 "output_quantity": output_quantity,
+                "pending_receipt_quantity": (
+                    pending_finished_quantity
+                    if node_type == "finished_inbound"
+                    else 0
+                ),
+                "received_quantity": (
+                    received_finished_quantity
+                    if node_type == "finished_inbound"
+                    else 0
+                ),
                 "input_details": input_details,
             }
         )
@@ -328,6 +427,69 @@ def _calculate_order_item_state(
     ]
     return {"node_stats": stats, "edge_stats": edge_stats}
 
+
+def _supplier_progress_projections(
+    *,
+    work_orders,
+    batches_by_order,
+    nodes: dict[str, dict],
+    target_node_ids_by_source: dict[str, list[str]],
+    edge_id_by_nodes: dict[tuple[str, str], str],
+) -> list[_SupplierProgressProjection]:
+    projections = []
+    for work_order in work_orders:
+        if (
+            work_order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING
+            or work_order.status == WORK_ORDER_STATUS_CANCELLED
+        ):
+            continue
+        source_node_id = work_order.source_flow_node_id
+        supplier_node_id = work_order.flow_node_id
+        qc_node_ids = [
+            node_id
+            for node_id in target_node_ids_by_source.get(supplier_node_id, [])
+            if nodes.get(node_id, {}).get("type") == "qc"
+        ]
+        source_edge_id = edge_id_by_nodes.get(
+            (source_node_id, supplier_node_id)
+        ) if source_node_id is not None else None
+        if source_node_id is None or source_edge_id is None or len(qc_node_ids) != 1:
+            raise DomainError(
+                "supplier_processing_flow_invalid",
+                "委外加工工单绑定的生产流程不完整",
+                status_code=409,
+            )
+        qc_node_id = qc_node_ids[0]
+        qc_edge_id = edge_id_by_nodes.get((supplier_node_id, qc_node_id))
+        if qc_edge_id is None:
+            raise DomainError(
+                "supplier_processing_flow_invalid",
+                "委外加工工单缺少直连 QC 线路",
+                status_code=409,
+            )
+        progress = calculate_supplier_processing_qc_progress(
+            work_order,
+            batches_by_order.get(work_order.id, []),
+        )
+        projections.append(_SupplierProgressProjection(
+            source_node_id=source_node_id,
+            supplier_node_id=supplier_node_id,
+            qc_node_id=qc_node_id,
+            source_edge_id=source_edge_id,
+            qc_edge_id=qc_edge_id,
+            task_quantity=work_order.quantity,
+            inspected_quantity=progress.inspected_quantity,
+            remaining_qualified_quantity=progress.remaining_qualified_quantity,
+            pending_destination_quantity=progress.pending_destination_quantity,
+            abnormal_quantity=(
+                progress.rework_quantity
+                + progress.scrap_quantity
+                + progress.lost_quantity
+            ),
+        ))
+    return projections
+
+
 def _process_node_totals(
     recorded_entered: int,
     internal_returned: int,
@@ -337,6 +499,7 @@ def _process_node_totals(
     entered = max(recorded_entered - internal_returned, 0)
     transferred = max(entered - current - abnormal, 0)
     return entered, transferred
+
 
 def _qc_node_totals(
     incoming_quantities: list[int],

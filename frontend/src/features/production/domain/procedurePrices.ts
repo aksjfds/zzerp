@@ -17,5 +17,8 @@ export type ProcedurePriceScope = {
   workshop_name: string
   part_name: string
   part_no: string
+  confirmed: boolean
+  confirmed_at: string | null
+  confirmed_by: string | null
   procedures: ProcedurePriceItem[]
 }

@@ -1,8 +1,7 @@
 import type { RouteRecordRaw } from 'vue-router'
 
 export type DepartmentCapability =
-  | 'repositories'
-  | 'work_orders'
+  | 'production_workbench'
   | 'workers'
   | 'standard_execution'
   | 'assembly'

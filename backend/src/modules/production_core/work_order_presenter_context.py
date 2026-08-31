@@ -159,7 +159,11 @@ def build_work_order_presenter_context(
         if bom_ids
         else []
     )
-    procedure_ids = {order.procedure_id for order in orders}
+    procedure_ids = {
+        order.procedure_id
+        for order in orders
+        if order.procedure_id is not None
+    }
     procedures = (
         list(
             session.scalars(

@@ -3,6 +3,8 @@ import type {
   PendingQcBatch,
   QcDestination,
   QcInspectionPayload,
+  SupplierProcessingQcInspectionPayload,
+  SupplierProcessingQcTask,
   WorkOrderBatch,
 } from '../domain/types'
 
@@ -40,6 +42,31 @@ export async function decideQcDestination(batchId: number, destination: QcDestin
   const response = await service.post<{ data: WorkOrderBatch }>(
     `/qc/work-order-batches/${batchId}/destination`,
     { destination },
+  )
+  return response.data.data
+}
+
+export async function querySupplierProcessingQcTasks() {
+  const response = await service.get<{ data: SupplierProcessingQcTask[]; total: number }>(
+    '/qc/supplier-processing-work-orders',
+  )
+  return { items: response.data.data, total: response.data.total }
+}
+
+export async function inspectSupplierProcessingWorkOrder(
+  workOrderId: number,
+  payload: SupplierProcessingQcInspectionPayload,
+) {
+  const response = await service.post<{ data: WorkOrderBatch }>(
+    `/qc/supplier-processing-work-orders/${workOrderId}/inspections`,
+    payload,
+  )
+  return response.data.data
+}
+
+export async function releaseSupplierProcessingBatch(batchId: number) {
+  const response = await service.post<{ data: WorkOrderBatch }>(
+    `/qc/supplier-processing-batches/${batchId}/release`,
   )
   return response.data.data
 }

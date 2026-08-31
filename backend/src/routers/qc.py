@@ -8,12 +8,77 @@ from schemas.production import (
     QcInspection,
     WorkOrderBatchEnvelope,
 )
+from modules.supplier_processing.api import (
+    list_qc_tasks as list_supplier_processing_qc_tasks,
+    record_supplier_processing_inspection,
+    release_supplier_processing_batch,
+)
+from schemas.supplier_processing import (
+    SupplierProcessingQcInspection,
+    SupplierProcessingQcTaskListEnvelope,
+)
 from departments.contracts import CAP_QUALITY
 from departments.registry import department_api
 
 
 router = APIRouter(prefix="/qc", tags=["qc"])
 qc_department = department_api("qc", CAP_QUALITY)
+
+
+@router.get(
+    "/supplier-processing-work-orders",
+    response_model=SupplierProcessingQcTaskListEnvelope,
+)
+def supplier_processing_qc_tasks(
+    user: dict = Depends(require_any_permission(QC_INSPECT)),
+):
+    ensure_department_access(user, "qc")
+    data, total = list_supplier_processing_qc_tasks()
+    return {"data": data, "total": total}
+
+
+@router.post(
+    "/supplier-processing-work-orders/{work_order_id}/inspections",
+    response_model=WorkOrderBatchEnvelope,
+)
+def supplier_processing_qc_inspect(
+    work_order_id: int,
+    payload: SupplierProcessingQcInspection,
+    user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
+):
+    ensure_department_access(user, "qc")
+    return {
+        "data": record_supplier_processing_inspection(
+            work_order_id=work_order_id,
+            qc_worker_id=payload.qc_worker_id,
+            qualified_quantity=payload.qualified_quantity,
+            rework_quantity=payload.rework_quantity,
+            scrap_quantity=payload.scrap_quantity,
+            lost_quantity=payload.lost_quantity,
+            defect_reason=payload.defect_reason,
+            actor_department=user["department"],
+            actor_is_system=user["is_system"],
+        )
+    }
+
+
+@router.post(
+    "/supplier-processing-batches/{batch_id}/release",
+    response_model=WorkOrderBatchEnvelope,
+)
+def supplier_processing_qc_release(
+    batch_id: int,
+    user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
+):
+    ensure_department_access(user, "qc")
+    return {
+        "data": release_supplier_processing_batch(
+            batch_id=batch_id,
+            actor_username=user["username"],
+            actor_department=user["department"],
+            actor_is_system=user["is_system"],
+        )
+    }
 
 
 @router.get("/work-order-batches", response_model=PendingQcListEnvelope)

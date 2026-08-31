@@ -9,15 +9,14 @@ export interface WorkOrderMetric {
 }
 
 export interface WorkOrderCardPolicy {
-  batchTitle: string
-  showBatches: boolean
-  trackRework: boolean
   metrics: (item: WorkOrder) => WorkOrderMetric[]
   statusText: (item: WorkOrder) => string
   statusType: (item: WorkOrder) => WorkOrderStatusType
   showInitialQc: (item: WorkOrder) => boolean
   showDirectResult: (item: WorkOrder) => boolean
   showReworkQc: (item: WorkOrder, batch: WorkOrderBatch) => boolean
+  showUndo: (item: WorkOrder) => boolean
+  showCancel: (item: WorkOrder) => boolean
 }
 
 export function initialProcessingQuantity(item: WorkOrder) {
@@ -32,4 +31,42 @@ export function commonStatusType(item: WorkOrder): WorkOrderStatusType {
     && initialProcessingQuantity(item) === 0
   ) return 'warning'
   return item.status === 'closed' ? 'success' : 'primary'
+}
+
+export function commonWorkOrderStatusText(item: WorkOrder) {
+  if (item.status === 'cancelled') return '已取消'
+  if (item.status === 'closed') return '已结单'
+  if (item.pending_qc_quantity) return '质检中'
+  return '进行中'
+}
+
+export const commonWorkOrderActions: Pick<
+  WorkOrderCardPolicy,
+  | 'showInitialQc'
+  | 'showDirectResult'
+  | 'showReworkQc'
+  | 'showUndo'
+  | 'showCancel'
+> = {
+  showInitialQc: item => (
+    item.status === 'open'
+    && item.qc_available
+    && item.submitted_quantity === 0
+  ),
+  showDirectResult: item => (
+    item.status === 'open'
+    && item.direct_result_allowed
+    && item.submitted_quantity === 0
+  ),
+  showReworkQc: (item, batch) => (
+    item.status === 'open'
+    && Boolean(batch.recorded_at)
+    && batch.rework_pending_quantity > 0
+  ),
+  showUndo: item => Boolean(item.undo_operation),
+  showCancel: item => (
+    item.status === 'open'
+    && item.processed_quantity === 0
+    && item.submitted_quantity === 0
+  ),
 }

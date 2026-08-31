@@ -25,3 +25,18 @@ export async function saveProcedurePrices(
     { procedures },
   )
 }
+
+export async function confirmProcedurePrices(
+  departmentCode: string,
+  scope: ProcedurePriceScope,
+  procedures: Array<{
+    procedure_id: number | null
+    procedure_name: string
+    unit_price: number | null
+  }>,
+) {
+  await service.post(
+    `/departments/${departmentCode}/procedure-prices/${scope.product_id}/${scope.product_version}/${encodeURIComponent(scope.origin_flow_node_id)}/${encodeURIComponent(scope.flow_node_id)}/confirm`,
+    { procedures },
+  )
+}

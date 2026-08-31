@@ -3,37 +3,38 @@
 from modules.engineering import product_reference_api as engineering
 from modules.planning import sales_api as planning
 from modules.planning import plan_api as planning_commands
-from modules.inventory.finished_goods_api import (
-    allocate_issued_finished_goods,
-    register_pending_finished_goods,
+from modules.inventory.plan_stock_api import (
+    release_finished_plan_stock,
+    reserve_finished_plan_stock,
 )
-from modules.inventory.plan_stock_api import withdraw_finished_plan_stock
+from modules.inventory.finished_shipment_api import order_item_shipped_quantities
 from modules.inventory.warehouse_api import withdraw_c01_stock
 from modules.production_core import api as production_lifecycle
 from modules.production_core.inventory_api import (
     accept_issued_inventory as accept_inventory_into_production,
 )
-from modules.production_core import operational_api as production_operations
 from modules.planning import sales_progress_api as planning_progress
 from modules.sales import command_api as sales
 
 
 class SalesProductionAdapter:
-    order_item_shipped_quantities = staticmethod(
-        planning_progress.order_item_shipped_quantities
-    )
-    load_product_flow = staticmethod(production_operations.load_product_flow)
-    shipping_node_and_unit_quantity = staticmethod(
-        production_operations.shipping_node_and_unit_quantity
-    )
+    cancel_order_production = staticmethod(production_lifecycle.cancel_order_production)
 
 
 production = SalesProductionAdapter()
 
 
+class SalesInventoryAdapter:
+    order_item_shipped_quantities = staticmethod(order_item_shipped_quantities)
+
+
+inventory = SalesInventoryAdapter()
+
+
 class PlanningExecutionAdapter:
     withdraw_warehouse_stock = staticmethod(withdraw_c01_stock)
-    withdraw_finished_plan_stock = staticmethod(withdraw_finished_plan_stock)
+    reserve_finished_plan_stock = staticmethod(reserve_finished_plan_stock)
+    release_finished_plan_stock = staticmethod(release_finished_plan_stock)
     initialize_order_production = staticmethod(
         production_lifecycle.initialize_order_production
     )
@@ -45,8 +46,6 @@ class PlanningExecutionAdapter:
             plan_item,
             stock,
             actor_username,
-            register_pending_finished_goods=register_pending_finished_goods,
-            allocate_issued_finished_goods=allocate_issued_finished_goods,
         )
 
 
@@ -69,7 +68,10 @@ class SalesPlanningAdapter:
     @staticmethod
     def cancel_order_plan(session, order, actor_username):
         return planning_commands.cancel_order_plan(
-            session, order, actor_username
+            session,
+            order,
+            actor_username,
+            collaborators=plan_execution,
         )
 
 
@@ -82,7 +84,6 @@ def list_orders(page: int, page_size: int, **kwargs) -> tuple[list[dict], int]:
         page_size,
         planning=planning_port,
         engineering=engineering,
-        production=production,
         **kwargs,
     )
 
@@ -98,12 +99,12 @@ def list_order_progress_details(
         customer_id,
         planning=planning_port,
         engineering=engineering,
-        production=production,
+        inventory=inventory,
     )
 
 
 def get_order(order_id: int) -> dict:
-    return sales.get_order(order_id, planning_port, engineering, production)
+    return sales.get_order(order_id, planning_port, engineering)
 
 
 def update_order(order_id: int, payload) -> dict:
@@ -112,7 +113,6 @@ def update_order(order_id: int, payload) -> dict:
         payload,
         planning_port,
         engineering,
-        production,
     )
 
 
@@ -131,13 +131,12 @@ def confirm_production_plan(*args, **kwargs) -> dict:
         *args,
         planning=planning_port,
         engineering=engineering,
-        production=production,
         **kwargs,
     )
 
 
 def create_order(payload) -> dict:
-    return sales.create_order(payload, engineering, production)
+    return sales.create_order(payload, engineering)
 
 
 delete_order = sales.delete_order

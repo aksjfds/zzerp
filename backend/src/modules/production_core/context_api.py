@@ -7,7 +7,7 @@ modules depend only on these fields so persistence classes remain private.
 from datetime import datetime
 from typing import Protocol
 
-from domain.production_types import QcQualifiedDestination
+from domain.production_types import QcQualifiedDestination, WorkOrderType
 
 
 class InventorySourceContext(Protocol):
@@ -53,10 +53,13 @@ class ProductionItemContext(Protocol):
 class WorkOrderContext(Protocol):
     id: int
     production_item_id: int
-    procedure_id: int
+    procedure_id: int | None
     source_flow_node_id: str | None
     flow_node_id: str
-    work_order_type: str
+    work_order_type: WorkOrderType
+    is_temporary: bool
+    supplier_name: str | None
+    supplier_process_name: str | None
     created_by: str
     worker_name: str | None
     completed_quantity: int
@@ -72,6 +75,8 @@ class InspectionBatchContext(Protocol):
     source_flow_node_id: str
     rework_source_batch_id: int | None
     submitted_quantity: int
+    scrap_quantity: int | None
+    lost_quantity: int | None
     rework_quantity: int | None
     qualified_quantity: int | None
     qualified_destination: QcQualifiedDestination | None

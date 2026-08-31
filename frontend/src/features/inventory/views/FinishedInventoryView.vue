@@ -4,24 +4,23 @@ import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import FinishedOrderOperations from '../components/FinishedOrderOperations.vue'
+import FinishedReceiptOperations from '../components/FinishedReceiptOperations.vue'
 import {
-  queryFinishedInventoryStocks,
-  queryFinishedInventoryTransactions,
+  queryFinishedStocks,
+  queryFinishedStockTransactions,
 } from '../api/inventory'
 import type {
-  FinishedInventoryStock,
-  FinishedInventoryTransaction,
+  FinishedStock,
+  FinishedStockTransaction,
 } from '../domain/types'
 
 const loading = ref(false)
-const stocks = ref<FinishedInventoryStock[]>([])
-const transactions = ref<FinishedInventoryTransaction[]>([])
-const finishedReceiptOperations = ref<InstanceType<typeof FinishedOrderOperations>>()
+const stocks = ref<FinishedStock[]>([])
+const transactions = ref<FinishedStockTransaction[]>([])
+const finishedReceiptOperations = ref<InstanceType<typeof FinishedReceiptOperations>>()
 const finishedShipmentOperations = ref<InstanceType<typeof FinishedOrderOperations>>()
 const transactionLabels: Record<string, string> = {
-  receipt: '入库', issue: '出库',
-  finished_receipt: '成品入库', finished_stock_issue: '库存转入订单',
-  finished_surplus_transfer: '订单结余转库存',
+  receipt: '成品入库',
   customer_shipment: '客户发货',
 }
 
@@ -29,8 +28,8 @@ async function load() {
   loading.value = true
   try {
     const [nextStocks, nextTransactions] = await Promise.all([
-      queryFinishedInventoryStocks(),
-      queryFinishedInventoryTransactions(),
+      queryFinishedStocks(),
+      queryFinishedStockTransactions(),
     ])
     stocks.value = nextStocks
     transactions.value = nextTransactions
@@ -57,41 +56,63 @@ defineExpose({ load })
   <section v-loading="loading" class="inventory-page">
     <DepartmentPageHeader
       department-name="成品部"
-      description="办理成品入库和订单发货，并查看成品库存及本项目成品流水。"
+      description="确认待入库成品、管理统一成品库存，并按客户订单办理发货。"
       @refresh="load"
     />
     <ElTabs>
-      <ElTabPane label="成品入库">
-        <FinishedOrderOperations
+      <ElTabPane label="待入库">
+        <FinishedReceiptOperations
           ref="finishedReceiptOperations"
-          :show-header="false"
-          mode="receipt"
-          @updated="refreshFinishedOperations"
-        />
-      </ElTabPane>
-      <ElTabPane label="订单发货">
-        <FinishedOrderOperations
-          ref="finishedShipmentOperations"
-          :show-header="false"
-          mode="shipment"
           @updated="refreshFinishedOperations"
         />
       </ElTabPane>
       <ElTabPane label="成品库存">
-        <ElTable v-table-column-widths="'finished.stocks'" :data="stocks" border stripe table-layout="auto">
+        <ElTable
+          v-table-column-widths="'finished.stocks'"
+          :data="stocks"
+          border
+          stripe
+          table-layout="auto"
+          empty-text="暂无成品库存"
+        >
           <ElTableColumn prop="item_code" label="编号" min-width="150" />
           <ElTableColumn prop="item_name" label="名称" min-width="180" />
           <ElTableColumn prop="product_version" label="版本" width="80" />
-          <ElTableColumn prop="completed_node_label" label="完成状态" min-width="130"><template #default="{ row }">{{ `${row.completed_node_label}完` }}</template></ElTableColumn>
           <ElTableColumn prop="quantity" label="现存" width="90" align="right" />
+          <ElTableColumn prop="reserved_quantity" label="占用" width="90" align="right" />
           <ElTableColumn prop="available_quantity" label="可用" width="90" align="right" />
         </ElTable>
       </ElTabPane>
-      <ElTabPane label="本项目成品流水">
-        <ElTable v-table-column-widths="'finished.transactions'" :data="transactions" border stripe table-layout="auto">
+      <ElTabPane label="客户订单发货">
+        <FinishedOrderOperations
+          ref="finishedShipmentOperations"
+          :show-header="false"
+          @updated="refreshFinishedOperations"
+        />
+      </ElTabPane>
+      <ElTabPane label="库存流水">
+        <ElTable
+          v-table-column-widths="'finished.transactions'"
+          :data="transactions"
+          border
+          stripe
+          table-layout="auto"
+          empty-text="暂无库存流水"
+        >
           <ElTableColumn prop="created_at" label="时间" min-width="180" />
-          <ElTableColumn label="类型" min-width="120"><template #default="{ row }">{{ transactionLabels[row.transaction_type] || row.transaction_type }}</template></ElTableColumn>
-          <ElTableColumn label="对象" min-width="240"><template #default="{ row }"><div>{{ row.item_code }} · {{ row.item_name }}</div><small v-if="row.completed_node_label">{{ row.completed_node_label }}完</small><small v-if="row.customer_order_no">订单 {{ row.customer_order_no }}</small></template></ElTableColumn>
+          <ElTableColumn label="类型" min-width="120">
+            <template #default="{ row }">
+              {{ transactionLabels[row.transaction_type] || row.transaction_type }}
+            </template>
+          </ElTableColumn>
+          <ElTableColumn label="对象" min-width="240">
+            <template #default="{ row }">
+              <div>{{ row.item_code }} · {{ row.item_name }}</div>
+              <small v-if="row.customer_order_no">
+                订单 {{ row.customer_order_no }}
+              </small>
+            </template>
+          </ElTableColumn>
           <ElTableColumn prop="quantity" label="数量" width="90" align="right" />
           <ElTableColumn prop="quantity_after" label="结存" width="90" align="right" />
           <ElTableColumn prop="actor_username" label="操作人" min-width="110" />

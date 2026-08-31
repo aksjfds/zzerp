@@ -28,6 +28,11 @@ const inventoryTypeLabels = {
 function inventoryTypeLabel(itemType: keyof typeof inventoryTypeLabels) {
   return inventoryTypeLabels[itemType]
 }
+function inventoryWarehouseLabel(item: ProductionPlan['inventory_items'][number]) {
+  if (item.item_type === 'finished_product') return '成品仓'
+  if (item.warehouse_code === '—') return '—'
+  return `${item.warehouse_code} · ${item.warehouse_name}`
+}
 function productDecomposition(group: InventoryGroup) {
   const parts = new Map<number, {
     product_bom_id: number
@@ -140,7 +145,7 @@ onMounted(load)
       <div class="plan-heading">
         <div>
           <h2>库存</h2>
-          <p>展示当前库存；确认生产计划时系统会重新读取并直接扣减。</p>
+          <p>展示当前实存、占用和可用数量；确认时成品只占用，配件和装配体按现有规则出库。</p>
         </div>
       </div>
       <ElEmpty v-if="!loading && !inventoryGroups.length" description="暂无相关产品库存" />
@@ -204,10 +209,18 @@ onMounted(load)
             <template #default="{ row }">{{ row.completed_node_label }}</template>
           </ElTableColumn>
           <ElTableColumn label="仓库" min-width="120">
-            <template #default="{ row }">{{ row.warehouse_code === '—' ? '—' : `${row.warehouse_code} · ${row.warehouse_name}` }}</template>
+            <template #default="{ row }">{{ inventoryWarehouseLabel(row) }}</template>
           </ElTableColumn>
-          <ElTableColumn prop="current_inventory_quantity" label="当前可用库存" width="120" align="right" />
-          <ElTableColumn prop="planned_deduction_quantity" label="确认时扣减" width="110" align="right" />
+          <ElTableColumn prop="stock_quantity" label="实存" width="85" align="right" />
+          <ElTableColumn prop="reserved_quantity" label="已占用" width="90" align="right" />
+          <ElTableColumn prop="available_quantity" label="可用" width="85" align="right" />
+          <ElTableColumn label="确认时分配" width="120" align="right">
+            <template #default="{ row }">
+              {{ row.planned_allocation_quantity
+                ? `${row.allocation_mode === 'reservation' ? '占用' : '出库'} ${row.planned_allocation_quantity}`
+                : '—' }}
+            </template>
+          </ElTableColumn>
         </ElTable>
       </section>
     </section>
@@ -216,7 +229,7 @@ onMounted(load)
       <div class="plan-heading">
         <div>
           <h2>生产计划</h2>
-          <p>填写各配件的新生产数量；确认时系统重新计算需求并直接扣减可用库存。</p>
+          <p>填写各配件的新生产数量；确认时系统重新计算需求并分配当时可用库存。</p>
         </div>
       </div>
       <ElEmpty v-if="!loading && !groups.length" description="暂无生产计划项目" />

@@ -4,6 +4,7 @@ from sqlalchemy import func, or_, select, update
 
 from database import SessionLocal
 from domain.identity import can_access_department
+from domain.time import business_iso, utc_now
 from modules.engineering.model_api import Product, ProductBom, ProductRouteTask
 from modules.engineering.pricing_api import get_product_pricing_view
 from modules.errors import DomainError
@@ -21,7 +22,11 @@ from modules.production_core.reference_api import (
     list_standard_execution_config_keys,
     list_standard_execution_order_ids,
 )
-from modules.standard_execution.persistence import ProcedurePrice, WorkOrderPayDetail
+from modules.standard_execution.persistence import (
+    ProcedureConfiguration,
+    ProcedurePrice,
+    WorkOrderPayDetail,
+)
 from schemas.procedure_prices import ProcedurePriceUpdate
 
 
@@ -51,7 +56,7 @@ def _reachable_workshop_nodes(flow: dict, origin_id: str) -> list[dict]:
         node = nodes.get(node_id)
         if node is None:
             continue
-        if node.get("type") in {"assembly", "shipping"}:
+        if node.get("type") in {"assembly", "finished_inbound"}:
             continue
         if node.get("type") == "process" and isinstance(node.get("workshop_id"), int):
             result.append(node)
@@ -93,6 +98,10 @@ def list_procedure_prices(
             .where(
                 ProductRouteTask.workshop_id.in_(workshop_ids_for_department),
                 Product.version == ProductRouteTask.product_version,
+                or_(
+                    ProductRouteTask.route_node_type != "assembly",
+                    ProductRouteTask.origin_node_type == "assembly",
+                ),
             )
         )
         value = (keyword or "").strip()
@@ -139,11 +148,23 @@ def list_procedure_prices(
                     continue
                 procedures_by_workshop[procedure.workshop_id].append(procedure)
         product_ids = {item["product"].id for item in selected}
-        prices = list(session.scalars(
-            select(ProcedurePrice).where(ProcedurePrice.product_id.in_(product_ids))
+        configurations = list(session.scalars(
+            select(ProcedureConfiguration).where(
+                ProcedureConfiguration.product_id.in_(product_ids)
+            )
         )) if product_ids else []
+        configuration_by_scope = {
+            (item.product_id, item.product_version, item.material_key, item.flow_node_id): item
+            for item in configurations
+        }
+        configuration_ids = {item.id for item in configurations}
+        prices = list(session.scalars(
+            select(ProcedurePrice).where(
+                ProcedurePrice.configuration_id.in_(configuration_ids)
+            )
+        )) if configuration_ids else []
         price_by_scope = {
-            (item.product_id, item.product_version, item.material_key, item.flow_node_id, item.procedure_id): item.unit_price
+            (item.configuration_id, item.procedure_id): item.unit_price
             for item in prices
         }
         procedure_ids = {
@@ -161,11 +182,14 @@ def list_procedure_prices(
             product, bom = item["product"], item["bom"]
             origin_id, flow_node_id = item["origin_id"], item["flow_node_id"]
             material_key = _material_key(bom.id if bom else None, origin_id)
+            configuration = configuration_by_scope.get(
+                (product.id, product.version, material_key, flow_node_id)
+            )
             procedure_data = []
             for procedure in procedures_by_workshop[item["workshop"].id]:
                 ref_key = (product.id, product.version, origin_id, flow_node_id, procedure.id)
-                price_key = (product.id, product.version, material_key, flow_node_id, procedure.id)
-                if price_key not in price_by_scope and ref_key not in referenced:
+                price_key = (configuration.id, procedure.id) if configuration else None
+                if price_key not in price_by_scope:
                     continue
                 procedure_data.append({
                     "procedure_id": procedure.id,
@@ -181,6 +205,9 @@ def list_procedure_prices(
                 "workshop_id": item["workshop"].id,
                 "workshop_name": item["workshop"].workshop_name,
                 "part_name": item["part_name"], "part_no": item["part_no"],
+                "confirmed": configuration is not None and configuration.confirmed_at is not None,
+                "confirmed_at": business_iso(configuration.confirmed_at) if configuration else None,
+                "confirmed_by": configuration.confirmed_by if configuration else None,
                 "procedures": procedure_data,
             })
         return data, total
@@ -195,107 +222,209 @@ def update_procedure_price(
     payload: ProcedurePriceUpdate,
     user_department: str | None,
     user_is_system: bool,
+    actor_username: str,
 ) -> None:
     with SessionLocal.begin() as session:
-        department = _department(
+        _save_procedure_configuration(
             session,
             department_code,
+            product_id,
+            product_version,
+            origin_flow_node_id,
+            flow_node_id,
+            payload,
             user_department,
             user_is_system,
+            actor_username,
+            confirm=False,
         )
-        product = get_product_pricing_view(session, product_id, product_version)
-        if product is None:
-            raise DomainError("product_version_not_found", "产品版本不存在", status_code=404)
-        nodes = {str(node.get("id")): node for node in (product.flow_json or {}).get("nodes", [])}
-        origin, node = nodes.get(origin_flow_node_id), nodes.get(flow_node_id)
-        reachable_ids = {str(item.get("id")) for item in _reachable_workshop_nodes(product.flow_json or {}, origin_flow_node_id)}
-        if origin is None or node is None or flow_node_id not in reachable_ids:
-            raise DomainError("procedure_price_route_invalid", "当前物料不经过该车间节点")
-        workshop = next(iter(get_workshop_views(
+
+
+def confirm_procedure_configuration(
+    department_code: str,
+    product_id: int,
+    product_version: int,
+    origin_flow_node_id: str,
+    flow_node_id: str,
+    payload: ProcedurePriceUpdate,
+    user_department: str | None,
+    user_is_system: bool,
+    actor_username: str,
+) -> None:
+    with SessionLocal.begin() as session:
+        _save_procedure_configuration(
             session,
-            workshop_ids={node.get("workshop_id")},
-        )), None)
-        if workshop is None or workshop.department_id != department.id:
-            raise DomainError("procedure_price_workshop_invalid", "当前车间不属于该部门")
-        bom_id = origin.get("bom_item_id") if origin.get("type") == "part" else None
-        material_key = _material_key(bom_id, origin_flow_node_id)
-        expected_input_mode = "multiple" if node.get("type") == "assembly" else "single"
-        scoped_order_ids = list_standard_execution_order_ids(
+            department_code,
+            product_id,
+            product_version,
+            origin_flow_node_id,
+            flow_node_id,
+            payload,
+            user_department,
+            user_is_system,
+            actor_username,
+            confirm=True,
+        )
+
+
+def _save_procedure_configuration(
+    session,
+    department_code: str,
+    product_id: int,
+    product_version: int,
+    origin_flow_node_id: str,
+    flow_node_id: str,
+    payload: ProcedurePriceUpdate,
+    user_department: str | None,
+    user_is_system: bool,
+    actor_username: str,
+    *,
+    confirm: bool,
+) -> None:
+    department = _department(
+        session,
+        department_code,
+        user_department,
+        user_is_system,
+    )
+    product = get_product_pricing_view(session, product_id, product_version)
+    if product is None:
+        raise DomainError("product_version_not_found", "产品版本不存在", status_code=404)
+    session.execute(
+        select(Product.id).where(Product.id == product_id).with_for_update()
+    )
+    nodes = {str(node.get("id")): node for node in (product.flow_json or {}).get("nodes", [])}
+    origin, node = nodes.get(origin_flow_node_id), nodes.get(flow_node_id)
+    reachable_ids = {str(item.get("id")) for item in _reachable_workshop_nodes(product.flow_json or {}, origin_flow_node_id)}
+    if origin is None or node is None or flow_node_id not in reachable_ids:
+        raise DomainError("procedure_price_route_invalid", "当前物料不经过该车间节点")
+    workshop = next(iter(get_workshop_views(
+        session,
+        workshop_ids={node.get("workshop_id")},
+    )), None)
+    if workshop is None or workshop.department_id != department.id:
+        raise DomainError("procedure_price_workshop_invalid", "当前车间不属于该部门")
+    bom_id = origin.get("bom_item_id") if origin.get("type") == "part" else None
+    material_key = _material_key(bom_id, origin_flow_node_id)
+    expected_input_mode = "multiple" if node.get("type") == "assembly" else "single"
+    scoped_order_ids = list_standard_execution_order_ids(
+        session,
+        product_id=product_id,
+        product_version=product_version,
+        origin_flow_node_id=origin_flow_node_id,
+        flow_node_id=flow_node_id,
+    )
+    normalized: dict[str, tuple[int | None, object]] = {}
+    for item in payload.procedures:
+        name = item.procedure_name.strip()
+        if name in normalized:
+            raise DomainError("procedure_name_duplicate", "同一车间不能重复配置同名工艺")
+        normalized[name] = (item.procedure_id, item.unit_price)
+    configuration = session.scalar(
+        select(ProcedureConfiguration).where(
+            ProcedureConfiguration.product_id == product_id,
+            ProcedureConfiguration.product_version == product_version,
+            ProcedureConfiguration.material_key == material_key,
+            ProcedureConfiguration.flow_node_id == flow_node_id,
+        ).with_for_update()
+    )
+    if configuration is None:
+        configuration = ProcedureConfiguration(
+            product_id=product_id,
+            product_version=product_version,
+            material_key=material_key,
+            flow_node_id=flow_node_id,
+        )
+        session.add(configuration)
+        session.flush()
+    existing_prices = list(session.scalars(
+        select(ProcedurePrice).where(
+            ProcedurePrice.configuration_id == configuration.id,
+        ).with_for_update()
+    ))
+    existing_by_procedure = {item.procedure_id: item for item in existing_prices}
+    if configuration.confirmed_at is not None:
+        submitted_ids = {
+            item.procedure_id for item in payload.procedures
+            if item.procedure_id is not None
+        }
+        if (
+            len(submitted_ids) != len(payload.procedures)
+            or submitted_ids != set(existing_by_procedure)
+        ):
+            raise DomainError(
+                "procedure_configuration_locked",
+                "工艺配置已确认，不能修改工艺清单",
+                status_code=409,
+            )
+    retained_ids: set[int] = set()
+    for name, (procedure_id, unit_price) in normalized.items():
+        procedure = resolve_workshop_procedure(
+            session,
+            workshop_id=workshop.id,
+            procedure_id=procedure_id,
+            procedure_name=name if procedure_id is None else None,
+            required_input_mode=expected_input_mode,
+        )
+        if (
+            procedure.workshop_id != workshop.id
+            or procedure.procedure_name != name
+        ):
+            raise DomainError("procedure_workshop_invalid", "所选工艺不属于当前车间")
+        retained_ids.add(procedure.id)
+        price = existing_by_procedure.get(procedure.id)
+        if price is None:
+            session.add(ProcedurePrice(
+                configuration_id=configuration.id,
+                procedure_id=procedure.id, unit_price=unit_price,
+            ))
+        else:
+            price.unit_price = unit_price
+        if scoped_order_ids:
+            session.execute(update(WorkOrderPayDetail).where(
+                WorkOrderPayDetail.procedure_id == procedure.id,
+                WorkOrderPayDetail.work_order_id.in_(scoped_order_ids),
+            ).values(unit_price=unit_price))
+    for price in existing_prices:
+        if price.procedure_id in retained_ids:
+            continue
+        if has_standard_execution_order(
             session,
             product_id=product_id,
             product_version=product_version,
             origin_flow_node_id=origin_flow_node_id,
             flow_node_id=flow_node_id,
+            procedure_id=price.procedure_id,
+        ):
+            raise DomainError("procedure_referenced", "已被工单引用的工艺不能删除")
+        procedure_id = price.procedure_id
+        session.delete(price)
+        session.flush()
+        has_price = session.scalar(
+            select(ProcedurePrice.id)
+            .where(ProcedurePrice.procedure_id == procedure_id)
+            .limit(1)
         )
-        normalized: dict[str, tuple[int | None, object]] = {}
-        for item in payload.procedures:
-            name = item.procedure_name.strip()
-            if name in normalized:
-                raise DomainError("procedure_name_duplicate", "同一车间不能重复配置同名工艺")
-            normalized[name] = (item.procedure_id, item.unit_price)
-        existing_prices = list(session.scalars(
-            select(ProcedurePrice).where(
-                ProcedurePrice.product_id == product_id,
-                ProcedurePrice.product_version == product_version,
-                ProcedurePrice.material_key == material_key,
-                ProcedurePrice.flow_node_id == flow_node_id,
-            ).with_for_update()
-        ))
-        existing_by_procedure = {item.procedure_id: item for item in existing_prices}
-        retained_ids: set[int] = set()
-        for name, (procedure_id, unit_price) in normalized.items():
-            procedure = resolve_workshop_procedure(
-                session,
-                workshop_id=workshop.id,
-                procedure_id=procedure_id,
-                procedure_name=name if procedure_id is None else None,
-                required_input_mode=expected_input_mode,
+        if (
+            has_price is None
+            and not has_work_order_for_procedure(session, procedure_id)
+        ):
+            delete_procedure(session, procedure_id)
+    if confirm:
+        if configuration.confirmed_at is not None:
+            raise DomainError(
+                "procedure_configuration_already_confirmed",
+                "工艺配置已经确认",
+                status_code=409,
             )
-            if (
-                procedure.workshop_id != workshop.id
-                or procedure.procedure_name != name
-            ):
-                raise DomainError("procedure_workshop_invalid", "所选工艺不属于当前车间")
-            retained_ids.add(procedure.id)
-            price = existing_by_procedure.get(procedure.id)
-            if price is None:
-                session.add(ProcedurePrice(
-                    product_id=product_id, product_version=product_version,
-                    material_key=material_key, flow_node_id=flow_node_id,
-                    procedure_id=procedure.id, unit_price=unit_price,
-                ))
-            else:
-                price.unit_price = unit_price
-            if scoped_order_ids:
-                session.execute(update(WorkOrderPayDetail).where(
-                    WorkOrderPayDetail.procedure_id == procedure.id,
-                    WorkOrderPayDetail.work_order_id.in_(scoped_order_ids),
-                ).values(unit_price=unit_price))
-        for price in existing_prices:
-            if price.procedure_id in retained_ids:
-                continue
-            if has_standard_execution_order(
-                session,
-                product_id=product_id,
-                product_version=product_version,
-                origin_flow_node_id=origin_flow_node_id,
-                flow_node_id=flow_node_id,
-                procedure_id=price.procedure_id,
-            ):
-                raise DomainError("procedure_referenced", "已被工单引用的工艺不能删除")
-            procedure_id = price.procedure_id
-            session.delete(price)
-            session.flush()
-            has_price = session.scalar(
-                select(ProcedurePrice.id)
-                .where(ProcedurePrice.procedure_id == procedure_id)
-                .limit(1)
+        if not retained_ids:
+            raise DomainError(
+                "procedure_configuration_empty",
+                "至少配置一个工艺后才能确认",
             )
-            if (
-                has_price is None
-                and not has_work_order_for_procedure(session, procedure_id)
-            ):
-                delete_procedure(session, procedure_id)
+        session.flush()
+        configuration.confirmed_at = utc_now()
+        configuration.confirmed_by = actor_username
 
 
 def _department(

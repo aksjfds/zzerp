@@ -30,9 +30,14 @@ function workshopName(node: FlowNode | null) {
       <h3>QC节点</h3>
       <p>合格数量由QC决定何时放行到下一流程节点；返工数量返回原工单。</p>
     </template>
-    <template v-else-if="node?.type === 'shipping'">
-      <h3>发货节点</h3>
-      <p>流程终点。产品经QC放行后进入成品部，确认入库后再按客户订单发货。</p>
+    <template v-else-if="node?.type === 'supplier_processing'">
+      <h3>委外加工节点</h3>
+      <p>由业务部在生产计划确认后填写供应商和加工工艺并创建委外工单。</p>
+      <p>该节点必须直接连接在配件之后，并直接连接到 QC。</p>
+    </template>
+    <template v-else-if="node?.type === 'finished_inbound'">
+      <h3>入库节点</h3>
+      <p>流程终点。产品经 QC 放行后进入成品部待入库，由成品部确认入库。</p>
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>

@@ -1,25 +1,28 @@
-from typing import Literal
-
 from fastapi import APIRouter, Depends, Query
 
 from authorization import ensure_department_access, require_any_permission
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
 from domain.warehouse import WarehouseOperationStatus
 from modules.inventory.api import (
-    confirm_finished_order_receipt,
-    list_finished_order_stocks,
+    confirm_finished_receipt,
+    list_finished_receipts,
+    list_finished_shipment_candidates,
+    list_finished_stock_reservations,
+    list_finished_stock_transactions,
+    list_finished_stocks,
     list_project_warehouse_operations,
-    list_finished_inventory_stocks,
     list_temporary_warehouse_stocks,
-    list_finished_inventory_transactions,
     review_project_warehouse_operation,
     ship_finished_order_item,
 )
 from schemas.inventory import (
-    FinishedInventoryStockEnvelope,
-    FinishedInventoryTransactionEnvelope,
-    FinishedOrderStockEnvelope,
-    FinishedOrderStockItemEnvelope,
+    FinishedReceiptEnvelope,
+    FinishedReceiptItemEnvelope,
+    FinishedStockEnvelope,
+    FinishedStockReservationEnvelope,
+    FinishedStockTransactionEnvelope,
+    FinishedShipmentCandidateEnvelope,
+    FinishedShipmentCandidateItemEnvelope,
     FinishedShipmentInput,
     WarehouseOperationEnvelope,
     WarehouseOperationReviewInput,
@@ -66,32 +69,39 @@ def warehouse_operation_review(
     }
 
 
-@router.get("/finished-order-stocks", response_model=FinishedOrderStockEnvelope)
-def finished_order_stocks(
-    operation: Literal["all", "receipt", "shipment"] = Query(default="all"),
+@router.get("/finished-receipts", response_model=FinishedReceiptEnvelope)
+def finished_receipts(
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, "finished")
-    return {"data": list_finished_order_stocks(operation)}
+    return {"data": list_finished_receipts()}
 
 
 @router.post(
-    "/finished-order-stocks/{customer_order_item_id}/receive",
-    response_model=FinishedOrderStockItemEnvelope,
+    "/finished-receipts/{receipt_id}/receive",
+    response_model=FinishedReceiptItemEnvelope,
 )
-def finished_order_stock_receive(
-    customer_order_item_id: int,
+def finished_receipt_receive(
+    receipt_id: int,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     ensure_department_access(user, "finished")
-    return {"data": confirm_finished_order_receipt(customer_order_item_id, user["username"])}
+    return {"data": confirm_finished_receipt(receipt_id, user["username"])}
+
+
+@router.get("/finished-shipments", response_model=FinishedShipmentCandidateEnvelope)
+def finished_shipment_candidates(
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, "finished")
+    return {"data": list_finished_shipment_candidates()}
 
 
 @router.post(
-    "/finished-order-stocks/{customer_order_item_id}/ship",
-    response_model=FinishedOrderStockItemEnvelope,
+    "/finished-shipments/{customer_order_item_id}",
+    response_model=FinishedShipmentCandidateItemEnvelope,
 )
-def finished_order_stock_ship(
+def finished_shipment_confirm(
     customer_order_item_id: int,
     payload: FinishedShipmentInput,
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
@@ -106,19 +116,44 @@ def finished_order_stock_ship(
     }
 
 
-@router.get("/finished-stocks", response_model=FinishedInventoryStockEnvelope)
-def finished_inventory_stocks(
+@router.get("/finished-stocks", response_model=FinishedStockEnvelope)
+def finished_stocks(
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, "finished")
-    return {"data": list_finished_inventory_stocks()}
+    return {"data": list_finished_stocks()}
 
 
-@router.get("/finished-transactions", response_model=FinishedInventoryTransactionEnvelope)
-def finished_inventory_transactions(
-    stock_id: int | None = Query(default=None, gt=0),
+@router.get(
+    "/finished-reservations",
+    response_model=FinishedStockReservationEnvelope,
+)
+def finished_stock_reservations(
+    production_plan_id: int | None = Query(default=None, gt=0),
+    customer_order_item_id: int | None = Query(default=None, gt=0),
     limit: int = Query(default=200, gt=0, le=1000),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, "finished")
-    return {"data": list_finished_inventory_transactions(stock_id, limit)}
+    return {
+        "data": list_finished_stock_reservations(
+            production_plan_id=production_plan_id,
+            customer_order_item_id=customer_order_item_id,
+            limit=limit,
+        )
+    }
+
+
+@router.get("/finished-transactions", response_model=FinishedStockTransactionEnvelope)
+def finished_stock_transactions(
+    finished_stock_id: int | None = Query(default=None, gt=0),
+    limit: int = Query(default=200, gt=0, le=1000),
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    ensure_department_access(user, "finished")
+    return {
+        "data": list_finished_stock_transactions(
+            finished_stock_id=finished_stock_id,
+            limit=limit,
+        )
+    }

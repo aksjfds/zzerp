@@ -3,7 +3,7 @@
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from modules.standard_execution.persistence import ProcedurePrice
+from modules.standard_execution.persistence import ProcedureConfiguration
 
 
 def product_version_procedure_price_references(
@@ -14,9 +14,12 @@ def product_version_procedure_price_references(
     return [
         (material_key, flow_node_id)
         for material_key, flow_node_id in session.execute(
-            select(ProcedurePrice.material_key, ProcedurePrice.flow_node_id).where(
-                ProcedurePrice.product_id == product_id,
-                ProcedurePrice.product_version == product_version,
+            select(
+                ProcedureConfiguration.material_key,
+                ProcedureConfiguration.flow_node_id,
+            ).where(
+                ProcedureConfiguration.product_id == product_id,
+                ProcedureConfiguration.product_version == product_version,
             )
         )
     ]

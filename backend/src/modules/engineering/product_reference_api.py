@@ -11,6 +11,7 @@ from domain.errors import DomainViolation
 from domain.product import ProductReference
 from domain.process_flow import validate_process_flow
 from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
+from modules.engineering.support import packaging_workshop_ids
 from modules.errors import DomainError
 from modules.organization.read_api import get_workshop_routes
 from schemas.engineering import ProcessFlowPayload
@@ -28,6 +29,7 @@ def _product_reference(product: Product) -> ProductReference:
         customer_id=product.customer_id,
         product_name=product.product_name,
         factory_code=product.factory_code,
+        customer_code=product.customer_code,
         version=product.version,
     )
 
@@ -146,8 +148,7 @@ def get_product_order_readinesses(
             continue
         try:
             validated = ProcessFlowPayload.model_validate(flow)
-            validate_process_flow(validated, current_bom_ids)
-        except (ValidationError, DomainViolation):
+        except ValidationError:
             result[product.id] = ProductOrderReadiness(False, "当前版本正式流程图不完整")
             continue
         validated_flows[product.id] = validated
@@ -157,6 +158,7 @@ def get_product_order_readinesses(
             if node.type in {"process", "assembly"}
         )
     workshops = get_workshop_routes(session, workshop_ids)
+    direct_inbound_workshop_ids = packaging_workshop_ids(workshops)
     for product in product_list:
         validated = validated_flows.get(product.id)
         if validated is None:
@@ -168,6 +170,15 @@ def get_product_order_readinesses(
         }
         if not flow_workshop_ids.issubset(workshops):
             result[product.id] = ProductOrderReadiness(False, "流程图包含已失效车间")
+            continue
+        try:
+            validate_process_flow(
+                validated,
+                bom_ids[(product.id, product.version)],
+                direct_inbound_workshop_ids,
+            )
+        except DomainViolation:
+            result[product.id] = ProductOrderReadiness(False, "当前版本正式流程图不完整")
             continue
         result[product.id] = ProductOrderReadiness(True, "")
     return result

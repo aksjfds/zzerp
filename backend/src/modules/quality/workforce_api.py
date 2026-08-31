@@ -21,6 +21,7 @@ class WorkOrderBatchActivity:
     scrap_quantity: int | None
     lost_quantity: int | None
     qc_worker_id: int | None
+    destination_decided_at: datetime | None
     recorded_at: datetime | None
 
 
@@ -35,6 +36,7 @@ def _batch_activity(batch: WorkOrderBatch) -> WorkOrderBatchActivity:
         scrap_quantity=batch.scrap_quantity,
         lost_quantity=batch.lost_quantity,
         qc_worker_id=batch.qc_worker_id,
+        destination_decided_at=batch.destination_decided_at,
         recorded_at=batch.recorded_at,
     )
 

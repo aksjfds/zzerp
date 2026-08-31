@@ -7,6 +7,8 @@ outside this module.
 
 from sqlalchemy import select
 
+from domain.production_types import WORK_ORDER_SUPPLIER_PROCESSING
+from domain.time import business_now
 from modules.organization.context_api import ProcedureContext
 from modules.production_core.persistence import (
     ProductionItem,
@@ -41,7 +43,7 @@ def create_work_order_material(
     session,
     *,
     work_order_id: int,
-    repository_id: int,
+    repository_id: int | None,
     production_item_id: int,
     quantity: int,
     source_flow_node_id: str,
@@ -89,6 +91,7 @@ def create_assembly_work_order_record(
     worker_name: str | None,
     quantity: int,
     remark: str | None,
+    is_temporary: bool,
     repository_id: int | None = None,
 ) -> WorkOrder:
     order = WorkOrder(
@@ -96,6 +99,7 @@ def create_assembly_work_order_record(
         production_item_id=production_item_id,
         procedure_id=procedure.id,
         work_order_type="assembly",
+        is_temporary=is_temporary,
         flow_node_id=flow_node_id,
         source_flow_node_id=flow_node_id,
         work_order_name=work_order_name,
@@ -106,6 +110,42 @@ def create_assembly_work_order_record(
         quantity=quantity,
     )
     session.add(order)
+    session.flush()
+    return order
+
+
+def create_supplier_processing_work_order_record(
+    session,
+    *,
+    production_item_id: int,
+    source_flow_node_id: str,
+    supplier_flow_node_id: str,
+    supplier_name: str,
+    supplier_process_name: str,
+    quantity: int,
+    created_by: str,
+    remark: str | None,
+) -> WorkOrder:
+    order = WorkOrder(
+        repository_id=None,
+        production_item_id=production_item_id,
+        procedure_id=None,
+        work_order_type=WORK_ORDER_SUPPLIER_PROCESSING,
+        is_temporary=False,
+        flow_node_id=supplier_flow_node_id,
+        source_flow_node_id=source_flow_node_id,
+        supplier_name=supplier_name,
+        supplier_process_name=supplier_process_name,
+        work_order_name=supplier_process_name,
+        created_by=created_by,
+        remark=(remark or "").strip() or None,
+        worker_id=None,
+        worker_name=None,
+        quantity=quantity,
+    )
+    session.add(order)
+    session.flush()
+    order.work_order_no = f"WO-{business_now():%Y%m%d}-{order.id:06d}"
     session.flush()
     return order
 
@@ -155,5 +195,6 @@ __all__ = [
     "assign_work_order_repository",
     "create_assembly_work_order_record",
     "create_production_item",
+    "create_supplier_processing_work_order_record",
     "create_work_order_material",
 ]

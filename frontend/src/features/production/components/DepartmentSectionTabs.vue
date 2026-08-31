@@ -8,6 +8,8 @@ import ProductionPositionStorageView from '../views/ProductionPositionStorageVie
 
 const props = defineProps<{
   departmentCode: string
+  workspaceLabel?: string
+  additionalTabs?: ReadonlyArray<{ name: string; label: string }>
   showInventory?: boolean
   showWorkers?: boolean
   showProgress?: boolean
@@ -17,13 +19,14 @@ const emit = defineEmits<{
   configurationSaved: []
 }>()
 
-type DepartmentTab = 'workspace' | 'inventory' | 'workers' | 'progress' | 'tag-prices'
+type DepartmentTab = string
 
 const route = useRoute()
 const router = useRouter()
 let tabSwitchRevision = 0
 const availableTabs = computed<DepartmentTab[]>(() => {
   const tabs: DepartmentTab[] = ['workspace']
+  for (const tab of props.additionalTabs || []) tabs.push(tab.name)
   if (props.showInventory) tabs.push('inventory')
   if (props.showProgress) tabs.push('progress')
   if (props.showProcedurePrices) tabs.push('tag-prices')
@@ -62,8 +65,18 @@ async function switchTab(tab: DepartmentTab) {
 
 <template>
   <ElTabs v-model="activeTab" class="department-section-tabs">
-    <ElTabPane label="生产工作台" name="workspace" lazy>
+    <ElTabPane :label="workspaceLabel || '生产工作台'" name="workspace" lazy>
       <slot />
+    </ElTabPane>
+
+    <ElTabPane
+      v-for="tab in additionalTabs || []"
+      :key="tab.name"
+      :label="tab.label"
+      :name="tab.name"
+      lazy
+    >
+      <slot :name="tab.name" />
     </ElTabPane>
 
     <ElTabPane

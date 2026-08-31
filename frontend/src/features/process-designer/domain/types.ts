@@ -1,6 +1,12 @@
-export const PROCESS_FLOW_SCHEMA_VERSION = 4 as const
+export const PROCESS_FLOW_SCHEMA_VERSION = 5 as const
 
-export type FlowNodeType = 'part' | 'process' | 'qc' | 'assembly' | 'shipping'
+export type FlowNodeType =
+  | 'part'
+  | 'process'
+  | 'qc'
+  | 'assembly'
+  | 'finished_inbound'
+  | 'supplier_processing'
 
 export type FlowPoint = { x: number; y: number }
 
@@ -24,7 +30,8 @@ export type ProcessFlowNode = FlowNodeBase & {
 }
 
 export type QcFlowNode = FlowNodeBase & { type: 'qc' }
-export type ShippingFlowNode = FlowNodeBase & { type: 'shipping' }
+export type SupplierProcessingFlowNode = FlowNodeBase & { type: 'supplier_processing' }
+export type FinishedInboundFlowNode = FlowNodeBase & { type: 'finished_inbound' }
 
 export type AssemblyFlowNode = FlowNodeBase & {
   type: 'assembly'
@@ -36,7 +43,13 @@ export type AssemblyFlowNode = FlowNodeBase & {
   assembly_name?: string
 }
 
-export type FlowNode = PartFlowNode | ProcessFlowNode | QcFlowNode | ShippingFlowNode | AssemblyFlowNode
+export type FlowNode =
+  | PartFlowNode
+  | ProcessFlowNode
+  | QcFlowNode
+  | SupplierProcessingFlowNode
+  | FinishedInboundFlowNode
+  | AssemblyFlowNode
 
 export type FlowEdge = {
   id: string

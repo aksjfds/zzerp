@@ -1,4 +1,4 @@
-"""Inject inventory deducted during production-plan confirmation into production."""
+"""Inject material stock issued during plan confirmation into production."""
 
 from sqlalchemy import select
 
@@ -8,23 +8,17 @@ from modules.organization.model_api import Department
 from modules.production_core.flow import load_product_flow, normal_target
 from modules.production_core.movements import record_movement
 from modules.production_core.persistence import ProductionItem
-from modules.production_core.work_order_support import (
-    move_to_node,
-    terminal_unit_quantity,
-)
+from modules.production_core.work_order_support import move_to_node
 from modules.sales.model_api import CustomerOrderItem
 
 
 def accept_issued_inventory(
     session,
     plan_item: IssuedPlanItem,
-    deducted_stock: IssuedInventoryStock,
-    actor_username: str,
-    *,
-    register_pending_finished_goods,
-    allocate_issued_finished_goods,
+    issued_stock: IssuedInventoryStock,
+    _actor_username: str,
 ) -> None:
-    quantity = deducted_stock.quantity
+    quantity = issued_stock.quantity
     if quantity <= 0:
         return
     order_item = session.get(CustomerOrderItem, plan_item.customer_order_item_id)
@@ -32,54 +26,29 @@ def accept_issued_inventory(
         raise DomainError("customer_order_item_not_found", "订单产品不存在", status_code=409)
     flow, nodes = load_product_flow(session, plan_item.product_id, plan_item.product_version)
     if plan_item.item_type == "finished_product":
-        _accept_finished(
-            session,
-            plan_item,
-            order_item,
-            flow,
-            nodes,
-            quantity,
-            actor_username,
-            allocate_issued_finished_goods,
+        raise DomainError(
+            "finished_stock_reservation_injected",
+            "成品库存占用不能作为生产物料注入",
+            status_code=409,
         )
-        return
     target, source_node_id = _resume_target(
         flow,
         nodes,
-        deducted_stock.completed_flow_node_id,
+        issued_stock.completed_flow_node_id,
     )
     if target is None:
         raise DomainError("inventory_issue_target_missing", "库存项目没有可进入的后续节点", status_code=409)
     production_item = _load_or_create_production_item(
         session,
         plan_item,
-        deducted_stock.flow_node_id,
+        issued_stock.flow_node_id,
     )
-    if target.get("type") == "shipping":
-        department_id = move_to_node(
-            session,
-            production_item,
-            target,
-            quantity,
-            source_node_id,
+    if target.get("type") == "finished_inbound":
+        raise DomainError(
+            "warehouse_material_finished_route_invalid",
+            "配件或装配体库存不能在生产计划确认时直接转为成品",
+            status_code=409,
         )
-        register_pending_finished_goods(
-            session,
-            production_item=production_item,
-            shipping_node_id=target["id"],
-            quantity=quantity,
-        )
-        record_movement(
-            session,
-            production_item=production_item,
-            quantity=quantity,
-            movement_type="inventory_issue",
-            source_flow_node_id=source_node_id,
-            target_flow_node_id=target["id"],
-            source_department_id=_department_id(session, "warehouse"),
-            target_department_id=department_id,
-        )
-        return
     department_id = move_to_node(
         session,
         production_item,
@@ -97,58 +66,6 @@ def accept_issued_inventory(
         source_department_id=_department_id(session, "warehouse"),
         target_department_id=department_id,
     )
-
-
-def _accept_finished(
-    session,
-    plan_item,
-    order_item,
-    flow,
-    nodes,
-    quantity: int,
-    actor_username: str,
-    allocate_issued_finished_goods,
-) -> None:
-    shipping = nodes.get(plan_item.flow_node_id)
-    if shipping is None or shipping.get("type") != "shipping":
-        raise DomainError("inventory_finished_identity_invalid", "成品库存身份与流程图不一致", status_code=409)
-    unit_quantity = terminal_unit_quantity(session, flow, nodes, shipping["id"])
-    if unit_quantity is None:
-        raise DomainError("inventory_finished_unit_invalid", "无法确定成品库存单位", status_code=409)
-    incoming = [
-        edge.get("source_node_id")
-        for edge in flow.get("edges", [])
-        if edge.get("target_node_id") == shipping["id"]
-    ]
-    if len(incoming) != 1 or not incoming[0]:
-        raise DomainError("inventory_finished_route_invalid", "成品节点必须有唯一来源", status_code=409)
-    production_item = ProductionItem(
-        customer_order_item_id=order_item.id,
-        product_id=plan_item.product_id,
-        product_version=plan_item.product_version,
-        product_bom_id=None,
-        origin_flow_node_id=shipping["id"],
-    )
-    session.add(production_item)
-    session.flush()
-    record_movement(
-        session,
-        production_item=production_item,
-        quantity=quantity * unit_quantity,
-        movement_type="inventory_issue",
-        source_flow_node_id=incoming[0],
-        target_flow_node_id=shipping["id"],
-        source_department_id=_department_id(session, "finished"),
-        target_department_id=_department_id(session, "finished"),
-    )
-    allocate_issued_finished_goods(
-        session,
-        production_item=production_item,
-        shipping_node_id=shipping["id"],
-        quantity=quantity * unit_quantity,
-        actor_username=actor_username,
-    )
-
 
 def _load_or_create_production_item(
     session,

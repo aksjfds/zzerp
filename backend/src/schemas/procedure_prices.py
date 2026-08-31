@@ -26,6 +26,9 @@ class ProcedurePriceScope(ProcedurePriceModel):
     workshop_name: str
     part_name: str
     part_no: str
+    confirmed: bool
+    confirmed_at: str | None
+    confirmed_by: str | None
     procedures: list[ProcedurePriceItem]
 
 

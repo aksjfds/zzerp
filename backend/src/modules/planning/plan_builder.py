@@ -191,18 +191,18 @@ def _order_item_definitions(session: Session, order_item, order_index: int) -> l
         )
     flow = flow_record.flow_json
     nodes = {node.get("id"): node for node in flow.get("nodes", [])}
-    shipping_nodes = sorted(
-        (node for node in nodes.values() if node.get("type") == "shipping"),
+    inbound_nodes = sorted(
+        (node for node in nodes.values() if node.get("type") == "finished_inbound"),
         key=_node_sort_key,
     )
-    if len(shipping_nodes) != 1:
+    if len(inbound_nodes) != 1:
         raise DomainError(
-            "product_shipping_node_invalid",
-            f"产品 {product.factory_code} 必须有且只有一个发货节点",
+            "product_finished_inbound_node_invalid",
+            f"产品 {product.factory_code} 必须有且只有一个入库节点",
             path="items",
         )
     base_sort = order_index * 10000
-    finished_node = shipping_nodes[0]
+    finished_node = inbound_nodes[0]
     result = [PlannedIdentity(
         customer_order_id=order_item.customer_order_id,
         customer_order_item_id=order_item.id,
@@ -330,7 +330,7 @@ def _apply_flow_inventory(
 def _flow_gross_quantities(
     session: Session,
     items,
-    shipping_node_id: str,
+    inbound_node_id: str,
     required_product_quantity: int,
     availability: dict[str, int],
 ) -> dict[str, int]:
@@ -370,7 +370,7 @@ def _flow_gross_quantities(
             if source_id:
                 visit(source_id, next_required, visiting | {node_id})
 
-    visit(shipping_node_id, required_product_quantity, set())
+    visit(inbound_node_id, required_product_quantity, set())
     return gross
 
 

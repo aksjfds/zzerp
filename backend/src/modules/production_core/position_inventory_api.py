@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from domain.warehouse import WarehouseItemType
 from modules.engineering.model_api import Product, ProductBom
 from modules.errors import DomainError
-from modules.production_core.card_status import reserved_quantities
+from modules.production_core.work_order_status import reserved_quantities
 from modules.production_core.flow_api import (
     ProductionFlowContext,
     load_production_flow,

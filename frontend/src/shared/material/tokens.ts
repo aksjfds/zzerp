@@ -16,6 +16,8 @@ export const materialColors = {
   flowProductionContainer: '#d8f9c8',
   flowOutsource: '#6750a4',
   flowOutsourceContainer: '#eaddff',
+  flowSupplierProcessing: '#7a5900',
+  flowSupplierProcessingContainer: '#ffdea8',
   flowAssembly: '#00639a',
   flowAssemblyContainer: '#cce5ff',
   flowFinished: '#006a60',

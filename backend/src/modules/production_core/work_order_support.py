@@ -49,7 +49,7 @@ def target_department_id(session, node: dict) -> int:
         if workshop is None:
             raise DomainError("workshop_department_missing", "目标节点没有有效车间")
         return workshop.department_id
-    if node_type == "shipping":
+    if node_type == "finished_inbound":
         department_code = "finished"
     elif node_type == "assembly":
         workshop = session.get(Workshop, node.get("workshop_id"))
@@ -78,7 +78,7 @@ def move_to_node(
         return None
     session.get(ProductionItem, production_item.id, with_for_update=True)
     department_id = target_department_id(session, node)
-    if node.get("type") == "shipping":
+    if node.get("type") == "finished_inbound":
         return department_id
     target = session.scalar(
         select(Repository)
@@ -152,37 +152,37 @@ def terminal_unit_quantity(session, flow: dict, nodes: dict[str, dict], node_id:
     if source_type == "part":
         bom = session.get(ProductBom, source.get("bom_item_id"))
         return bom.pcs if bom is not None else None
-    if source_type in {"process", "qc"}:
+    if source_type in {"process", "qc", "supplier_processing"}:
         return terminal_unit_quantity(session, flow, nodes, source_id)
     return None
 
 
-def shipping_node_and_unit_quantity(
+def finished_inbound_node_and_unit_quantity(
     session,
     flow: dict,
     nodes: dict[str, dict],
 ) -> tuple[dict, int]:
-    shipping_nodes = [
+    inbound_nodes = [
         node for node in nodes.values()
-        if node.get("type") == "shipping"
+        if node.get("type") == "finished_inbound"
     ]
-    if len(shipping_nodes) != 1:
+    if len(inbound_nodes) != 1:
         raise DomainError(
-            "production_shipping_node_invalid",
-            "产品版本必须配置唯一的成品节点",
+            "production_finished_inbound_node_invalid",
+            "产品版本必须配置唯一的入库节点",
             status_code=409,
         )
-    shipping_node = shipping_nodes[0]
+    inbound_node = inbound_nodes[0]
     unit_quantity = terminal_unit_quantity(
         session,
         flow,
         nodes,
-        shipping_node["id"],
+        inbound_node["id"],
     )
     if unit_quantity is None or unit_quantity <= 0:
         raise DomainError(
-            "production_shipping_unit_invalid",
+            "production_finished_inbound_unit_invalid",
             "产品版本无法确定有效的成品换算单位",
             status_code=409,
         )
-    return shipping_node, unit_quantity
+    return inbound_node, unit_quantity

@@ -8,7 +8,8 @@ import {
   startPartDrag,
   startProcessDrag,
   startQcDrag,
-  startShippingDrag,
+  startSupplierProcessingDrag,
+  startFinishedInboundDrag,
   updateNodeDefinition,
 } from '../logicflow/commands'
 
@@ -41,6 +42,10 @@ const {
   workshopDepartmentCode: (workshopId) => props.workshops.find(
     workshop => workshop.id === workshopId,
   )?.department_code,
+  workshopDirectInbound: (workshopId) => {
+    const workshop = props.workshops.find(item => item.id === workshopId)
+    return workshop?.department_code === 'assembly' && workshop.input_mode === 'single'
+  },
 })
 
 watch(() => props.readonly, value => setReadonly(Boolean(value)))
@@ -91,9 +96,14 @@ function dragQc() {
   withInstance(startQcDrag)
 }
 
-function dragShipping() {
+function dragSupplierProcessing() {
   if (props.readonly) return
-  withInstance(startShippingDrag)
+  withInstance(startSupplierProcessingDrag)
+}
+
+function dragFinishedInbound() {
+  if (props.readonly) return
+  withInstance(startFinishedInboundDrag)
 }
 
 function updateNode(nodeId: string, label: string, property: Parameters<typeof updateNodeDefinition>[3]) {
@@ -110,7 +120,8 @@ defineExpose({
   dragPart,
   dragProcess,
   dragQc,
-  dragShipping,
+  dragSupplierProcessing,
+  dragFinishedInbound,
   focusElement,
   getGraphData: currentFlow,
   renderFlow,

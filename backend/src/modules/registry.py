@@ -8,6 +8,7 @@ from modules.production_core.descriptor import MODULE as PRODUCTION_CORE
 from modules.quality.descriptor import MODULE as QUALITY
 from modules.sales.descriptor import MODULE as SALES
 from modules.standard_execution.descriptor import MODULE as STANDARD_EXECUTION
+from modules.supplier_processing.descriptor import MODULE as SUPPLIER_PROCESSING
 from modules.workforce.descriptor import MODULE as WORKFORCE
 
 
@@ -21,6 +22,7 @@ MODULES = {
         SALES,
         PRODUCTION_CORE,
         STANDARD_EXECUTION,
+        SUPPLIER_PROCESSING,
         ASSEMBLY,
         QUALITY,
         WORKFORCE,

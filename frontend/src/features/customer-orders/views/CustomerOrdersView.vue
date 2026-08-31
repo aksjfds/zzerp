@@ -60,7 +60,7 @@ async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete'
     },
     cancel: {
       title: '取消客户订单',
-      message: '确定取消这个客户订单吗？',
+      message: '确定取消这个客户订单吗？仅占用的成品库存会自动释放；已经实际出库、加工或送检时不能取消。',
       success: '客户订单已取消',
     },
     delete: {
@@ -101,7 +101,7 @@ async function editOrder(order: CustomerOrder) {
 
 function hasMoreActions(order: CustomerOrder) {
   return (
-    ['draft', 'confirmed'].includes(order.status)
+    ['draft', 'confirmed', 'planned'].includes(order.status)
     && authStore.hasPermission(ORDER_PERMISSIONS.cancel)
   ) || (
     order.status === 'draft'
@@ -174,7 +174,7 @@ defineExpose({ load: loadOrders })
                 <template #dropdown>
                   <ElDropdownMenu>
                     <ElDropdownItem
-                      v-if="['draft', 'confirmed'].includes(row.status)"
+                      v-if="['draft', 'confirmed', 'planned'].includes(row.status)"
                       v-permission="ORDER_PERMISSIONS.cancel"
                       command="cancel"
                     >取消订单</ElDropdownItem>

@@ -5,13 +5,17 @@ from dataclasses import dataclass
 from modules.errors import DomainError
 
 
-EXECUTION_NODE_TYPES = frozenset({"process", "assembly"})
+EXECUTION_NODE_TYPES = frozenset({
+    "process",
+    "assembly",
+    "supplier_processing",
+})
 
 
 @dataclass(frozen=True, slots=True)
 class MaterialCompletionStep:
     flow_node_id: str
-    workshop_name: str
+    node_label: str
     occurrence: int
     completion_status: str
     route_order: int
@@ -31,16 +35,16 @@ def material_completion_steps(
     occurrences: dict[str, int] = {}
     steps: list[MaterialCompletionStep] = []
     for route_order, node in enumerate(route_nodes):
-        workshop_name = str(node.get("label") or "").strip()
-        if not workshop_name:
-            raise _projection_error("流程中的车间节点缺少名称")
-        occurrence = occurrences.get(workshop_name, 0) + 1
-        occurrences[workshop_name] = occurrence
+        node_label = str(node.get("label") or "").strip()
+        if not node_label:
+            raise _projection_error("流程中的执行节点缺少名称")
+        occurrence = occurrences.get(node_label, 0) + 1
+        occurrences[node_label] = occurrence
         steps.append(MaterialCompletionStep(
             flow_node_id=str(node["id"]),
-            workshop_name=workshop_name,
+            node_label=node_label,
             occurrence=occurrence,
-            completion_status=f"{workshop_name}{occurrence}完",
+            completion_status=f"{node_label}{occurrence}完",
             route_order=route_order,
         ))
     return tuple(steps)
@@ -58,7 +62,7 @@ def completed_execution_node_id(
     if completed.get("type") in EXECUTION_NODE_TYPES:
         return completed_flow_node_id
     if completed.get("type") != "qc":
-        raise _projection_error("完成状态必须来自车间节点或其 QC 节点")
+        raise _projection_error("完成状态必须来自执行节点或其 QC 节点")
 
     incoming = _incoming_node_ids(flow, completed_flow_node_id)
     if len(incoming) != 1:
@@ -66,7 +70,7 @@ def completed_execution_node_id(
     source_node_id = incoming[0]
     source = nodes.get(source_node_id)
     if source is None or source.get("type") not in EXECUTION_NODE_TYPES:
-        raise _projection_error("QC 上游不是有效的车间节点")
+        raise _projection_error("QC 上游不是有效的执行节点")
     return source_node_id
 
 
@@ -111,7 +115,7 @@ def _material_execution_nodes(
         if node is None:
             raise _projection_error("流程连线引用了不存在的节点")
         node_type = node.get("type")
-        if node_type == "shipping":
+        if node_type == "finished_inbound":
             break
         if node_type == "assembly" and current_node_id != origin_node_id:
             break

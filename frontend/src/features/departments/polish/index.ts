@@ -10,8 +10,7 @@ export const polishDepartment: DepartmentModule = {
   requiredPermission: PRODUCTION_PERMISSIONS.view,
   component: () => import('@/features/production/views/PolishDepartmentView.vue'),
   capabilities: [
-    'repositories',
-    'work_orders',
+    'production_workbench',
     'workers',
     'standard_execution',
     'special_printing',

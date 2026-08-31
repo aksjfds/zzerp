@@ -5,7 +5,7 @@ import { getApiErrorDetail } from '@/api/request'
 import {
   queryProductionPositionStorageCandidates,
   storeProductionPosition,
-} from '../api/departmentRepositories'
+} from '../api/productionStorage'
 import type { ProductionPositionStorageCandidate } from '../domain/types'
 
 const props = defineProps<{ departmentCode: string }>()

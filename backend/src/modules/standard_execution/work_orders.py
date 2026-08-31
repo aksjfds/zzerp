@@ -4,6 +4,7 @@ from database import SessionLocal
 from domain.identity import can_access_department
 from domain.production_types import COMPLETION_QC, WorkOrderCompletionAction
 from modules.errors import DomainError
+from modules.inventory.finished_receipt_api import register_pending_packaging_receipt
 from modules.organization.context_api import ProcedureContext
 from modules.organization.read_api import get_department_ids_by_codes, get_department_views_by_ids
 from modules.organization.transaction_api import load_procedure_context
@@ -12,6 +13,7 @@ from modules.production_core.operational_api import (
     capture_operation_state,
     consume_order_source,
     create_order_record,
+    move_to_node,
     node_context,
     order_remaining_quantity,
     process_qc_node,
@@ -45,6 +47,7 @@ def create_standard_order(
     worker_name: str | None,
     created_by: str,
     remark: str | None,
+    is_temporary: bool,
 ) -> WorkOrderContext:
     order = create_order_record(
         session,
@@ -56,6 +59,7 @@ def create_standard_order(
         worker_name=worker_name,
         created_by=created_by,
         work_order_type="standard",
+        is_temporary=is_temporary,
         remark=remark,
     )
     attach_work_order_price(
@@ -67,6 +71,7 @@ def create_standard_order(
         flow_node_id=source.flow_node_id,
         procedure_id=procedure.id,
         procedure_name=procedure.procedure_name,
+        is_temporary=is_temporary,
     )
     return order
 
@@ -106,17 +111,39 @@ def submit_standard_order(
         target_flow_node_id = qc_node["id"]
         target_department_id = qc_department_id
     else:
-        add_repository_quantity(
-            session,
-            production_item_id=production_item.id,
-            flow_node_id=node["id"],
-            execution_flow_node_id=node["id"],
-            department_id=department_id,
-            quantity=quantity,
-            source_work_order_id=order.id,
-        )
-        target_flow_node_id = node["id"]
-        target_department_id = department_id
+        direct_target = context.normal_target(node["id"])
+        if direct_target is not None and direct_target.get("type") == "finished_inbound":
+            target_department_id = move_to_node(
+                session,
+                production_item,
+                direct_target,
+                quantity,
+                node["id"],
+                source_work_order_id=order.id,
+            )
+            if target_department_id is None:
+                raise DomainError("finished_inbound_target_missing", "装包节点没有有效入库终点")
+            register_pending_packaging_receipt(
+                session,
+                work_order_id=order.id,
+                product_id=production_item.product_id,
+                product_version=production_item.product_version,
+                inbound_node_id=direct_target["id"],
+                released_quantity=quantity,
+            )
+            target_flow_node_id = direct_target["id"]
+        else:
+            add_repository_quantity(
+                session,
+                production_item_id=production_item.id,
+                flow_node_id=node["id"],
+                source_flow_node_id=node["id"],
+                department_id=department_id,
+                quantity=quantity,
+                source_work_order_id=order.id,
+            )
+            target_flow_node_id = node["id"]
+            target_department_id = department_id
     record_movement(
         session,
         production_item=production_item,

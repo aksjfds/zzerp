@@ -11,17 +11,26 @@ import {
 export const PROCESS_FLOW_GRID_X = 500
 export const PROCESS_FLOW_GRID_Y = 250
 
-const NODE_TYPES = new Set<FlowNodeType>(['part', 'process', 'qc', 'assembly', 'shipping'])
+const NODE_TYPES = new Set<FlowNodeType>([
+  'part',
+  'process',
+  'qc',
+  'assembly',
+  'finished_inbound',
+  'supplier_processing',
+])
 const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }> = {
   part: { halfWidth: 75, halfHeight: 28 },
   process: { halfWidth: 75, halfHeight: 28 },
   qc: { halfWidth: 68, halfHeight: 42 },
-  shipping: { halfWidth: 75, halfHeight: 28 },
+  finished_inbound: { halfWidth: 75, halfHeight: 28 },
   assembly: { halfWidth: 80, halfHeight: 28 },
+  supplier_processing: { halfWidth: 80, halfHeight: 28 },
 }
 
 type RenderOptions = {
   workshopDepartmentCode?: (workshopId: number) => string | undefined
+  workshopDirectInbound?: (workshopId: number) => boolean
 }
 
 export function toLogicFlowData(
@@ -104,7 +113,8 @@ function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
     }
   }
   if (type === 'qc') return { ...base, type: 'qc' }
-  if (type === 'shipping') return { ...base, type: 'shipping' }
+  if (type === 'supplier_processing') return { ...base, type: 'supplier_processing' }
+  if (type === 'finished_inbound') return { ...base, type: 'finished_inbound' }
   return {
     ...base,
     type: 'assembly',
@@ -142,10 +152,12 @@ function nodeProperties(node: FlowNode, options: RenderOptions): Record<string, 
     return {
       workshopId: node.workshop_id,
       departmentCode: options.workshopDepartmentCode?.(node.workshop_id),
+      directInbound: options.workshopDirectInbound?.(node.workshop_id) ?? false,
     }
   }
   if (node.type === 'qc') return {}
-  if (node.type === 'shipping') return {}
+  if (node.type === 'supplier_processing') return {}
+  if (node.type === 'finished_inbound') return {}
   if (node.type === 'assembly') {
     return {
       workshopId: node.workshop_id,

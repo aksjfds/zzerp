@@ -1,31 +1,11 @@
 import { service } from '@/api/request'
 import type { CompletionAction, WorkOrder } from '../domain/types'
 
-export async function queryDepartmentWorkOrders(
-  departmentCode: string,
-  page = 1,
-  pageSize = 50,
-  productionItemId?: number | null,
-  flowNodeId?: string | null,
-  sourceFlowNodeId?: string | null,
-) {
-  const params = new URLSearchParams()
-  params.set('page', String(page))
-  params.set('page_size', String(pageSize))
-  if (productionItemId) params.set('production_item_id', String(productionItemId))
-  if (flowNodeId) params.set('flow_node_id', flowNodeId)
-  if (sourceFlowNodeId) params.set('source_flow_node_id', sourceFlowNodeId)
-  const response = await service.get<{ data: WorkOrder[]; total: number }>(
-    `/departments/${departmentCode}/work-orders`,
-    { params },
-  )
-  return { items: response.data.data, total: response.data.total }
-}
-
 export async function createWorkOrder(
   repositoryId: number,
   procedureId: number | null,
   procedureName: string | null,
+  isTemporary: boolean,
   quantity: number,
   workerId: number | null,
   remark: string,
@@ -34,6 +14,7 @@ export async function createWorkOrder(
     repository_id: repositoryId,
     procedure_id: procedureId,
     procedure_name: procedureName,
+    is_temporary: isTemporary,
     quantity,
     worker_id: workerId,
     remark,
@@ -45,6 +26,7 @@ export async function createAssemblyWorkOrder(
   materials: Array<{ repository_id: number; quantity: number }>,
   procedureId: number | null,
   procedureName: string | null,
+  isTemporary: boolean,
   quantity: number,
   workerId: number | null,
   remark: string,
@@ -53,6 +35,7 @@ export async function createAssemblyWorkOrder(
     materials,
     procedure_id: procedureId,
     procedure_name: procedureName,
+    is_temporary: isTemporary,
     quantity,
     worker_id: workerId,
     remark,

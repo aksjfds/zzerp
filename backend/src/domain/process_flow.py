@@ -1,4 +1,5 @@
 from collections import defaultdict, deque
+from collections.abc import Collection
 from typing import Protocol
 
 from domain.errors import DomainViolation
@@ -9,6 +10,7 @@ class FlowNodeLike(Protocol):
     type: str
     label: str
     bom_item_id: int
+    workshop_id: int
 
 
 class FlowEdgeLike(Protocol):
@@ -76,9 +78,15 @@ def validate_process_flow_draft(
 def validate_process_flow(
     flow: ProcessFlowLike,
     bom_ids: set[int],
+    direct_inbound_workshop_ids: Collection[int] = (),
 ) -> ProcessFlowLike:
+    direct_inbound_workshops = set(direct_inbound_workshop_ids)
     if not flow.nodes and not flow.edges:
-        return flow
+        _fail(
+            "finished_inbound_node_count",
+            "流程图必须且只能配置一个入库节点",
+            "process_flow.nodes",
+        )
     if not flow.nodes:
         _fail("flow_nodes_missing", "流程图存在连线但没有节点", "process_flow.nodes")
 
@@ -122,6 +130,15 @@ def validate_process_flow(
             part_node_by_bom[duplicate_id][0],
         )
 
+    inbound_nodes = [node for node in flow.nodes if node.type == "finished_inbound"]
+    if len(inbound_nodes) != 1:
+        _fail(
+            "finished_inbound_node_count",
+            "流程图必须且只能配置一个入库节点",
+            "process_flow.nodes",
+            inbound_nodes[0].id if inbound_nodes else None,
+        )
+
     edge_ids: set[str] = set()
     edge_keys: set[tuple[str, str]] = set()
     normal_incoming: dict[str, int] = defaultdict(int)
@@ -163,29 +180,64 @@ def validate_process_flow(
                 _fail("part_has_incoming_edge", f"配件“{node.label}”不能有输入连线", path, node.id)
             if normal_outgoing[node.id] != 1:
                 _fail("part_output_count", f"配件“{node.label}”必须且只能连接一个首节点", path, node.id)
-            if node_map[normal_targets[node.id][0]].type not in {"process", "assembly"}:
+            if node_map[normal_targets[node.id][0]].type not in {
+                "process",
+                "assembly",
+                "supplier_processing",
+            }:
                 _fail(
                     "part_first_node_invalid",
-                    "配件节点的第一个执行节点必须是工艺或装配节点",
+                    "配件节点的第一个执行节点必须是工艺、装配或委外加工节点",
+                    path,
+                    node.id,
+                )
+        elif node.type == "supplier_processing":
+            if normal_incoming[node.id] != 1:
+                _fail(
+                    "supplier_processing_input_count",
+                    f"委外加工节点“{node.label}”必须且只能连接一个上游配件",
+                    path,
+                    node.id,
+                )
+            source = node_map[normal_sources[node.id][0]]
+            if source.type != "part":
+                _fail(
+                    "supplier_processing_source_invalid",
+                    f"委外加工节点“{node.label}”的上游必须是配件节点",
+                    path,
+                    node.id,
+                )
+            if normal_outgoing[node.id] != 1:
+                _fail(
+                    "supplier_processing_output_count",
+                    f"委外加工节点“{node.label}”必须且只能连接一个QC节点",
+                    path,
+                    node.id,
+                )
+            target = node_map[normal_targets[node.id][0]]
+            if target.type != "qc":
+                _fail(
+                    "supplier_processing_qc_required",
+                    f"委外加工节点“{node.label}”的后续必须是QC节点",
                     path,
                     node.id,
                 )
         elif node.type == "qc":
             if normal_incoming[node.id] != 1:
-                _fail("qc_input_count", f"QC节点“{node.label}”必须且只能连接一个上游工艺或装配", path, node.id)
+                _fail("qc_input_count", f"QC节点“{node.label}”必须且只能连接一个上游执行节点", path, node.id)
             source = node_map[normal_sources[node.id][0]]
-            if source.type not in {"process", "assembly"}:
-                _fail("qc_source_invalid", f"QC节点“{node.label}”的上游必须是工艺或装配节点", path, node.id)
+            if source.type not in {"process", "assembly", "supplier_processing"}:
+                _fail("qc_source_invalid", f"QC节点“{node.label}”的上游必须是工艺、装配或委外加工节点", path, node.id)
             if normal_outgoing[node.id] != 1:
                 _fail("qc_output_count", f"QC节点“{node.label}”必须且只能连接一个后续节点", path, node.id)
             target = node_map[normal_targets[node.id][0]]
-            if target.type not in {"process", "assembly", "shipping"}:
-                _fail("qc_target_invalid", f"QC节点“{node.label}”后只能连接工艺、装配或发货节点", path, node.id)
-        elif node.type == "shipping":
+            if target.type not in {"process", "assembly", "finished_inbound"}:
+                _fail("qc_target_invalid", f"QC节点“{node.label}”后只能连接工艺、装配或入库节点", path, node.id)
+        elif node.type == "finished_inbound":
             if normal_incoming[node.id] != 1:
-                _fail("shipping_input_count", f"发货节点“{node.label}”必须且只能连接一个上游节点", path, node.id)
+                _fail("finished_inbound_input_count", f"入库节点“{node.label}”必须且只能连接一个上游节点", path, node.id)
             if normal_outgoing[node.id] != 0:
-                _fail("shipping_has_output", f"发货节点“{node.label}”必须是流程终点，不能再连接后续节点", path, node.id)
+                _fail("finished_inbound_has_output", f"入库节点“{node.label}”必须是流程终点，不能再连接后续节点", path, node.id)
         else:
             minimum = 2 if node.type == "assembly" else 1
             if normal_incoming[node.id] < minimum:
@@ -205,10 +257,15 @@ def validate_process_flow(
             if normal_outgoing[node.id] != 1:
                 _fail("execution_output_count", f"节点“{node.label}”必须且只能连接一个后续节点", path, node.id)
             target = node_map[normal_targets[node.id][0]]
-            if target.type != "qc":
+            direct_inbound = (
+                node.type == "process"
+                and node.workshop_id in direct_inbound_workshops
+                and target.type == "finished_inbound"
+            )
+            if target.type != "qc" and not direct_inbound:
                 _fail(
                     "execution_qc_required",
-                    f"节点“{node.label}”的后续必须是QC节点",
+                    f"节点“{node.label}”的后续必须是QC节点；只有装包节点可以直接连接入库",
                     path,
                     node.id,
                 )

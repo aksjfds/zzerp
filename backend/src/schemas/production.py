@@ -8,8 +8,6 @@ from schemas.production_inventory import (
     ProductionPositionStorageInput,
     ProductionPositionStorageListEnvelope,
     ProductionPositionStorageResponse,
-    RepositoryListEnvelope,
-    RepositoryResponse,
 )
 from schemas.production_progress import (
     AssemblyMaterialArrivalResponse,
@@ -34,9 +32,13 @@ from schemas.production_work_orders import (
     ReworkSubmission,
     WorkOrderCreate,
     WorkOrderEnvelope,
-    WorkOrderListEnvelope,
     WorkOrderResponse,
     WorkOrderSubmission,
+)
+from schemas.production_workbench import (
+    ProductionWorkbenchPositionListEnvelope,
+    ProductionWorkbenchProcedureSummaryResponse,
+    ProductionWorkbenchWorkOrderListEnvelope,
 )
 from schemas.production_workforce import (
     DepartmentWorkerCreate,

@@ -9,10 +9,11 @@ const props = defineProps<{
 }>()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 
-const typeLabel = computed(() => ({
+const typeLabel = computed(() => `${props.item?.is_temporary ? '临时' : ''}${({
   standard: '生产加工工单',
   assembly: '装配工单',
-}[props.item?.work_order_type || 'standard']))
+  supplier_processing: '委外加工工单',
+}[props.item?.work_order_type || 'standard'])}`)
 const statusLabel = computed(() => workOrderStatusLabel(props.item?.status || 'open'))
 
 function print() {
@@ -46,7 +47,7 @@ function print() {
         <tbody>
           <tr><th>客户订单</th><td>{{ item.customer_order_no }}</td><th>工单状态</th><td>{{ statusLabel }}</td></tr>
           <tr><th>配件编号</th><td>{{ item.part_no }}</td><th>配件名称</th><td>{{ item.part_name }}</td></tr>
-          <tr><th>工单内容</th><td>{{ item.work_order_name }}</td><th>{{ item.work_order_type === 'assembly' ? '对应产品数 / 装配体数' : '工单数量' }}</th><td class="quantity">{{ item.work_order_type === 'assembly' ? `${item.quantity} / ${item.output_quantity}` : item.quantity }}</td></tr>
+          <tr><th>加工工艺</th><td>{{ item.procedure_name }}</td><th>{{ item.work_order_type === 'assembly' ? '对应产品数 / 装配体数' : '工单数量' }}</th><td class="quantity">{{ item.work_order_type === 'assembly' ? `${item.quantity} / ${item.output_quantity}` : item.quantity }}</td></tr>
           <tr><th>执行工人</th><td>{{ item.worker_name || '未分配' }}</td><th>创建时间</th><td>{{ item.created_at }}</td></tr>
           <tr><th>备注</th><td colspan="3" class="remark">{{ item.remark || '无' }}</td></tr>
         </tbody>

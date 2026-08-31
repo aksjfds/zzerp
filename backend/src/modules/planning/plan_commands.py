@@ -8,7 +8,7 @@ from domain.time import utc_now
 from modules.errors import DomainError
 from modules.planning.execution_contract import PlanExecutionCollaborators
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
-from modules.planning.plan_confirmation import deduct_plan_inventory
+from modules.planning.plan_confirmation import allocate_plan_inventory
 from modules.planning.plan_builder import planned_finished_quantity, refresh_plan_availability
 from modules.planning.route_projection import rebuild_plan_route_tasks
 from modules.planning.plan_access import _ensure_revision, _load_plan
@@ -90,7 +90,7 @@ def confirm_order_plan(
                 f"{supported_quantity} 件，少于订单需求 {finished.gross_required_quantity} 件",
                 path="items",
             )
-    issued_rows = deduct_plan_inventory(
+    issued_rows = allocate_plan_inventory(
         session,
         plan,
         actor_username,
@@ -121,18 +121,32 @@ def cancel_order_plan(
     session: Session,
     order,
     _actor_username: str,
+    *,
+    collaborators: PlanExecutionCollaborators,
 ) -> None:
     plan = _load_plan(session, order.id, for_update=True)
     if plan is None:
         return
     if plan.status == "cancelled":
         return
-    if plan.status in {"confirmed", "completed"}:
+    if plan.status == "completed":
         raise DomainError(
-            "production_plan_inventory_deducted",
-            "生产计划已扣减库存，不能取消",
+            "production_plan_completed",
+            "已完成的生产计划不能取消",
             status_code=409,
         )
+    if plan.status == "confirmed":
+        if any(
+            item.item_type != "finished_product"
+            and item.allocated_inventory_quantity > 0
+            for item in plan.items
+        ):
+            raise DomainError(
+                "production_plan_material_issued",
+                "生产计划已经从仓库实际出库，不能取消",
+                status_code=409,
+            )
+        collaborators.release_finished_plan_stock(session, plan.id)
     plan.status = "cancelled"
     plan.updated_at = utc_now()
     plan.revision += 1

@@ -1,11 +1,20 @@
 """Production-core batch and work-order operations required by quality."""
 
+from collections.abc import Iterable
+
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from domain.production_types import (
+    WORK_ORDER_STATUS_CLOSED,
+    WORK_ORDER_STATUS_OPEN,
+    WORK_ORDER_SUPPLIER_PROCESSING,
+)
 from domain.time import utc_now
+from modules.errors import DomainError
 
 from modules.production_core.context_api import (
+    InspectionBatchContext,
     ProductionItemContext,
     WorkOrderContext,
 )
@@ -13,6 +22,10 @@ from modules.production_core.persistence import (
     ProductionItem,
     WorkOrder,
     WorkOrderBatch,
+)
+from modules.production_core.work_order_progress import (
+    calculate_supplier_processing_qc_progress,
+    validate_supplier_processing_work_order_progress,
 )
 
 
@@ -22,7 +35,12 @@ def load_qc_work_order(
     *,
     for_update: bool = False,
 ) -> WorkOrderContext | None:
-    return session.get(WorkOrder, work_order_id, with_for_update=for_update)
+    return session.get(
+        WorkOrder,
+        work_order_id,
+        with_for_update=for_update,
+        populate_existing=for_update,
+    )
 
 
 def load_qc_production_item(
@@ -35,6 +53,7 @@ def load_qc_production_item(
         ProductionItem,
         production_item_id,
         with_for_update=for_update,
+        populate_existing=for_update,
     )
 
 
@@ -44,7 +63,12 @@ def load_qc_batch(
     *,
     for_update: bool = False,
 ):
-    return session.get(WorkOrderBatch, batch_id, with_for_update=for_update)
+    return session.get(
+        WorkOrderBatch,
+        batch_id,
+        with_for_update=for_update,
+        populate_existing=for_update,
+    )
 
 
 def list_qc_batches(session: Session, work_order_id: int):
@@ -126,6 +150,36 @@ def record_qc_batch_destination(
     batch.destination_decided_by = actor_username
 
 
+def refresh_supplier_processing_release_progress(
+    order: WorkOrderContext,
+    batches: Iterable[InspectionBatchContext],
+) -> bool:
+    """Synchronize supplier-order progress from released QC batches."""
+    if order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING:
+        raise DomainError(
+            "supplier_processing_work_order_required",
+            "当前工单不是委外加工工单",
+            status_code=409,
+        )
+    progress = calculate_supplier_processing_qc_progress(order, batches)
+    released_quantity = progress.released_quantity
+    order.processed_quantity = released_quantity
+    order.completed_quantity = released_quantity
+    if released_quantity == order.quantity:
+        order.status = WORK_ORDER_STATUS_CLOSED
+        order.closed_at = utc_now()
+        validate_supplier_processing_work_order_progress(order, progress)
+        return True
+    if order.status != WORK_ORDER_STATUS_OPEN:
+        raise DomainError(
+            "supplier_processing_work_order_closed",
+            "委外加工工单已经结单",
+            status_code=409,
+        )
+    validate_supplier_processing_work_order_progress(order, progress)
+    return False
+
+
 __all__ = [
     "create_qc_batch",
     "list_qc_batches",
@@ -134,5 +188,6 @@ __all__ = [
     "load_qc_work_order",
     "record_qc_batch_result",
     "record_qc_batch_destination",
+    "refresh_supplier_processing_release_progress",
     "rework_submitted_quantity",
 ]

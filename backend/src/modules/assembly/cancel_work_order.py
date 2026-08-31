@@ -3,13 +3,17 @@ from __future__ import annotations
 """Restore materials consumed by a cancelled assembly work order."""
 
 from sqlalchemy import select
-from modules.production_core.model_api import WorkOrderMaterial
-from modules.production_core.ownership_api import assign_work_order_material_repository
+
 from modules.errors import DomainError
 from modules.production_core.assembly_api import load_production_item
 from modules.production_core.context_api import WorkOrderContext
+from modules.production_core.model_api import WorkOrderMaterial
 from modules.production_core.operational_api import record_movement
-from modules.production_core.ownership_api import add_repository_quantity
+from modules.production_core.ownership_api import (
+    add_repository_quantity,
+    assign_work_order_material_repository,
+)
+
 
 def restore_cancelled_assembly_materials(session, order: WorkOrderContext) -> None:
     materials = session.scalars(
@@ -17,6 +21,18 @@ def restore_cancelled_assembly_materials(session, order: WorkOrderContext) -> No
         .where(WorkOrderMaterial.work_order_id == order.id)
         .with_for_update()
     ).all()
+    if order.repository_id is not None:
+        if (
+            len(materials) != 1
+            or materials[0].repository_id is not None
+            or materials[0].quantity != order.quantity
+        ):
+            raise DomainError(
+                "assembly_continuation_snapshot_invalid",
+                "装配后续工艺的投入来源快照不完整",
+                status_code=409,
+            )
+        return
     for material in materials:
         production_item = load_production_item(
             session,

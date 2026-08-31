@@ -2,7 +2,7 @@ from sqlalchemy.exc import IntegrityError
 
 from domain.product import ProductReference
 from domain.time import business_iso
-from modules.sales.context_api import SalesEngineeringPort, SalesProductionPort
+from modules.sales.context_api import SalesEngineeringPort
 from modules.sales.persistence import CustomerOrder, CustomerOrderItem
 from schemas.sales import CustomerOrderItemInput
 from modules.errors import DomainError
@@ -26,7 +26,6 @@ def serialize_order(
     order: CustomerOrder,
     products: dict[int, ProductReference] | None = None,
     *,
-    production: SalesProductionPort,
     production_plan_started: bool = False,
     production_plan_status: str | None = None,
 ) -> dict:

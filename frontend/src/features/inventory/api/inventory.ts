@@ -1,8 +1,9 @@
 import { service } from '@/api/request'
 import type {
-  FinishedInventoryStock,
-  FinishedInventoryTransaction,
-  FinishedOrderStock,
+  FinishedStock,
+  FinishedStockTransaction,
+  FinishedReceipt,
+  FinishedShipmentCandidate,
   WarehouseOperation,
   WarehouseOperationStatus,
   WarehouseStock,
@@ -34,37 +35,42 @@ export async function reviewWarehouseOperation(
   return response.data.data
 }
 
-export async function queryFinishedInventoryStocks() {
-  const response = await service.get<{ data: FinishedInventoryStock[] }>(
+export async function queryFinishedStocks() {
+  const response = await service.get<{ data: FinishedStock[] }>(
     '/inventory/finished-stocks',
   )
   return response.data.data
 }
 
-export async function queryFinishedInventoryTransactions() {
-  const response = await service.get<{ data: FinishedInventoryTransaction[] }>(
+export async function queryFinishedStockTransactions() {
+  const response = await service.get<{ data: FinishedStockTransaction[] }>(
     '/inventory/finished-transactions',
   )
   return response.data.data
 }
 
-export async function queryFinishedOrderStocks(operation: 'all' | 'receipt' | 'shipment') {
-  const response = await service.get<{ data: FinishedOrderStock[] }>('/inventory/finished-order-stocks', {
-    params: { operation },
-  })
+export async function queryFinishedReceipts() {
+  const response = await service.get<{ data: FinishedReceipt[] }>('/inventory/finished-receipts')
   return response.data.data
 }
 
-export async function receiveFinishedOrderStock(customerOrderItemId: number) {
-  const response = await service.post<{ data: FinishedOrderStock }>(
-    `/inventory/finished-order-stocks/${customerOrderItemId}/receive`,
+export async function receiveFinishedReceipt(receiptId: number) {
+  const response = await service.post<{ data: FinishedReceipt }>(
+    `/inventory/finished-receipts/${receiptId}/receive`,
   )
   return response.data.data
 }
 
-export async function shipFinishedOrderStock(customerOrderItemId: number, quantity: number) {
-  const response = await service.post<{ data: FinishedOrderStock }>(
-    `/inventory/finished-order-stocks/${customerOrderItemId}/ship`,
+export async function queryFinishedShipmentCandidates() {
+  const response = await service.get<{ data: FinishedShipmentCandidate[] }>(
+    '/inventory/finished-shipments',
+  )
+  return response.data.data
+}
+
+export async function confirmFinishedShipment(customerOrderItemId: number, quantity: number) {
+  const response = await service.post<{ data: FinishedShipmentCandidate }>(
+    `/inventory/finished-shipments/${customerOrderItemId}`,
     { quantity },
   )
   return response.data.data

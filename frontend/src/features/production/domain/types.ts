@@ -1,10 +1,3 @@
-export type RepositoryWorkStatus =
-  | 'unprocessed'
-  | 'processing'
-  | 'processing_completed'
-  | 'qc'
-  | 'rework'
-  | 'completed'
 export type WorkOrderStatus = 'open' | 'closed' | 'cancelled'
 export type QcDestination = 'return' | 'release' | 'inventory'
 
@@ -14,45 +7,6 @@ export type ProcedureOption = {
   department_name: string
   department_code: string
   procedure_name: string
-}
-
-export type RepositoryItem = {
-  card_key: string
-  repository_id: number | null
-  production_item_id: number
-  customer_order_item_id: number
-  customer_order_no: string
-  customer_name: string
-  product_id: number
-  product_version: number
-  product_name: string
-  factory_code: string
-  product_bom_id: number | null
-  part_name: string
-  part_no: string
-  flow_node_id: string
-  node_type: string
-  source_flow_node_id: string
-  source_node_label: string
-  material_source_name: string
-  workshop_id: number
-  available_procedures: ProcedureOption[]
-  workshop_name: string
-  department_id: number
-  department_name: string
-  department_code: string
-  quantity: number
-  available_quantity: number
-  assembly_unit_quantity: number
-  assembly_required_source_ids: string[]
-  assembly_material_key: string
-  assembly_required_material_keys: string[]
-  assembly_group_complete: boolean
-  assembly_output_name: string | null
-  delivery_date: string
-  arrived_at: string | null
-  work_status: RepositoryWorkStatus
-  can_create_work_order: boolean
 }
 
 export type ProductionPositionStorageCandidate = {
@@ -73,12 +27,6 @@ export type ProductionPositionStorageCandidate = {
   completion_status: string
   available_quantity: number
   position_version: string
-}
-
-export type RepositoryFilters = {
-  keyword: string
-  workshop_name: string | null
-  work_status: 'all' | RepositoryWorkStatus
 }
 
 export type WorkOrderBatch = {
@@ -106,10 +54,13 @@ export type WorkOrder = {
   work_order_no: string
   repository_id: number | null
   production_item_id: number
-  procedure_id: number
+  procedure_id: number | null
   flow_node_id: string
   source_flow_node_id: string | null
-  work_order_type: 'standard' | 'assembly'
+  work_order_type: 'standard' | 'assembly' | 'supplier_processing'
+  is_temporary: boolean
+  supplier_name: string | null
+  supplier_process_name: string | null
   qc_available: boolean
   direct_result_allowed: boolean
   input_production_item_ids: number[]
@@ -166,11 +117,6 @@ export type PendingQcBatch = WorkOrderBatch & {
 
 export type CompletionAction = 'direct' | 'qc'
 
-export type WorkOrderQueryScope = {
-  flowNodeId: string
-  sourceFlowNodeId: string
-}
-
 export type WorkerItem = {
   id: number
   worker_name: string
@@ -186,3 +132,36 @@ export type QcInspectionPayload = {
   lost_quantity: number
   defect_reason: string
 }
+
+export type SupplierProcessingQcTask = {
+  production_plan_id: number
+  production_plan_item_id: number
+  production_item_id: number
+  customer_order_item_id: number
+  product_id: number
+  product_version: number
+  product_bom_id: number
+  source_flow_node_id: string
+  supplier_flow_node_id: string
+  item_code: string
+  item_name: string
+  work_order_id: number
+  work_order_no: string
+  supplier_name: string
+  supplier_process_name: string
+  remark: string | null
+  task_quantity: number
+  inspected_quantity: number
+  qualified_quantity: number
+  rework_quantity: number
+  scrap_quantity: number
+  lost_quantity: number
+  remaining_qualified_quantity: number
+  pending_destination_quantity: number
+  released_quantity: number
+  status: WorkOrderStatus
+  created_at: string
+  batches: WorkOrderBatch[]
+}
+
+export type SupplierProcessingQcInspectionPayload = QcInspectionPayload

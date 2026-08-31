@@ -270,6 +270,12 @@ def prepare_qualified_destination(
     destination: QcQualifiedDestination,
 ) -> PreparedDestination:
     batch, order = _load_locked_inspection(session, batch_id)
+    if order.work_order_type not in QC_SUPPORTED_WORK_ORDER_TYPES:
+        raise DomainError(
+            "qc_work_order_type_invalid",
+            "当前工单不支持普通 QC 去向操作",
+            status_code=409,
+        )
     if batch.recorded_at is None:
         raise DomainError("qc_result_required", "请先录入 QC 结果", status_code=409)
     if not batch.qualified_quantity:

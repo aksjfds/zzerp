@@ -9,7 +9,7 @@ def _node_department_code(node, workshops, departments):
         return department.department_code if department else None
     return {
         "qc": "qc",
-        "shipping": "finished",
+        "finished_inbound": "finished",
     }.get(node.get("type"))
 
 def _node_workshop_name(node, workshops):

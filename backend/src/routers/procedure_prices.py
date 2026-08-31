@@ -2,7 +2,11 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from authorization import require_any_permission
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
-from modules.standard_execution.api import list_procedure_prices, update_procedure_price
+from modules.standard_execution.api import (
+    confirm_procedure_configuration,
+    list_procedure_prices,
+    update_procedure_price,
+)
 from schemas.procedure_prices import ProcedurePriceListEnvelope, ProcedurePriceUpdate
 
 
@@ -54,5 +58,34 @@ def procedure_price_update(
         payload,
         user["department"],
         user["is_system"],
+        user["username"],
+    )
+    return Response(status_code=204)
+
+
+@router.post(
+    "/departments/{department_code}/procedure-prices/"
+    "{product_id}/{product_version}/{origin_flow_node_id}/{flow_node_id}/confirm",
+    status_code=204,
+)
+def procedure_configuration_confirm(
+    department_code: str,
+    product_id: int,
+    product_version: int,
+    origin_flow_node_id: str,
+    flow_node_id: str,
+    payload: ProcedurePriceUpdate,
+    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
+):
+    confirm_procedure_configuration(
+        department_code,
+        product_id,
+        product_version,
+        origin_flow_node_id,
+        flow_node_id,
+        payload,
+        user["department"],
+        user["is_system"],
+        user["username"],
     )
     return Response(status_code=204)

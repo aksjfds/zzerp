@@ -18,6 +18,7 @@ from modules.sales.repository import CustomerOrderRepository
 from modules.sales.context_api import (
     OrderPlanState,
     SalesEngineeringPort,
+    SalesInventoryPort,
     SalesPlanningPort,
     SalesProductionPort,
 )
@@ -36,7 +37,6 @@ def list_orders(
     statuses: set[str] | None = None,
     planning: SalesPlanningPort,
     engineering: SalesEngineeringPort,
-    production: SalesProductionPort,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         repository = CustomerOrderRepository(session)
@@ -52,7 +52,6 @@ def list_orders(
                 session,
                 item,
                 products,
-                production=production,
                 production_plan_started=_production_plan_started(
                     plans_by_order_id.get(item.id)
                 ),
@@ -73,7 +72,7 @@ def list_order_progress_details(
     *,
     planning: SalesPlanningPort,
     engineering: SalesEngineeringPort,
-    production: SalesProductionPort,
+    inventory: SalesInventoryPort,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         condition = CustomerOrder.customer_id == customer_id if customer_id is not None else True
@@ -100,25 +99,17 @@ def list_order_progress_details(
             session,
             order_item_ids,
         )
-        shipped_raw_by_item = production.order_item_shipped_quantities(
+        shipped_quantity_by_item = inventory.order_item_shipped_quantities(
             session,
             order_item_ids,
         )
         data = []
         for item, order in rows:
             product = products[item.product_id]
-            shipped_raw = int(shipped_raw_by_item.get(item.id, 0))
-            flow, nodes = production.load_product_flow(
-                session,
-                item.product_id,
-                item.product_version,
+            shipped_quantity = min(
+                int(shipped_quantity_by_item.get(item.id, 0)),
+                item.quantity,
             )
-            _shipping_node, unit_quantity = production.shipping_node_and_unit_quantity(
-                session,
-                flow,
-                nodes,
-            )
-            shipped_quantity = min(shipped_raw // unit_quantity, item.quantity)
             data.append({
                 "customer_order_id": order.id,
                 "customer_order_item_id": item.id,
@@ -141,7 +132,6 @@ def get_order(
     order_id: int,
     planning: SalesPlanningPort,
     engineering: SalesEngineeringPort,
-    production: SalesProductionPort,
 ) -> dict:
     with SessionLocal() as session:
         order = CustomerOrderRepository(session).get(order_id)
@@ -156,7 +146,6 @@ def get_order(
             session,
             order,
             products,
-            production=production,
             production_plan_started=_production_plan_started(plan),
         )
 
@@ -164,7 +153,6 @@ def get_order(
 def create_order(
     payload: CustomerOrderCreate,
     engineering: SalesEngineeringPort,
-    production: SalesProductionPort,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -190,7 +178,6 @@ def create_order(
                 session,
                 order,
                 products,
-                production=production,
             )
         return result
     except IntegrityError as exc:
@@ -202,7 +189,6 @@ def update_order(
     payload: CustomerOrderUpdate,
     planning: SalesPlanningPort,
     engineering: SalesEngineeringPort,
-    production: SalesProductionPort,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -244,7 +230,6 @@ def update_order(
                 session,
                 order,
                 products,
-                production=production,
             )
     except IntegrityError as exc:
         raise_order_integrity_error(exc)
@@ -271,9 +256,10 @@ def change_status(
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许确认")
             planning.rebuild_order_plan(session, order)
         elif target == "cancelled":
-            if order.status not in {"draft", "confirmed"}:
+            if order.status not in {"draft", "confirmed", "planned"}:
                 raise DomainError("invalid_customer_order_status", "当前订单状态不允许取消")
             planning.cancel_order_plan(session, order, actor_username)
+            production.cancel_order_production(session, order)
         else:
             raise DomainError("invalid_customer_order_status", "不支持的订单状态操作")
         order.status = target
@@ -287,7 +273,6 @@ def change_status(
                 session,
                 {item.product_id for item in order.items},
             ),
-            production=production,
             production_plan_started=_production_plan_started(
                 planning.order_plan_state(session, order.id)
             ),
@@ -302,7 +287,6 @@ def confirm_production_plan(
     actor_username: str,
     planning: SalesPlanningPort,
     engineering: SalesEngineeringPort,
-    production: SalesProductionPort,
 ) -> dict:
     with SessionLocal.begin() as session:
         repository = CustomerOrderRepository(session)
@@ -332,7 +316,6 @@ def confirm_production_plan(
                 session,
                 {item.product_id for item in order.items},
             ),
-            production=production,
         )
 
 

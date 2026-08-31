@@ -1,43 +1,36 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
+import { queryDepartmentWorkers } from '../api/departmentWorkers'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
-import QcBatchCards from '../components/QcBatchCards.vue'
-import QcInspectionDialog from '../components/QcInspectionDialog.vue'
-import { useQcDepartment } from '../composables/useQcDepartment'
+import StandardQcWorkspace from '../components/StandardQcWorkspace.vue'
+import SupplierProcessingQcPanel from '../components/SupplierProcessingQcPanel.vue'
+import type { WorkerItem } from '../domain/types'
 import '../styles/workspace.css'
 
-const {
-  activeView,
-  activeBatch,
-  batches,
-  changePage,
-  changeView,
-  decideDestination,
-  decidingBatchId,
-  dialogVisible,
-  load,
-  loading,
-  openInspection,
-  page,
-  pageSize,
-  refresh,
-  saveInspection,
-  search,
-  submitting,
-  total,
-  workers,
-} = useQcDepartment()
-const searchText = ref('')
-onMounted(load)
+const qcTabs = [{ name: 'supplier-processing', label: '委外加工质检' }] as const
+const workers = ref<WorkerItem[]>([])
+const standardWorkspace = ref<{ refresh: () => Promise<void> }>()
+const supplierProcessingPanel = ref<{ refresh: () => Promise<void> }>()
 
-function selectView(value: string | number) {
-  if (value === 'active' || value === 'history') void changeView(value)
+async function loadWorkers() {
+  try {
+    workers.value = await queryDepartmentWorkers('qc')
+  } catch {
+    ElMessage.warning('QC 工人列表加载失败')
+  }
 }
 
-function applySearch() {
-  void search(searchText.value)
+async function refreshWorkspace() {
+  await Promise.all([
+    loadWorkers(),
+    standardWorkspace.value?.refresh(),
+    supplierProcessingPanel.value?.refresh(),
+  ])
 }
+
+onMounted(loadWorkers)
 </script>
 
 <template>
@@ -45,64 +38,20 @@ function applySearch() {
     <DepartmentPageHeader
       department-name="QC部门"
       description="先录入工单质检结果，再决定合格品返回、放行或入库。"
-      @refresh="refresh"
+      @refresh="refreshWorkspace"
     />
-    <DepartmentSectionTabs department-code="qc" show-workers>
-    <section class="qc-filter-bar">
-      <ElInput
-        v-model="searchText"
-        clearable
-        placeholder="搜索工单号、订单号、配件或工单内容"
-        @clear="applySearch"
-        @keyup.enter="applySearch"
-      />
-      <ElButton type="primary" @click="applySearch">搜索</ElButton>
-    </section>
-    <section class="production-card qc-workspace">
-      <ElTabs :model-value="activeView" @update:model-value="selectView">
-        <ElTabPane label="待处理" name="active" />
-        <ElTabPane label="历史记录" name="history" />
-      </ElTabs>
-      <QcBatchCards
-        :items="batches"
-        :loading="loading"
-        :history="activeView === 'history'"
-        :deciding-batch-id="decidingBatchId"
-        @inspect="openInspection"
-        @decide="decideDestination"
-      />
-      <ElPagination
-        v-model:current-page="page"
-        class="production-pagination"
-        layout="prev, pager, next, total"
-        :page-size="pageSize"
-        :total="total"
-        @current-change="changePage"
-      />
-    </section>
-    <QcInspectionDialog
-      v-model="dialogVisible"
-      :batch="activeBatch"
-      :workers="workers"
-      :submitting="submitting"
-      @submit="saveInspection"
-    />
+    <DepartmentSectionTabs
+      department-code="qc"
+      workspace-label="生产工单质检"
+      :additional-tabs="qcTabs"
+      show-workers
+    >
+      <StandardQcWorkspace ref="standardWorkspace" :workers="workers" />
+      <template #supplier-processing>
+        <section class="production-card">
+          <SupplierProcessingQcPanel ref="supplierProcessingPanel" :workers="workers" />
+        </section>
+      </template>
     </DepartmentSectionTabs>
   </main>
 </template>
-
-<style scoped>
-.qc-workspace { min-height: 300px; }
-.qc-filter-bar {
-  display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto;
-  gap: 12px;
-  margin-bottom: 18px;
-}
-.qc-heading { display: flex; justify-content: space-between; align-items: center; }
-.qc-heading span { color: var(--el-text-color-secondary); font-size: 13px; }
-@media (max-width: 640px) {
-  .qc-filter-bar { grid-template-columns: 1fr; }
-  .qc-filter-bar :deep(.el-button) { width: 100%; }
-}
-</style>

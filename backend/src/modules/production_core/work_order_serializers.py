@@ -5,6 +5,7 @@ from __future__ import annotations
 from domain.production_types import (
     REWORK_TRACKED_WORK_ORDER_TYPES,
     WORK_ORDER_ASSEMBLY,
+    WORK_ORDER_SUPPLIER_PROCESSING,
 )
 from domain.time import business_iso
 from modules.production_core.flow import process_qc_node
@@ -61,8 +62,15 @@ def map_work_order(
         context,
     )
     product = context.products.get(production_item.product_id)
-    procedure = context.procedures.get(order.procedure_id)
-    procedure_name = procedure.procedure_name if procedure else order.work_order_name
+    procedure = (
+        context.procedures.get(order.procedure_id)
+        if order.procedure_id is not None
+        else None
+    )
+    if order.work_order_type == WORK_ORDER_SUPPLIER_PROCESSING:
+        procedure_name = order.supplier_process_name
+    else:
+        procedure_name = procedure.procedure_name if procedure else order.work_order_name
     part_no, part_name = flow_context.item_name(production_item)
     if order.work_order_type == WORK_ORDER_ASSEMBLY:
         part_name = assembly_output_name(
@@ -108,8 +116,9 @@ def map_work_order(
         flow_context.nodes,
         order.flow_node_id,
     ) is not None
-    qc_available = configured_qc
-    direct_result_allowed = True
+    standard_execution = order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING
+    qc_available = configured_qc and standard_execution
+    direct_result_allowed = standard_execution
     return {
         "id": order.id,
         "work_order_no": order.work_order_no,
@@ -119,6 +128,9 @@ def map_work_order(
         "flow_node_id": order.flow_node_id,
         "source_flow_node_id": order.source_flow_node_id,
         "work_order_type": order.work_order_type,
+        "is_temporary": order.is_temporary,
+        "supplier_name": order.supplier_name,
+        "supplier_process_name": order.supplier_process_name,
         "qc_available": qc_available,
         "direct_result_allowed": direct_result_allowed,
         "customer_order_no": customer_order.customer_order_no,

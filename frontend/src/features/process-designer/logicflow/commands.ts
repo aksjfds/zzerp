@@ -35,6 +35,7 @@ export function startProcessDrag(
     properties: {
       workshopId,
       departmentCode,
+      directInbound: departmentCode === 'assembly',
     },
   })
 }
@@ -43,8 +44,12 @@ export function startQcDrag(lf: LogicFlow) {
   lf.dnd.startDrag({ type: 'qc', text: 'QC' })
 }
 
-export function startShippingDrag(lf: LogicFlow) {
-  lf.dnd.startDrag({ type: 'shipping', text: '发货' })
+export function startSupplierProcessingDrag(lf: LogicFlow) {
+  lf.dnd.startDrag({ type: 'supplier_processing', text: '委外加工' })
+}
+
+export function startFinishedInboundDrag(lf: LogicFlow) {
+  lf.dnd.startDrag({ type: 'finished_inbound', text: '入库' })
 }
 
 export function updateNodeDefinition(

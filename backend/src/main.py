@@ -22,6 +22,7 @@ from routers import (
     production,
     products,
     qc,
+    supplier_processing,
     work_orders,
 )
 from modules.errors import DomainError
@@ -193,6 +194,7 @@ app.include_router(production.router)
 app.include_router(procedure_prices.router)
 app.include_router(work_orders.router)
 app.include_router(qc.router)
+app.include_router(supplier_processing.router)
 
 
 @app.get("/")

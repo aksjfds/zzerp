@@ -8,6 +8,8 @@ export type ProductionNodeStat = {
   transferred_quantity: number
   abnormal_quantity: number
   output_quantity: number
+  pending_receipt_quantity: number
+  received_quantity: number
   input_details: Record<string, number>
 }
 

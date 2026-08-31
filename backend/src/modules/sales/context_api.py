@@ -30,25 +30,15 @@ class SalesEngineeringPort(Protocol):
 
 
 class SalesProductionPort(Protocol):
+    def cancel_order_production(self, session: Any, order: Any) -> None: ...
+
+
+class SalesInventoryPort(Protocol):
     def order_item_shipped_quantities(
         self,
         session: Any,
         customer_order_item_ids: Collection[int],
     ) -> dict[int, int]: ...
-
-    def load_product_flow(
-        self,
-        session: Any,
-        product_id: int,
-        product_version: int,
-    ) -> tuple[dict, dict[str, dict]]: ...
-
-    def shipping_node_and_unit_quantity(
-        self,
-        session: Any,
-        flow: dict,
-        nodes: dict[str, dict],
-    ) -> tuple[dict, int]: ...
 
 
 class SalesPlanningPort(Protocol):
@@ -94,6 +84,7 @@ class SalesPlanningPort(Protocol):
 __all__ = [
     "OrderPlanState",
     "SalesEngineeringPort",
+    "SalesInventoryPort",
     "SalesPlanningPort",
     "SalesProductionPort",
 ]

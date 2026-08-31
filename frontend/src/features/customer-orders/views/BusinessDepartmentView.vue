@@ -1,11 +1,15 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ORDER_PERMISSIONS } from '@/permission/constants'
+import {
+  ORDER_PERMISSIONS,
+  SUPPLIER_PROCESSING_PERMISSIONS,
+} from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
 import CustomerOrdersView from './CustomerOrdersView.vue'
 import ProductionPlansView from './ProductionPlansView.vue'
 import OrderProgressDetailsView from './OrderProgressDetailsView.vue'
+import SupplierProcessingTasksView from './SupplierProcessingTasksView.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -13,12 +17,21 @@ const authStore = useAuthStore()
 const ordersView = ref<{ load: () => Promise<void> }>()
 const plansView = ref<{ load: () => Promise<void> }>()
 const progressView = ref<{ load: () => Promise<void> }>()
+const supplierProcessingView = ref<{ load: () => Promise<void> }>()
+
+function selectedBusinessTab() {
+  const tab = String(route.query.tab || 'orders')
+  const availableTabs = ['orders', 'plans', 'progress']
+  if (authStore.hasPermission(SUPPLIER_PROCESSING_PERMISSIONS.view)) {
+    availableTabs.push('supplier-processing')
+  }
+  return availableTabs.includes(tab)
+    ? tab
+    : 'orders'
+}
+
 const activeTab = computed({
-  get: () => route.query.tab === 'plans'
-    ? 'plans'
-    : route.query.tab === 'progress'
-      ? 'progress'
-      : 'orders',
+  get: selectedBusinessTab,
   set: (tab: string) => router.replace({
     path: '/business/orders',
     query: tab === 'orders' ? {} : { tab },
@@ -29,6 +42,7 @@ watch(activeTab, async (tab) => {
   await nextTick()
   if (tab === 'plans') await plansView.value?.load()
   else if (tab === 'progress') await progressView.value?.load()
+  else if (tab === 'supplier-processing') await supplierProcessingView.value?.load()
   else await ordersView.value?.load()
 })
 
@@ -61,6 +75,14 @@ async function logout() {
         </ElTabPane>
         <ElTabPane label="进度明细表" name="progress" lazy>
           <OrderProgressDetailsView ref="progressView" />
+        </ElTabPane>
+        <ElTabPane
+          v-if="authStore.hasPermission(SUPPLIER_PROCESSING_PERMISSIONS.view)"
+          label="委外加工"
+          name="supplier-processing"
+          lazy
+        >
+          <SupplierProcessingTasksView ref="supplierProcessingView" />
         </ElTabPane>
       </ElTabs>
     </section>

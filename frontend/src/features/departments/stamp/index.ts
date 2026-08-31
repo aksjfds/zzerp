@@ -9,5 +9,5 @@ export const stampDepartment: DepartmentModule = {
   routeName: 'stamp-department',
   requiredPermission: PRODUCTION_PERMISSIONS.view,
   component: () => import('@/features/production/views/StampDepartmentView.vue'),
-  capabilities: ['repositories', 'work_orders', 'workers', 'standard_execution', 'production_progress'],
+  capabilities: ['production_workbench', 'workers', 'standard_execution', 'production_progress'],
 }

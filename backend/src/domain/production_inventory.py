@@ -1,4 +1,4 @@
-"""Immutable values exchanged while issuing plan inventory into production."""
+"""Immutable values exchanged while allocating plan inventory."""
 
 from dataclasses import dataclass
 
@@ -28,15 +28,15 @@ class IssuedInventoryStock:
 
 
 @dataclass(frozen=True, slots=True)
-class FinishedInventoryStockSnapshot:
+class FinishedStockSnapshot:
     id: int
     product_id: int
     product_version: int
-    flow_node_id: str
-    completed_flow_node_id: str
     item_code: str
     item_name: str
     quantity: int
+    reserved_quantity: int
+    available_quantity: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,11 +44,10 @@ class FinishedStockLookup:
     identity_key: str
     product_id: int
     product_version: int
-    flow_node_id: str
 
 
 __all__ = [
-    "FinishedInventoryStockSnapshot",
+    "FinishedStockSnapshot",
     "FinishedStockLookup",
     "IssuedInventoryStock",
     "IssuedPlanItem",

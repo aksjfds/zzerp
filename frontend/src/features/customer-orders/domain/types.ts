@@ -70,10 +70,9 @@ export type ProductionPlanItem = {
   unit_requirement: number
   gross_required_quantity: number
   estimated_inventory_quantity: number
-  available_inventory_quantity: number
   net_required_quantity: number
   planned_production_quantity: number
-  deducted_inventory_quantity: number
+  allocated_inventory_quantity: number
 }
 
 export type ProductionPlan = {
@@ -104,8 +103,11 @@ export type ProductionPlan = {
     completed_node_label: string
     warehouse_code: string
     warehouse_name: string
-    current_inventory_quantity: number
-    planned_deduction_quantity: number
+    stock_quantity: number
+    reserved_quantity: number
+    available_quantity: number
+    planned_allocation_quantity: number
+    allocation_mode: 'reservation' | 'outbound'
     decomposition: {
       finished_equivalent_quantity: number
       parts: Array<{

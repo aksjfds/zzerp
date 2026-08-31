@@ -9,6 +9,7 @@ from sqlalchemy import (
     Index,
     Integer,
     Numeric,
+    String,
     Text,
     TIMESTAMP,
     UniqueConstraint,
@@ -23,26 +24,56 @@ class ProcedurePrice(Base):
     __tablename__ = "procedure_price"
     __table_args__ = (
         CheckConstraint("unit_price >= 0", name="ck_procedure_price_nonnegative"),
-        ForeignKeyConstraint(
-            ["product_id", "product_version"],
-            ["product_version.product_id", "product_version.version"],
-            ondelete="CASCADE",
-            name="fk_procedure_price_product_version",
-        ),
         UniqueConstraint(
-            "product_id",
-            "product_version",
-            "material_key",
-            "flow_node_id",
+            "configuration_id",
             "procedure_id",
             name="uq_procedure_price_scope",
         ),
         Index(
             "idx_procedure_price_scope",
             "procedure_id",
+            "configuration_id",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    configuration_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("procedure_configuration.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    procedure_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("procedure.id"), nullable=False
+    )
+    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class ProcedureConfiguration(Base):
+    __tablename__ = "procedure_configuration"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_id", "product_version"],
+            ["product_version.product_id", "product_version.version"],
+            ondelete="CASCADE",
+            name="fk_procedure_configuration_product_version",
+        ),
+        CheckConstraint(
+            "(confirmed_at IS NULL AND confirmed_by IS NULL) "
+            "OR (confirmed_at IS NOT NULL AND confirmed_by IS NOT NULL)",
+            name="ck_procedure_configuration_confirmation",
+        ),
+        UniqueConstraint(
             "product_id",
             "product_version",
+            "material_key",
             "flow_node_id",
+            name="uq_procedure_configuration_scope",
         ),
     )
 
@@ -51,10 +82,10 @@ class ProcedurePrice(Base):
     product_version: Mapped[int] = mapped_column(Integer, nullable=False)
     material_key: Mapped[str] = mapped_column(Text, nullable=False)
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    procedure_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("procedure.id"), nullable=False
+    confirmed_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
     )
-    unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True)
+    confirmed_by: Mapped[str | None] = mapped_column(String(50), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )

@@ -75,22 +75,6 @@ def load_assembly_work_order(
     )
 
 
-def open_work_order_ids(
-    session: Session,
-    work_order_ids: Collection[int],
-) -> frozenset[int]:
-    if not work_order_ids:
-        return frozenset()
-    return frozenset(
-        session.scalars(
-            select(WorkOrder.id).where(
-                WorkOrder.id.in_(work_order_ids),
-                WorkOrder.status == "open",
-            )
-        ).all()
-    )
-
-
 def assembly_item_unit_quantity(
     session: Session,
     production_item: ProductionItemContext,
@@ -129,6 +113,5 @@ __all__ = [
     "load_production_item",
     "load_production_items",
     "load_repositories",
-    "open_work_order_ids",
     "record_assembly_output",
 ]

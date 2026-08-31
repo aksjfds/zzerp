@@ -312,40 +312,100 @@ class WarehouseOperation(Base):
     manual_review_note: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
-class FinishedInventoryStock(Base):
-    __tablename__ = "finished_inventory_stock"
+class FinishedReceipt(Base):
+    __tablename__ = "finished_receipt"
     __table_args__ = (
         ForeignKeyConstraint(
             ["product_id", "product_version"],
             ["product_version.product_id", "product_version.version"],
-            name="fk_finished_inventory_stock_product_version",
+            name="fk_finished_receipt_product_version",
         ),
-        CheckConstraint("product_version > 0", name="ck_finished_inventory_stock_version"),
-        CheckConstraint("quantity >= 0", name="ck_finished_inventory_stock_quantity"),
-        CheckConstraint("revision > 0", name="ck_finished_inventory_stock_revision"),
+        UniqueConstraint(
+            "work_order_batch_id",
+            name="uq_finished_receipt_qc_batch",
+        ),
+        UniqueConstraint(
+            "work_order_id",
+            name="uq_finished_receipt_packaging_order",
+        ),
+        CheckConstraint(
+            "(work_order_batch_id IS NOT NULL AND work_order_id IS NULL) OR "
+            "(work_order_batch_id IS NULL AND work_order_id IS NOT NULL)",
+            name="ck_finished_receipt_source",
+        ),
+        CheckConstraint("product_version > 0", name="ck_finished_receipt_version"),
+        CheckConstraint("quantity > 0", name="ck_finished_receipt_quantity"),
+        CheckConstraint(
+            "status IN ('pending', 'received')",
+            name="ck_finished_receipt_status",
+        ),
+        CheckConstraint("revision > 0", name="ck_finished_receipt_revision"),
+        CheckConstraint(
+            "(status = 'pending' AND received_at IS NULL AND received_by IS NULL) OR "
+            "(status = 'received' AND received_at IS NOT NULL "
+            "AND received_by IS NOT NULL AND received_by = btrim(received_by) "
+            "AND received_by <> '')",
+            name="ck_finished_receipt_lifecycle",
+        ),
         Index(
-            "idx_finished_inventory_stock_product",
-            "product_id",
-            "product_version",
-            "flow_node_id",
+            "idx_finished_receipt_pending",
+            "status",
+            "created_at",
+            "id",
+            postgresql_where=text("status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_batch_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("work_order_batch.id", name="fk_finished_receipt_qc_batch"),
+        nullable=True,
+    )
+    work_order_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("work_order.id", name="fk_finished_receipt_packaging_order"),
+        nullable=True,
+    )
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
+    received_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    received_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+class FinishedStock(Base):
+    __tablename__ = "finished_stock"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_id", "product_version"],
+            ["product_version.product_id", "product_version.version"],
+            name="fk_finished_stock_product_version",
         ),
         UniqueConstraint(
             "product_id",
             "product_version",
-            "flow_node_id",
-            "completed_flow_node_id",
-            name="uq_finished_inventory_stock_identity",
+            name="uq_finished_stock_identity",
         ),
+        CheckConstraint("product_version > 0", name="ck_finished_stock_version"),
+        CheckConstraint("quantity >= 0", name="ck_finished_stock_quantity"),
+        CheckConstraint("reserved_quantity >= 0", name="ck_finished_stock_reserved"),
+        CheckConstraint(
+            "reserved_quantity <= quantity",
+            name="ck_finished_stock_availability",
+        ),
+        CheckConstraint("revision > 0", name="ck_finished_stock_revision"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     product_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    completed_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    item_code: Mapped[str] = mapped_column(Text, nullable=False)
-    item_name: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserved_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
@@ -355,148 +415,195 @@ class FinishedInventoryStock(Base):
     )
 
 
-class FinishedInventoryTransaction(Base):
-    __tablename__ = "finished_inventory_transaction"
+class FinishedStockReservation(Base):
+    __tablename__ = "finished_stock_reservation"
     __table_args__ = (
-        CheckConstraint("quantity > 0", name="ck_finished_inventory_transaction_quantity"),
-        CheckConstraint(
-            "transaction_type IN ('receipt', 'issue')",
-            name="ck_finished_inventory_transaction_type",
+        ForeignKeyConstraint(
+            [
+                "production_plan_item_id",
+                "production_plan_id",
+                "customer_order_item_id",
+            ],
+            [
+                "production_plan_item.id",
+                "production_plan_item.production_plan_id",
+                "production_plan_item.customer_order_item_id",
+            ],
+            name="fk_finished_stock_reservation_plan_item",
+        ),
+        UniqueConstraint(
+            "production_plan_item_id",
+            "finished_stock_id",
+            name="uq_finished_stock_reservation_plan_item",
+        ),
+        UniqueConstraint(
+            "id",
+            "finished_stock_id",
+            "customer_order_item_id",
+            name="uq_finished_stock_reservation_context",
         ),
         CheckConstraint(
-            "(transaction_type = 'receipt' AND source_production_item_id IS NOT NULL "
-            "AND production_plan_id IS NULL AND production_plan_item_id IS NULL) OR "
-            "(transaction_type = 'issue' AND source_production_item_id IS NULL "
-            "AND production_plan_id IS NOT NULL AND production_plan_item_id IS NOT NULL)",
-            name="ck_finished_inventory_transaction_source",
+            "reserved_quantity > 0",
+            name="ck_finished_stock_reservation_reserved",
+        ),
+        CheckConstraint(
+            "shipped_quantity >= 0",
+            name="ck_finished_stock_reservation_shipped",
+        ),
+        CheckConstraint(
+            "released_quantity >= 0",
+            name="ck_finished_stock_reservation_released",
+        ),
+        CheckConstraint(
+            "shipped_quantity + released_quantity <= reserved_quantity",
+            name="ck_finished_stock_reservation_balance",
+        ),
+        Index(
+            "idx_finished_stock_reservation_plan",
+            "production_plan_id",
+            "production_plan_item_id",
+            "id",
+        ),
+        Index(
+            "idx_finished_stock_reservation_order_open",
+            "customer_order_item_id",
+            "id",
+            postgresql_where=text(
+                "shipped_quantity + released_quantity < reserved_quantity"
+            ),
+        ),
+        Index(
+            "idx_finished_stock_reservation_recent",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    finished_stock_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("finished_stock.id"),
+        nullable=False,
+    )
+    production_plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    production_plan_item_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    customer_order_item_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("customer_order_item.id"),
+        nullable=False,
+    )
+    reserved_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    shipped_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    released_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
+class FinishedStockTransaction(Base):
+    __tablename__ = "finished_stock_transaction"
+    __table_args__ = (
+        UniqueConstraint(
+            "finished_receipt_id",
+            name="uq_finished_stock_transaction_receipt",
         ),
         ForeignKeyConstraint(
-            ["production_plan_item_id", "production_plan_id"],
-            ["production_plan_item.id", "production_plan_item.production_plan_id"],
-            name="fk_finished_inventory_transaction_plan_item",
+            ["customer_order_item_id", "customer_order_id"],
+            ["customer_order_item.id", "customer_order_item.customer_order_id"],
+            name="fk_finished_stock_transaction_order_item",
+        ),
+        ForeignKeyConstraint(
+            [
+                "finished_stock_reservation_id",
+                "finished_stock_id",
+                "customer_order_item_id",
+            ],
+            [
+                "finished_stock_reservation.id",
+                "finished_stock_reservation.finished_stock_id",
+                "finished_stock_reservation.customer_order_item_id",
+            ],
+            name="fk_finished_stock_transaction_reservation",
         ),
         CheckConstraint(
+            "transaction_type IN ('receipt', 'customer_shipment')",
+            name="ck_finished_stock_transaction_type",
+        ),
+        CheckConstraint("quantity > 0", name="ck_finished_stock_transaction_quantity"),
+        CheckConstraint(
             "quantity_before >= 0",
-            name="ck_finished_inventory_transaction_quantity_before",
+            name="ck_finished_stock_transaction_before",
         ),
         CheckConstraint(
             "quantity_after >= 0",
-            name="ck_finished_inventory_transaction_quantity_after",
+            name="ck_finished_stock_transaction_after",
         ),
-        Index("idx_finished_inventory_transaction_stock", "finished_inventory_stock_id", "id"),
-        Index("idx_finished_inventory_transaction_plan", "production_plan_id", "id"),
+        CheckConstraint(
+            "actor_username = btrim(actor_username) AND actor_username <> ''",
+            name="ck_finished_stock_transaction_actor",
+        ),
+        CheckConstraint(
+            "(transaction_type = 'receipt' AND finished_receipt_id IS NOT NULL "
+            "AND customer_order_id IS NULL AND customer_order_item_id IS NULL "
+            "AND finished_stock_reservation_id IS NULL) OR "
+            "(transaction_type = 'customer_shipment' AND finished_receipt_id IS NULL "
+            "AND customer_order_id IS NOT NULL AND customer_order_item_id IS NOT NULL)",
+            name="ck_finished_stock_transaction_source",
+        ),
+        CheckConstraint(
+            "(transaction_type = 'receipt' "
+            "AND quantity_after = quantity_before + quantity) OR "
+            "(transaction_type = 'customer_shipment' "
+            "AND quantity_after = quantity_before - quantity)",
+            name="ck_finished_stock_transaction_balance",
+        ),
         Index(
-            "idx_finished_inventory_transaction_production_item",
-            "source_production_item_id",
+            "idx_finished_stock_transaction_stock",
+            "finished_stock_id",
+            "created_at",
             "id",
         ),
+        Index(
+            "idx_finished_stock_transaction_order",
+            "customer_order_item_id",
+            "created_at",
+            "id",
+            postgresql_where=text("customer_order_item_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_finished_stock_transaction_recent",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    finished_inventory_stock_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("finished_inventory_stock.id"), nullable=False
-    )
-    production_plan_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("production_plan.id"), nullable=True
-    )
-    production_plan_item_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    source_production_item_id: Mapped[int | None] = mapped_column(
+    finished_stock_id: Mapped[int] = mapped_column(
         BigInteger,
-        ForeignKey(
-            "production_item.id",
-            name="fk_finished_inventory_transaction_production_item",
-        ),
+        ForeignKey("finished_stock.id"),
+        nullable=False,
+    )
+    finished_receipt_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("finished_receipt.id"),
         nullable=True,
     )
-    transaction_type: Mapped[str] = mapped_column(Text, nullable=False)
-    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    quantity_before: Mapped[int] = mapped_column(Integer, nullable=False)
-    quantity_after: Mapped[int] = mapped_column(Integer, nullable=False)
-    actor_username: Mapped[str] = mapped_column(Text, nullable=False)
-    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-
-
-class FinishedOrderStock(Base):
-    __tablename__ = "finished_order_stock"
-    __table_args__ = (
-        CheckConstraint("product_version > 0", name="ck_finished_order_stock_version"),
-        CheckConstraint("unit_quantity > 0", name="ck_finished_order_stock_unit"),
-        CheckConstraint("pending_quantity >= 0", name="ck_finished_order_stock_pending"),
-        CheckConstraint("available_quantity >= 0", name="ck_finished_order_stock_available"),
-        CheckConstraint("shipped_quantity >= 0", name="ck_finished_order_stock_shipped"),
-        CheckConstraint("transferred_quantity >= 0", name="ck_finished_order_stock_transferred"),
-        CheckConstraint("revision > 0", name="ck_finished_order_stock_revision"),
-        UniqueConstraint(
-            "production_item_id",
-            "flow_node_id",
-            name="uq_finished_order_stock_item_node",
-        ),
-        Index("idx_finished_order_stock_order", "customer_order_id", "id"),
-        Index("idx_finished_order_stock_order_item", "customer_order_item_id", "id"),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_order_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customer_order.id", ondelete="CASCADE"), nullable=False
-    )
-    customer_order_item_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customer_order_item.id", ondelete="CASCADE"), nullable=False
-    )
-    production_item_id: Mapped[int] = mapped_column(
+    customer_order_id: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey(
-            "production_item.id",
-            name="fk_finished_order_stock_production_item",
-            ondelete="CASCADE",
-        ),
-        nullable=False,
+        ForeignKey("customer_order.id"),
+        nullable=True,
     )
-    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    item_code: Mapped[str] = mapped_column(Text, nullable=False)
-    item_name: Mapped[str] = mapped_column(Text, nullable=False)
-    unit_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    pending_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    available_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    shipped_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    transferred_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
-    received_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
-    received_by: Mapped[str | None] = mapped_column(Text, nullable=True)
-    last_shipped_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
-    last_shipped_by: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-
-
-class FinishedGoodsTransaction(Base):
-    __tablename__ = "finished_goods_transaction"
-    __table_args__ = (
-        CheckConstraint("quantity > 0", name="ck_finished_goods_transaction_quantity"),
-        CheckConstraint(
-            "transaction_type IN ('finished_receipt', 'customer_shipment', "
-            "'finished_stock_issue', 'finished_surplus_transfer')",
-            name="ck_finished_goods_transaction_type",
-        ),
-        CheckConstraint("quantity_before >= 0", name="ck_finished_goods_transaction_before"),
-        CheckConstraint("quantity_after >= 0", name="ck_finished_goods_transaction_after"),
-        Index("idx_finished_goods_transaction_lot", "finished_order_stock_id", "id"),
-        Index("idx_finished_goods_transaction_created", text("created_at DESC"), text("id DESC")),
-    )
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    finished_order_stock_id: Mapped[int] = mapped_column(
+    customer_order_item_id: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey("finished_order_stock.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("customer_order_item.id"),
+        nullable=True,
+    )
+    finished_stock_reservation_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        nullable=True,
     )
     transaction_type: Mapped[str] = mapped_column(Text, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)

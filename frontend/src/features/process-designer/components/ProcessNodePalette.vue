@@ -14,11 +14,12 @@ type DepartmentGroup = {
   workshops: WorkshopRouteOption[]
 }
 const fixedDepartments = [
+  { departmentCode: 'business', departmentName: '业务部' },
   { departmentCode: 'qc', departmentName: 'QC部门' },
   { departmentCode: 'finished', departmentName: '成品部' },
 ]
 const departmentOrder = [
-  'stamp', 'cnc', 'polish', 'outsource', 'qc', 'assembly', 'finished',
+  'business', 'stamp', 'cnc', 'polish', 'outsource', 'qc', 'assembly', 'finished',
 ]
 const departmentGroups = computed<DepartmentGroup[]>(() => {
   const groups = new Map<string, DepartmentGroup>()
@@ -43,7 +44,7 @@ const departmentGroups = computed<DepartmentGroup[]>(() => {
   })
 })
 function fixedNodeCount(code: string) {
-  return ['qc', 'finished'].includes(code) ? 1 : 0
+  return ['business', 'qc', 'finished'].includes(code) ? 1 : 0
 }
 function workshopColorClass(workshop: WorkshopRouteOption) {
   if (workshop.department_code === 'outsource') return 'outsource'
@@ -51,8 +52,9 @@ function workshopColorClass(workshop: WorkshopRouteOption) {
   return 'process'
 }
 const emit = defineEmits<{
+  dragSupplierProcessing: []
   dragQc: []
-  dragShipping: []
+  dragFinishedInbound: []
   dragWorkshop: [workshop: WorkshopRouteOption]
   dragPart: [item: BomItem]
 }>()
@@ -109,6 +111,9 @@ const emit = defineEmits<{
         <span class="group-count">{{ group.workshops.length + fixedNodeCount(group.departmentCode) }}</span>
       </div>
       <div class="group-items">
+        <button v-if="group.departmentCode === 'business'" class="palette-item supplier-processing" type="button" title="拖动委外加工节点到画布" @mousedown="emit('dragSupplierProcessing')">
+          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>委外加工</strong></span><span class="item-kind">委外</span>
+        </button>
         <button
           v-for="workshop in group.workshops"
           :key="workshop.id"
@@ -125,8 +130,8 @@ const emit = defineEmits<{
         <button v-if="group.departmentCode === 'qc'" class="palette-item qc" type="button" title="拖动 QC 到画布" @mousedown="emit('dragQc')">
           <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>QC</strong></span><span class="item-kind">QC</span>
         </button>
-        <button v-if="group.departmentCode === 'finished'" class="palette-item shipping" type="button" title="拖动发货节点到画布" @mousedown="emit('dragShipping')">
-          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>发货</strong></span><span class="item-kind">发货</span>
+        <button v-if="group.departmentCode === 'finished'" class="palette-item finished-inbound" type="button" title="拖动入库节点到画布" @mousedown="emit('dragFinishedInbound')">
+          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>入库</strong></span><span class="item-kind">入库</span>
         </button>
       </div>
     </section>
@@ -145,6 +150,7 @@ const emit = defineEmits<{
 .group-mark { width: 4px; height: 14px; flex: 0 0 auto; border-radius: 999px; background: var(--flow-production); }
 .part-mark { background: var(--md-primary); }
 .department-outsource .group-mark { background: var(--flow-outsource); }
+.department-business .group-mark { background: var(--flow-supplier-processing); }
 .department-qc .group-mark { background: var(--flow-qc); }
 .department-assembly .group-mark { background: var(--flow-assembly); }
 .department-finished .group-mark { background: var(--flow-finished); }
@@ -163,8 +169,9 @@ const emit = defineEmits<{
 .palette-item.part { border-color: var(--md-primary); background: var(--md-primary-container); }
 .palette-item.process { border-color: var(--flow-production); background: var(--flow-production-container); }
 .palette-item.outsource { border-color: var(--flow-outsource); background: var(--flow-outsource-container); }
+.palette-item.supplier-processing { border-color: var(--flow-supplier-processing); background: var(--flow-supplier-processing-container); }
 .palette-item.qc { border-color: var(--flow-qc); background: var(--flow-qc-container); }
-.palette-item.shipping { border-color: var(--flow-finished); background: var(--flow-finished-container); }
+.palette-item.finished-inbound { border-color: var(--flow-finished); background: var(--flow-finished-container); }
 .palette-item.assembly { border-color: var(--flow-assembly); background: var(--flow-assembly-container); }
 .palette-item:disabled { cursor: not-allowed; opacity: .45; }
 @media (max-width: 900px) {

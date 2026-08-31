@@ -1,42 +1,58 @@
 import type { CustomerOrderStatus } from '@/features/customer-orders'
 
-export type FinishedInventoryTransactionSource = 'finished_inventory_stock' | 'finished_order_stock'
 export type FinishedOrderStatus = Extract<CustomerOrderStatus, 'planned' | 'closed'>
 
-export type FinishedInventoryStock = {
+export type FinishedReceipt = {
+  id: number
+  work_order_batch_id: number | null
+  work_order_id: number | null
+  product_id: number
+  product_version: number
+  item_code: string
+  item_name: string
+  quantity: number
+  status: 'pending' | 'received'
+  received_at: string | null
+  received_by: string | null
+  created_at: string
+  revision: number
+}
+
+export type FinishedStock = {
   id: number
   product_id: number
   item_code: string
   item_name: string
   product_version: number
-  flow_node_id: string
-  completed_flow_node_id: string
-  completed_node_label: string
   quantity: number
+  reserved_quantity: number
   available_quantity: number
   revision: number
+  updated_at: string
 }
 
-export type FinishedInventoryTransaction = {
+export type FinishedStockTransaction = {
   id: number
-  source_type: FinishedInventoryTransactionSource
-  source_id: number
-  finished_inventory_stock_id: number | null
-  production_plan_id: number | null
-  transaction_type: string
+  finished_stock_id: number
+  finished_receipt_id: number | null
+  finished_stock_reservation_id: number | null
+  customer_order_id: number | null
+  customer_order_no: string
+  customer_order_item_id: number | null
+  product_id: number
+  product_version: number
+  item_code: string
+  item_name: string
+  transaction_type: 'receipt' | 'customer_shipment'
   quantity: number
   quantity_before: number
   quantity_after: number
   actor_username: string
   reason: string
   created_at: string
-  item_code: string
-  item_name: string
-  customer_order_no: string
-  completed_node_label: string
 }
 
-export type FinishedOrderStock = {
+export type FinishedShipmentCandidate = {
   customer_order_id: number
   customer_order_no: string
   order_status: FinishedOrderStatus
@@ -45,7 +61,8 @@ export type FinishedOrderStock = {
   item_name: string
   product_version: number
   required_quantity: number
-  pending_quantity: number
+  reserved_quantity: number
+  unreserved_quantity: number
   available_quantity: number
   shipped_quantity: number
   outstanding_quantity: number

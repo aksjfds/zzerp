@@ -1,12 +1,280 @@
 """Read-only reference checks and projections owned by production core."""
 
+from dataclasses import dataclass
 from collections.abc import Collection
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
-from modules.production_core.persistence import ProductionItem, WorkOrder
-from modules.production_core.card_status import reserved_quantities
+from domain.production_types import (
+    WORK_ORDER_STATUS_OPEN,
+    WORK_ORDER_SUPPLIER_PROCESSING,
+    QcQualifiedDestination,
+    WorkOrderStatus,
+)
+from modules.errors import DomainError
+from modules.production_core.persistence import (
+    ProductionItem,
+    WorkOrder,
+    WorkOrderBatch,
+)
+from modules.production_core.work_order_status import reserved_quantities
+from modules.production_core.work_order_progress import (
+    SupplierProcessingQcProgress,
+    calculate_supplier_processing_qc_progress,
+    validate_supplier_processing_work_order_progress,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PartProductionReference:
+    id: int
+    customer_order_item_id: int
+    product_id: int
+    product_version: int
+    product_bom_id: int
+    origin_flow_node_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class SupplierProcessingWorkOrderReference:
+    id: int
+    production_item_id: int
+    flow_node_id: str
+    status: WorkOrderStatus
+
+
+@dataclass(frozen=True, slots=True)
+class SupplierProcessingQcBatchReference:
+    id: int
+    work_order_id: int
+    submitted_quantity: int
+    source_flow_node_id: str
+    qualified_quantity: int
+    rework_quantity: int
+    scrap_quantity: int
+    lost_quantity: int
+    qc_worker_id: int
+    qc_worker_name: str
+    defect_reason: str | None
+    qualified_destination: QcQualifiedDestination | None
+    destination_decided_at: datetime | None
+    destination_decided_by: str | None
+    recorded_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class SupplierProcessingQcOrderReference:
+    id: int
+    work_order_no: str
+    production_item_id: int
+    flow_node_id: str
+    source_flow_node_id: str
+    supplier_name: str
+    supplier_process_name: str
+    remark: str | None
+    quantity: int
+    status: WorkOrderStatus
+    created_at: datetime
+    batches: tuple[SupplierProcessingQcBatchReference, ...]
+    qc_progress: SupplierProcessingQcProgress
+
+    @property
+    def inspected_quantity(self) -> int:
+        return self.qc_progress.inspected_quantity
+
+    @property
+    def qualified_quantity(self) -> int:
+        return self.qc_progress.qualified_quantity
+
+    @property
+    def rework_quantity(self) -> int:
+        return self.qc_progress.rework_quantity
+
+    @property
+    def scrap_quantity(self) -> int:
+        return self.qc_progress.scrap_quantity
+
+    @property
+    def lost_quantity(self) -> int:
+        return self.qc_progress.lost_quantity
+
+    @property
+    def remaining_qualified_quantity(self) -> int:
+        return self.qc_progress.remaining_qualified_quantity
+
+    @property
+    def pending_destination_quantity(self) -> int:
+        return self.qc_progress.pending_destination_quantity
+
+    @property
+    def released_quantity(self) -> int:
+        return self.qc_progress.released_quantity
+
+
+PartProductionIdentity = tuple[int, int, int, int, str]
+SupplierProcessingPosition = tuple[int, str]
+
+
+def part_production_references(
+    session: Session,
+    identities: Collection[PartProductionIdentity],
+) -> dict[PartProductionIdentity, PartProductionReference]:
+    if not identities:
+        return {}
+    rows = session.scalars(
+        select(ProductionItem).where(
+            tuple_(
+                ProductionItem.customer_order_item_id,
+                ProductionItem.product_id,
+                ProductionItem.product_version,
+                ProductionItem.product_bom_id,
+                ProductionItem.origin_flow_node_id,
+            ).in_(list(identities)),
+            ProductionItem.product_bom_id.is_not(None),
+        )
+    )
+    references: dict[PartProductionIdentity, PartProductionReference] = {}
+    for item in rows:
+        if item.product_bom_id is None:
+            continue
+        identity = (
+            item.customer_order_item_id,
+            item.product_id,
+            item.product_version,
+            item.product_bom_id,
+            item.origin_flow_node_id,
+        )
+        references[identity] = PartProductionReference(
+            id=item.id,
+            customer_order_item_id=item.customer_order_item_id,
+            product_id=item.product_id,
+            product_version=item.product_version,
+            product_bom_id=item.product_bom_id,
+            origin_flow_node_id=item.origin_flow_node_id,
+        )
+    return references
+
+
+def supplier_processing_work_order_references(
+    session: Session,
+    positions: Collection[SupplierProcessingPosition],
+) -> dict[SupplierProcessingPosition, SupplierProcessingWorkOrderReference]:
+    if not positions:
+        return {}
+    rows = session.scalars(
+        select(WorkOrder).where(
+            tuple_(WorkOrder.production_item_id, WorkOrder.flow_node_id).in_(
+                list(positions)
+            ),
+            WorkOrder.work_order_type == WORK_ORDER_SUPPLIER_PROCESSING,
+        )
+    )
+    return {
+        (
+            order.production_item_id,
+            order.flow_node_id,
+        ): SupplierProcessingWorkOrderReference(
+            id=order.id,
+            production_item_id=order.production_item_id,
+            flow_node_id=order.flow_node_id,
+            status=order.status,
+        )
+        for order in rows
+    }
+
+
+def supplier_processing_qc_order_references(
+    session: Session,
+    work_order_ids: Collection[int] | None = None,
+) -> dict[int, SupplierProcessingQcOrderReference]:
+    if work_order_ids is not None and not work_order_ids:
+        return {}
+    statement = select(WorkOrder).where(
+        WorkOrder.work_order_type == WORK_ORDER_SUPPLIER_PROCESSING,
+        WorkOrder.status == WORK_ORDER_STATUS_OPEN,
+    )
+    if work_order_ids is not None:
+        statement = statement.where(WorkOrder.id.in_(list(work_order_ids)))
+    orders = list(session.scalars(
+        statement.order_by(
+            WorkOrder.created_at.desc(),
+            WorkOrder.id.desc(),
+        )
+    ))
+    if not orders:
+        return {}
+    order_ids = [order.id for order in orders]
+    batches_by_order: dict[int, list[WorkOrderBatch]] = {}
+    for batch in session.scalars(
+        select(WorkOrderBatch)
+        .where(WorkOrderBatch.work_order_id.in_(order_ids))
+        .order_by(WorkOrderBatch.work_order_id, WorkOrderBatch.id)
+    ):
+        batches_by_order.setdefault(batch.work_order_id, []).append(batch)
+    result: dict[int, SupplierProcessingQcOrderReference] = {}
+    for order in orders:
+        if (
+            not order.work_order_no
+            or not order.source_flow_node_id
+            or not order.supplier_name
+            or not order.supplier_process_name
+        ):
+            raise DomainError(
+                "supplier_processing_work_order_context_invalid",
+                "委外加工工单执行快照不完整",
+                status_code=409,
+            )
+        batch_rows = tuple(batches_by_order.get(order.id, ()))
+        progress = calculate_supplier_processing_qc_progress(order, batch_rows)
+        validate_supplier_processing_work_order_progress(order, progress)
+        if any(
+            batch.qc_worker_id is None or batch.qc_worker_name is None
+            for batch in batch_rows
+        ):
+            raise DomainError(
+                "supplier_processing_qc_batch_invalid",
+                "委外加工工单存在不符合分次质检规则的批次",
+                status_code=409,
+            )
+        batches = tuple(
+            SupplierProcessingQcBatchReference(
+                id=batch.id,
+                work_order_id=batch.work_order_id,
+                submitted_quantity=batch.submitted_quantity,
+                source_flow_node_id=batch.source_flow_node_id,
+                qualified_quantity=batch.qualified_quantity,
+                rework_quantity=batch.rework_quantity,
+                scrap_quantity=batch.scrap_quantity,
+                lost_quantity=batch.lost_quantity,
+                qc_worker_id=batch.qc_worker_id,
+                qc_worker_name=batch.qc_worker_name,
+                defect_reason=batch.defect_reason,
+                qualified_destination=batch.qualified_destination,
+                destination_decided_at=batch.destination_decided_at,
+                destination_decided_by=batch.destination_decided_by,
+                recorded_at=batch.recorded_at,
+            )
+            for batch in batch_rows
+        )
+        reference = SupplierProcessingQcOrderReference(
+            id=order.id,
+            work_order_no=order.work_order_no,
+            production_item_id=order.production_item_id,
+            flow_node_id=order.flow_node_id,
+            source_flow_node_id=order.source_flow_node_id,
+            supplier_name=order.supplier_name,
+            supplier_process_name=order.supplier_process_name,
+            remark=order.remark,
+            quantity=order.quantity,
+            status=order.status,
+            created_at=order.created_at,
+            batches=batches,
+            qc_progress=progress,
+        )
+        result[order.id] = reference
+    return result
 
 
 def reserved_repository_quantities(
@@ -111,10 +379,19 @@ def has_work_order_for_procedure(session: Session, procedure_id: int) -> bool:
 
 
 __all__ = [
+    "PartProductionIdentity",
+    "PartProductionReference",
+    "SupplierProcessingPosition",
+    "SupplierProcessingQcBatchReference",
+    "SupplierProcessingQcOrderReference",
+    "SupplierProcessingWorkOrderReference",
     "has_product_version_production_reference",
     "has_standard_execution_order",
     "has_work_order_for_procedure",
     "list_standard_execution_order_ids",
     "list_standard_execution_config_keys",
+    "part_production_references",
     "reserved_repository_quantities",
+    "supplier_processing_work_order_references",
+    "supplier_processing_qc_order_references",
 ]

@@ -1,4 +1,5 @@
 from datetime import date
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -115,10 +116,9 @@ class ProductionPlanItemResponse(SalesModel):
     unit_requirement: int
     gross_required_quantity: int
     estimated_inventory_quantity: int
-    available_inventory_quantity: int
     net_required_quantity: int
     planned_production_quantity: int
-    deducted_inventory_quantity: int
+    allocated_inventory_quantity: int
 
 
 class ProductionPlanProductSummary(SalesModel):
@@ -156,8 +156,11 @@ class ProductionPlanInventoryItem(SalesModel):
     completed_node_label: str
     warehouse_code: str
     warehouse_name: str
-    current_inventory_quantity: int
-    planned_deduction_quantity: int
+    stock_quantity: int
+    reserved_quantity: int
+    available_quantity: int
+    planned_allocation_quantity: int
+    allocation_mode: Literal["reservation", "outbound"]
     decomposition: ProductionPlanInventoryDecomposition
 
 
@@ -189,6 +192,8 @@ class ProductionNodeStat(SalesModel):
     transferred_quantity: int
     abnormal_quantity: int
     output_quantity: int
+    pending_receipt_quantity: int
+    received_quantity: int
     input_details: dict[str, int]
 
 

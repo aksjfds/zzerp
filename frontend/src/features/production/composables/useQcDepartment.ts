@@ -1,7 +1,6 @@
 import { ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import { queryDepartmentWorkers } from '../api/departmentRepositories'
 import {
   decideQcDestination,
   inspectQcBatch,
@@ -11,13 +10,11 @@ import type {
   PendingQcBatch,
   QcDestination,
   QcInspectionPayload,
-  WorkerItem,
 } from '../domain/types'
 
 export function useQcDepartment() {
   const activeView = ref<'active' | 'history'>('active')
   const batches = ref<PendingQcBatch[]>([])
-  const workers = ref<WorkerItem[]>([])
   const activeBatch = ref<PendingQcBatch>()
   const loading = ref(false)
   const page = ref(1)
@@ -60,14 +57,6 @@ export function useQcDepartment() {
       if (sequence === loadSequence) ElMessage.warning('待检批次加载失败')
     } finally {
       if (sequence === loadSequence) loading.value = false
-    }
-  }
-
-  async function loadWorkers() {
-    try {
-      workers.value = await queryDepartmentWorkers('qc')
-    } catch {
-      ElMessage.warning('QC 工人列表加载失败')
     }
   }
 
@@ -121,7 +110,7 @@ export function useQcDepartment() {
 
   async function refresh() {
     page.value = 1
-    await Promise.all([loadBatches(), loadWorkers()])
+    await loadBatches()
   }
 
   async function changePage(nextPage: number) {
@@ -142,7 +131,7 @@ export function useQcDepartment() {
   }
 
   async function load() {
-    await Promise.all([loadBatches(), loadWorkers()])
+    await loadBatches()
   }
 
   return {
@@ -165,6 +154,5 @@ export function useQcDepartment() {
     search,
     submitting,
     total,
-    workers,
   }
 }

@@ -88,8 +88,8 @@ class ProductionPlanItem(Base):
         CheckConstraint("net_required_quantity >= 0", name="ck_plan_item_net_required"),
         CheckConstraint("planned_production_quantity >= 0", name="ck_plan_item_planned"),
         CheckConstraint(
-            "deducted_inventory_quantity >= 0",
-            name="ck_plan_item_deducted_inventory",
+            "allocated_inventory_quantity >= 0",
+            name="ck_plan_item_allocated_inventory",
         ),
         UniqueConstraint(
             "production_plan_id",
@@ -101,6 +101,12 @@ class ProductionPlanItem(Base):
             "id",
             "production_plan_id",
             name="uq_production_plan_item_plan_context",
+        ),
+        UniqueConstraint(
+            "id",
+            "production_plan_id",
+            "customer_order_item_id",
+            name="uq_production_plan_item_reservation_context",
         ),
         ForeignKeyConstraint(
             ["production_plan_id", "customer_order_id"],
@@ -150,7 +156,7 @@ class ProductionPlanItem(Base):
     estimated_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     net_required_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     planned_production_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    deducted_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    allocated_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
     plan: Mapped[ProductionPlan] = relationship(back_populates="items")
     route_tasks: Mapped[list[ProductionRouteTask]] = relationship(
@@ -163,8 +169,19 @@ class ProductionRouteTask(Base):
     __tablename__ = "production_route_task"
     __table_args__ = (
         CheckConstraint(
-            "route_node_type IN ('process', 'assembly')",
+            "route_node_type IN ('process', 'assembly', 'supplier_processing')",
             name="ck_production_route_task_node_type",
+        ),
+        CheckConstraint(
+            "(route_node_type IN ('process', 'assembly') "
+            "AND workshop_id IS NOT NULL) OR "
+            "(route_node_type = 'supplier_processing' AND workshop_id IS NULL)",
+            name="ck_production_route_task_execution_scope",
+        ),
+        ForeignKeyConstraint(
+            ["workshop_id", "department_id"],
+            ["workshop.id", "workshop.department_id"],
+            name="fk_production_route_task_workshop_department",
         ),
         CheckConstraint("route_order >= 0", name="ck_production_route_task_order"),
         ForeignKeyConstraint(
@@ -189,6 +206,12 @@ class ProductionRouteTask(Base):
             "workshop_id",
             "production_plan_item_id",
         ),
+        Index(
+            "idx_production_route_task_department",
+            "department_id",
+            "production_plan_id",
+            "production_plan_item_id",
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -196,10 +219,9 @@ class ProductionRouteTask(Base):
     production_plan_item_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     route_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     route_node_type: Mapped[str] = mapped_column(Text, nullable=False)
-    workshop_id: Mapped[int] = mapped_column(
-        BigInteger,
-        ForeignKey("workshop.id"),
-        nullable=False,
+    workshop_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    department_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("department.id"), nullable=False
     )
     route_order: Mapped[int] = mapped_column(Integer, nullable=False)
     plan_item: Mapped[ProductionPlanItem] = relationship(back_populates="route_tasks")

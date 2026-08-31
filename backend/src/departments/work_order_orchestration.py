@@ -17,7 +17,6 @@ from modules.assembly.api import (
 )
 from modules.errors import DomainError
 from modules.organization.model_api import Department, Procedure
-from modules.organization.transaction_api import resolve_workshop_procedure
 from modules.planning.execution_api import ensure_production_plan_active
 from modules.production_core.model_api import WorkOrder, WorkOrderBatch
 from modules.production_core.operational_api import (
@@ -41,6 +40,8 @@ from modules.standard_execution.api import (
     resubmit_standard_rework_batch,
     submit_standard_order,
 )
+from modules.standard_execution.configuration_api import resolve_work_order_procedure
+from modules.standard_execution.procedure_api import material_key
 from modules.workforce.reference_api import get_worker_reference
 
 
@@ -48,6 +49,7 @@ def create_work_order(
     repository_id: int,
     procedure_id: int | None,
     procedure_name: str | None,
+    is_temporary: bool,
     quantity: int,
     worker_id: int | None,
     remark: str | None,
@@ -81,11 +83,18 @@ def create_work_order(
         workshop_id = node.get("workshop_id")
         if not isinstance(workshop_id, int):
             raise DomainError("workshop_not_found", "当前流程节点未配置车间")
-        procedure = resolve_workshop_procedure(
+        procedure = resolve_work_order_procedure(
             session,
+            scope=(
+                production_item.product_id,
+                production_item.product_version,
+                material_key(production_item),
+                source.flow_node_id,
+            ),
             workshop_id=workshop_id,
             procedure_id=procedure_id,
             procedure_name=procedure_name,
+            is_temporary=is_temporary,
             required_input_mode="single",
         )
         if source.department_id != procedure_department_id(session, procedure):
@@ -105,6 +114,7 @@ def create_work_order(
             "worker_name": worker.worker_name if worker else None,
             "created_by": actor_username,
             "remark": remark,
+            "is_temporary": is_temporary,
         }
         order = create_standard_order(**common)
         mark_order_planned(session, production_item.customer_order_item_id)
@@ -175,10 +185,16 @@ def submit_work_order(
                 "无权操作该工单",
                 status_code=403,
             )
-        _flow_context, node = node_context(
+        flow_context, node = node_context(
             session,
             production_item,
             order.flow_node_id,
+        )
+        direct_inbound_target = flow_context.normal_target(node["id"])
+        completes_packaging = (
+            completion_action != COMPLETION_QC
+            and direct_inbound_target is not None
+            and direct_inbound_target.get("type") == "finished_inbound"
         )
         procedure = session.get(Procedure, order.procedure_id)
         if procedure is None or procedure.workshop_id != node.get("workshop_id"):
@@ -194,19 +210,20 @@ def submit_work_order(
             "completion_action": completion_action,
         }
         submit_standard_order(**common)
-        record_undoable_operation(
-            session,
-            order,
-            before,
-            operation_type="submission",
-            operation_label=(
-                "撤回送检"
-                if completion_action == COMPLETION_QC
-                else "撤回加工结果"
-            ),
-            department_code=department.department_code,
-            actor_username=actor_username,
-        )
+        if not completes_packaging:
+            record_undoable_operation(
+                session,
+                order,
+                before,
+                operation_type="submission",
+                operation_label=(
+                    "撤回送检"
+                    if completion_action == COMPLETION_QC
+                    else "撤回加工结果"
+                ),
+                department_code=department.department_code,
+                actor_username=actor_username,
+            )
         return serialize_work_order(session, order)
 
 

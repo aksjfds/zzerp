@@ -10,8 +10,7 @@ export const outsourceDepartment: DepartmentModule = {
   requiredPermission: PRODUCTION_PERMISSIONS.view,
   component: () => import('@/features/production/views/OutsourceDepartmentView.vue'),
   capabilities: [
-    'repositories',
-    'work_orders',
+    'production_workbench',
     'workers',
     'standard_execution',
     'production_progress',

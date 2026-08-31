@@ -20,6 +20,7 @@ from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import (
     bom_commands,
     empty_process_flow,
+    packaging_workshop_ids,
     raise_integrity_error,
     raise_stale_data_error,
     validated_draft_flow,
@@ -70,20 +71,21 @@ def _ensure_workshops_exist(session, flow: ProcessFlowPayload) -> None:
 def _validate_flow_departments_and_workshops(
     session,
     flow: ProcessFlowPayload,
-) -> None:
+) -> set[int]:
     workshop_ids = {
         node.workshop_id for node in flow.nodes if node.type in {"process", "assembly"}
     }
     workshops = get_workshop_routes(session, workshop_ids)
     department_ids = get_department_ids_by_codes(
         session,
-        {"assembly", "finished", "qc"},
+        {"assembly", "business", "finished", "qc"},
     )
     required_department_codes = {
         code
         for code, node_type in (
             ("assembly", "assembly"),
-            ("finished", "shipping"),
+            ("business", "supplier_processing"),
+            ("finished", "finished_inbound"),
             ("qc", "qc"),
         )
         if any(node.type == node_type for node in flow.nodes)
@@ -93,7 +95,8 @@ def _validate_flow_departments_and_workshops(
         missing_code = sorted(missing_department_codes)[0]
         missing_type = {
             "assembly": "assembly",
-            "finished": "shipping",
+            "business": "supplier_processing",
+            "finished": "finished_inbound",
             "qc": "qc",
         }[missing_code]
         invalid_node = next(
@@ -136,6 +139,7 @@ def _validate_flow_departments_and_workshops(
                     path="process_flow.nodes",
                     element_id=node.id,
                 )
+    return packaging_workshop_ids(workshops)
 
 
 def create_product(payload: CreateProductPayload) -> dict:
@@ -270,7 +274,16 @@ def replace_product_bom(
                 current_flow = ProcessFlowPayload.model_validate(
                     process_flow_record.flow_json
                 )
-                validated_flow(current_flow, retained_ids)
+                _ensure_workshops_exist(session, current_flow)
+                direct_inbound_workshop_ids = _validate_flow_departments_and_workshops(
+                    session,
+                    current_flow,
+                )
+                validated_flow(
+                    current_flow,
+                    retained_ids,
+                    direct_inbound_workshop_ids,
+                )
             saved_items = repository.replace_bom(product, product_version, commands)
             if current_flow is not None:
                 synchronized = synchronize_part_metadata(
@@ -318,6 +331,11 @@ def update_product_process_flow(
                 },
                 product.factory_code,
             )
+            _ensure_workshops_exist(session, flow)
+            direct_inbound_workshop_ids = _validate_flow_departments_and_workshops(
+                session,
+                flow,
+            )
             validated = validated_flow(
                 flow,
                 {
@@ -325,6 +343,7 @@ def update_product_process_flow(
                     for item in product.bom_items
                     if item.product_version == product_version
                 },
+                direct_inbound_workshop_ids,
             )
             current_flow_record = next(
                 (
@@ -342,8 +361,6 @@ def update_product_process_flow(
                 proposed_flow=validated,
                 collaborators=collaborators,
             )
-            _ensure_workshops_exist(session, flow)
-            _validate_flow_departments_and_workshops(session, flow)
             repository.set_process_flow(
                 product,
                 product_version,

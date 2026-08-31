@@ -3,7 +3,13 @@ from typing import Literal, TypeAlias
 
 WORK_ORDER_STANDARD = "standard"
 WORK_ORDER_ASSEMBLY = "assembly"
+WORK_ORDER_SUPPLIER_PROCESSING = "supplier_processing"
 WORK_ORDER_TYPES = frozenset({
+    WORK_ORDER_STANDARD,
+    WORK_ORDER_ASSEMBLY,
+    WORK_ORDER_SUPPLIER_PROCESSING,
+})
+STANDARD_EXECUTION_WORK_ORDER_TYPES = frozenset({
     WORK_ORDER_STANDARD,
     WORK_ORDER_ASSEMBLY,
 })
@@ -25,13 +31,16 @@ QC_DESTINATION_RELEASE = "release"
 QC_DESTINATION_INVENTORY = "inventory"
 
 WorkOrderCompletionAction: TypeAlias = Literal["direct", "qc"]
+WorkOrderType: TypeAlias = Literal[
+    "standard",
+    "assembly",
+    "supplier_processing",
+]
+WorkOrderStatus: TypeAlias = Literal["open", "closed", "cancelled"]
 QcQualifiedDestination: TypeAlias = Literal["return", "release", "inventory"]
 
-QC_SUPPORTED_WORK_ORDER_TYPES = WORK_ORDER_TYPES
-REWORK_TRACKED_WORK_ORDER_TYPES = frozenset({
-    WORK_ORDER_STANDARD,
-    WORK_ORDER_ASSEMBLY,
-})
+QC_SUPPORTED_WORK_ORDER_TYPES = STANDARD_EXECUTION_WORK_ORDER_TYPES
+REWORK_TRACKED_WORK_ORDER_TYPES = STANDARD_EXECUTION_WORK_ORDER_TYPES
 
 WORK_ORDER_MOVEMENT_TYPES = {
     "process": WORK_ORDER_STANDARD,

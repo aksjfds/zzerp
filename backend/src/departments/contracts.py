@@ -1,20 +1,17 @@
 from dataclasses import dataclass
 
 
-CAP_REPOSITORIES = "repositories"
-CAP_WORK_ORDERS = "work_orders"
 CAP_WORKERS = "workers"
 CAP_STANDARD_EXECUTION = "standard_execution"
 CAP_ASSEMBLY = "assembly"
 CAP_QUALITY = "quality"
 CAP_SPECIAL_PRINTING = "special_printing"
 CAP_PRODUCTION_PROGRESS = "production_progress"
+CAP_PRODUCTION_WORKBENCH = "production_workbench"
 CAP_INVENTORY = "inventory"
 CAP_FINISHED_GOODS = "finished_goods"
 
 CAPABILITY_METHODS = {
-    CAP_REPOSITORIES: ("list_repositories",),
-    CAP_WORK_ORDERS: ("list_work_orders",),
     CAP_WORKERS: (
         "list_workers",
         "worker_overview",
@@ -27,6 +24,10 @@ CAPABILITY_METHODS = {
     CAP_QUALITY: ("list_qc_batches", "inspect_qc_batch"),
     CAP_SPECIAL_PRINTING: ("printing_profile",),
     CAP_PRODUCTION_PROGRESS: ("list_production_progress",),
+    CAP_PRODUCTION_WORKBENCH: (
+        "list_production_workbench_positions",
+        "list_production_workbench_work_orders",
+    ),
     CAP_INVENTORY: (),
     CAP_FINISHED_GOODS: (),
 }

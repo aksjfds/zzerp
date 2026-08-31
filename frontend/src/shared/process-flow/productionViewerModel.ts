@@ -74,9 +74,10 @@ export function withProductionEdgeStyle(
 export function nodeTypeLabel(type?: FlowNodeType) {
   if (type === 'part') return '配件'
   if (type === 'process') return '工艺'
+  if (type === 'supplier_processing') return '委外加工'
   if (type === 'qc') return 'QC'
   if (type === 'assembly') return '装配'
-  if (type === 'shipping') return '发货'
+  if (type === 'finished_inbound') return '入库'
   return '节点'
 }
 
@@ -88,8 +89,14 @@ export function nodeStatus(stat: ProductionNodeStat | null, type?: FlowNodeType)
   if (!stat) return { label: '未开始', tone: 'pending' }
   if (stat.abnormal_quantity > 0) return { label: '存在异常', tone: 'danger' }
   if (stat.current_quantity > 0) return { label: '进行中', tone: 'active' }
+  if (type === 'finished_inbound' && stat.pending_receipt_quantity > 0) {
+    return { label: '待入库', tone: 'active' }
+  }
+  if (type === 'finished_inbound' && stat.received_quantity > 0) {
+    return { label: '已入库', tone: 'done' }
+  }
   if (stat.entered_quantity > 0 || stat.transferred_quantity > 0 || stat.output_quantity > 0) {
-    return { label: type === 'shipping' ? '已发货' : '已流转', tone: 'done' }
+    return { label: '已流转', tone: 'done' }
   }
   return { label: '未开始', tone: 'pending' }
 }
@@ -97,9 +104,12 @@ export function nodeStatus(stat: ProductionNodeStat | null, type?: FlowNodeType)
 export function primaryProgress(stat: ProductionNodeStat | null, type?: FlowNodeType) {
   if (type === 'part') return { label: '当前剩余', value: stat?.current_quantity ?? 0 }
   if (type === 'process') return { label: '当前待加工', value: stat?.current_quantity ?? 0 }
+  if (type === 'supplier_processing') return { label: '剩余待合格', value: stat?.current_quantity ?? 0 }
   if (type === 'qc') return { label: '当前待检', value: stat?.current_quantity ?? 0 }
   if (type === 'assembly') return { label: '当前可装配', value: stat?.current_quantity ?? 0 }
-  if (type === 'shipping') return { label: '已发货', value: stat?.entered_quantity ?? 0 }
+  if (type === 'finished_inbound') {
+    return { label: '待入库', value: stat?.pending_receipt_quantity ?? 0 }
+  }
   return { label: '当前数量', value: stat?.current_quantity ?? 0 }
 }
 
@@ -108,8 +118,12 @@ export function progressFields(stat: ProductionNodeStat | null, type?: FlowNodeT
   const abnormal = { label: '异常数量', value: stat.abnormal_quantity, danger: stat.abnormal_quantity > 0 }
   if (type === 'part') return [{ label: '投入数量', value: stat.entered_quantity }, { label: '已转出', value: stat.transferred_quantity }, abnormal]
   if (type === 'process') return [{ label: '接收数量', value: stat.entered_quantity }, { label: '已流转', value: stat.transferred_quantity }, abnormal]
+  if (type === 'supplier_processing') return [{ label: '任务数量', value: stat.entered_quantity }, { label: '累计质检', value: stat.transferred_quantity }, abnormal]
   if (type === 'qc') return [{ label: '送检数量', value: stat.entered_quantity }, { label: '合格数量', value: stat.transferred_quantity }, abnormal]
   if (type === 'assembly') return [{ label: '投入数量', value: stat.entered_quantity }, { label: '装配产出', value: stat.output_quantity }, { label: '已转出', value: stat.transferred_quantity }, abnormal]
+  if (type === 'finished_inbound') {
+    return [{ label: '已入库', value: stat.received_quantity }]
+  }
   return []
 }
 

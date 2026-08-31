@@ -7,6 +7,7 @@ from collections.abc import Collection
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from domain.production_types import WorkOrderType
 from modules.production_core.persistence import ProductionItem, WorkOrder
 from modules.production_core.work_order_presenters import item_display
 
@@ -16,8 +17,8 @@ class WorkOrderActivity:
     id: int
     work_order_no: str | None
     production_item_id: int
-    procedure_id: int
-    work_order_type: str
+    procedure_id: int | None
+    work_order_type: WorkOrderType
     work_order_name: str
     worker_id: int | None
     quantity: int

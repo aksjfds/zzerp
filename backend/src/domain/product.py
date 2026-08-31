@@ -9,6 +9,7 @@ class ProductReference:
     customer_id: int
     product_name: str
     factory_code: str
+    customer_code: str
     version: int
 
 

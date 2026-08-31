@@ -29,7 +29,10 @@ type Callbacks = {
   onSelectEdge: (edge: FlowEdge | null) => void
   onSelectNode: (node: FlowNode | null) => void
   workshopDepartmentCode?: (workshopId: number) => string | undefined
+  workshopDirectInbound?: (workshopId: number) => boolean
 }
+
+type SelectedElements = ReturnType<LogicFlow['getSelectElements']>
 
 export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>, callbacks: Callbacks) {
   const instance = shallowRef<LogicFlow | null>(null)
@@ -39,6 +42,7 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   let nodeDisplayScale = storedProcessFlowNumber(PROCESS_FLOW_NODE_SCALE_STORAGE_KEY, 1, 0.6)
   let applyingDisplayScale = false
   let batchConnecting = false
+  let batchDeleting = false
   let panElement: HTMLDivElement | null = null
   const pointerInteractions = createCanvasPointerInteractions({
     container: () => panElement,
@@ -77,6 +81,21 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       lf.clearSelectElements()
       emitChange()
     })
+  }
+
+  function deleteSelectedNodes(lf: LogicFlow, elements?: SelectedElements) {
+    const selectedNodes = elements?.nodes ?? lf.getSelectElements().nodes
+    if (!selectedNodes.length) return
+    batchDeleting = true
+    try {
+      lf.clearSelectElements()
+      selectedNodes.forEach(node => lf.deleteNode(node.id))
+    } finally {
+      batchDeleting = false
+    }
+    callbacks.onSelectNode(null)
+    callbacks.onSelectEdge(null)
+    emitChange()
   }
 
   function applyNodeDisplayScale(lf: LogicFlow, nodeId?: string) {
@@ -144,7 +163,10 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       graphMenu: [],
       selectionMenu: readonly
         ? []
-        : [{ text: '自动连接', callback: () => autoConnectSelectedNodes(lf) }],
+        : [
+            { text: '自动连接', callback: () => autoConnectSelectedNodes(lf) },
+            { text: '删除所选节点', callback: (elements: SelectedElements) => deleteSelectedNodes(lf, elements) },
+          ],
     })
   }
 
@@ -161,6 +183,7 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     const lf = instance.value
     lf?.renderRawData(toLogicFlowData(flow, {
       workshopDepartmentCode: callbacks.workshopDepartmentCode,
+      workshopDirectInbound: callbacks.workshopDirectInbound,
     }))
     if (lf) {
       applyNodeDisplayScale(lf)
@@ -229,7 +252,7 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
     lf.on(
       'node:add,node:dnd-add,node:delete,edge:delete,node:drop,node:rotate,node:resize,node:properties-change,edge:adjust,edge:exchange-node,text:update',
       () => {
-        if (applyingDisplayScale) return
+        if (applyingDisplayScale || batchDeleting) return
         emitChange()
         refreshNodeReadability(lf)
       },

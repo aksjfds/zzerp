@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { RepositoryItem, WorkerItem } from '../domain/types'
+import type { WorkerItem } from '../domain/types'
+import type { AssemblyWorkOrderCreationTarget } from '../domain/workOrderCreation'
 
 const props = defineProps<{
   modelValue: boolean
-  item?: RepositoryItem
-  materials: RepositoryItem[]
+  item?: AssemblyWorkOrderCreationTarget
   workers: WorkerItem[]
   submitting: boolean
 }>()
@@ -17,32 +17,27 @@ const emit = defineEmits<{
     materials: Array<{ repository_id: number; quantity: number }>
     procedureId: number | null
     procedureName: string | null
+    isTemporary: boolean
     workerId: number | null
     remark: string
   }]
 }>()
 const form = reactive({
-  procedure: null as number | string | null,
+  procedureId: null as number | null,
+  temporaryProcedureName: '',
+  isTemporary: false,
   quantity: 1,
   materialQuantities: {} as Record<number, number>,
   workerId: null as number | null,
   remark: '',
 })
 const materialGroups = computed(() => {
-  const groups = new Map<string, RepositoryItem[]>()
-  props.materials.forEach((material) => {
-    if (material.repository_id === null) return
-    groups.set(
-      material.assembly_material_key,
-      [...(groups.get(material.assembly_material_key) || []), material],
-    )
-  })
-  return [...groups.entries()].map(([key, sources]) => ({
-    key,
-    name: sources[0]?.part_name || '物料',
-    requiredUnit: sources[0]?.assembly_unit_quantity || 1,
-    sources,
-  }))
+  return props.item?.materials.map(material => ({
+    key: material.material_key,
+    name: material.item_name,
+    requiredUnit: material.unit_quantity,
+    sources: material.sources,
+  })) || []
 })
 
 function allocateDefault() {
@@ -50,7 +45,6 @@ function allocateDefault() {
   materialGroups.value.forEach((group) => {
     let remaining = form.quantity * group.requiredUnit
     group.sources.forEach((source) => {
-      if (source.repository_id === null) return
       const allocated = Math.min(source.available_quantity, remaining)
       allocations[source.repository_id] = allocated
       remaining -= allocated
@@ -62,7 +56,9 @@ function allocateDefault() {
 watch(() => props.modelValue, (visible) => {
   if (!visible) return
   form.quantity = props.item?.available_quantity || 1
-  form.procedure = props.item?.available_procedures[0]?.id ?? null
+  form.procedureId = props.item?.available_procedures[0]?.id ?? null
+  form.temporaryProcedureName = ''
+  form.isTemporary = false
   allocateDefault()
   form.workerId = null
   form.remark = ''
@@ -79,14 +75,23 @@ function submit() {
     ElMessage.warning('工单数量超过当前可生产数量')
     return
   }
-  if (form.procedure === null || (typeof form.procedure === 'string' && !form.procedure.trim())) {
-    ElMessage.warning('请选择已有工艺或输入新工艺')
+  if (!form.isTemporary && form.procedureId === null) {
+    ElMessage.warning('请选择已配置工艺')
+    return
+  }
+  const temporaryName = form.temporaryProcedureName.trim()
+  if (form.isTemporary && !temporaryName) {
+    ElMessage.warning('请填写临时工艺名称')
+    return
+  }
+  if (form.isTemporary && props.item?.available_procedures.some(item => item.procedure_name === temporaryName)) {
+    ElMessage.warning('该工艺已在正式配置中，请创建普通工单')
     return
   }
   for (const group of materialGroups.value) {
     const required = form.quantity * group.requiredUnit
     const allocated = group.sources.reduce((sum, source) => (
-      sum + (source.repository_id === null ? 0 : form.materialQuantities[source.repository_id] || 0)
+      sum + (form.materialQuantities[source.repository_id] || 0)
     ), 0)
     if (allocated !== required) {
       ElMessage.warning(`${group.name}的各来源合计必须为 ${required}`)
@@ -95,15 +100,14 @@ function submit() {
   }
   emit('submit', {
     quantity: form.quantity,
-    procedureId: typeof form.procedure === 'number' ? form.procedure : null,
-    procedureName: typeof form.procedure === 'string' ? form.procedure.trim() : null,
+    procedureId: form.isTemporary ? null : form.procedureId,
+    procedureName: form.isTemporary ? temporaryName : null,
+    isTemporary: form.isTemporary,
     materials: materialGroups.value.flatMap(group => group.sources).flatMap(source => (
-      source.repository_id === null
-        ? []
-        : [{
-            repository_id: source.repository_id,
-            quantity: form.materialQuantities[source.repository_id] || 0,
-          }]
+      [{
+        repository_id: source.repository_id,
+        quantity: form.materialQuantities[source.repository_id] || 0,
+      }]
     )),
     workerId: form.workerId,
     remark: form.remark.trim(),
@@ -122,10 +126,11 @@ function submit() {
       {{ item?.part_no }} - {{ item?.part_name }} · {{ item?.workshop_name }}
     </p>
     <ElForm label-width="96px">
-      <ElFormItem label="加工工艺" required>
-        <ElSelect v-model="form.procedure" filterable allow-create default-first-option placeholder="选择已有工艺或输入新工艺">
+      <ElFormItem :label="form.isTemporary ? '临时工艺' : '加工工艺'" required>
+        <ElSelect v-if="!form.isTemporary" v-model="form.procedureId" filterable placeholder="选择已配置工艺">
           <ElOption v-for="procedure in item?.available_procedures || []" :key="procedure.id" :label="procedure.procedure_name" :value="procedure.id" />
         </ElSelect>
+        <ElInput v-else v-model="form.temporaryProcedureName" maxlength="200" placeholder="填写配置以外的工艺" />
       </ElFormItem>
       <ElFormItem label="工单数量">
         <ElInputNumber
@@ -142,17 +147,17 @@ function submit() {
               <strong>{{ group.name }}</strong>
               <span>需要 {{ form.quantity * group.requiredUnit }}</span>
             </div>
-            <div v-for="(source, index) in group.sources" :key="source.repository_id || source.card_key" class="source-row">
-              <span>{{ source.material_source_name || `来源 ${index + 1}` }}</span>
+            <div v-for="source in group.sources" :key="source.repository_id" class="source-row">
+              <span>{{ source.source_label }}</span>
               <small>可用 {{ source.available_quantity }}</small>
               <ElInputNumber
-                v-if="source.repository_id !== null && group.sources.length > 1"
+                v-if="group.sources.length > 1"
                 v-model="form.materialQuantities[source.repository_id]"
                 :min="0"
                 :max="source.available_quantity"
               />
               <span v-else class="fixed-quantity">
-                使用 {{ source.repository_id === null ? 0 : form.materialQuantities[source.repository_id] || 0 }}
+                使用 {{ form.materialQuantities[source.repository_id] || 0 }}
               </span>
             </div>
           </section>
@@ -173,10 +178,17 @@ function submit() {
       </ElFormItem>
     </ElForm>
     <template #footer>
-      <ElButton @click="emit('update:modelValue', false)">取消</ElButton>
-      <ElButton type="primary" :loading="submitting" @click="submit">
-        创建工单
-      </ElButton>
+      <div class="dialog-footer">
+        <ElButton plain @click="form.isTemporary = !form.isTemporary">
+          {{ form.isTemporary ? '返回普通工单' : '临时工单' }}
+        </ElButton>
+        <div>
+          <ElButton @click="emit('update:modelValue', false)">取消</ElButton>
+          <ElButton type="primary" :loading="submitting" :disabled="!form.isTemporary && form.procedureId === null" @click="submit">
+            {{ form.isTemporary ? '创建临时工单' : '创建工单' }}
+          </ElButton>
+        </div>
+      </div>
     </template>
   </ElDialog>
 </template>
@@ -192,4 +204,5 @@ function submit() {
 .source-row + .source-row { margin-top: 8px; }
 .source-row :deep(.el-input-number) { width: 140px; }
 .fixed-quantity { width: 140px; text-align: right; color: var(--md-on-surface); }
+.dialog-footer { display: flex; justify-content: space-between; gap: 12px; width: 100%; }
 </style>

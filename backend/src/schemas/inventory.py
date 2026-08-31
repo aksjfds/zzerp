@@ -1,4 +1,5 @@
 from datetime import date, datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,11 +13,7 @@ from domain.warehouse import (
     WarehouseUnit,
 )
 
-from schemas.common import (
-    CustomerOrderStatus,
-    FinishedInventoryTransactionType,
-    FinishedInventoryTransactionSourceType,
-)
+from schemas.common import CustomerOrderStatus
 
 
 class InventoryModel(BaseModel):
@@ -87,48 +84,97 @@ class WarehouseOperationReviewInput(InventoryModel):
     review_note: str = Field(min_length=1)
 
 
-class FinishedInventoryStockResponse(InventoryModel):
+class FinishedReceiptResponse(InventoryModel):
     id: int
+    work_order_batch_id: int | None
+    work_order_id: int | None
     product_id: int
     product_version: int
-    flow_node_id: str
-    completed_flow_node_id: str
-    completed_node_label: str
     item_code: str
     item_name: str
     quantity: int
-    available_quantity: int
+    status: Literal["pending", "received"]
+    received_at: datetime | None
+    received_by: str | None
+    created_at: datetime
     revision: int
 
 
-class FinishedInventoryStockEnvelope(InventoryModel):
-    data: list[FinishedInventoryStockResponse]
+class FinishedReceiptEnvelope(InventoryModel):
+    data: list[FinishedReceiptResponse]
 
 
-class FinishedInventoryTransactionResponse(InventoryModel):
+class FinishedReceiptItemEnvelope(InventoryModel):
+    data: FinishedReceiptResponse
+
+
+class FinishedStockResponse(InventoryModel):
     id: int
-    source_type: FinishedInventoryTransactionSourceType
-    source_id: int
-    finished_inventory_stock_id: int | None
-    production_plan_id: int | None
-    transaction_type: FinishedInventoryTransactionType
+    product_id: int
+    product_version: int
+    item_code: str
+    item_name: str
+    quantity: int
+    reserved_quantity: int
+    available_quantity: int
+    revision: int
+    updated_at: datetime
+
+
+class FinishedStockEnvelope(InventoryModel):
+    data: list[FinishedStockResponse]
+
+
+class FinishedStockReservationResponse(InventoryModel):
+    id: int
+    finished_stock_id: int
+    production_plan_id: int
+    production_plan_item_id: int
+    customer_order_id: int
+    customer_order_no: str
+    customer_order_item_id: int
+    product_id: int
+    product_version: int
+    item_code: str
+    item_name: str
+    reserved_quantity: int
+    shipped_quantity: int
+    released_quantity: int
+    open_quantity: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class FinishedStockReservationEnvelope(InventoryModel):
+    data: list[FinishedStockReservationResponse]
+
+
+class FinishedStockTransactionResponse(InventoryModel):
+    id: int
+    finished_stock_id: int
+    finished_receipt_id: int | None
+    finished_stock_reservation_id: int | None
+    customer_order_id: int | None
+    customer_order_no: str
+    customer_order_item_id: int | None
+    product_id: int
+    product_version: int
+    item_code: str
+    item_name: str
+    transaction_type: Literal["receipt", "customer_shipment"]
     quantity: int
     quantity_before: int
     quantity_after: int
     actor_username: str
     reason: str
-    created_at: str
-    item_code: str = ""
-    item_name: str = ""
-    customer_order_no: str = ""
-    completed_node_label: str = ""
+    created_at: datetime
 
 
-class FinishedInventoryTransactionEnvelope(InventoryModel):
-    data: list[FinishedInventoryTransactionResponse]
+class FinishedStockTransactionEnvelope(InventoryModel):
+    data: list[FinishedStockTransactionResponse]
 
 
-class FinishedOrderStockResponse(InventoryModel):
+class FinishedShipmentCandidateResponse(InventoryModel):
     customer_order_id: int
     customer_order_no: str
     order_status: CustomerOrderStatus
@@ -137,18 +183,19 @@ class FinishedOrderStockResponse(InventoryModel):
     item_name: str
     product_version: int
     required_quantity: int
-    pending_quantity: int
+    reserved_quantity: int
+    unreserved_quantity: int
     available_quantity: int
     shipped_quantity: int
     outstanding_quantity: int
 
 
-class FinishedOrderStockEnvelope(InventoryModel):
-    data: list[FinishedOrderStockResponse]
+class FinishedShipmentCandidateEnvelope(InventoryModel):
+    data: list[FinishedShipmentCandidateResponse]
 
 
-class FinishedOrderStockItemEnvelope(InventoryModel):
-    data: FinishedOrderStockResponse
+class FinishedShipmentCandidateItemEnvelope(InventoryModel):
+    data: FinishedShipmentCandidateResponse
 
 
 class FinishedShipmentInput(InventoryModel):

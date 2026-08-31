@@ -5,6 +5,14 @@ import type {
   WorkerOverviewItem,
   WorkerPaySummary,
 } from '@/features/workers'
+import type { WorkerItem } from '../domain/types'
+
+export async function queryDepartmentWorkers(departmentCode: string) {
+  const response = await service.get<{ data: WorkerItem[] }>(
+    `/departments/${departmentCode}/workers`,
+  )
+  return response.data.data
+}
 
 export async function queryDepartmentWorkerOverview(departmentCode: string) {
   const response = await service.get<{ data: DepartmentWorkerOverview }>(

@@ -5,6 +5,7 @@ MODULE = ModuleDescriptor(
     name="standard_execution",
     public_api="modules.standard_execution.api",
     owns=(
+        "procedure_configuration",
         "procedure_price",
         "work_order_pay_detail",
     ),
@@ -17,6 +18,7 @@ MODULE = ModuleDescriptor(
     ),
     collaboration_apis=(
         "modules.standard_execution.pay_reference_api",
+        "modules.standard_execution.configuration_api",
         "modules.standard_execution.procedure_api",
         "modules.standard_execution.pricing_api",
         "modules.standard_execution.qc_api",

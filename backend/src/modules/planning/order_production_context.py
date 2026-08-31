@@ -7,7 +7,13 @@ from dataclasses import dataclass
 
 from sqlalchemy import select, tuple_
 
+from domain.production_types import (
+    WORK_ORDER_ASSEMBLY,
+    WORK_ORDER_STANDARD,
+    WORK_ORDER_SUPPLIER_PROCESSING,
+)
 from modules.engineering.model_api import Product, ProductBom
+from modules.inventory.reference_api import finished_receipt_states_by_qc_batch
 from modules.production_core.flow_api import load_product_flow
 from modules.production_core.model_api import (
     ProductionItem,
@@ -31,6 +37,7 @@ class OrderProductionReadContext:
     movements_by_item: dict[int, list[ProductionMovement]]
     work_orders_by_item: dict[int, list[WorkOrder]]
     batches_by_order: dict[int, list[WorkOrderBatch]]
+    finished_receipts_by_batch: dict[int, tuple[str, int]]
     display: ProductionItemDisplayContext
 
 
@@ -75,7 +82,11 @@ def _load_order_production_context(
     work_orders = list(session.scalars(
         select(WorkOrder).where(
             WorkOrder.production_item_id.in_(production_item_ids),
-            WorkOrder.work_order_type.in_(("standard", "assembly")),
+            WorkOrder.work_order_type.in_((
+                WORK_ORDER_STANDARD,
+                WORK_ORDER_ASSEMBLY,
+                WORK_ORDER_SUPPLIER_PROCESSING,
+            )),
         )
     )) if production_item_ids else []
     work_order_ids = {item.id for item in work_orders}
@@ -84,6 +95,10 @@ def _load_order_production_context(
             WorkOrderBatch.work_order_id.in_(work_order_ids)
         )
     )) if work_order_ids else []
+    finished_receipts_by_batch = finished_receipt_states_by_qc_batch(
+        session,
+        {batch.id for batch in batches},
+    )
     material_item_ids: dict[int, list[int]] = defaultdict(list)
     if work_order_ids:
         for work_order_id, production_item_id in session.execute(
@@ -125,6 +140,7 @@ def _load_order_production_context(
         movements_by_item=_group_by(movements, "production_item_id"),
         work_orders_by_item=_group_by(work_orders, "production_item_id"),
         batches_by_order=_group_by(batches, "work_order_id"),
+        finished_receipts_by_batch=finished_receipts_by_batch,
         display=display,
     )
 

@@ -131,7 +131,7 @@ CREATE TABLE product_process_flow (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
     product_version INT NOT NULL,
-    flow_json JSONB NOT NULL DEFAULT '{"schema_version": 4, "nodes": [], "edges": []}'::jsonb,
+    flow_json JSONB NOT NULL DEFAULT '{"schema_version": 5, "nodes": [], "edges": []}'::jsonb,
     draft_flow_json JSONB,
     CONSTRAINT ck_process_flow_json_object
         CHECK (jsonb_typeof(flow_json) = 'object'),
@@ -140,7 +140,7 @@ CREATE TABLE product_process_flow (
     CONSTRAINT ck_process_flow_schema_version_type
         CHECK (jsonb_typeof(flow_json->'schema_version') = 'number'),
     CONSTRAINT ck_process_flow_schema_version
-        CHECK (flow_json->>'schema_version' = '4'),
+        CHECK (flow_json->>'schema_version' = '5'),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT ck_process_flow_nodes_present CHECK (flow_json ? 'nodes'),
@@ -152,7 +152,7 @@ CREATE TABLE product_process_flow (
     CONSTRAINT ck_process_flow_draft_object
         CHECK (draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json) = 'object'),
     CONSTRAINT ck_process_flow_draft_schema_version
-        CHECK (draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '4'),
+        CHECK (draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '5'),
     CONSTRAINT ck_process_flow_draft_nodes
         CHECK (draft_flow_json IS NULL OR jsonb_typeof(draft_flow_json->'nodes') = 'array'),
     CONSTRAINT ck_process_flow_draft_edges
@@ -179,7 +179,7 @@ CREATE TABLE workshop (
     CONSTRAINT uq_workshop_name UNIQUE (department_id, workshop_name)
 );
 
--- product_route_task：正式流程按物料起点展开后的车间路线投影。
+-- product_route_task：正式流程按物料起点展开后的执行路线投影。
 CREATE TABLE product_route_task (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL,
@@ -191,7 +191,8 @@ CREATE TABLE product_route_task (
     origin_item_name TEXT NOT NULL,
     route_flow_node_id TEXT NOT NULL,
     route_node_type TEXT NOT NULL,
-    workshop_id BIGINT NOT NULL REFERENCES workshop(id),
+    workshop_id BIGINT,
+    department_id BIGINT NOT NULL REFERENCES department(id),
     route_order INT NOT NULL,
     CONSTRAINT fk_product_route_task_version
         FOREIGN KEY (product_id, product_version)
@@ -199,6 +200,9 @@ CREATE TABLE product_route_task (
     CONSTRAINT fk_product_route_task_bom_version
         FOREIGN KEY (product_bom_id, product_id, product_version)
         REFERENCES product_bom(id, product_id, product_version) ON DELETE CASCADE,
+    CONSTRAINT fk_product_route_task_workshop_department
+        FOREIGN KEY (workshop_id, department_id)
+        REFERENCES workshop(id, department_id),
     CONSTRAINT ck_product_route_task_origin_type
         CHECK (origin_node_type IN ('part', 'assembly')),
     CONSTRAINT ck_product_route_task_origin_scope CHECK (
@@ -206,7 +210,12 @@ CREATE TABLE product_route_task (
         OR (origin_node_type = 'assembly' AND product_bom_id IS NULL)
     ),
     CONSTRAINT ck_product_route_task_node_type
-        CHECK (route_node_type IN ('process', 'assembly')),
+        CHECK (route_node_type IN ('process', 'assembly', 'supplier_processing')),
+    CONSTRAINT ck_product_route_task_execution_scope CHECK (
+        (route_node_type IN ('process', 'assembly') AND workshop_id IS NOT NULL)
+        OR (route_node_type = 'supplier_processing'
+            AND workshop_id IS NULL AND origin_node_type = 'part')
+    ),
     CONSTRAINT ck_product_route_task_order CHECK (route_order >= 0),
     CONSTRAINT uq_product_route_task_origin_node UNIQUE (
         product_id, product_version, origin_flow_node_id, route_flow_node_id
@@ -221,23 +230,40 @@ CREATE TABLE procedure (
     CONSTRAINT uq_procedure_name UNIQUE (workshop_id, procedure_name)
 );
 
--- procedure_price：按产品版本、物料和流程节点配置可选工艺及单价。
-CREATE TABLE procedure_price (
+-- procedure_configuration：保存产品版本、物料和车间节点的工艺配置及确认状态。
+CREATE TABLE procedure_configuration (
     id BIGSERIAL PRIMARY KEY,
     product_id BIGINT NOT NULL,
     product_version INT NOT NULL,
     material_key TEXT NOT NULL,
     flow_node_id TEXT NOT NULL,
+    confirmed_at TIMESTAMPTZ,
+    confirmed_by VARCHAR(50),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_procedure_configuration_product_version
+        FOREIGN KEY (product_id, product_version)
+        REFERENCES product_version(product_id, version) ON DELETE CASCADE,
+    CONSTRAINT ck_procedure_configuration_confirmation CHECK (
+        (confirmed_at IS NULL AND confirmed_by IS NULL)
+        OR (confirmed_at IS NOT NULL AND confirmed_by IS NOT NULL)
+    ),
+    CONSTRAINT uq_procedure_configuration_scope
+        UNIQUE (product_id, product_version, material_key, flow_node_id)
+);
+
+-- procedure_price：保存已归属明确配置的工艺成员及可空单价。
+CREATE TABLE procedure_price (
+    id BIGSERIAL PRIMARY KEY,
+    configuration_id BIGINT NOT NULL
+        REFERENCES procedure_configuration(id) ON DELETE CASCADE,
     procedure_id BIGINT NOT NULL REFERENCES procedure(id),
     unit_price NUMERIC(12, 2),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_procedure_price_product_version
-        FOREIGN KEY (product_id, product_version)
-        REFERENCES product_version(product_id, version) ON DELETE CASCADE,
     CONSTRAINT ck_procedure_price_nonnegative CHECK (unit_price >= 0),
     CONSTRAINT uq_procedure_price_scope
-        UNIQUE (product_id, product_version, material_key, flow_node_id, procedure_id)
+        UNIQUE (configuration_id, procedure_id)
 );
 
 -- worker：保存部门或车间下可分配到工单、QC 批次的工作人员。
@@ -284,6 +310,8 @@ CREATE TABLE customer_order_item (
         REFERENCES product_version(product_id, version),
     CONSTRAINT uq_customer_order_item_id_version
         UNIQUE (id, product_id, product_version),
+    CONSTRAINT uq_customer_order_item_order
+        UNIQUE (id, customer_order_id),
     CONSTRAINT uq_customer_order_item_context
         UNIQUE (id, customer_order_id, product_id, product_version),
     CONSTRAINT uq_customer_order_item_product_version
@@ -339,7 +367,7 @@ CREATE TABLE production_plan_item (
     estimated_inventory_quantity INT NOT NULL DEFAULT 0,
     net_required_quantity INT NOT NULL,
     planned_production_quantity INT NOT NULL,
-    deducted_inventory_quantity INT NOT NULL DEFAULT 0,
+    allocated_inventory_quantity INT NOT NULL DEFAULT 0,
     sort_order INT NOT NULL,
     CONSTRAINT fk_production_plan_item_plan_context
         FOREIGN KEY (production_plan_id, customer_order_id)
@@ -366,27 +394,37 @@ CREATE TABLE production_plan_item (
     CONSTRAINT ck_plan_item_estimated_stock CHECK (estimated_inventory_quantity >= 0),
     CONSTRAINT ck_plan_item_net_required CHECK (net_required_quantity >= 0),
     CONSTRAINT ck_plan_item_planned CHECK (planned_production_quantity >= 0),
-    CONSTRAINT ck_plan_item_deducted_inventory CHECK (deducted_inventory_quantity >= 0),
+    CONSTRAINT ck_plan_item_allocated_inventory CHECK (allocated_inventory_quantity >= 0),
     CONSTRAINT uq_production_plan_item_identity
         UNIQUE (production_plan_id, customer_order_item_id, identity_key),
     CONSTRAINT uq_production_plan_item_plan_context
-        UNIQUE (id, production_plan_id)
+        UNIQUE (id, production_plan_id),
+    CONSTRAINT uq_production_plan_item_reservation_context
+        UNIQUE (id, production_plan_id, customer_order_item_id)
 );
 
--- production_route_task：确定保存计划物料在绑定版本正式流程中的车间路线；数量和执行状态仍以计划、生产、工单及 QC 表为准。
+-- production_route_task：确定保存计划物料在绑定版本正式流程中的执行路线；数量和执行状态仍以计划、生产、工单及 QC 表为准。
 CREATE TABLE production_route_task (
     id BIGSERIAL PRIMARY KEY,
     production_plan_id BIGINT NOT NULL,
     production_plan_item_id BIGINT NOT NULL,
     route_flow_node_id TEXT NOT NULL,
     route_node_type TEXT NOT NULL,
-    workshop_id BIGINT NOT NULL REFERENCES workshop(id),
+    workshop_id BIGINT,
+    department_id BIGINT NOT NULL REFERENCES department(id),
     route_order INT NOT NULL,
     CONSTRAINT fk_production_route_task_plan_item
         FOREIGN KEY (production_plan_item_id, production_plan_id)
         REFERENCES production_plan_item(id, production_plan_id) ON DELETE CASCADE,
+    CONSTRAINT fk_production_route_task_workshop_department
+        FOREIGN KEY (workshop_id, department_id)
+        REFERENCES workshop(id, department_id),
     CONSTRAINT ck_production_route_task_node_type
-        CHECK (route_node_type IN ('process', 'assembly')),
+        CHECK (route_node_type IN ('process', 'assembly', 'supplier_processing')),
+    CONSTRAINT ck_production_route_task_execution_scope CHECK (
+        (route_node_type IN ('process', 'assembly') AND workshop_id IS NOT NULL)
+        OR (route_node_type = 'supplier_processing' AND workshop_id IS NULL)
+    ),
     CONSTRAINT ck_production_route_task_order CHECK (route_order >= 0),
     CONSTRAINT uq_production_route_task_item_node
         UNIQUE (production_plan_item_id, route_flow_node_id)
@@ -430,101 +468,99 @@ CREATE TABLE warehouse_stock (
     )
 );
 
--- finished_inventory_stock：保存跨订单成品库存；非成品统一使用 warehouse_stock。
-CREATE TABLE finished_inventory_stock (
+-- finished_receipt：QC 放行或装包完成后等待成品部整批确认的成品入库记录。
+CREATE TABLE finished_receipt (
     id BIGSERIAL PRIMARY KEY,
+    work_order_batch_id BIGINT,
+    work_order_id BIGINT,
     product_id BIGINT NOT NULL,
     product_version INT NOT NULL,
-    flow_node_id TEXT NOT NULL,
-    completed_flow_node_id TEXT NOT NULL,
-    item_code TEXT NOT NULL,
-    item_name TEXT NOT NULL,
-    quantity INT NOT NULL DEFAULT 0,
-    revision INT NOT NULL DEFAULT 1,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_finished_inventory_stock_product_version
-        FOREIGN KEY (product_id, product_version)
-        REFERENCES product_version(product_id, version),
-    CONSTRAINT ck_finished_inventory_stock_version CHECK (product_version > 0),
-    CONSTRAINT ck_finished_inventory_stock_quantity CHECK (quantity >= 0),
-    CONSTRAINT ck_finished_inventory_stock_revision CHECK (revision > 0),
-    CONSTRAINT uq_finished_inventory_stock_identity UNIQUE (
-        product_id, product_version, flow_node_id, completed_flow_node_id
-    )
-);
-
--- finished_inventory_transaction：记录跨订单成品库存的直接入库、扣减和调整。
-CREATE TABLE finished_inventory_transaction (
-    id BIGSERIAL PRIMARY KEY,
-    finished_inventory_stock_id BIGINT NOT NULL REFERENCES finished_inventory_stock(id),
-    production_plan_id BIGINT REFERENCES production_plan(id),
-    production_plan_item_id BIGINT,
-    source_production_item_id BIGINT,
-    transaction_type TEXT NOT NULL,
     quantity INT NOT NULL,
-    quantity_before INT NOT NULL,
-    quantity_after INT NOT NULL,
-    actor_username TEXT NOT NULL,
-    reason TEXT,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT fk_finished_inventory_transaction_plan_item
-        FOREIGN KEY (production_plan_item_id, production_plan_id)
-        REFERENCES production_plan_item(id, production_plan_id),
-    CONSTRAINT ck_finished_inventory_transaction_type CHECK (
-        transaction_type IN ('receipt', 'issue')
-    ),
-    CONSTRAINT ck_finished_inventory_transaction_quantity CHECK (quantity > 0),
-    CONSTRAINT ck_finished_inventory_transaction_quantity_before CHECK (quantity_before >= 0),
-    CONSTRAINT ck_finished_inventory_transaction_quantity_after CHECK (quantity_after >= 0),
-    CONSTRAINT ck_finished_inventory_transaction_source CHECK (
-        (transaction_type = 'receipt' AND source_production_item_id IS NOT NULL
-            AND production_plan_id IS NULL AND production_plan_item_id IS NULL)
-        OR (transaction_type = 'issue' AND source_production_item_id IS NULL
-            AND production_plan_id IS NOT NULL AND production_plan_item_id IS NOT NULL)
-    )
-);
-
--- finished_order_stock：订单专属成品暂存，区分待入库、可发货、已发货和结余结转。
-CREATE TABLE finished_order_stock (
-    id BIGSERIAL PRIMARY KEY,
-    customer_order_id BIGINT NOT NULL
-        REFERENCES customer_order(id) ON DELETE CASCADE,
-    customer_order_item_id BIGINT NOT NULL
-        REFERENCES customer_order_item(id) ON DELETE CASCADE,
-    production_item_id BIGINT NOT NULL,
-    product_id BIGINT NOT NULL,
-    product_version INT NOT NULL,
-    flow_node_id TEXT NOT NULL,
-    item_code TEXT NOT NULL,
-    item_name TEXT NOT NULL,
-    unit_quantity INT NOT NULL,
-    pending_quantity INT NOT NULL DEFAULT 0,
-    available_quantity INT NOT NULL DEFAULT 0,
-    shipped_quantity INT NOT NULL DEFAULT 0,
-    transferred_quantity INT NOT NULL DEFAULT 0,
-    revision INT NOT NULL DEFAULT 1,
+    status TEXT NOT NULL DEFAULT 'pending',
     received_at TIMESTAMPTZ,
     received_by TEXT,
-    last_shipped_at TIMESTAMPTZ,
-    last_shipped_by TEXT,
+    revision INT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_finished_order_stock_item_node UNIQUE (production_item_id, flow_node_id),
-    CONSTRAINT ck_finished_order_stock_version CHECK (product_version > 0),
-    CONSTRAINT ck_finished_order_stock_unit CHECK (unit_quantity > 0),
-    CONSTRAINT ck_finished_order_stock_pending CHECK (pending_quantity >= 0),
-    CONSTRAINT ck_finished_order_stock_available CHECK (available_quantity >= 0),
-    CONSTRAINT ck_finished_order_stock_shipped CHECK (shipped_quantity >= 0),
-    CONSTRAINT ck_finished_order_stock_transferred CHECK (transferred_quantity >= 0),
-    CONSTRAINT ck_finished_order_stock_revision CHECK (revision > 0)
+    CONSTRAINT fk_finished_receipt_product_version
+        FOREIGN KEY (product_id, product_version)
+        REFERENCES product_version(product_id, version),
+    CONSTRAINT uq_finished_receipt_qc_batch UNIQUE (work_order_batch_id),
+    CONSTRAINT uq_finished_receipt_packaging_order UNIQUE (work_order_id),
+    CONSTRAINT ck_finished_receipt_source CHECK (
+        (work_order_batch_id IS NOT NULL AND work_order_id IS NULL)
+        OR (work_order_batch_id IS NULL AND work_order_id IS NOT NULL)
+    ),
+    CONSTRAINT ck_finished_receipt_version CHECK (product_version > 0),
+    CONSTRAINT ck_finished_receipt_quantity CHECK (quantity > 0),
+    CONSTRAINT ck_finished_receipt_status CHECK (status IN ('pending', 'received')),
+    CONSTRAINT ck_finished_receipt_revision CHECK (revision > 0),
+    CONSTRAINT ck_finished_receipt_lifecycle CHECK (
+        (status = 'pending' AND received_at IS NULL AND received_by IS NULL)
+        OR (status = 'received' AND received_at IS NOT NULL
+            AND received_by IS NOT NULL
+            AND received_by = btrim(received_by) AND received_by <> '')
+    )
 );
 
--- finished_goods_transaction：订单专属成品的真实入库、发货与库存领用流水。
-CREATE TABLE finished_goods_transaction (
+-- finished_stock：成品部统一成品仓；库存唯一身份只有产品和产品版本。
+CREATE TABLE finished_stock (
     id BIGSERIAL PRIMARY KEY,
-    finished_order_stock_id BIGINT NOT NULL
-        REFERENCES finished_order_stock(id) ON DELETE CASCADE,
+    product_id BIGINT NOT NULL,
+    product_version INT NOT NULL,
+    quantity INT NOT NULL DEFAULT 0,
+    reserved_quantity INT NOT NULL DEFAULT 0,
+    revision INT NOT NULL DEFAULT 1,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_finished_stock_product_version
+        FOREIGN KEY (product_id, product_version)
+        REFERENCES product_version(product_id, version),
+    CONSTRAINT uq_finished_stock_identity UNIQUE (product_id, product_version),
+    CONSTRAINT ck_finished_stock_version CHECK (product_version > 0),
+    CONSTRAINT ck_finished_stock_quantity CHECK (quantity >= 0),
+    CONSTRAINT ck_finished_stock_reserved CHECK (reserved_quantity >= 0),
+    CONSTRAINT ck_finished_stock_availability CHECK (reserved_quantity <= quantity),
+    CONSTRAINT ck_finished_stock_revision CHECK (revision > 0)
+);
+
+-- finished_stock_reservation：生产计划对统一成品库存的占用，不形成第二套库存。
+CREATE TABLE finished_stock_reservation (
+    id BIGSERIAL PRIMARY KEY,
+    finished_stock_id BIGINT NOT NULL REFERENCES finished_stock(id),
+    production_plan_id BIGINT NOT NULL,
+    production_plan_item_id BIGINT NOT NULL,
+    customer_order_item_id BIGINT NOT NULL REFERENCES customer_order_item(id),
+    reserved_quantity INT NOT NULL,
+    shipped_quantity INT NOT NULL DEFAULT 0,
+    released_quantity INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_finished_stock_reservation_plan_item
+        FOREIGN KEY (
+            production_plan_item_id, production_plan_id, customer_order_item_id
+        ) REFERENCES production_plan_item(
+            id, production_plan_id, customer_order_item_id
+        ),
+    CONSTRAINT uq_finished_stock_reservation_plan_item
+        UNIQUE (production_plan_item_id, finished_stock_id),
+    CONSTRAINT uq_finished_stock_reservation_context
+        UNIQUE (id, finished_stock_id, customer_order_item_id),
+    CONSTRAINT ck_finished_stock_reservation_reserved CHECK (reserved_quantity > 0),
+    CONSTRAINT ck_finished_stock_reservation_shipped CHECK (shipped_quantity >= 0),
+    CONSTRAINT ck_finished_stock_reservation_released CHECK (released_quantity >= 0),
+    CONSTRAINT ck_finished_stock_reservation_balance CHECK (
+        shipped_quantity + released_quantity <= reserved_quantity
+    )
+);
+
+-- finished_stock_transaction：统一成品仓的真实入库和客户发货不可变流水。
+CREATE TABLE finished_stock_transaction (
+    id BIGSERIAL PRIMARY KEY,
+    finished_stock_id BIGINT NOT NULL REFERENCES finished_stock(id),
+    finished_receipt_id BIGINT REFERENCES finished_receipt(id),
+    customer_order_id BIGINT REFERENCES customer_order(id),
+    customer_order_item_id BIGINT REFERENCES customer_order_item(id),
+    finished_stock_reservation_id BIGINT,
     transaction_type TEXT NOT NULL,
     quantity INT NOT NULL,
     quantity_before INT NOT NULL,
@@ -532,15 +568,42 @@ CREATE TABLE finished_goods_transaction (
     actor_username TEXT NOT NULL,
     reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT ck_finished_goods_transaction_type CHECK (
-        transaction_type IN (
-            'finished_receipt', 'customer_shipment', 'finished_stock_issue',
-            'finished_surplus_transfer'
-        )
+    CONSTRAINT uq_finished_stock_transaction_receipt UNIQUE (finished_receipt_id),
+    CONSTRAINT fk_finished_stock_transaction_order_item
+        FOREIGN KEY (customer_order_item_id, customer_order_id)
+        REFERENCES customer_order_item(id, customer_order_id),
+    CONSTRAINT fk_finished_stock_transaction_reservation
+        FOREIGN KEY (
+            finished_stock_reservation_id, finished_stock_id, customer_order_item_id
+        ) REFERENCES finished_stock_reservation(
+            id, finished_stock_id, customer_order_item_id
+        ),
+    CONSTRAINT ck_finished_stock_transaction_type CHECK (
+        transaction_type IN ('receipt', 'customer_shipment')
     ),
-    CONSTRAINT ck_finished_goods_transaction_quantity CHECK (quantity > 0),
-    CONSTRAINT ck_finished_goods_transaction_before CHECK (quantity_before >= 0),
-    CONSTRAINT ck_finished_goods_transaction_after CHECK (quantity_after >= 0)
+    CONSTRAINT ck_finished_stock_transaction_quantity CHECK (quantity > 0),
+    CONSTRAINT ck_finished_stock_transaction_before CHECK (quantity_before >= 0),
+    CONSTRAINT ck_finished_stock_transaction_after CHECK (quantity_after >= 0),
+    CONSTRAINT ck_finished_stock_transaction_actor CHECK (
+        actor_username = btrim(actor_username) AND actor_username <> ''
+    ),
+    CONSTRAINT ck_finished_stock_transaction_source CHECK (
+        (transaction_type = 'receipt'
+            AND finished_receipt_id IS NOT NULL
+            AND customer_order_id IS NULL
+            AND customer_order_item_id IS NULL
+            AND finished_stock_reservation_id IS NULL)
+        OR (transaction_type = 'customer_shipment'
+            AND finished_receipt_id IS NULL
+            AND customer_order_id IS NOT NULL
+            AND customer_order_item_id IS NOT NULL)
+    ),
+    CONSTRAINT ck_finished_stock_transaction_balance CHECK (
+        (transaction_type = 'receipt'
+            AND quantity_after = quantity_before + quantity)
+        OR (transaction_type = 'customer_shipment'
+            AND quantity_after = quantity_before - quantity)
+    )
 );
 
 -- ------------------------------------------------------------
@@ -567,14 +630,6 @@ CREATE TABLE production_item (
     )
 );
 
-ALTER TABLE finished_order_stock
-    ADD CONSTRAINT fk_finished_order_stock_production_item
-    FOREIGN KEY (production_item_id) REFERENCES production_item(id) ON DELETE CASCADE;
-
-ALTER TABLE finished_inventory_transaction
-    ADD CONSTRAINT fk_finished_inventory_transaction_production_item
-    FOREIGN KEY (source_production_item_id) REFERENCES production_item(id);
-
 -- repository：保存生产对象在流程节点中的可用数量；工单产出按来源工单独立存放。
 CREATE TABLE repository (
     id BIGSERIAL PRIMARY KEY,
@@ -589,17 +644,20 @@ CREATE TABLE repository (
     CONSTRAINT ck_repository_quantity_positive CHECK (quantity > 0)
 );
 
--- work_order：保存普通加工和装配工单及其执行快照和进度。
+-- work_order：保存普通加工、装配和委外加工工单及其执行快照和进度。
 CREATE TABLE work_order (
     id BIGSERIAL PRIMARY KEY,
     work_order_no TEXT,
     repository_id BIGINT,
     production_item_id BIGINT NOT NULL REFERENCES production_item(id),
-    procedure_id BIGINT NOT NULL REFERENCES procedure(id),
+    procedure_id BIGINT REFERENCES procedure(id),
     work_order_type TEXT NOT NULL,
+    is_temporary BOOLEAN NOT NULL,
     flow_node_id TEXT NOT NULL,
     -- 工单创建时记录执行来源快照；装配工单记录自身装配节点，物料来源另见 work_order_material。
     source_flow_node_id TEXT,
+    supplier_name TEXT,
+    supplier_process_name TEXT,
     work_order_name TEXT NOT NULL,
     created_by VARCHAR(50) NOT NULL,
     remark TEXT,
@@ -614,13 +672,26 @@ CREATE TABLE work_order (
         processed_quantity >= completed_quantity
         AND processed_quantity <= quantity
     ),
+    CONSTRAINT ck_work_order_supplier_progress CHECK (
+        work_order_type <> 'supplier_processing'
+        OR processed_quantity = completed_quantity
+    ),
     status TEXT NOT NULL DEFAULT 'open',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     closed_at TIMESTAMPTZ,
     CONSTRAINT uq_work_order_no UNIQUE (work_order_no),
     CONSTRAINT ck_work_order_quantity_positive CHECK (quantity > 0),
     CONSTRAINT ck_work_order_type
-        CHECK (work_order_type IN ('standard', 'assembly')),
+        CHECK (work_order_type IN ('standard', 'assembly', 'supplier_processing')),
+    CONSTRAINT ck_work_order_supplier_name CHECK (
+        supplier_name IS NULL
+        OR (supplier_name = btrim(supplier_name) AND supplier_name <> '')
+    ),
+    CONSTRAINT ck_work_order_supplier_process_name CHECK (
+        supplier_process_name IS NULL
+        OR (supplier_process_name = btrim(supplier_process_name)
+            AND supplier_process_name <> '')
+    ),
     CONSTRAINT ck_work_order_status CHECK (status IN ('open', 'closed', 'cancelled')),
     CONSTRAINT ck_work_order_closed_at CHECK (
         (status = 'open' AND closed_at IS NULL)
@@ -638,12 +709,27 @@ CREATE TABLE work_order (
     ),
     CONSTRAINT ck_work_order_type_source CHECK (
         (work_order_type = 'assembly'
-            AND source_flow_node_id IS NOT NULL)
-        OR (work_order_type = 'standard'
+            AND procedure_id IS NOT NULL
             AND source_flow_node_id IS NOT NULL
+            AND supplier_name IS NULL
+            AND supplier_process_name IS NULL)
+        OR (work_order_type = 'standard'
+            AND procedure_id IS NOT NULL
+            AND source_flow_node_id IS NOT NULL
+            AND supplier_name IS NULL
+            AND supplier_process_name IS NULL
             AND (status <> 'open'
                 OR completed_quantity = quantity
                 OR repository_id IS NOT NULL))
+        OR (work_order_type = 'supplier_processing'
+            AND procedure_id IS NULL
+            AND is_temporary = FALSE
+            AND repository_id IS NULL
+            AND worker_id IS NULL
+            AND worker_name IS NULL
+            AND source_flow_node_id IS NOT NULL
+            AND supplier_name IS NOT NULL
+            AND supplier_process_name IS NOT NULL)
     ),
     CONSTRAINT fk_work_order_repository_item
         FOREIGN KEY (repository_id, production_item_id)
@@ -669,7 +755,7 @@ CREATE TABLE work_order_pay_detail (
         CHECK (unit_price IS NULL OR unit_price >= 0)
 );
 
--- work_order_material：保存装配工单占用的来源库存、生产对象和物料数量。
+-- work_order_material：保存装配工单选定的投入来源快照；repository_id 只在来源仍被直接占用时保留。
 CREATE TABLE work_order_material (
     id BIGSERIAL PRIMARY KEY,
     work_order_id BIGINT NOT NULL REFERENCES work_order(id) ON DELETE CASCADE,
@@ -689,12 +775,12 @@ CREATE TABLE work_order_material (
     CONSTRAINT ck_work_order_material_quantity CHECK (quantity > 0)
 );
 
--- work_order_batch：保存工单送检批次、QC 结果及返工复检的父子关系。
+-- work_order_batch：保存普通工单送检批次、委外分次 QC 结果及普通返工复检关系。
 CREATE TABLE work_order_batch (
     id BIGSERIAL PRIMARY KEY,
     work_order_id BIGINT NOT NULL REFERENCES work_order(id) ON DELETE CASCADE,
     submitted_quantity INT NOT NULL,
-    -- 记录本次工单完成并送往 QC 的加工节点，即 work_order.flow_node_id。
+    -- 普通批次记录送检执行节点；委外批次记录对应委外节点，均等于 work_order.flow_node_id。
     source_flow_node_id TEXT NOT NULL,
     -- 返工复检批次指向产生返工数量的上一批 QC；首次送检保持 NULL。
     rework_source_batch_id BIGINT,
@@ -748,6 +834,12 @@ CREATE TABLE work_order_batch (
                 = submitted_quantity)
     )
 );
+
+ALTER TABLE finished_receipt
+    ADD CONSTRAINT fk_finished_receipt_qc_batch
+        FOREIGN KEY (work_order_batch_id) REFERENCES work_order_batch(id),
+    ADD CONSTRAINT fk_finished_receipt_packaging_order
+        FOREIGN KEY (work_order_id) REFERENCES work_order(id);
 
 -- warehouse_operation：只记录本项目发起的仓库操作及跨数据库处理结果。
 CREATE TABLE warehouse_operation (
@@ -907,8 +999,7 @@ CREATE TABLE production_movement (
         movement_type IN (
             'initial', 'process', 'assembly_input', 'assembly_output',
             'qc_qualified', 'qc_inventory', 'production_inventory', 'qc_rework',
-            'inventory_issue',
-            'finished_receipt', 'customer_shipment', 'assembly_input_restore',
+            'inventory_issue', 'assembly_input_restore',
             'scrap', 'lost'
         )
     ),
@@ -932,13 +1023,6 @@ CREATE TABLE production_movement (
             AND work_order_id IS NULL
             AND work_order_batch_id IS NULL)
         OR (movement_type = 'inventory_issue'
-            AND source_flow_node_id IS NOT NULL
-            AND target_flow_node_id IS NOT NULL
-            AND source_department_id IS NOT NULL
-            AND target_department_id IS NOT NULL
-            AND work_order_id IS NULL
-            AND work_order_batch_id IS NULL)
-        OR (movement_type IN ('finished_receipt', 'customer_shipment')
             AND source_flow_node_id IS NOT NULL
             AND target_flow_node_id IS NOT NULL
             AND source_department_id IS NOT NULL
@@ -1058,6 +1142,77 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE FUNCTION protect_procedure_configuration() RETURNS TRIGGER AS $$
+BEGIN
+    IF (
+        NEW.product_id,
+        NEW.product_version,
+        NEW.material_key,
+        NEW.flow_node_id
+    ) IS DISTINCT FROM (
+        OLD.product_id,
+        OLD.product_version,
+        OLD.material_key,
+        OLD.flow_node_id
+    ) THEN
+        RAISE EXCEPTION 'procedure configuration scope is immutable'
+            USING ERRCODE = '23514';
+    END IF;
+    IF OLD.confirmed_at IS NOT NULL AND (
+        NEW.confirmed_at,
+        NEW.confirmed_by
+    ) IS DISTINCT FROM (
+        OLD.confirmed_at,
+        OLD.confirmed_by
+    ) THEN
+        RAISE EXCEPTION 'confirmed procedure configuration is immutable'
+            USING ERRCODE = '23514';
+    END IF;
+    IF OLD.confirmed_at IS NULL AND NEW.confirmed_at IS NOT NULL
+        AND NOT EXISTS (
+            SELECT 1 FROM procedure_price
+            WHERE configuration_id = NEW.id
+        ) THEN
+        RAISE EXCEPTION 'procedure configuration cannot be confirmed without a procedure'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION protect_confirmed_procedure_membership() RETURNS TRIGGER AS $$
+DECLARE
+    old_confirmed BOOLEAN := FALSE;
+    new_confirmed BOOLEAN := FALSE;
+BEGIN
+    IF TG_OP <> 'INSERT' THEN
+        SELECT confirmed_at IS NOT NULL INTO old_confirmed
+        FROM procedure_configuration WHERE id = OLD.configuration_id;
+    END IF;
+    IF TG_OP <> 'DELETE' THEN
+        SELECT confirmed_at IS NOT NULL INTO new_confirmed
+        FROM procedure_configuration WHERE id = NEW.configuration_id;
+    END IF;
+    IF TG_OP = 'INSERT' AND new_confirmed THEN
+        RAISE EXCEPTION 'confirmed procedure configuration membership is immutable'
+            USING ERRCODE = '23514';
+    ELSIF TG_OP = 'DELETE' AND old_confirmed THEN
+        RAISE EXCEPTION 'confirmed procedure configuration membership is immutable'
+            USING ERRCODE = '23514';
+    ELSIF TG_OP = 'UPDATE'
+        AND (NEW.configuration_id, NEW.procedure_id)
+            IS DISTINCT FROM (OLD.configuration_id, OLD.procedure_id)
+        AND (old_confirmed OR new_confirmed) THEN
+        RAISE EXCEPTION 'confirmed procedure configuration membership is immutable'
+            USING ERRCODE = '23514';
+    END IF;
+    IF TG_OP = 'DELETE' THEN
+        RETURN OLD;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE FUNCTION protect_work_order_closure() RETURNS TRIGGER AS $$
 BEGIN
     IF NEW.status = 'closed'
@@ -1073,6 +1228,7 @@ BEGIN
             USING ERRCODE = '23514';
     END IF;
     IF NEW.status = 'closed'
+        AND NEW.work_order_type IN ('standard', 'assembly')
         AND EXISTS (
         SELECT 1
         FROM work_order_batch AS source_batch
@@ -1166,32 +1322,52 @@ BEGIN
     IF (
         NEW.procedure_id,
         NEW.work_order_type,
+        NEW.is_temporary,
         NEW.work_order_name,
+        NEW.supplier_name,
+        NEW.supplier_process_name,
         NEW.remark,
         NEW.flow_node_id,
         NEW.source_flow_node_id
     ) IS DISTINCT FROM (
         OLD.procedure_id,
         OLD.work_order_type,
+        OLD.is_temporary,
         OLD.work_order_name,
+        OLD.supplier_name,
+        OLD.supplier_process_name,
         OLD.remark,
         OLD.flow_node_id,
         OLD.source_flow_node_id
-    ) AND EXISTS (
-        SELECT 1
-        FROM production_movement
-        WHERE work_order_id = NEW.id
-    ) THEN
-        RAISE EXCEPTION 'work order execution snapshot is retained by movement history'
-            USING ERRCODE = '23514';
-    END IF;
-    IF NEW.production_item_id IS DISTINCT FROM OLD.production_item_id
-        AND EXISTS (
+    ) AND (
+        EXISTS (
             SELECT 1
             FROM production_movement
             WHERE work_order_id = NEW.id
-              AND movement_type <> 'assembly_input'
-              AND production_item_id <> NEW.production_item_id
+        )
+        OR EXISTS (
+            SELECT 1
+            FROM work_order_batch
+            WHERE work_order_id = NEW.id
+        )
+    ) THEN
+        RAISE EXCEPTION 'work order execution snapshot is retained by production history'
+            USING ERRCODE = '23514';
+    END IF;
+    IF NEW.production_item_id IS DISTINCT FROM OLD.production_item_id
+        AND (
+            EXISTS (
+                SELECT 1
+                FROM work_order_batch
+                WHERE work_order_id = NEW.id
+            )
+            OR EXISTS (
+                SELECT 1
+                FROM production_movement
+                WHERE work_order_id = NEW.id
+                  AND movement_type <> 'assembly_input'
+                  AND production_item_id <> NEW.production_item_id
+            )
         ) THEN
         RAISE EXCEPTION 'work order production item conflicts with existing movements'
             USING ERRCODE = '23514';
@@ -1277,6 +1453,11 @@ $$ LANGUAGE plpgsql;
 
 CREATE FUNCTION validate_qc_batch_result_balance() RETURNS TRIGGER AS $$
 DECLARE
+    batch_work_order_type TEXT;
+    batch_work_order_quantity INT;
+    batch_work_order_flow_node_id TEXT;
+    batch_work_order_status TEXT;
+    recorded_qualified_quantity BIGINT;
     submission_count INT;
     submission_quantity BIGINT;
     moved_qualified BIGINT;
@@ -1285,6 +1466,11 @@ DECLARE
     moved_scrap BIGINT;
     moved_lost BIGINT;
 BEGIN
+    SELECT work_order_type
+    INTO batch_work_order_type
+    FROM work_order
+    WHERE id = NEW.work_order_id;
+
     SELECT
         COUNT(*) FILTER (
             WHERE movement_type IN ('process', 'assembly_output')
@@ -1307,6 +1493,46 @@ BEGIN
         moved_lost
     FROM production_movement
     WHERE work_order_batch_id = NEW.id;
+
+    IF batch_work_order_type = 'supplier_processing' THEN
+        SELECT quantity, flow_node_id, status
+        INTO
+            batch_work_order_quantity,
+            batch_work_order_flow_node_id,
+            batch_work_order_status
+        FROM work_order
+        WHERE id = NEW.work_order_id
+        FOR UPDATE;
+
+        SELECT COALESCE(SUM(qualified_quantity), 0)
+        INTO recorded_qualified_quantity
+        FROM work_order_batch
+        WHERE work_order_id = NEW.work_order_id
+          AND id <> NEW.id
+          AND recorded_at IS NOT NULL;
+
+        IF batch_work_order_status <> 'open' THEN
+            RAISE EXCEPTION 'closed supplier-processing work order cannot accept QC results'
+                USING ERRCODE = '23514';
+        END IF;
+        IF NEW.source_flow_node_id <> batch_work_order_flow_node_id
+            OR NEW.rework_source_batch_id IS NOT NULL
+            OR submission_count <> 0
+            OR moved_qualified <> 0
+            OR moved_inventory <> 0
+            OR moved_rework <> 0
+            OR moved_scrap <> 0
+            OR moved_lost <> 0 THEN
+            RAISE EXCEPTION 'supplier-processing QC result cannot retain production movements or a rework source'
+                USING ERRCODE = '23514';
+        END IF;
+        IF recorded_qualified_quantity + NEW.qualified_quantity
+            > batch_work_order_quantity THEN
+            RAISE EXCEPTION 'supplier-processing qualified quantity exceeds work order quantity'
+                USING ERRCODE = '23514';
+        END IF;
+        RETURN NEW;
+    END IF;
 
     IF submission_count <> 1 OR submission_quantity <> NEW.submitted_quantity THEN
         RAISE EXCEPTION 'QC batch must retain one matching submission movement'
@@ -1334,10 +1560,27 @@ $$ LANGUAGE plpgsql;
 
 CREATE FUNCTION validate_qc_batch_destination_balance() RETURNS TRIGGER AS $$
 DECLARE
+    batch_work_order_type TEXT;
+    batch_work_order_status TEXT;
     moved_qualified BIGINT;
     moved_inventory BIGINT;
     stored_inventory BIGINT;
 BEGIN
+    SELECT work_order_type, status
+    INTO batch_work_order_type, batch_work_order_status
+    FROM work_order
+    WHERE id = NEW.work_order_id
+    FOR UPDATE;
+
+    IF batch_work_order_type = 'supplier_processing'
+        AND (
+            batch_work_order_status <> 'open'
+            OR NEW.qualified_destination <> 'release'
+        ) THEN
+        RAISE EXCEPTION 'supplier-processing qualified material can only be released from an open work order'
+            USING ERRCODE = '23514';
+    END IF;
+
     SELECT
         COALESCE(SUM(quantity) FILTER (WHERE movement_type = 'qc_qualified'), 0),
         COALESCE(SUM(quantity) FILTER (WHERE movement_type = 'qc_inventory'), 0)
@@ -1369,6 +1612,87 @@ BEGIN
     ELSE
         RAISE EXCEPTION 'QC qualified destination is invalid'
             USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- 委外工单进度只校验已放行合格数；实际流转和状态转换仍由后端负责。
+CREATE FUNCTION assert_supplier_processing_release_progress(
+    checked_work_order_id BIGINT,
+    checked_quantity INT,
+    checked_processed_quantity INT,
+    checked_completed_quantity INT,
+    checked_status TEXT
+) RETURNS VOID AS $$
+DECLARE
+    released_quantity BIGINT;
+BEGIN
+    SELECT COALESCE(SUM(qualified_quantity), 0)
+    INTO released_quantity
+    FROM work_order_batch
+    WHERE work_order_id = checked_work_order_id
+      AND qualified_destination = 'release'
+      AND destination_decided_at IS NOT NULL;
+
+    IF checked_processed_quantity <> released_quantity
+        OR checked_completed_quantity <> released_quantity
+        OR released_quantity > checked_quantity
+        OR (checked_status = 'open' AND released_quantity >= checked_quantity)
+        OR (checked_status = 'closed' AND released_quantity <> checked_quantity)
+        OR (checked_status = 'cancelled' AND released_quantity <> 0) THEN
+        RAISE EXCEPTION 'supplier-processing work order progress must match released QC quantity'
+            USING ERRCODE = '23514';
+    END IF;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION validate_supplier_processing_work_order_progress() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.work_order_type = 'supplier_processing' THEN
+        PERFORM assert_supplier_processing_release_progress(
+            NEW.id,
+            NEW.quantity,
+            NEW.processed_quantity,
+            NEW.completed_quantity,
+            NEW.status
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION validate_supplier_processing_batch_progress() RETURNS TRIGGER AS $$
+DECLARE
+    batch_work_order_type TEXT;
+    batch_work_order_quantity INT;
+    batch_work_order_processed_quantity INT;
+    batch_work_order_completed_quantity INT;
+    batch_work_order_status TEXT;
+BEGIN
+    SELECT
+        work_order_type,
+        quantity,
+        processed_quantity,
+        completed_quantity,
+        status
+    INTO
+        batch_work_order_type,
+        batch_work_order_quantity,
+        batch_work_order_processed_quantity,
+        batch_work_order_completed_quantity,
+        batch_work_order_status
+    FROM work_order
+    WHERE id = NEW.work_order_id;
+
+    IF batch_work_order_type = 'supplier_processing' THEN
+        PERFORM assert_supplier_processing_release_progress(
+            NEW.work_order_id,
+            batch_work_order_quantity,
+            batch_work_order_processed_quantity,
+            batch_work_order_completed_quantity,
+            batch_work_order_status
+        );
     END IF;
     RETURN NEW;
 END;
@@ -1468,6 +1792,58 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE FUNCTION protect_finished_receipt_history() RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'finished receipt history cannot be deleted'
+            USING ERRCODE = '23514';
+    END IF;
+    IF OLD.status = 'pending'
+        AND NEW.status = 'received'
+        AND NEW.received_at IS NOT NULL
+        AND NEW.received_by IS NOT NULL
+        AND NEW.revision = OLD.revision + 1
+        AND (to_jsonb(NEW) - ARRAY[
+            'status', 'received_at', 'received_by', 'revision'
+        ]) = (to_jsonb(OLD) - ARRAY[
+            'status', 'received_at', 'received_by', 'revision'
+        ]) THEN
+        RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'finished receipt only supports one complete receipt transition'
+        USING ERRCODE = '23514';
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE FUNCTION protect_finished_stock_reservation_history() RETURNS TRIGGER AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'finished stock reservation history cannot be deleted'
+            USING ERRCODE = '23514';
+    END IF;
+    IF (
+        NEW.finished_stock_id,
+        NEW.production_plan_id,
+        NEW.production_plan_item_id,
+        NEW.customer_order_item_id,
+        NEW.reserved_quantity,
+        NEW.created_at
+    ) IS DISTINCT FROM (
+        OLD.finished_stock_id,
+        OLD.production_plan_id,
+        OLD.production_plan_item_id,
+        OLD.customer_order_item_id,
+        OLD.reserved_quantity,
+        OLD.created_at
+    ) OR NEW.shipped_quantity < OLD.shipped_quantity
+        OR NEW.released_quantity < OLD.released_quantity THEN
+        RAISE EXCEPTION 'finished stock reservation identity and history are immutable'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE FUNCTION protect_warehouse_operation_history() RETURNS TRIGGER AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
@@ -1531,10 +1907,19 @@ WHEN (NEW.status = 'closed' AND OLD.status IS DISTINCT FROM NEW.status)
 EXECUTE FUNCTION protect_work_order_closure();
 
 CREATE TRIGGER trg_work_order_movement_items
-BEFORE UPDATE OF production_item_id, procedure_id, work_order_type, work_order_name,
-    remark, flow_node_id, source_flow_node_id
+BEFORE UPDATE OF production_item_id, procedure_id, work_order_type, is_temporary, work_order_name,
+    supplier_name, supplier_process_name, remark, flow_node_id, source_flow_node_id
 ON work_order
 FOR EACH ROW EXECUTE FUNCTION validate_work_order_movement_items();
+
+CREATE TRIGGER trg_supplier_processing_work_order_progress_insert
+BEFORE INSERT ON work_order
+FOR EACH ROW EXECUTE FUNCTION validate_supplier_processing_work_order_progress();
+
+CREATE TRIGGER trg_supplier_processing_work_order_progress_update
+BEFORE UPDATE OF work_order_type, quantity, processed_quantity, completed_quantity, status
+ON work_order
+FOR EACH ROW EXECUTE FUNCTION validate_supplier_processing_work_order_progress();
 
 CREATE TRIGGER trg_rework_submission_quantity
 BEFORE INSERT ON work_order_batch
@@ -1545,6 +1930,18 @@ EXECUTE FUNCTION protect_rework_submission_quantity();
 CREATE TRIGGER trg_qc_batch_history
 BEFORE UPDATE ON work_order_batch
 FOR EACH ROW EXECUTE FUNCTION protect_qc_batch_history();
+
+CREATE TRIGGER trg_qc_batch_insert_result_balance
+BEFORE INSERT ON work_order_batch
+FOR EACH ROW
+WHEN (NEW.recorded_at IS NOT NULL)
+EXECUTE FUNCTION validate_qc_batch_result_balance();
+
+CREATE TRIGGER trg_qc_batch_insert_destination_balance
+BEFORE INSERT ON work_order_batch
+FOR EACH ROW
+WHEN (NEW.qualified_destination IS NOT NULL)
+EXECUTE FUNCTION validate_qc_batch_destination_balance();
 
 CREATE TRIGGER trg_qc_batch_result_balance
 BEFORE UPDATE OF recorded_at, qualified_quantity, rework_quantity,
@@ -1561,6 +1958,13 @@ FOR EACH ROW
 WHEN (NEW.qualified_destination IS NOT NULL AND OLD.qualified_destination IS NULL)
 EXECUTE FUNCTION validate_qc_batch_destination_balance();
 
+CREATE CONSTRAINT TRIGGER trg_supplier_processing_batch_progress
+AFTER UPDATE ON work_order_batch
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+WHEN (NEW.qualified_destination IS NOT NULL AND OLD.qualified_destination IS NULL)
+EXECUTE FUNCTION validate_supplier_processing_batch_progress();
+
 CREATE TRIGGER trg_assembly_material_movement_update
 BEFORE UPDATE OF work_order_id, production_item_id, quantity ON work_order_material
 FOR EACH ROW EXECUTE FUNCTION protect_assembly_material_movement_context();
@@ -1573,16 +1977,20 @@ CREATE TRIGGER trg_production_movement_history
 BEFORE UPDATE OR DELETE ON production_movement
 FOR EACH ROW EXECUTE FUNCTION protect_production_movement_history();
 
-CREATE TRIGGER trg_finished_inventory_transaction_history
-BEFORE UPDATE OR DELETE ON finished_inventory_transaction
-FOR EACH ROW EXECUTE FUNCTION protect_inventory_transaction_history();
-
 CREATE TRIGGER trg_warehouse_operation_history
 BEFORE UPDATE OR DELETE ON warehouse_operation
 FOR EACH ROW EXECUTE FUNCTION protect_warehouse_operation_history();
 
-CREATE TRIGGER trg_finished_goods_transaction_history
-BEFORE UPDATE OR DELETE ON finished_goods_transaction
+CREATE TRIGGER trg_finished_receipt_history
+BEFORE UPDATE OR DELETE ON finished_receipt
+FOR EACH ROW EXECUTE FUNCTION protect_finished_receipt_history();
+
+CREATE TRIGGER trg_finished_stock_reservation_history
+BEFORE UPDATE OR DELETE ON finished_stock_reservation
+FOR EACH ROW EXECUTE FUNCTION protect_finished_stock_reservation_history();
+
+CREATE TRIGGER trg_finished_stock_transaction_history
+BEFORE UPDATE OR DELETE ON finished_stock_transaction
 FOR EACH ROW EXECUTE FUNCTION protect_inventory_transaction_history();
 
 CREATE TRIGGER trg_product_updated_at
@@ -1601,6 +2009,18 @@ CREATE TRIGGER trg_product_process_flow_updated_at
 BEFORE UPDATE ON product_process_flow
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
+CREATE TRIGGER trg_procedure_configuration_updated_at
+BEFORE UPDATE ON procedure_configuration
+FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER trg_procedure_configuration_protection
+BEFORE UPDATE ON procedure_configuration
+FOR EACH ROW EXECUTE FUNCTION protect_procedure_configuration();
+
+CREATE TRIGGER trg_procedure_price_membership_protection
+BEFORE INSERT OR UPDATE OR DELETE ON procedure_price
+FOR EACH ROW EXECUTE FUNCTION protect_confirmed_procedure_membership();
+
 CREATE TRIGGER trg_procedure_price_updated_at
 BEFORE UPDATE ON procedure_price
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
@@ -1613,12 +2033,12 @@ CREATE TRIGGER trg_production_plan_updated_at
 BEFORE UPDATE ON production_plan
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE TRIGGER trg_finished_inventory_stock_updated_at
-BEFORE UPDATE ON finished_inventory_stock
+CREATE TRIGGER trg_finished_stock_updated_at
+BEFORE UPDATE ON finished_stock
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
-CREATE TRIGGER trg_finished_order_stock_updated_at
-BEFORE UPDATE ON finished_order_stock
+CREATE TRIGGER trg_finished_stock_reservation_updated_at
+BEFORE UPDATE ON finished_stock_reservation
 FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 -- ============================================================
@@ -1642,8 +2062,10 @@ CREATE INDEX idx_product_updated ON product(updated_at DESC, id DESC);
 CREATE INDEX idx_product_bom_product ON product_bom(product_id, sort_order);
 CREATE INDEX idx_product_route_task_department_page
     ON product_route_task(
-        workshop_id, product_id, product_version, origin_flow_node_id, route_order
+        department_id, product_id, product_version, origin_flow_node_id, route_order
     );
+CREATE INDEX idx_product_route_task_workshop
+    ON product_route_task(workshop_id, product_id, product_version);
 CREATE INDEX idx_product_route_task_item_code_trgm
     ON product_route_task USING GIN (origin_item_code gin_trgm_ops);
 CREATE INDEX idx_product_route_task_item_name_trgm
@@ -1667,6 +2089,10 @@ CREATE INDEX idx_production_route_task_plan_page
     );
 CREATE INDEX idx_production_route_task_workshop
     ON production_route_task(workshop_id, production_plan_item_id);
+CREATE INDEX idx_production_route_task_department
+    ON production_route_task(
+        department_id, production_plan_id, production_plan_item_id
+    );
 CREATE INDEX idx_warehouse_stock_allocation
     ON warehouse_stock(
         item_code, product_version, item_type, warehouse_code,
@@ -1686,22 +2112,23 @@ CREATE INDEX idx_warehouse_operation_production_item
     ON warehouse_operation(production_item_id, id);
 CREATE INDEX idx_warehouse_operation_stock
     ON warehouse_operation(warehouse_stock_id, id);
-CREATE INDEX idx_finished_inventory_stock_product
-    ON finished_inventory_stock(product_id, product_version, flow_node_id);
-CREATE INDEX idx_finished_goods_transaction_lot
-    ON finished_goods_transaction(finished_order_stock_id, id);
-CREATE INDEX idx_finished_goods_transaction_created
-    ON finished_goods_transaction(created_at DESC, id DESC);
-CREATE INDEX idx_finished_inventory_transaction_stock
-    ON finished_inventory_transaction(finished_inventory_stock_id, id);
-CREATE INDEX idx_finished_inventory_transaction_plan
-    ON finished_inventory_transaction(production_plan_id, id);
-CREATE INDEX idx_finished_inventory_transaction_production_item
-    ON finished_inventory_transaction(source_production_item_id, id);
-CREATE INDEX idx_finished_order_stock_order
-    ON finished_order_stock(customer_order_id, id);
-CREATE INDEX idx_finished_order_stock_order_item
-    ON finished_order_stock(customer_order_item_id, id);
+CREATE INDEX idx_finished_receipt_pending
+    ON finished_receipt(status, created_at, id)
+    WHERE status = 'pending';
+CREATE INDEX idx_finished_stock_reservation_plan
+    ON finished_stock_reservation(production_plan_id, production_plan_item_id, id);
+CREATE INDEX idx_finished_stock_reservation_order_open
+    ON finished_stock_reservation(customer_order_item_id, id)
+    WHERE shipped_quantity + released_quantity < reserved_quantity;
+CREATE INDEX idx_finished_stock_reservation_recent
+    ON finished_stock_reservation(created_at DESC, id DESC);
+CREATE INDEX idx_finished_stock_transaction_stock
+    ON finished_stock_transaction(finished_stock_id, created_at, id);
+CREATE INDEX idx_finished_stock_transaction_order
+    ON finished_stock_transaction(customer_order_item_id, created_at, id)
+    WHERE customer_order_item_id IS NOT NULL;
+CREATE INDEX idx_finished_stock_transaction_recent
+    ON finished_stock_transaction(created_at DESC, id DESC);
 CREATE INDEX idx_production_movement_item_created
     ON production_movement(production_item_id, created_at);
 CREATE INDEX idx_production_movement_target_department_created
@@ -1730,11 +2157,12 @@ CREATE UNIQUE INDEX uq_repository_work_order_output
     ON repository(source_work_order_id, production_item_id, flow_node_id)
     WHERE source_work_order_id IS NOT NULL;
 CREATE INDEX idx_procedure_price_scope
-    ON procedure_price(
-        procedure_id, product_id, product_version, flow_node_id
-    );
+    ON procedure_price(procedure_id, configuration_id);
 CREATE INDEX idx_production_item_order_item ON production_item(customer_order_item_id);
 CREATE INDEX idx_production_item_bom ON production_item(product_bom_id);
+CREATE UNIQUE INDEX uq_production_item_part_origin
+    ON production_item(customer_order_item_id, product_bom_id, origin_flow_node_id)
+    WHERE product_bom_id IS NOT NULL;
 CREATE INDEX idx_work_order_repository ON work_order(repository_id);
 CREATE INDEX idx_work_order_production_item ON work_order(production_item_id);
 CREATE INDEX idx_work_order_no_trgm
@@ -1747,6 +2175,18 @@ CREATE INDEX idx_work_order_repository_open ON work_order(repository_id)
     WHERE status = 'open';
 CREATE INDEX idx_work_order_item_node_status
     ON work_order(production_item_id, flow_node_id, status);
+CREATE INDEX idx_work_order_open_workbench
+    ON work_order(
+        work_order_type,
+        procedure_id,
+        production_item_id,
+        flow_node_id,
+        source_flow_node_id
+    )
+    WHERE status = 'open';
+CREATE UNIQUE INDEX uq_work_order_supplier_task
+    ON work_order(production_item_id, flow_node_id)
+    WHERE work_order_type = 'supplier_processing';
 CREATE INDEX idx_work_order_process_position
     ON work_order(production_item_id, flow_node_id, procedure_id, id DESC);
 CREATE INDEX idx_work_order_pay_detail_procedure
@@ -1833,7 +2273,7 @@ INSERT INTO users (
     NULL,
     TRUE,
     'supervisor',
-    'engineering:product:view,engineering:product:add,engineering:product:edit,engineering:product:delete,order:view,order:add,order:edit,order:confirm,order:cancel,production:view,production:manage,qc:inspect,sys:user:add'
+    'engineering:product:view,engineering:product:add,engineering:product:edit,engineering:product:delete,order:view,order:add,order:edit,order:confirm,order:cancel,production:view,production:manage,qc:inspect,supplier_processing:view,supplier_processing:create,sys:user:add'
 ),
 (
     'engineering',
@@ -1849,7 +2289,7 @@ INSERT INTO users (
     'business',
     FALSE,
     'sales',
-    'engineering:product:view,order:view,order:add,order:edit,order:confirm,order:cancel'
+    'engineering:product:view,order:view,order:add,order:edit,order:confirm,order:cancel,supplier_processing:view,supplier_processing:create'
 ),
 (
     'pmc',
@@ -2033,7 +2473,7 @@ INSERT INTO product_process_flow (
 SELECT
     product.id,
     1,
-    '{"schema_version": 4, "nodes": [], "edges": []}'::jsonb
+    '{"schema_version": 5, "nodes": [], "edges": []}'::jsonb
 FROM product
 WHERE product.factory_code = 'Z8735';
 
@@ -2107,7 +2547,7 @@ INSERT INTO product_process_flow (
 SELECT
     product.id,
     1,
-    '{"schema_version": 4, "nodes": [], "edges": []}'::jsonb
+    '{"schema_version": 5, "nodes": [], "edges": []}'::jsonb
 FROM product
 WHERE product.factory_code IN ('Z8737', 'Z8739', 'Z8740', 'Z8711', 'Z8609');
 

@@ -18,3 +18,8 @@ export const PRODUCTION_PERMISSIONS = {
   manage: 'production:manage',
   inspect: 'qc:inspect',
 } as const
+
+export const SUPPLIER_PROCESSING_PERMISSIONS = {
+  view: 'supplier_processing:view',
+  create: 'supplier_processing:create',
+} as const

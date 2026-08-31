@@ -86,15 +86,19 @@ async function confirmPlan() {
   try {
     const saved = await editor.value?.save({ silent: true })
     if (!saved) return
-    const deductions = saved.inventory_items.filter(item => item.planned_deduction_quantity > 0)
-    const deductionDetails = deductions.length
-      ? deductions.map(item => (
+    const allocations = saved.inventory_items.filter(item => item.planned_allocation_quantity > 0)
+    const allocationDetails = allocations.length
+      ? allocations.map(item => (
           `${item.item_code} / ${item.completed_node_label} / `
-          + `${item.warehouse_code} ${item.warehouse_name}：${item.planned_deduction_quantity} 件`
+          + `${item.item_type === 'finished_product'
+            ? '成品仓'
+            : `${item.warehouse_code} ${item.warehouse_name}`}：`
+          + `${item.allocation_mode === 'reservation' ? '占用' : '出库'} ${item.planned_allocation_quantity} 件`
         )).join('；')
       : '本计划不使用现有库存'
     await ElMessageBox.confirm(
-      `确认时将再次读取库存并直接扣减，成功后不能取消生产计划。${deductionDetails}。是否继续？`,
+      `确认时将重新读取库存；成品只占用，配件和装配体会实际出库。`
+      + `发生实际出库后不能取消。${allocationDetails}。是否继续？`,
       '确认生产计划',
       { type: 'warning' },
     )

@@ -22,6 +22,7 @@ TABLE_OWNERS = {
     "workshop": "organization",
     "procedure": "organization",
     "worker": "workforce",
+    "procedure_configuration": "standard_execution",
     "procedure_price": "standard_execution",
     "production_item": "production_core",
     "repository": "production_core",
@@ -36,10 +37,10 @@ TABLE_OWNERS = {
     "production_route_task": "planning",
     "warehouse_stock": "inventory",
     "warehouse_operation": "inventory",
-    "finished_inventory_stock": "inventory",
-    "finished_inventory_transaction": "inventory",
-    "finished_order_stock": "inventory",
-    "finished_goods_transaction": "inventory",
+    "finished_receipt": "inventory",
+    "finished_stock": "inventory",
+    "finished_stock_reservation": "inventory",
+    "finished_stock_transaction": "inventory",
 }
 
 

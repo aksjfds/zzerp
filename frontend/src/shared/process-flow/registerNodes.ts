@@ -46,6 +46,15 @@ class PartNodeModel extends RectNodeModel {
       message: '配件节点是流程起点，不能连接输入线',
       validate: () => false,
     })
+    this.sourceRules.push({
+      message: '配件后只能连接工艺、装配或委外加工节点',
+      validate: (_sourceNode, targetNode) => (
+        Boolean(
+          targetNode
+          && ['process', 'assembly', 'supplier_processing'].includes(targetNode.type),
+        )
+      ),
+    })
   }
 
   setAttributes() {
@@ -70,6 +79,27 @@ class PartNodeModel extends RectNodeModel {
 }
 
 class ProcessNodeModel extends RectNodeModel {
+  initNodeData(data: LogicFlow.NodeConfig) {
+    super.initNodeData(data)
+    this.sourceRules.push({
+      message: '工艺节点后必须连接QC；装包节点可以直接连接入库',
+      validate: (sourceNode, targetNode) => {
+        const targetType = String(targetNode?.type ?? '')
+        return Boolean(
+          sourceNode
+          && targetNode
+          && (
+            targetType === 'qc'
+            || (
+              sourceNode.properties.directInbound === true
+              && targetType === 'finished_inbound'
+            )
+          ),
+        )
+      },
+    })
+  }
+
   setAttributes() {
     const scale = displayScale(this.properties)
     this.width = 150 * scale
@@ -96,6 +126,19 @@ class ProcessNodeModel extends RectNodeModel {
 }
 
 class QcNodeModel extends DiamondNodeModel {
+  initNodeData(data: LogicFlow.NodeConfig) {
+    super.initNodeData(data)
+    this.targetRules.push({
+      message: 'QC上游必须是工艺、装配或委外加工节点',
+      validate: (sourceNode) => (
+        Boolean(
+          sourceNode
+          && ['process', 'assembly', 'supplier_processing'].includes(sourceNode.type),
+        )
+      ),
+    })
+  }
+
   setAttributes() {
     const scale = displayScale(this.properties)
     this.rx = 68 * scale
@@ -116,7 +159,41 @@ class QcNodeModel extends DiamondNodeModel {
   }
 }
 
-class ShippingNodeModel extends RectNodeModel {
+class SupplierProcessingNodeModel extends RectNodeModel {
+  initNodeData(data: LogicFlow.NodeConfig) {
+    super.initNodeData(data)
+    this.targetRules.push({
+      message: '委外加工节点的上游必须是配件节点',
+      validate: (sourceNode) => Boolean(sourceNode && ['part'].includes(sourceNode.type)),
+    })
+    this.sourceRules.push({
+      message: '委外加工节点后只能连接QC节点',
+      validate: (_sourceNode, targetNode) => Boolean(targetNode && ['qc'].includes(targetNode.type)),
+    })
+  }
+
+  setAttributes() {
+    const scale = displayScale(this.properties)
+    this.width = 160 * scale
+    this.height = 56 * scale
+    this.radius = 12 * scale
+  }
+
+  getNodeStyle() {
+    return {
+      ...super.getNodeStyle(),
+      fill: materialColors.flowSupplierProcessingContainer,
+      stroke: materialColors.flowSupplierProcessing,
+      strokeWidth: 2,
+    }
+  }
+
+  getDefaultAnchor() {
+    return fourMidpointAnchors(this)
+  }
+}
+
+class FinishedInboundNodeModel extends RectNodeModel {
   setAttributes() {
     const scale = displayScale(this.properties)
     this.width = 150 * scale
@@ -166,7 +243,8 @@ export function registerProcessNodes(lf: LogicFlow) {
     { type: 'part', view: RectNode, model: PartNodeModel },
     { type: 'process', view: RectNode, model: ProcessNodeModel },
     { type: 'qc', view: DiamondNode, model: QcNodeModel },
-    { type: 'shipping', view: RectNode, model: ShippingNodeModel },
+    { type: 'supplier_processing', view: RectNode, model: SupplierProcessingNodeModel },
+    { type: 'finished_inbound', view: RectNode, model: FinishedInboundNodeModel },
     { type: 'assembly', view: RectNode, model: AssemblyNodeModel },
   ])
 }

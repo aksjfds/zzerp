@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from modules.production_core.model_api import WorkOrder, WorkOrderBatch
-from modules.production_core.operational_api import load_product_flow
-from modules.production_core.operational_api import calculate_work_order_progress, terminal_unit_quantity
+from modules.production_core.operational_api import calculate_work_order_progress
 from modules.planning.progress_routes import progress_route_nodes
 
 def _process_completion_summary(
@@ -18,96 +17,6 @@ def _process_completion_summary(
         progress = calculate_work_order_progress(work_order, batches)
         completed_quantity += progress.qualified_quantity
     return completed_quantity
-
-def _shipping_summary(
-    session,
-    order_item,
-    movements: list,
-    flow_cache,
-) -> dict:
-    flow, nodes = load_product_flow(
-        session,
-        order_item.product_id,
-        order_item.product_version,
-        flow_cache,
-    )
-    shipping_nodes = [
-        node for node in nodes.values() if node.get("type") == "shipping"
-    ]
-    if len(shipping_nodes) != 1:
-        return {"shipped_quantity": 0, "completion_date": None}
-    shipping_node = shipping_nodes[0]
-    unit_quantity = terminal_unit_quantity(
-        session,
-        flow,
-        nodes,
-        shipping_node["id"],
-    )
-    if not unit_quantity:
-        return {"shipped_quantity": 0, "completion_date": None}
-    shipments = sorted(
-        (
-            movement
-            for movement in movements
-            if movement.movement_type == "customer_shipment"
-            and movement.target_flow_node_id == shipping_node["id"]
-        ),
-        key=lambda movement: (movement.created_at, movement.id),
-    )
-    shipped_material = sum(movement.quantity for movement in shipments)
-    shipped_quantity = min(
-        shipped_material // unit_quantity,
-        order_item.quantity,
-    )
-    completion_date = None
-    if shipped_quantity >= order_item.quantity:
-        cumulative = 0
-        target = order_item.quantity * unit_quantity
-        for movement in shipments:
-            cumulative += movement.quantity
-            if cumulative >= target:
-                completion_date = movement.created_at.date().isoformat()
-                break
-    return {
-        "shipped_quantity": shipped_quantity,
-        "completion_date": completion_date,
-    }
-
-def _production_item_shipping_summary(
-    context,
-    movements: list,
-    target_quantity: int,
-) -> dict:
-    shipping_node_ids = {
-        node["id"]
-        for node in context.nodes.values()
-        if node.get("type") == "shipping"
-    }
-    shipments = sorted(
-        (
-            movement
-            for movement in movements
-            if movement.movement_type == "customer_shipment"
-            and movement.target_flow_node_id in shipping_node_ids
-        ),
-        key=lambda movement: (movement.created_at, movement.id),
-    )
-    shipped_quantity = min(
-        sum(movement.quantity for movement in shipments),
-        target_quantity,
-    )
-    completion_date = None
-    if target_quantity and shipped_quantity >= target_quantity:
-        cumulative = 0
-        for movement in shipments:
-            cumulative += movement.quantity
-            if cumulative >= target_quantity:
-                completion_date = movement.created_at.date().isoformat()
-                break
-    return {
-        "shipped_quantity": shipped_quantity,
-        "completion_date": completion_date,
-    }
 
 def _physical_route(context, origin_node_id: str) -> list[dict]:
     return progress_route_nodes(
@@ -134,7 +43,7 @@ def _node_department(node, department_by_code, workshops):
         )
     code = {
         "qc": "qc",
-        "shipping": "finished",
+        "finished_inbound": "finished",
     }.get(node_type)
     return department_by_code.get(code) if code else None
 

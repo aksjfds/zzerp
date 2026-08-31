@@ -46,11 +46,7 @@ def serialize_plan(session: Session, plan: ProductionPlan) -> dict:
                 "estimated_inventory_quantity": item.estimated_inventory_quantity,
                 "net_required_quantity": item.net_required_quantity,
                 "planned_production_quantity": item.planned_production_quantity,
-                "deducted_inventory_quantity": item.deducted_inventory_quantity,
-                "available_inventory_quantity": max(
-                    item.estimated_inventory_quantity - item.deducted_inventory_quantity,
-                    0,
-                ) if plan.status != "draft" else item.estimated_inventory_quantity,
+                "allocated_inventory_quantity": item.allocated_inventory_quantity,
             }
             for item in plan.items
             if item.item_type == "part"

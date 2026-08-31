@@ -4,30 +4,49 @@ from __future__ import annotations
 
 from database import SessionLocal
 from domain.identity import can_access_department
+from domain.material_identity import production_item_material_key
 from domain.time import business_now
-from modules.production_core.ownership_api import assign_work_order_material_repository, create_work_order_material
+from modules.assembly.material_allocation import (
+    _get_or_create_output_item,
+    _validate_material_allocations,
+)
 from modules.errors import DomainError
 from modules.organization.model_api import Workshop
 from modules.organization.read_api import get_department_ids_by_codes
-from modules.organization.transaction_api import resolve_workshop_procedure
 from modules.planning.execution_api import ensure_production_plan_active
-from modules.production_core.assembly_api import assign_assembly_work_order_number, load_production_items, load_repositories
-from modules.production_core.operational_api import record_movement
-from modules.production_core.operational_api import serialize_work_order
-from modules.production_core.operational_api import consume_repository, node_context
-from modules.production_core.ownership_api import create_assembly_work_order_record
+from modules.production_core.assembly_api import (
+    assign_assembly_work_order_number,
+    load_production_items,
+    load_repositories,
+)
 from modules.production_core.flow_api import assembly_material_key
+from modules.production_core.operational_api import (
+    consume_repository,
+    node_context,
+    record_movement,
+    serialize_work_order,
+)
+from modules.production_core.ownership_api import (
+    assign_work_order_material_repository,
+    create_assembly_work_order_record,
+    create_work_order_material,
+)
+from modules.production_core.reference_api import reserved_repository_quantities
+from modules.production_core.transaction_api import (
+    ensure_source_procedure_not_repeated,
+)
 from modules.sales.transaction_api import mark_order_planned
+from modules.standard_execution.configuration_api import resolve_work_order_procedure
 from modules.standard_execution.pricing_api import attach_work_order_price
 from modules.standard_execution.procedure_api import material_key
 from modules.workforce.reference_api import get_worker_reference
-from modules.assembly.material_allocation import _get_or_create_output_item, _validate_material_allocations
-from domain.material_identity import production_item_material_key
+
 
 def create_assembly_work_order(
     materials: list[dict],
     procedure_id: int | None,
     procedure_name: str | None,
+    is_temporary: bool,
     quantity: int,
     worker_id: int | None,
     remark: str | None,
@@ -77,12 +96,25 @@ def create_assembly_work_order(
         workshop_id = assembly_node.get("workshop_id")
         if not isinstance(workshop_id, int):
             raise DomainError("assembly_workshop_invalid", "多路节点未配置车间")
-        procedure = resolve_workshop_procedure(
+        procedure = resolve_work_order_procedure(
             session,
+            scope=(
+                input_items[0].product_id,
+                input_items[0].product_version,
+                f"assembly:{assembly_node['id']}",
+                assembly_node["id"],
+            ),
             workshop_id=workshop_id,
             procedure_id=procedure_id,
             procedure_name=procedure_name,
+            is_temporary=is_temporary,
             required_input_mode="multiple",
+        )
+        ensure_source_procedure_not_repeated(
+            session,
+            {repository.source_work_order_id for repository in repositories},
+            assembly_node["id"],
+            procedure.id,
         )
         continuation = (
             len(repositories) == 1
@@ -121,9 +153,17 @@ def create_assembly_work_order(
             raise DomainError("worker_invalid", "工人不属于当前装配工艺车间")
 
         if continuation:
-            if requested_quantities[repositories[0].id] != quantity or quantity > repositories[0].quantity:
+            repository = repositories[0]
+            reserved = reserved_repository_quantities(
+                session,
+                {repository.id},
+            ).get(repository.id, 0)
+            if (
+                requested_quantities[repository.id] != quantity
+                or quantity > max(repository.quantity - reserved, 0)
+            ):
                 raise DomainError("assembly_quantity_exceeded", "后续工艺数量必须等于所选在制数量")
-            material_quantities = {repositories[0].id: quantity}
+            material_quantities = {repository.id: quantity}
         else:
             material_quantities = _validate_material_allocations(
                 session,
@@ -150,6 +190,7 @@ def create_assembly_work_order(
             worker_name=worker.worker_name if worker else None,
             quantity=quantity,
             remark=remark,
+            is_temporary=is_temporary,
             repository_id=repositories[0].id if continuation else None,
         )
         mark_order_planned(session, input_items[0].customer_order_item_id)
@@ -166,8 +207,21 @@ def create_assembly_work_order(
             flow_node_id=assembly_node["id"],
             procedure_id=procedure.id,
             procedure_name=procedure.procedure_name,
+            is_temporary=is_temporary,
         )
         if continuation:
+            repository = repositories[0]
+            create_work_order_material(
+                session,
+                work_order_id=order.id,
+                repository_id=None,
+                production_item_id=repository.production_item_id,
+                quantity=quantity,
+                source_flow_node_id=repository.flow_node_id,
+                source_previous_flow_node_id=repository.source_flow_node_id,
+                source_department_id=repository.department_id,
+                source_work_order_id=repository.source_work_order_id,
+            )
             session.flush()
             return serialize_work_order(session, order)
         allocated_materials = []

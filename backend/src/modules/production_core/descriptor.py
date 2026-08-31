@@ -21,7 +21,6 @@ MODULE = ModuleDescriptor(
     ),
     collaboration_apis=(
         "modules.production_core.assembly_api",
-        "modules.production_core.card_read_api",
         "modules.production_core.context_api",
         "modules.production_core.flow_api",
         "modules.production_core.inventory_api",
@@ -35,5 +34,6 @@ MODULE = ModuleDescriptor(
         "modules.production_core.reference_api",
         "modules.production_core.transaction_api",
         "modules.production_core.workforce_api",
+        "modules.production_core.workbench_read_api",
     ),
 )

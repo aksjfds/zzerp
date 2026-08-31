@@ -9,11 +9,7 @@ from domain.production_inventory import FinishedStockLookup
 from domain.warehouse import WAREHOUSE_CODE_MAIN, WarehouseMaterialIdentity
 from modules.inventory.plan_stock_api import list_finished_plan_stocks
 from modules.inventory.warehouse_api import list_material_warehouse_stocks
-from modules.production_core.flow_api import (
-    completed_node_display_label,
-    load_product_flow,
-    material_completion_steps,
-)
+from modules.production_core.flow_api import load_product_flow, material_completion_steps
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +22,9 @@ class PlanStockRow:
     completion_status: str
     warehouse_code: str
     warehouse_name: str
-    quantity: int
+    stock_quantity: int
+    reserved_quantity: int
+    available_quantity: int
 
 
 def load_plan_item_stocks(
@@ -40,7 +38,7 @@ def load_plan_item_stocks(
         item.identity_key: [] for item in item_list
     }
     _load_non_finished_stocks(session, item_list, result, request_flow_cache)
-    _load_finished_stocks(session, item_list, result, request_flow_cache)
+    _load_finished_stocks(session, item_list, result)
     return {key: tuple(rows) for key, rows in result.items()}
 
 
@@ -49,7 +47,7 @@ def plan_item_available_quantities(
     items: Iterable,
 ) -> dict[str, int]:
     return {
-        key: sum(row.quantity for row in rows)
+        key: sum(row.available_quantity for row in rows)
         for key, rows in load_plan_item_stocks(session, items, {}).items()
     }
 
@@ -127,11 +125,13 @@ def _load_non_finished_stocks(session, items, result, flow_cache: dict) -> None:
             completion_status=stock.completion_status,
             warehouse_code=stock.warehouse_code,
             warehouse_name=stock.warehouse_name,
-            quantity=stock.quantity,
+            stock_quantity=stock.quantity,
+            reserved_quantity=0,
+            available_quantity=stock.quantity,
         ))
 
 
-def _load_finished_stocks(session, items, result, flow_cache: dict) -> None:
+def _load_finished_stocks(session, items, result) -> None:
     finished_items = [item for item in items if item.item_type == "finished_product"]
     groups = list_finished_plan_stocks(
         session,
@@ -140,41 +140,24 @@ def _load_finished_stocks(session, items, result, flow_cache: dict) -> None:
                 identity_key=item.identity_key,
                 product_id=item.product_id,
                 product_version=item.product_version,
-                flow_node_id=item.flow_node_id,
             )
             for item in finished_items
         ),
     )
-    flow_contexts = {
-        (item.product_id, item.product_version): load_product_flow(
-            session,
-            item.product_id,
-            item.product_version,
-            flow_cache,
-        )
-        for item in finished_items
-    }
     for item in finished_items:
-        flow, nodes = flow_contexts[(item.product_id, item.product_version)]
         for stock in groups.get(item.identity_key, ()):
-            quantity = stock.quantity
-            if quantity <= 0:
-                continue
             result[item.identity_key].append(PlanStockRow(
                 stock_id=stock.id,
                 identity_key=item.identity_key,
                 item_type=item.item_type,
                 item_code=stock.item_code,
                 item_name=stock.item_name,
-                completion_status=completed_node_display_label(
-                    flow,
-                    nodes,
-                    stock.flow_node_id,
-                    stock.completed_flow_node_id,
-                ),
-                warehouse_code="finished",
+                completion_status="成品",
+                warehouse_code="—",
                 warehouse_name="成品仓",
-                quantity=quantity,
+                stock_quantity=stock.quantity,
+                reserved_quantity=stock.reserved_quantity,
+                available_quantity=stock.available_quantity,
             ))
 
 

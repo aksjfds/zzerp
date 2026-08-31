@@ -1,3 +1,4 @@
+from collections.abc import Collection
 from typing import cast
 
 from sqlalchemy import select
@@ -5,9 +6,9 @@ from sqlalchemy import select
 from domain.production_types import (
     COMPLETION_DIRECT,
     COMPLETION_QC,
+    STANDARD_EXECUTION_WORK_ORDER_TYPES,
     WORK_ORDER_STATUS_CANCELLED,
     WORK_ORDER_STATUS_OPEN,
-    WORK_ORDER_TYPES,
     WorkOrderCompletionAction,
 )
 from domain.identity import can_access_department
@@ -16,7 +17,8 @@ from modules.organization.model_api import Department, Procedure
 from modules.production_core.context_api import WorkOrderContext
 from modules.production_core.persistence import ProductionItem, Repository, WorkOrder
 from modules.errors import DomainError
-from modules.production_core.work_order_progress import order_has_submissions, order_remaining_quantity
+from modules.production_core.work_order_progress import order_has_submissions
+from modules.production_core.work_order_status import reserved_quantities
 from modules.production_core.work_order_support import consume_repository
 
 
@@ -39,7 +41,7 @@ def prepare_full_submission(
     quantity: int,
 ) -> None:
     """Validate and prepare the only supported initial submission: the full order."""
-    if order.work_order_type not in WORK_ORDER_TYPES:
+    if order.work_order_type not in STANDARD_EXECUTION_WORK_ORDER_TYPES:
         raise DomainError("work_order_type_invalid", "工单类型无效")
     if quantity <= 0 or quantity != order.quantity or order.completed_quantity != 0:
         raise DomainError(
@@ -65,12 +67,19 @@ def create_order_record(
     worker_name: str | None,
     created_by: str,
     work_order_type: str,
+    is_temporary: bool,
     remark: str | None = None,
 ) -> WorkOrder:
     if quantity <= 0:
         raise DomainError("work_order_quantity_invalid", "工单数量必须大于 0")
+    ensure_source_procedure_not_repeated(
+        session,
+        {source.source_work_order_id},
+        source.flow_node_id,
+        procedure.id,
+    )
     repository_id = source.id if isinstance(source, Repository) else None
-    reserved = reserved_source_quantity(session, repository_id)
+    reserved = reserved_quantities(session, [repository_id]).get(repository_id, 0)
     if quantity > source.quantity - reserved:
         raise DomainError("work_order_quantity_exceeded", "开单数量超过当前可用数量")
     order = WorkOrder(
@@ -78,6 +87,7 @@ def create_order_record(
         production_item_id=production_item.id,
         procedure_id=procedure.id,
         work_order_type=work_order_type,
+        is_temporary=is_temporary,
         flow_node_id=source.flow_node_id,
         source_flow_node_id=source.source_flow_node_id,
         work_order_name=procedure.procedure_name,
@@ -90,6 +100,34 @@ def create_order_record(
     session.add(order)
     session.flush()
     return order
+
+
+def ensure_source_procedure_not_repeated(
+    session,
+    source_work_order_ids: Collection[int | None],
+    flow_node_id: str,
+    procedure_id: int,
+) -> None:
+    source_ids = {
+        order_id
+        for order_id in source_work_order_ids
+        if order_id is not None
+    }
+    if not source_ids:
+        return
+    repeated_order_id = session.scalar(
+        select(WorkOrder.id).where(
+            WorkOrder.id.in_(source_ids),
+            WorkOrder.flow_node_id == flow_node_id,
+            WorkOrder.procedure_id == procedure_id,
+        )
+    )
+    if repeated_order_id is not None:
+        raise DomainError(
+            "work_order_procedure_repeated",
+            "该批物料已经完成所选工艺，请选择其他工艺",
+            status_code=409,
+        )
 
 
 def validate_worker(
@@ -139,17 +177,6 @@ def load_order_source(
     if production_item is None:
         raise DomainError("production_context_missing", "生产项不存在")
     return source, production_item
-
-
-def reserved_source_quantity(
-    session,
-    repository_id: int | None,
-) -> int:
-    condition = WorkOrder.repository_id == repository_id
-    orders = session.scalars(
-        select(WorkOrder).where(condition, WorkOrder.status == WORK_ORDER_STATUS_OPEN)
-    ).all()
-    return sum(order_remaining_quantity(order) for order in orders)
 
 
 def consume_order_source(

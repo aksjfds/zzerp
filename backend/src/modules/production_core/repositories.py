@@ -69,14 +69,17 @@ def provision_order_repositories(
             if (
                 len(targets) != 1
                 or targets[0] is None
-                or targets[0].get("type") not in {"process", "assembly"}
+                or targets[0].get("type") not in {
+                    "process",
+                    "assembly",
+                    "supplier_processing",
+                }
             ):
-                _invalid_first_node(bom_item.part_name, "必须直接连接且只连接一个工艺或装配节点")
+                _invalid_first_node(
+                    bom_item.part_name,
+                    "必须直接连接且只连接一个工艺、装配或委外加工节点",
+                )
             first_node = targets[0]
-            try:
-                department_id = target_department_id(session, first_node)
-            except DomainError:
-                _invalid_first_node(bom_item.part_name, "首节点没有有效生产部门")
             quantity = (
                 part_quantities.get((order_item.id, bom_item.id, part_node["id"]), 0)
                 if part_quantities is not None
@@ -93,6 +96,12 @@ def provision_order_repositories(
             )
             session.add(production_item)
             session.flush()
+            if first_node.get("type") == "supplier_processing":
+                continue
+            try:
+                department_id = target_department_id(session, first_node)
+            except DomainError:
+                _invalid_first_node(bom_item.part_name, "首节点没有有效生产部门")
             session.add(Repository(
                 production_item_id=production_item.id,
                 flow_node_id=first_node["id"],

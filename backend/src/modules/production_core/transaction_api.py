@@ -14,6 +14,7 @@ from modules.production_core.context_api import (
 from modules.production_core.persistence import ProductionItem, WorkOrder
 from modules.production_core.work_order_commands import (
     cancel_open_order,
+    ensure_source_procedure_not_repeated,
     load_order_source,
     load_source,
     prepare_full_submission,
@@ -55,6 +56,7 @@ def record_work_order_submission(order: WorkOrderContext, quantity: int) -> None
 
 __all__ = [
     "cancel_open_order",
+    "ensure_source_procedure_not_repeated",
     "load_order_source",
     "load_source",
     "load_production_item_context",

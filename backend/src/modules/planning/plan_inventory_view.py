@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+
+from domain.warehouse import WAREHOUSE_CODE_MAIN, WAREHOUSE_NAME_MAIN
 from modules.engineering.model_api import ProductBom
+from modules.inventory.plan_stock_api import finished_plan_reservation_quantities
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
 from modules.planning.plan_stock_view import (
     completion_status_priority,
@@ -12,9 +15,11 @@ from modules.planning.plan_stock_view import (
 )
 from modules.production_core.flow_api import load_product_flow
 
+
 def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[dict]:
     flow_cache: dict = {}
     stock_groups = load_plan_item_stocks(session, plan.items, flow_cache)
+    reservation_quantities = finished_plan_reservation_quantities(session, plan.id)
     bom_ids = {
         item.product_bom_id
         for item in plan.items
@@ -68,12 +73,15 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
             if bom_item is not None:
                 item_name = bom_item.part_name
         if not stocks:
+            warehouse_code, warehouse_name = _default_warehouse(item.item_type)
             rows.append(_inventory_item_row(
                 item,
                 None,
                 "—",
-                "—",
-                "—",
+                warehouse_code,
+                warehouse_name,
+                0,
+                0,
                 0,
                 0,
                 item_name,
@@ -88,24 +96,29 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
                 ),
             ))
             continue
-        remaining_deduction = (
-            item.estimated_inventory_quantity if plan.status == "draft" else 0
-        )
+        remaining_allocation = item.estimated_inventory_quantity
         for stock in stocks:
-            deduction = min(remaining_deduction, stock.quantity)
-            remaining_deduction -= deduction
+            if plan.status == "draft":
+                allocation = min(remaining_allocation, stock.available_quantity)
+                remaining_allocation -= allocation
+            elif item.item_type == "finished_product":
+                allocation = reservation_quantities.get((item.id, stock.stock_id), 0)
+            else:
+                allocation = 0
             rows.append(_inventory_item_row(
                 item,
                 stock.stock_id,
                 stock.completion_status,
                 stock.warehouse_code,
                 stock.warehouse_name,
-                stock.quantity,
-                deduction,
+                stock.stock_quantity,
+                stock.reserved_quantity,
+                stock.available_quantity,
+                allocation,
                 item_name,
                 _inventory_decomposition(
                     item,
-                    stock.quantity,
+                    stock.available_quantity,
                     nodes,
                     incoming_by_product[product_key],
                     requirements,
@@ -115,14 +128,23 @@ def _serialize_inventory_items(session: Session, plan: ProductionPlan) -> list[d
             ))
     return rows
 
+
+def _default_warehouse(item_type: str) -> tuple[str, str]:
+    if item_type in {"part", "assembly"}:
+        return WAREHOUSE_CODE_MAIN, WAREHOUSE_NAME_MAIN
+    return "—", "成品仓"
+
+
 def _inventory_item_row(
     item: ProductionPlanItem,
     stock_id: int | None,
     completed_node_label: str,
     warehouse_code: str,
     warehouse_name: str,
-    available: int,
-    planned_deduction: int,
+    stock_quantity: int,
+    reserved_quantity: int,
+    available_quantity: int,
+    planned_allocation: int,
     item_name: str | None = None,
     decomposition: dict | None = None,
 ) -> dict:
@@ -139,8 +161,13 @@ def _inventory_item_row(
         "completed_node_label": completed_node_label,
         "warehouse_code": warehouse_code,
         "warehouse_name": warehouse_name,
-        "current_inventory_quantity": available,
-        "planned_deduction_quantity": planned_deduction,
+        "stock_quantity": stock_quantity,
+        "reserved_quantity": reserved_quantity,
+        "available_quantity": available_quantity,
+        "planned_allocation_quantity": planned_allocation,
+        "allocation_mode": (
+            "reservation" if item.item_type == "finished_product" else "outbound"
+        ),
         "decomposition": decomposition or {
             "finished_equivalent_quantity": 0,
             "parts": [],

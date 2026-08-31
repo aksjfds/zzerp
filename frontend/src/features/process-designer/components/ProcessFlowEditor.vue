@@ -20,7 +20,8 @@ type NodeProperty = {
 type CanvasApi = {
   dragPart: (item: BomItem) => void
   dragQc: () => void
-  dragShipping: () => void
+  dragSupplierProcessing: () => void
+  dragFinishedInbound: () => void
   dragProcess: (
     workshopId: number,
     workshopName: string,
@@ -93,7 +94,7 @@ onMounted(async () => { workshops.value = await queryWorkshopRoutes() })
     <div class="section-heading">
       <div>
         <h2>工序流程配置</h2>
-        <p>工程部只配置配件经过的车间和QC节点；具体加工工艺由车间在开工单时选择。</p>
+        <p>工程部只配置配件经过的车间、委外加工和 QC 节点；具体加工工艺不在流程图中配置。</p>
       </div>
       <div class="heading-actions"><slot name="actions" /></div>
     </div>
@@ -105,8 +106,9 @@ onMounted(async () => { workshops.value = await queryWorkshopRoutes() })
         :workshops="workshops"
         @drag-part="canvas?.dragPart($event)"
         @drag-workshop="dragWorkshop"
+        @drag-supplier-processing="canvas?.dragSupplierProcessing()"
         @drag-qc="canvas?.dragQc()"
-        @drag-shipping="canvas?.dragShipping()"
+        @drag-finished-inbound="canvas?.dragFinishedInbound()"
       />
       <ProcessFlowCanvas
         ref="canvas"

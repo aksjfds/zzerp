@@ -111,21 +111,35 @@ function batchConnectionError(
   const targetLabel = target.text.value || target.type
   const sourceType = String(source.type)
   const targetType = String(target.type)
-  if (sourceType === 'shipping') return `发货节点“${sourceLabel}”不能连接后续节点`
+  if (sourceType === 'finished_inbound') return `入库节点“${sourceLabel}”不能连接后续节点`
   if (targetType === 'part') return `配件节点“${targetLabel}”不能连接输入线`
   if ((outgoing.get(source.id) ?? 0) >= 1) return `节点“${sourceLabel}”已经有后续节点`
-  if (['process', 'qc', 'shipping'].includes(targetType)
+  if (['process', 'qc', 'finished_inbound', 'supplier_processing'].includes(targetType)
     && (incoming.get(target.id) ?? 0) >= 1) {
     return `节点“${targetLabel}”已经有上游节点`
   }
-  if (sourceType === 'part' && !['process', 'assembly'].includes(targetType)) {
-    return `配件“${sourceLabel}”后只能连接工艺或装配节点`
+  if (sourceType === 'part' && !['process', 'assembly', 'supplier_processing'].includes(targetType)) {
+    return `配件“${sourceLabel}”后只能连接工艺、装配或委外加工节点`
   }
-  if (targetType === 'qc' && !['process', 'assembly'].includes(sourceType)) {
-    return `QC节点“${targetLabel}”的上游必须是工艺或装配节点`
+  if (targetType === 'supplier_processing' && sourceType !== 'part') {
+    return `委外加工节点“${targetLabel}”的上游必须是配件节点`
   }
-  if (sourceType === 'qc' && !['process', 'assembly', 'shipping'].includes(targetType)) {
-    return `QC节点“${sourceLabel}”后只能连接工艺、装配或发货节点`
+  if (sourceType === 'supplier_processing' && targetType !== 'qc') {
+    return `委外加工节点“${sourceLabel}”后只能连接QC节点`
+  }
+  if (sourceType === 'process'
+    && targetType !== 'qc'
+    && !(source.properties.directInbound === true && targetType === 'finished_inbound')) {
+    return `工艺节点“${sourceLabel}”后必须连接QC；装包节点可以直接连接入库`
+  }
+  if (sourceType === 'assembly' && targetType !== 'qc') {
+    return `装配节点“${sourceLabel}”后只能连接QC节点`
+  }
+  if (targetType === 'qc' && !['process', 'assembly', 'supplier_processing'].includes(sourceType)) {
+    return `QC节点“${targetLabel}”的上游必须是工艺、装配或委外加工节点`
+  }
+  if (sourceType === 'qc' && !['process', 'assembly', 'finished_inbound'].includes(targetType)) {
+    return `QC节点“${sourceLabel}”后只能连接工艺、装配或入库节点`
   }
   if (hasPath(adjacency, target.id, source.id)) return '批量连接会形成流程环路'
   return null

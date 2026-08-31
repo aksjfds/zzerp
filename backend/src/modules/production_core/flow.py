@@ -74,7 +74,7 @@ def physical_route_nodes(
     nodes: dict[str, dict],
     origin_node_id: str,
 ) -> list[dict]:
-    """Return every downstream physical route until the next assembly or shipping node."""
+    """Return every downstream physical route until the next assembly or inbound node."""
     origin = nodes.get(origin_node_id)
     if origin is None:
         return []
@@ -93,7 +93,7 @@ def physical_route_nodes(
                 route.append(node)
             continue
         route.append(node)
-        if node.get("type") != "shipping":
+        if node.get("type") != "finished_inbound":
             queue.extend(_ordered_targets(flow, nodes, node_id))
     return route
 
@@ -159,7 +159,7 @@ def completed_node_display_label(
     origin = nodes.get(origin_flow_node_id)
     if (
         origin is not None
-        and origin.get("type") == "shipping"
+        and origin.get("type") == "finished_inbound"
         and completed_flow_node_id == origin_flow_node_id
     ):
         return str(origin.get("label") or "成品")
@@ -190,7 +190,7 @@ def qc_qualified_destinations(
     destinations = ["return"]
     if target is not None:
         destinations.append("release")
-    if target is None or target.get("type") != "shipping":
+    if target is None or target.get("type") != "finished_inbound":
         destinations.append("inventory")
     return tuple(destinations)
 

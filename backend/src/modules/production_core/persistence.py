@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     BigInteger,
+    Boolean,
     CheckConstraint,
     ForeignKey,
     ForeignKeyConstraint,
@@ -21,6 +22,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from sqlalchemy.dialects.postgresql import JSONB
 
 from database import Base
+from domain.production_types import WorkOrderStatus, WorkOrderType
 
 
 class ProductionItem(Base):
@@ -55,6 +57,14 @@ class ProductionItem(Base):
         ),
         Index("idx_production_item_order_item", "customer_order_item_id"),
         Index("idx_production_item_bom", "product_bom_id"),
+        Index(
+            "uq_production_item_part_origin",
+            "customer_order_item_id",
+            "product_bom_id",
+            "origin_flow_node_id",
+            unique=True,
+            postgresql_where=text("product_bom_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -120,8 +130,19 @@ class WorkOrder(Base):
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_work_order_quantity_positive"),
         CheckConstraint(
-            "work_order_type IN ('standard', 'assembly')",
+            "work_order_type IN ('standard', 'assembly', 'supplier_processing')",
             name="ck_work_order_type",
+        ),
+        CheckConstraint(
+            "supplier_name IS NULL OR "
+            "(supplier_name = btrim(supplier_name) AND supplier_name <> '')",
+            name="ck_work_order_supplier_name",
+        ),
+        CheckConstraint(
+            "supplier_process_name IS NULL OR "
+            "(supplier_process_name = btrim(supplier_process_name) "
+            "AND supplier_process_name <> '')",
+            name="ck_work_order_supplier_process_name",
         ),
         CheckConstraint(
             "completed_quantity >= 0 AND completed_quantity <= quantity",
@@ -130,6 +151,11 @@ class WorkOrder(Base):
         CheckConstraint(
             "processed_quantity >= completed_quantity AND processed_quantity <= quantity",
             name="ck_work_order_processed_quantity",
+        ),
+        CheckConstraint(
+            "work_order_type <> 'supplier_processing' "
+            "OR processed_quantity = completed_quantity",
+            name="ck_work_order_supplier_progress",
         ),
         CheckConstraint(
             "status IN ('open', 'closed', 'cancelled')",
@@ -154,12 +180,27 @@ class WorkOrder(Base):
             name="ck_work_order_repository_lifecycle",
         ),
         CheckConstraint(
-            "(work_order_type = 'assembly' AND procedure_id IS NOT NULL "
-            "AND source_flow_node_id IS NOT NULL) OR "
-            "(work_order_type = 'standard' AND procedure_id IS NOT NULL "
+            "(work_order_type = 'assembly' "
+            "AND procedure_id IS NOT NULL "
             "AND source_flow_node_id IS NOT NULL "
+            "AND supplier_name IS NULL "
+            "AND supplier_process_name IS NULL) OR "
+            "(work_order_type = 'standard' "
+            "AND procedure_id IS NOT NULL "
+            "AND source_flow_node_id IS NOT NULL "
+            "AND supplier_name IS NULL "
+            "AND supplier_process_name IS NULL "
             "AND (status <> 'open' OR completed_quantity = quantity "
-            "OR repository_id IS NOT NULL))",
+            "OR repository_id IS NOT NULL)) OR "
+            "(work_order_type = 'supplier_processing' "
+            "AND procedure_id IS NULL "
+            "AND is_temporary = FALSE "
+            "AND repository_id IS NULL "
+            "AND worker_id IS NULL "
+            "AND worker_name IS NULL "
+            "AND source_flow_node_id IS NOT NULL "
+            "AND supplier_name IS NOT NULL "
+            "AND supplier_process_name IS NOT NULL)",
             name="ck_work_order_type_source",
         ),
         ForeignKeyConstraint(
@@ -199,6 +240,22 @@ class WorkOrder(Base):
             "flow_node_id",
             "status",
         ),
+        Index(
+            "idx_work_order_open_workbench",
+            "work_order_type",
+            "procedure_id",
+            "production_item_id",
+            "flow_node_id",
+            "source_flow_node_id",
+            postgresql_where=text("status = 'open'"),
+        ),
+        Index(
+            "uq_work_order_supplier_task",
+            "production_item_id",
+            "flow_node_id",
+            unique=True,
+            postgresql_where=text("work_order_type = 'supplier_processing'"),
+        ),
         Index("idx_work_order_process_position", "production_item_id", "flow_node_id", "procedure_id", text("id DESC")),
     )
 
@@ -208,12 +265,15 @@ class WorkOrder(Base):
     production_item_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("production_item.id"), nullable=False
     )
-    procedure_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("procedure.id"), nullable=False
+    procedure_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("procedure.id"), nullable=True
     )
-    work_order_type: Mapped[str] = mapped_column(Text, nullable=False)
+    work_order_type: Mapped[WorkOrderType] = mapped_column(Text, nullable=False)
+    is_temporary: Mapped[bool] = mapped_column(Boolean, nullable=False)
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     source_flow_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supplier_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    supplier_process_name: Mapped[str | None] = mapped_column(Text, nullable=True)
     work_order_name: Mapped[str] = mapped_column(Text, nullable=False)
     created_by: Mapped[str] = mapped_column(String(50), nullable=False)
     remark: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -224,7 +284,11 @@ class WorkOrder(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     processed_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     completed_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    status: Mapped[str] = mapped_column(Text, nullable=False, default="open")
+    status: Mapped[WorkOrderStatus] = mapped_column(
+        Text,
+        nullable=False,
+        default="open",
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )
@@ -380,8 +444,7 @@ class ProductionMovement(Base):
             "movement_type IN ('initial', 'process', 'assembly_input', "
             "'assembly_output', 'qc_qualified', 'qc_inventory', "
             "'production_inventory', 'qc_rework', "
-            "'inventory_issue', 'finished_receipt', "
-            "'customer_shipment', 'assembly_input_restore', 'scrap', 'lost')",
+            "'inventory_issue', 'assembly_input_restore', 'scrap', 'lost')",
             name="ck_production_movement_type",
         ),
         CheckConstraint(
@@ -393,10 +456,6 @@ class ProductionMovement(Base):
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND target_department_id IS NOT NULL AND work_order_id IS NULL "
             "AND work_order_batch_id IS NULL) OR "
-            "(movement_type IN ('finished_receipt', 'customer_shipment') "
-            "AND source_flow_node_id IS NOT NULL AND target_flow_node_id IS NOT NULL "
-            "AND source_department_id IS NOT NULL AND target_department_id IS NOT NULL "
-            "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
             "(movement_type IN ('process', 'assembly_output') "
             "AND source_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND (target_flow_node_id IS NULL) = (target_department_id IS NULL) "

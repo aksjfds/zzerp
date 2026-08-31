@@ -7,11 +7,19 @@ from typing import Iterable
 from sqlalchemy import select
 
 from domain.production_types import (
+    QC_DESTINATION_RELEASE,
     REWORK_TRACKED_WORK_ORDER_TYPES,
+    WORK_ORDER_STATUS_CANCELLED,
     WORK_ORDER_STATUS_CLOSED,
     WORK_ORDER_STATUS_OPEN,
+    WORK_ORDER_SUPPLIER_PROCESSING,
 )
 from domain.time import utc_now
+from modules.errors import DomainError
+from modules.production_core.context_api import (
+    InspectionBatchContext,
+    WorkOrderContext,
+)
 from modules.production_core.persistence import WorkOrder, WorkOrderBatch
 
 
@@ -47,6 +55,144 @@ class AssemblyOutputProgress:
     rework_quantity: int
     scrap_quantity: int
     lost_quantity: int
+
+
+@dataclass(frozen=True, slots=True)
+class SupplierProcessingQcProgress:
+    inspected_quantity: int
+    qualified_quantity: int
+    rework_quantity: int
+    scrap_quantity: int
+    lost_quantity: int
+    remaining_qualified_quantity: int
+    pending_destination_quantity: int
+    released_quantity: int
+
+
+def calculate_supplier_processing_qc_progress(
+    order: WorkOrderContext,
+    batches: Iterable[InspectionBatchContext],
+) -> SupplierProcessingQcProgress:
+    if order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING:
+        raise DomainError(
+            "supplier_processing_work_order_required",
+            "当前工单不是委外加工工单",
+            status_code=409,
+        )
+    inspected_quantity = 0
+    qualified_quantity = 0
+    rework_quantity = 0
+    scrap_quantity = 0
+    lost_quantity = 0
+    pending_destination_quantity = 0
+    released_quantity = 0
+    for batch in batches:
+        qualified, rework, scrap, lost = _supplier_processing_batch_quantities(
+            order,
+            batch,
+        )
+        inspected_quantity += batch.submitted_quantity
+        qualified_quantity += qualified
+        rework_quantity += rework
+        scrap_quantity += scrap
+        lost_quantity += lost
+        if batch.qualified_destination == QC_DESTINATION_RELEASE:
+            released_quantity += qualified
+        else:
+            pending_destination_quantity += qualified
+    if qualified_quantity > order.quantity:
+        raise DomainError(
+            "supplier_processing_qualified_quantity_exceeded",
+            "委外加工工单累计合格数量超过任务数量",
+            status_code=409,
+        )
+    return SupplierProcessingQcProgress(
+        inspected_quantity=inspected_quantity,
+        qualified_quantity=qualified_quantity,
+        rework_quantity=rework_quantity,
+        scrap_quantity=scrap_quantity,
+        lost_quantity=lost_quantity,
+        remaining_qualified_quantity=order.quantity - qualified_quantity,
+        pending_destination_quantity=pending_destination_quantity,
+        released_quantity=released_quantity,
+    )
+
+
+def _supplier_processing_batch_quantities(
+    order: WorkOrderContext,
+    batch: InspectionBatchContext,
+) -> tuple[int, int, int, int]:
+    quantities = (
+        batch.qualified_quantity,
+        batch.rework_quantity,
+        batch.scrap_quantity,
+        batch.lost_quantity,
+    )
+    if (
+        batch.work_order_id != order.id
+        or batch.submitted_quantity <= 0
+        or batch.recorded_at is None
+        or any(quantity is None for quantity in quantities)
+        or batch.rework_source_batch_id is not None
+        or batch.source_flow_node_id != order.flow_node_id
+        or batch.qualified_destination not in {None, QC_DESTINATION_RELEASE}
+        or (
+            batch.qualified_destination is None
+            and batch.destination_decided_at is not None
+        )
+        or (
+            batch.qualified_destination == QC_DESTINATION_RELEASE
+            and batch.destination_decided_at is None
+        )
+    ):
+        raise DomainError(
+            "supplier_processing_qc_history_invalid",
+            "委外加工工单存在不符合分次质检规则的批次",
+            status_code=409,
+        )
+    qualified = batch.qualified_quantity or 0
+    rework = batch.rework_quantity or 0
+    scrap = batch.scrap_quantity or 0
+    lost = batch.lost_quantity or 0
+    if (
+        any(quantity < 0 for quantity in (qualified, rework, scrap, lost))
+        or qualified + rework + scrap + lost != batch.submitted_quantity
+    ):
+        raise DomainError(
+            "supplier_processing_qc_history_invalid",
+            "委外加工质检批次数量不守恒",
+            status_code=409,
+        )
+    return qualified, rework, scrap, lost
+
+
+def validate_supplier_processing_work_order_progress(
+    order: WorkOrderContext,
+    progress: SupplierProcessingQcProgress,
+) -> None:
+    released_quantity = progress.released_quantity
+    if (
+        order.processed_quantity != released_quantity
+        or order.completed_quantity != released_quantity
+        or released_quantity > order.quantity
+        or (
+            order.status == WORK_ORDER_STATUS_OPEN
+            and released_quantity >= order.quantity
+        )
+        or (
+            order.status == WORK_ORDER_STATUS_CLOSED
+            and released_quantity != order.quantity
+        )
+        or (
+            order.status == WORK_ORDER_STATUS_CANCELLED
+            and released_quantity != 0
+        )
+    ):
+        raise DomainError(
+            "supplier_processing_progress_invalid",
+            "委外加工工单放行进度与质检历史不一致",
+            status_code=409,
+        )
 
 
 def order_remaining_quantity(order: WorkOrder) -> int:

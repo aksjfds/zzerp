@@ -20,6 +20,7 @@ DepartmentCapability = Literal[
     "quality",
     "special_printing",
     "production_progress",
+    "production_workbench",
     "inventory",
     "finished_goods",
 ]

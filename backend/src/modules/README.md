@@ -33,9 +33,11 @@ create copies of the production state machine.
 - `standard_execution`: procedure prices, pay details and standard work-order execution.
 - `assembly`: assembly work orders and material allocation.
 - `quality`: inspections and QC release.
-- `inventory`: temporary warehouse stock and operations, cross-order finished stock and immutable ledgers.
+- `inventory.finished_receipt_api`: pending finished receipts from either a QC release batch or a completed packaging work order; the two source identities are mutually exclusive.
+- `inventory`: temporary non-finished warehouse operations, unified finished stock, reservations and immutable ledgers.
 - `workforce`: worker administration, history and pay projections.
 - `planning`: production plans, PMC and other cross-module read models.
+- `supplier_processing`: business-owned task creation plus supplier-processing QC orchestration; it owns no duplicate production tables and does not reuse outsource-department execution.
 
 ## Dependency rules
 
@@ -80,11 +82,11 @@ they may not construct or mutate foreign-owned records.
 | Read model | Owner | Purpose |
 | --- | --- | --- |
 | `planning.department_progress` | planning | ordinary department task list |
-| `planning.current_production_cards` / `historical_production_cards` / `production_card_listing` | planning | production workbench card queries and orchestration |
+| `planning.production_workbench` / `production_workbench_orders` | planning | production-position workbench and related work-order projections |
 | `planning.production_progress_detail` | planning | department task detail drawer |
 | `planning.order_status_view` / `sales_progress_api` | planning | sales order production summaries and flow status |
-| `inventory.api` | inventory | temporary warehouse and finished-inventory presentation |
-| `inventory.finished_goods_api` | inventory | finished-goods receiving, shipment and presentation |
+| `inventory.api` | inventory | temporary warehouse and unified finished-stock HTTP facade |
+| `inventory.finished_stock_query_api` | inventory | unified finished stock, reservation and transaction read models |
 | `production_core.work_order_queries` / `work_order_presenters` | production_core | owner work-order query and response mapping |
 | `quality.workforce_api` | quality | immutable QC activity projection for workforce |
 | `workforce.workers` | workforce | worker history and pay projection |
@@ -100,15 +102,26 @@ writers: all construction and mutation is delegated to the owning `*_api.py`.
 | `production_core.flow` / `lifecycle` / `inventory_api` / `assembly_api` | resolve immutable order-version flow and initialize owner production records |
 | `production_core.repositories` / `work_order_commands` / `work_order_support` | validate source, workshop and procedure context before owner writes |
 | `production_core.operation_undo` | lock the source order context while reversing owner movements |
-| `quality.inspection_api` / `submission_api` | no direct ORM dependency remains; QC batch reads and writes go through `production_core.qc_api` |
+| `quality.inspection_api` / `submission_api` / `supplier_processing_api` | no direct ORM dependency remains; ordinary and supplier-processing QC batch reads and writes go through `production_core.qc_api` |
+| `supplier_processing.commands` / `qc_commands` / `release_commands` | lock planning, production, quality and finished-inbound context through narrow owner APIs; do not construct foreign ORM records |
 
 Any new foreign ORM construction or attribute mutation is a boundary violation,
 even if the class was imported through `model_api.py`.
 
 `production_route_task` is a planning-owned deterministic projection of
-`production_plan_item` onto the bound product-version flow. It stores only the
-route node, workshop and order within the route; department remains derived
-from the workshop owner. Planned quantity,
-arrival, completion, work-order and QC state remain in their authoritative
-tables. The projection is rebuilt in the same transaction whenever a draft plan
+`production_plan_item` onto the bound product-version flow. It stores the
+route node, optional workshop, owning department and order within the route;
+supplier-processing nodes belong to the business department without a fake
+workshop. Planned quantity, completion, work-order and QC state remain in their
+authoritative tables; supplier-processing has no arrival state. The projection is rebuilt in the same transaction whenever a draft plan
 is rebuilt or edited; plan confirmation does not create a second route.
+
+Supplier-processing is not an alias for the outsource department. A confirmed
+or completed plan exposes one task per part and stable supplier node; business
+creates one work order with free-text supplier and process snapshots. The order
+does not reference procedure, worker or repository records. QC records complete
+result batches directly, may accumulate inspected quantity beyond the task, and
+limits only cumulative qualified quantity. Rework is final history without a
+rework-source batch. Each qualified batch has one fixed `release` decision, and
+the owner work order closes only when released qualified quantity equals its
+task quantity.

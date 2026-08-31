@@ -1,11 +1,7 @@
-from sqlalchemy import case, exists, func, or_, select
+from sqlalchemy import exists, func, or_, select
 
 from database import SessionLocal
-from domain.production_types import (
-    WORK_ORDER_ASSEMBLY,
-    WORK_ORDER_STANDARD,
-)
-from modules.organization.model_api import Department, Procedure, Workshop
+from domain.production_types import STANDARD_EXECUTION_WORK_ORDER_TYPES
 from modules.engineering.model_api import Product, ProductBom, ProductRouteTask
 from modules.production_core.persistence import (
     ProductionItem,
@@ -15,72 +11,14 @@ from modules.production_core.persistence import (
     WorkOrderMaterial,
 )
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
-from modules.errors import DomainError
 from modules.production_core.work_order_presenters import (
     WorkOrderPresenterContext,
     build_work_order_presenter_context,
     item_display,
     serialize_batch,
-    serialize_work_order,
     work_order_context,
 )
 from modules.production_core.flow_api import qc_qualified_destinations
-
-
-def list_department_work_orders(
-    department_code: str,
-    page: int,
-    page_size: int,
-    production_item_id: int | None = None,
-    flow_node_id: str | None = None,
-    source_flow_node_id: str | None = None,
-) -> tuple[list[dict], int]:
-    with SessionLocal() as session:
-        department = _department(session, department_code)
-        statement = (
-            select(WorkOrder)
-            .outerjoin(Procedure, Procedure.id == WorkOrder.procedure_id)
-            .outerjoin(Workshop, Workshop.id == Procedure.workshop_id)
-            .order_by(
-                case(
-                    (WorkOrder.status == "open", 0),
-                    (WorkOrder.status == "closed", 1),
-                    else_=2,
-                ),
-                WorkOrder.id.desc(),
-            )
-        )
-        condition = (
-            or_(
-                WorkOrder.work_order_type == WORK_ORDER_ASSEMBLY,
-                (WorkOrder.work_order_type == WORK_ORDER_STANDARD)
-                & (Workshop.department_id == department.id),
-            )
-            if department_code == "assembly"
-            else (
-                (WorkOrder.work_order_type == WORK_ORDER_STANDARD)
-                & (Workshop.department_id == department.id)
-            )
-        )
-        if production_item_id is not None:
-            condition = condition & _related_to_production_item(production_item_id)
-        if flow_node_id is not None:
-            condition = condition & (WorkOrder.flow_node_id == flow_node_id)
-        if source_flow_node_id is not None:
-            condition = condition & (
-                WorkOrder.source_flow_node_id == source_flow_node_id
-            )
-        filtered = statement.where(condition)
-        total = session.scalar(
-            select(func.count()).select_from(filtered.order_by(None).subquery())
-        ) or 0
-        orders = session.scalars(
-            filtered.offset((page - 1) * page_size).limit(page_size)
-        ).all()
-        context = _load_order_relations(session, orders)
-        return [
-            serialize_work_order(session, item, context) for item in orders
-        ], total
 
 
 def list_qc_batches(
@@ -93,6 +31,8 @@ def list_qc_batches(
     with SessionLocal() as session:
         statement = select(WorkOrderBatch).join(
             WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id
+        ).where(
+            WorkOrder.work_order_type.in_(list(STANDARD_EXECUTION_WORK_ORDER_TYPES))
         )
         destination_pending = (
             (WorkOrderBatch.recorded_at.is_not(None))
@@ -177,15 +117,6 @@ def list_qc_batches(
                 item = _serialize_pending_batch(session, batch, context)
                 visible.append(item)
         return visible, total
-
-
-def _department(session, department_code: str) -> Department:
-    department = session.scalar(
-        select(Department).where(Department.department_code == department_code)
-    )
-    if department is None:
-        raise DomainError("department_not_found", "部门不存在", status_code=404)
-    return department
 
 
 def _related_to_production_item(production_item_id: int):
