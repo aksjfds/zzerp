@@ -6,6 +6,7 @@ import {
   createCancelWorkOrderAction,
   createDirectResultAction,
   createUndoProductionOperationAction,
+  type WorkOrderSubmissionTarget,
   type WorkOrderActions,
 } from './workOrderActionSupport'
 
@@ -17,7 +18,7 @@ export function useProductionWorkOrderActions(
     return index >= 0 ? index + 1 : '—'
   }
 
-  async function submitQc(item: WorkOrder) {
+  async function submitQc(item: WorkOrderSubmissionTarget) {
     try {
       const quantity = item.quantity
       await ElMessageBox.confirm(

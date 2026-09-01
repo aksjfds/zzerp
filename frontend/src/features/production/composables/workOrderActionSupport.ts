@@ -3,9 +3,19 @@ import { getApiErrorDetail } from '@/api/request'
 import { cancelWorkOrder, submitWorkOrder, undoProductionOperation } from '../api/workOrders'
 import type { WorkOrder, WorkOrderBatch } from '../domain/types'
 
+export type WorkOrderSubmissionTarget = Pick<
+  WorkOrder,
+  | 'id'
+  | 'work_order_no'
+  | 'work_order_type'
+  | 'quantity'
+  | 'output_unit_quantity'
+  | 'direct_result_allowed'
+>
+
 export interface WorkOrderActions {
-  submitQc: (item: WorkOrder) => Promise<void>
-  submitDirectResult: (item: WorkOrder) => Promise<void>
+  submitQc: (item: WorkOrderSubmissionTarget) => Promise<void>
+  submitDirectResult: (item: WorkOrderSubmissionTarget) => Promise<void>
   resubmitQc: (item: WorkOrder, batch: WorkOrderBatch) => Promise<void>
   cancel: (item: WorkOrder) => Promise<void>
   undo: (item: WorkOrder) => Promise<void>
@@ -51,7 +61,7 @@ export function createDirectResultAction(
   onChanged: () => Promise<void>,
   resultName = '加工',
 ) {
-  return async function submitDirectResult(item: WorkOrder) {
+  return async function submitDirectResult(item: WorkOrderSubmissionTarget) {
     const available = item.quantity
     if (available < 1 || !item.direct_result_allowed) return
     try {

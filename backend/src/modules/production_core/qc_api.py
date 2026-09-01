@@ -2,7 +2,7 @@
 
 from collections.abc import Iterable
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
 from domain.production_types import (
@@ -20,6 +20,7 @@ from modules.production_core.context_api import (
 )
 from modules.production_core.persistence import (
     ProductionItem,
+    ProductionMovement,
     WorkOrder,
     WorkOrderBatch,
 )
@@ -150,6 +151,93 @@ def record_qc_batch_destination(
     batch.destination_decided_by = actor_username
 
 
+def undo_qc_batch_result(session: Session, batch_id: int) -> None:
+    batch = load_qc_batch(session, batch_id)
+    if batch is None:
+        raise DomainError("qc_batch_not_found", "质检批次不存在", status_code=404)
+    order = load_qc_work_order(session, batch.work_order_id, for_update=True)
+    batch = load_qc_batch(session, batch_id, for_update=True)
+    if order is None or batch is None or batch.work_order_id != order.id:
+        raise DomainError("qc_batch_not_found", "质检批次不存在", status_code=404)
+    if batch.recorded_at is None:
+        raise DomainError(
+            "qc_result_not_recorded",
+            "当前批次尚未录入质检结果",
+            status_code=409,
+        )
+    if batch.destination_decided_at is not None or batch.qualified_destination is not None:
+        raise DomainError(
+            "qc_destination_decided",
+            "合格品去向已经确定，不能撤回质检",
+            status_code=409,
+        )
+
+    child_batches = list(session.scalars(
+        select(WorkOrderBatch)
+        .where(
+            WorkOrderBatch.work_order_id == order.id,
+            WorkOrderBatch.rework_source_batch_id == batch.id,
+        )
+        .with_for_update()
+    ))
+    if child_batches:
+        raise DomainError(
+            "qc_rework_already_submitted",
+            "该结果已经产生返工复检，不能撤回",
+            status_code=409,
+        )
+
+    movements = list(session.scalars(
+        select(ProductionMovement)
+        .where(ProductionMovement.work_order_batch_id == batch.id)
+        .with_for_update()
+    ))
+    result_movement_types = {"qc_rework", "scrap", "lost"}
+    submission_movement_types = {"process", "assembly_output"}
+    if any(
+        movement.movement_type
+        not in result_movement_types | submission_movement_types
+        for movement in movements
+    ):
+        raise DomainError(
+            "qc_result_already_used",
+            "该质检结果已经产生后续流转，不能撤回",
+            status_code=409,
+        )
+
+    if order.work_order_type == WORK_ORDER_SUPPLIER_PROCESSING:
+        if movements:
+            raise DomainError(
+                "qc_result_already_used",
+                "该委外质检结果已经产生后续流转，不能撤回",
+                status_code=409,
+            )
+        session.delete(batch)
+        session.flush()
+        return
+
+    session.execute(
+        text("SELECT set_config('zzerp.qc_inspection_undo_batch_id', :batch_id, true)"),
+        {"batch_id": str(batch.id)},
+    )
+    for movement in movements:
+        if movement.movement_type in result_movement_types:
+            session.delete(movement)
+    session.flush()
+    batch.qualified_quantity = None
+    batch.rework_quantity = None
+    batch.scrap_quantity = None
+    batch.lost_quantity = None
+    batch.qc_worker_id = None
+    batch.qc_worker_name = None
+    batch.defect_reason = None
+    batch.recorded_at = None
+    if order.status == WORK_ORDER_STATUS_CLOSED:
+        order.status = WORK_ORDER_STATUS_OPEN
+        order.closed_at = None
+    session.flush()
+
+
 def refresh_supplier_processing_release_progress(
     order: WorkOrderContext,
     batches: Iterable[InspectionBatchContext],
@@ -190,4 +278,5 @@ __all__ = [
     "record_qc_batch_destination",
     "refresh_supplier_processing_release_progress",
     "rework_submitted_quantity",
+    "undo_qc_batch_result",
 ]

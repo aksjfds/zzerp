@@ -6,7 +6,6 @@ from pydantic import Field
 from schemas.common import FlowNodeType
 from schemas.organization import ProcedureResponse
 from schemas.production_base import ProductionModel
-from schemas.production_work_orders import WorkOrderResponse
 
 
 class WorkbenchActivityResponse(ProductionModel):
@@ -123,53 +122,12 @@ class ProductionWorkbenchPositionListEnvelope(ProductionModel):
     total: int = Field(ge=0)
 
 
-class ProductionWorkbenchProcedureSummaryResponse(ProductionModel):
-    procedure_id: int = Field(gt=0)
-    procedure_name: str = Field(min_length=1)
-    is_temporary: bool
-    work_order_count: int = Field(gt=0)
-    open_work_order_count: int = Field(ge=0)
-    work_order_quantity: int = Field(ge=0)
-    processing_quantity: int = Field(ge=0)
-    ready_for_result_quantity: int = Field(ge=0)
-    pending_qc_quantity: int = Field(ge=0)
-    qualified_quantity: int = Field(ge=0)
-    rework_quantity: int = Field(ge=0)
-    scrap_quantity: int = Field(ge=0)
-    lost_quantity: int = Field(ge=0)
-
-
-class ProductionWorkbenchInputMaterialResponse(ProductionModel):
-    production_item_id: int = Field(gt=0)
-    item_code: str
-    item_name: str
-    quantity: int = Field(gt=0)
-    source_completion: str
-    source_work_order_no: str | None
-
-
-class ProductionWorkbenchWorkOrderResponse(WorkOrderResponse):
-    input_materials: list[ProductionWorkbenchInputMaterialResponse] = Field(
-        default_factory=list,
-    )
-
-
-class ProductionWorkbenchWorkOrderListEnvelope(ProductionModel):
-    data: list[ProductionWorkbenchWorkOrderResponse]
-    total: int = Field(ge=0)
-    procedure_summaries: list[ProductionWorkbenchProcedureSummaryResponse]
-
-
 __all__ = [
     "AssemblyWorkbenchInputMaterialResponse",
     "AssemblyWorkbenchContinuationSourceResponse",
     "AssemblyWorkbenchPositionResponse",
     "ProductionWorkbenchPositionListEnvelope",
     "ProductionWorkbenchPositionResponse",
-    "ProductionWorkbenchInputMaterialResponse",
-    "ProductionWorkbenchProcedureSummaryResponse",
-    "ProductionWorkbenchWorkOrderResponse",
-    "ProductionWorkbenchWorkOrderListEnvelope",
     "StandardWorkbenchPositionResponse",
     "StandardWorkbenchSourceResponse",
     "WorkbenchActivityResponse",

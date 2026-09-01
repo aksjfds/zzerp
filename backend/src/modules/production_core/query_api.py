@@ -1,7 +1,8 @@
 """Public read API shared with workforce and quality modules."""
 
 from modules.production_core.work_order_queries import (
-    list_qc_batches,
+    get_qc_work_order_detail,
+    list_qc_inspection_batches,
 )
 
-__all__ = ["list_qc_batches"]
+__all__ = ["get_qc_work_order_detail", "list_qc_inspection_batches"]

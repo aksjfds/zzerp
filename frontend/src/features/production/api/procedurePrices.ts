@@ -1,10 +1,13 @@
 import { service } from '@/api/request'
-import type { ProcedurePriceScope } from '../domain/procedurePrices'
+import type {
+  ProcedurePriceListItem,
+  ProcedurePriceScope,
+} from '../domain/procedurePrices'
 
 export async function queryProcedurePrices(
   departmentCode: string, page: number, pageSize: number, keyword: string,
 ) {
-  const response = await service.get<{ data: ProcedurePriceScope[]; total: number }>(
+  const response = await service.get<{ data: ProcedurePriceListItem[]; total: number }>(
     `/departments/${departmentCode}/procedure-prices`,
     { params: { page, page_size: pageSize, keyword: keyword.trim() || undefined } },
   )
@@ -38,5 +41,25 @@ export async function confirmProcedurePrices(
   await service.post(
     `/departments/${departmentCode}/procedure-prices/${scope.product_id}/${scope.product_version}/${encodeURIComponent(scope.origin_flow_node_id)}/${encodeURIComponent(scope.flow_node_id)}/confirm`,
     { procedures },
+  )
+}
+
+export async function cancelProcedurePriceConfirmation(
+  departmentCode: string,
+  scope: ProcedurePriceScope,
+) {
+  await service.delete(
+    `/departments/${departmentCode}/procedure-prices/${scope.product_id}/${scope.product_version}/${encodeURIComponent(scope.origin_flow_node_id)}/${encodeURIComponent(scope.flow_node_id)}/confirm`,
+  )
+}
+
+export async function saveTemporaryWorkOrderPrice(
+  departmentCode: string,
+  workOrderId: number,
+  unitPrice: number | null,
+) {
+  await service.put(
+    `/departments/${departmentCode}/procedure-prices/temporary-work-orders/${workOrderId}`,
+    { unit_price: unitPrice },
   )
 }

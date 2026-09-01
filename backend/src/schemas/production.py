@@ -13,13 +13,13 @@ from schemas.production_progress import (
     AssemblyMaterialArrivalResponse,
     DepartmentProductionProgressEnvelope,
     DepartmentProductionProgressResponse,
+    ProductionTaskProcessingStatusResponse,
     ProductionProgressItemDetailResponse,
     ProductionProgressProcedureCardResponse,
     ProductionProgressWorkOrderResponse,
 )
 from schemas.production_quality import (
-    PendingQcListEnvelope,
-    PendingQcResponse,
+    QcInspectionBatchListEnvelope,
     QcDestinationInput,
     QcInspection,
     WorkOrderBatchEnvelope,
@@ -35,11 +35,7 @@ from schemas.production_work_orders import (
     WorkOrderResponse,
     WorkOrderSubmission,
 )
-from schemas.production_workbench import (
-    ProductionWorkbenchPositionListEnvelope,
-    ProductionWorkbenchProcedureSummaryResponse,
-    ProductionWorkbenchWorkOrderListEnvelope,
-)
+from schemas.production_workbench import ProductionWorkbenchPositionListEnvelope
 from schemas.production_workforce import (
     DepartmentWorkerCreate,
     DepartmentWorkerEnvelope,

@@ -26,3 +26,12 @@ export type AssemblyWorkOrderCreationMaterial = {
 export type AssemblyWorkOrderCreationTarget = WorkOrderCreationTarget & {
   materials: AssemblyWorkOrderCreationMaterial[]
 }
+
+export type TaskWorkOrderChoice = {
+  key: string
+  position_key: string
+  mode: 'standard' | 'assembly_initial' | 'assembly_continuation'
+  repository_id: number | null
+  label: string
+  description: string
+}

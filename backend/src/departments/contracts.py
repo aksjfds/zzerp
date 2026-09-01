@@ -21,13 +21,16 @@ CAPABILITY_METHODS = {
     ),
     CAP_STANDARD_EXECUTION: ("create_source_work_order",),
     CAP_ASSEMBLY: ("create_assembly_work_order",),
-    CAP_QUALITY: ("list_qc_batches", "inspect_qc_batch"),
+    CAP_QUALITY: (
+        "get_qc_work_order_detail",
+        "list_qc_inspection_batches",
+        "inspect_qc_batch",
+        "decide_qc_destination",
+        "undo_qc_inspection",
+    ),
     CAP_SPECIAL_PRINTING: ("printing_profile",),
     CAP_PRODUCTION_PROGRESS: ("list_production_progress",),
-    CAP_PRODUCTION_WORKBENCH: (
-        "list_production_workbench_positions",
-        "list_production_workbench_work_orders",
-    ),
+    CAP_PRODUCTION_WORKBENCH: ("list_production_workbench_positions",),
     CAP_INVENTORY: (),
     CAP_FINISHED_GOODS: (),
 }

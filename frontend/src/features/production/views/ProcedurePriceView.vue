@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
@@ -7,11 +7,17 @@ import { PRODUCTION_PERMISSIONS } from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import {
+  cancelProcedurePriceConfirmation,
   confirmProcedurePrices,
   queryProcedurePrices,
   saveProcedurePrices,
+  saveTemporaryWorkOrderPrice,
 } from '../api/procedurePrices'
-import type { ProcedurePriceScope } from '../domain/procedurePrices'
+import type {
+  ProcedurePriceListItem,
+  ProcedurePriceScope,
+  TemporaryWorkOrderPriceItem,
+} from '../domain/procedurePrices'
 
 const props = withDefaults(defineProps<{ embedded?: boolean; departmentCode?: string }>(), {
   embedded: false,
@@ -31,7 +37,7 @@ const departmentCode = computed(() => String(
 ))
 const departmentName = computed(() => authStore.department || departmentCode.value || '生产部门')
 const canManage = computed(() => authStore.hasPermission(PRODUCTION_PERMISSIONS.manage))
-const items = ref<ProcedurePriceScope[]>([])
+const items = ref<ProcedurePriceListItem[]>([])
 const loading = ref(false)
 const keyword = ref('')
 const page = ref(1)
@@ -42,8 +48,14 @@ const activeScope = ref<ProcedurePriceScope>()
 const draft = ref<DraftProcedure[]>([])
 const saving = ref(false)
 const confirming = ref(false)
+const cancellingConfirmation = ref(false)
+const temporaryPriceDrafts = ref<Record<number, number | null>>({})
+const savingTemporaryWorkOrderId = ref<number | null>(null)
 
-function title(scope: ProcedurePriceScope) {
+function isTemporary(item: ProcedurePriceListItem): item is TemporaryWorkOrderPriceItem {
+  return item.row_type === 'temporary'
+}
+function title(scope: ProcedurePriceListItem) {
   return `${scope.factory_code}-${scope.product_name}-${scope.part_name}`
 }
 function procedureNames(scope: ProcedurePriceScope) {
@@ -72,6 +84,12 @@ async function load() {
     )
     items.value = result.data
     total.value = result.total
+    temporaryPriceDrafts.value = Object.fromEntries(
+      result.data.filter(isTemporary).map(item => [
+        item.work_order_id,
+        item.unit_price === null ? null : Number(item.unit_price),
+      ]),
+    )
   } catch (error) {
     ElMessage.error(getApiErrorDetail(error)?.message || '工艺与单价配置加载失败')
   } finally {
@@ -81,6 +99,36 @@ async function load() {
 async function search() {
   page.value = 1
   await load()
+}
+async function refreshAll() {
+  await load()
+}
+async function saveTemporaryPrice(item: TemporaryWorkOrderPriceItem) {
+  savingTemporaryWorkOrderId.value = item.work_order_id
+  try {
+    await saveTemporaryWorkOrderPrice(
+      departmentCode.value,
+      item.work_order_id,
+      temporaryPriceDrafts.value[item.work_order_id] ?? null,
+    )
+    ElMessage.success('临时工单单价已保存')
+    await load()
+    emit('saved')
+  } catch (error) {
+    ElMessage.error(getApiErrorDetail(error)?.message || '临时工单单价保存失败')
+  } finally {
+    savingTemporaryWorkOrderId.value = null
+  }
+}
+function temporaryStatus(item: TemporaryWorkOrderPriceItem) {
+  if (item.status === 'closed') return { label: '已结单', type: 'success' as const }
+  if (item.status === 'cancelled') return { label: '已取消', type: 'info' as const }
+  return { label: '进行中', type: 'warning' as const }
+}
+function formalPriceText(scope: ProcedurePriceScope) {
+  return scope.procedures.map(item => (
+    item.unit_price === null ? '未配置' : `¥ ${Number(item.unit_price).toFixed(2)}`
+  )).join('、') || '—'
 }
 async function save() {
   const scope = activeScope.value
@@ -125,7 +173,7 @@ async function confirmConfiguration() {
   }
   try {
     await ElMessageBox.confirm(
-      '确认后不能再新增、删除或更换工艺，单价仍可调整。确认当前工艺配置？',
+      '确认后不能直接新增、删除或更换工艺；未开过工单时可取消确认，单价仍可调整。确认当前工艺配置？',
       '确认工艺配置',
       { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
     )
@@ -149,29 +197,80 @@ async function confirmConfiguration() {
     confirming.value = false
   }
 }
-onMounted(load)
+async function cancelConfirmation() {
+  const scope = activeScope.value
+  if (!scope?.confirmed || !scope.can_cancel) return
+  try {
+    await ElMessageBox.confirm(
+      '取消确认后，工艺清单将恢复可编辑。确认取消当前工艺配置？',
+      '取消工艺确认',
+      { type: 'warning', confirmButtonText: '确认取消', cancelButtonText: '返回' },
+    )
+  } catch {
+    return
+  }
+  cancellingConfirmation.value = true
+  try {
+    await cancelProcedurePriceConfirmation(departmentCode.value, scope)
+    dialogVisible.value = false
+    ElMessage.success('已取消工艺确认')
+    await load()
+    emit('saved')
+  } catch (error) {
+    ElMessage.error(getApiErrorDetail(error)?.message || '取消确认失败')
+  } finally {
+    cancellingConfirmation.value = false
+  }
+}
+onMounted(() => {
+  void load()
+})
+watch(
+  () => route.query.tab,
+  tab => {
+    if (props.embedded && tab === 'tag-prices') void refreshAll()
+  },
+)
 </script>
 
 <template>
   <component :is="embedded ? 'section' : 'main'" :class="{ 'procedure-price-page': !embedded }">
-    <DepartmentPageHeader v-if="!embedded" :department-name="departmentName" page-title="工艺与单价配置" description="按产品、版本、物料和车间维护可选工艺及计件单价。" @refresh="load" />
+    <DepartmentPageHeader v-if="!embedded" :department-name="departmentName" page-title="工艺与单价配置" description="维护正式工艺配置及临时工单独立单价。" @refresh="refreshAll" />
     <section class="filter-bar">
-      <ElInput v-model="keyword" clearable placeholder="搜索产品或物料" @keyup.enter="search" @clear="search" />
+      <ElInput v-model="keyword" clearable placeholder="搜索正式产品/物料或临时工单/工艺" @keyup.enter="search" @clear="search" />
       <ElButton type="primary" @click="search">查询</ElButton>
     </section>
     <ElTable v-table-column-widths="'production.procedure-prices'" v-loading="loading" :data="items" border stripe table-layout="auto" empty-text="暂无可配置项">
+      <ElTableColumn label="类型" min-width="80" align="center">
+        <template #default="{ row }"><ElTag :type="isTemporary(row) ? 'warning' : 'primary'">{{ isTemporary(row) ? '临时' : '正式' }}</ElTag></template>
+      </ElTableColumn>
       <ElTableColumn label="产品 / 物料" min-width="260">
         <template #default="{ row }"><strong>{{ title(row) }}</strong><div>V{{ row.product_version }} · {{ row.part_no }}</div></template>
       </ElTableColumn>
+      <ElTableColumn label="工单" min-width="170">
+        <template #default="{ row }">{{ isTemporary(row) ? row.work_order_no : '—' }}</template>
+      </ElTableColumn>
       <ElTableColumn prop="workshop_name" label="车间" min-width="120" />
       <ElTableColumn label="工艺" min-width="200">
-        <template #default="{ row }">{{ procedureNames(row) }}</template>
+        <template #default="{ row }">{{ isTemporary(row) ? row.procedure_name : procedureNames(row) }}</template>
       </ElTableColumn>
       <ElTableColumn label="状态" min-width="100" align="center">
-        <template #default="{ row }"><ElTag :type="row.confirmed ? 'success' : 'info'">{{ row.confirmed ? '已确认' : '草稿' }}</ElTag></template>
+        <template #default="{ row }">
+          <ElTag v-if="isTemporary(row)" :type="temporaryStatus(row).type">{{ temporaryStatus(row).label }}</ElTag>
+          <ElTag v-else :type="row.confirmed ? 'success' : 'info'">{{ row.confirmed ? '已确认' : '草稿' }}</ElTag>
+        </template>
       </ElTableColumn>
-      <ElTableColumn label="操作" width="90" align="center">
-        <template #default="{ row }"><ElButton size="small" :disabled="!canManage" @click="open(row)">配置</ElButton></template>
+      <ElTableColumn label="单价" min-width="155">
+        <template #default="{ row }">
+          <ElInputNumber v-if="isTemporary(row)" v-model="temporaryPriceDrafts[row.work_order_id]" :min="0" :precision="2" :step="0.1" placeholder="未配置" />
+          <span v-else>{{ formalPriceText(row) }}</span>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="操作" min-width="90" align="center">
+        <template #default="{ row }">
+          <ElButton v-if="isTemporary(row)" type="primary" link :disabled="!canManage" :loading="savingTemporaryWorkOrderId === row.work_order_id" @click="saveTemporaryPrice(row)">保存</ElButton>
+          <ElButton v-else size="small" :disabled="!canManage" @click="open(row)">配置</ElButton>
+        </template>
       </ElTableColumn>
     </ElTable>
     <ElPagination v-model:current-page="page" layout="prev, pager, next, total" :page-size="pageSize" :total="total" @current-change="load" />
@@ -189,7 +288,16 @@ onMounted(load)
       </div>
       <ElButton v-if="!activeScope?.confirmed" plain @click="addProcedure">添加工艺</ElButton>
       <template #footer>
-        <ElButton @click="dialogVisible = false">取消</ElButton>
+        <ElButton @click="dialogVisible = false">关闭</ElButton>
+        <ElButton
+          v-if="activeScope?.confirmed"
+          plain
+          type="danger"
+          :disabled="!activeScope.can_cancel"
+          :loading="cancellingConfirmation"
+          :title="activeScope.can_cancel ? '' : '当前配置已经开过工单，不能取消确认'"
+          @click="cancelConfirmation"
+        >取消确认</ElButton>
         <ElButton :loading="saving" @click="save">{{ activeScope?.confirmed ? '保存单价' : '保存草稿' }}</ElButton>
         <ElButton v-if="!activeScope?.confirmed" type="primary" :loading="confirming" @click="confirmConfiguration">确认工艺</ElButton>
       </template>

@@ -6,21 +6,33 @@ import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import DepartmentProductionTaskTable from '../components/DepartmentProductionTaskTable.vue'
 import ProductionProgressItemDrawer from '../components/ProductionProgressItemDrawer.vue'
+import ProductionTaskWorkOrderDrawer from '../components/ProductionTaskWorkOrderDrawer.vue'
 import {
   queryDepartmentProductionProgress,
 } from '../api/productionProgress'
-import type { DepartmentProductionProgressItem } from '../domain/productionProgress'
+import type {
+  DepartmentProductionProgressItem,
+  ProductionTaskProcessingStatus,
+} from '../domain/productionProgress'
 import '../styles/workspace.css'
 
 const props = withDefaults(defineProps<{
   embedded?: boolean
   departmentCode?: string
   departmentName?: string
+  specialPrinting?: boolean
 }>(), {
   embedded: false,
   departmentCode: '',
   departmentName: '生产部门',
+  specialPrinting: false,
 })
+const emit = defineEmits<{
+  createWorkOrder: [
+    item: DepartmentProductionProgressItem,
+    status: ProductionTaskProcessingStatus,
+  ]
+}>()
 const route = useRoute()
 const departmentCode = computed(
   () => String(props.departmentCode || route.meta.departmentCode || ''),
@@ -33,6 +45,9 @@ const pageSize = 50
 const total = ref(0)
 const selectedItem = ref<DepartmentProductionProgressItem | null>(null)
 const detailVisible = ref(false)
+const selectedWorkOrderItem = ref<DepartmentProductionProgressItem | null>(null)
+const selectedWorkOrderStatus = ref<ProductionTaskProcessingStatus | null>(null)
+const workOrderDrawerVisible = ref(false)
 
 
 async function load() {
@@ -71,6 +86,30 @@ function openDetail(item: DepartmentProductionProgressItem) {
   detailVisible.value = true
 }
 
+function openWorkOrders(
+  item: DepartmentProductionProgressItem,
+  status: ProductionTaskProcessingStatus,
+) {
+  selectedWorkOrderItem.value = item
+  selectedWorkOrderStatus.value = status
+  workOrderDrawerVisible.value = true
+}
+
+function openAllWorkOrders(item: DepartmentProductionProgressItem) {
+  selectedWorkOrderItem.value = item
+  selectedWorkOrderStatus.value = null
+  workOrderDrawerVisible.value = true
+}
+
+function createWorkOrder(
+  item: DepartmentProductionProgressItem,
+  status: ProductionTaskProcessingStatus,
+) {
+  emit('createWorkOrder', item, status)
+}
+
+defineExpose({ load })
+
 onMounted(load)
 </script>
 
@@ -99,9 +138,11 @@ onMounted(load)
 
       <DepartmentProductionTaskTable
         :items="items"
-        :department-code="departmentCode"
         :loading="loading"
         @select="openDetail"
+        @view-all-work-orders="openAllWorkOrders"
+        @view-work-orders="openWorkOrders"
+        @create-work-order="createWorkOrder"
       />
 
       <ElPagination
@@ -118,6 +159,14 @@ onMounted(load)
       v-model="detailVisible"
       :department-code="departmentCode"
       :item="selectedItem"
+    />
+    <ProductionTaskWorkOrderDrawer
+      v-model="workOrderDrawerVisible"
+      :department-code="departmentCode"
+      :item="selectedWorkOrderItem"
+      :status="selectedWorkOrderStatus"
+      :special-printing="specialPrinting"
+      @changed="load"
     />
   </component>
 </template>

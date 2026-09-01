@@ -7,9 +7,6 @@ from modules.planning.production_progress_detail import (
     get_department_production_progress_item,
 )
 from modules.planning.production_workbench import list_production_workbench_positions
-from modules.planning.production_workbench_orders import (
-    list_production_workbench_work_orders,
-)
 from modules.planning.plan_api import (
     complete_order_plan,
     get_order_plan,
@@ -24,7 +21,6 @@ __all__ = [
     "get_department_production_progress_item",
     "list_department_production_progress",
     "list_production_workbench_positions",
-    "list_production_workbench_work_orders",
     "planned_product_quantity",
     "rebuild_order_plan",
     "update_order_plan",

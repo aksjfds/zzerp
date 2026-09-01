@@ -1165,8 +1165,26 @@ BEGIN
         OLD.confirmed_at,
         OLD.confirmed_by
     ) THEN
-        RAISE EXCEPTION 'confirmed procedure configuration is immutable'
-            USING ERRCODE = '23514';
+        IF NOT (
+            NEW.confirmed_at IS NULL
+            AND NEW.confirmed_by IS NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM work_order wo
+                JOIN production_item pi ON pi.id = wo.production_item_id
+                WHERE pi.product_id = OLD.product_id
+                  AND pi.product_version = OLD.product_version
+                  AND wo.flow_node_id = OLD.flow_node_id
+                  AND CASE
+                      WHEN pi.product_bom_id IS NOT NULL
+                          THEN 'part:' || pi.product_bom_id::TEXT
+                      ELSE 'assembly:' || pi.origin_flow_node_id
+                  END = OLD.material_key
+            )
+        ) THEN
+            RAISE EXCEPTION 'confirmed procedure configuration is immutable'
+                USING ERRCODE = '23514';
+        END IF;
     END IF;
     IF OLD.confirmed_at IS NULL AND NEW.confirmed_at IS NOT NULL
         AND NOT EXISTS (
@@ -1407,8 +1425,48 @@ END;
 $$ LANGUAGE plpgsql;
 
 CREATE FUNCTION protect_qc_batch_history() RETURNS TRIGGER AS $$
+DECLARE
+    qc_undo_batch_id_text TEXT;
 BEGIN
     IF OLD.recorded_at IS NOT NULL AND NEW IS DISTINCT FROM OLD THEN
+        qc_undo_batch_id_text := current_setting(
+            'zzerp.qc_inspection_undo_batch_id',
+            TRUE
+        );
+        IF qc_undo_batch_id_text = OLD.id::TEXT
+            AND OLD.qualified_destination IS NULL
+            AND OLD.destination_decided_at IS NULL
+            AND OLD.destination_decided_by IS NULL
+            AND ROW(
+                NEW.work_order_id,
+                NEW.submitted_quantity,
+                NEW.source_flow_node_id,
+                NEW.rework_source_batch_id
+            ) IS NOT DISTINCT FROM ROW(
+                OLD.work_order_id,
+                OLD.submitted_quantity,
+                OLD.source_flow_node_id,
+                OLD.rework_source_batch_id
+            )
+            AND NEW.recorded_at IS NULL
+            AND NEW.qualified_quantity IS NULL
+            AND NEW.rework_quantity IS NULL
+            AND NEW.scrap_quantity IS NULL
+            AND NEW.lost_quantity IS NULL
+            AND NEW.qc_worker_id IS NULL
+            AND NEW.qc_worker_name IS NULL
+            AND NEW.defect_reason IS NULL
+            AND NEW.qualified_destination IS NULL
+            AND NEW.destination_decided_at IS NULL
+            AND NEW.destination_decided_by IS NULL
+            AND NOT EXISTS (
+                SELECT 1
+                FROM work_order_batch AS child_batch
+                WHERE child_batch.work_order_id = OLD.work_order_id
+                  AND child_batch.rework_source_batch_id = OLD.id
+            ) THEN
+            RETURN NEW;
+        END IF;
         IF OLD.qualified_quantity > 0
             AND OLD.qualified_destination IS NULL
             AND OLD.destination_decided_at IS NULL
@@ -1742,10 +1800,36 @@ $$ LANGUAGE plpgsql;
 CREATE FUNCTION protect_production_movement_history() RETURNS TRIGGER AS $$
 DECLARE
     undo_operation_id_text TEXT;
+    qc_undo_batch_id_text TEXT;
 BEGIN
     IF TG_OP = 'UPDATE' THEN
         RAISE EXCEPTION 'production movement history is immutable'
             USING ERRCODE = '23514';
+    END IF;
+    qc_undo_batch_id_text := current_setting(
+        'zzerp.qc_inspection_undo_batch_id',
+        TRUE
+    );
+    IF qc_undo_batch_id_text IS NOT NULL
+        AND qc_undo_batch_id_text ~ '^[0-9]+$'
+        AND OLD.work_order_batch_id = qc_undo_batch_id_text::BIGINT
+        AND OLD.movement_type IN ('qc_rework', 'scrap', 'lost')
+        AND EXISTS (
+            SELECT 1
+            FROM work_order_batch AS qc_batch
+            WHERE qc_batch.id = OLD.work_order_batch_id
+              AND qc_batch.work_order_id = OLD.work_order_id
+              AND qc_batch.recorded_at IS NOT NULL
+              AND qc_batch.qualified_destination IS NULL
+              AND qc_batch.destination_decided_at IS NULL
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM work_order_batch AS child_batch
+                  WHERE child_batch.work_order_id = qc_batch.work_order_id
+                    AND child_batch.rework_source_batch_id = qc_batch.id
+              )
+        ) THEN
+        RETURN OLD;
     END IF;
     undo_operation_id_text := current_setting('zzerp.undo_operation_id', TRUE);
     IF undo_operation_id_text IS NOT NULL

@@ -1,23 +1,29 @@
 from departments.contracts import CAP_QUALITY
-from departments.qc_orchestration import decide_qc_destination, inspect_qc_batch
+from departments.qc_orchestration import (
+    decide_qc_destination,
+    inspect_qc_batch,
+    undo_qc_inspection,
+)
 from modules.quality import api as quality
 from schemas.production import QcDestinationInput, QcInspection
 
 
 class QualityCapability:
-    def list_qc_batches(
+    def get_qc_work_order_detail(self, work_order_id: int) -> dict:
+        self.require_capability(CAP_QUALITY)
+        return quality.get_qc_work_order_detail(work_order_id)
+
+    def list_qc_inspection_batches(
         self,
         page: int,
         page_size: int,
-        production_item_id: int | None,
         history: bool,
         keyword: str | None,
     ) -> tuple[list[dict], int]:
         self.require_capability(CAP_QUALITY)
-        return quality.list_qc_batches(
+        return quality.list_qc_inspection_batches(
             page,
             page_size,
-            production_item_id,
             history,
             keyword,
         )
@@ -53,3 +59,12 @@ class QualityCapability:
             actor_department,
             actor_is_system,
         )
+
+    def undo_qc_inspection(
+        self,
+        batch_id: int,
+        actor_department: str | None,
+        actor_is_system: bool,
+    ) -> None:
+        self.require_capability(CAP_QUALITY)
+        undo_qc_inspection(batch_id, actor_department, actor_is_system)

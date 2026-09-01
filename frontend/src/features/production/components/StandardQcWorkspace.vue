@@ -1,16 +1,16 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import QcBatchCards from './QcBatchCards.vue'
+import QcInspectionBatchTable from './QcInspectionBatchTable.vue'
 import QcInspectionDialog from './QcInspectionDialog.vue'
+import QcWorkOrderDrawer from './QcWorkOrderDrawer.vue'
 import { useQcDepartment } from '../composables/useQcDepartment'
-import type { WorkerItem } from '../domain/types'
+import type { QcInspectionBatchRow, WorkerItem } from '../domain/types'
 
 defineProps<{ workers: WorkerItem[] }>()
 
 const {
   activeView,
   activeBatch,
-  batches,
   changePage,
   changeView,
   decideDestination,
@@ -18,6 +18,7 @@ const {
   dialogVisible,
   load,
   loading,
+  batches,
   openInspection,
   page,
   pageSize,
@@ -26,9 +27,13 @@ const {
   search,
   submitting,
   total,
+  undoInspection,
+  undoingBatchId,
 } = useQcDepartment()
 
 const searchText = ref('')
+const detailWorkOrderId = ref<number | null>(null)
+const detailVisible = ref(false)
 
 function selectView(value: string | number) {
   if (value === 'active' || value === 'history') void changeView(value)
@@ -38,6 +43,11 @@ function applySearch() {
   void search(searchText.value)
 }
 
+function openDetail(batch: QcInspectionBatchRow) {
+  detailWorkOrderId.value = batch.work_order_id
+  detailVisible.value = true
+}
+
 onMounted(load)
 defineExpose({ refresh })
 </script>
@@ -45,6 +55,14 @@ defineExpose({ refresh })
 <template>
   <section class="standard-qc-workspace">
     <div class="qc-filter-bar">
+      <ElSelect
+        :model-value="activeView"
+        aria-label="质检状态"
+        @update:model-value="selectView"
+      >
+        <ElOption label="待处理" value="active" />
+        <ElOption label="历史记录" value="history" />
+      </ElSelect>
       <ElInput
         v-model="searchText"
         clearable
@@ -55,18 +73,16 @@ defineExpose({ refresh })
       <ElButton type="primary" @click="applySearch">搜索</ElButton>
     </div>
 
-    <section class="production-card qc-workspace">
-      <ElTabs :model-value="activeView" @update:model-value="selectView">
-        <ElTabPane label="待处理" name="active" />
-        <ElTabPane label="历史记录" name="history" />
-      </ElTabs>
-      <QcBatchCards
+    <section class="qc-workspace">
+      <QcInspectionBatchTable
         :items="batches"
         :loading="loading"
-        :history="activeView === 'history'"
         :deciding-batch-id="decidingBatchId"
+        :undoing-batch-id="undoingBatchId"
         @inspect="openInspection"
+        @view="openDetail"
         @decide="decideDestination"
+        @undo-inspection="undoInspection"
       />
       <ElPagination
         v-model:current-page="page"
@@ -85,6 +101,10 @@ defineExpose({ refresh })
       :submitting="submitting"
       @submit="saveInspection"
     />
+    <QcWorkOrderDrawer
+      v-model="detailVisible"
+      :work-order-id="detailWorkOrderId"
+    />
   </section>
 </template>
 
@@ -95,7 +115,7 @@ defineExpose({ refresh })
 
 .qc-filter-bar {
   display: grid;
-  grid-template-columns: minmax(240px, 1fr) auto;
+  grid-template-columns: 140px minmax(240px, 1fr) auto;
   gap: 12px;
   margin-bottom: 18px;
 }

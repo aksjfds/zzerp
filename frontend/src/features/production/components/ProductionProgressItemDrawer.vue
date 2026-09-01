@@ -30,9 +30,7 @@ const { detail, loading } = useProductionProgressDetail(
 function isFocused(card: ProductionProgressProcedureCard) {
   return Boolean(
     props.item?.processing_workshop
-    && (props.item.flow_node_id
-      ? card.flow_node_id === props.item.flow_node_id
-      : card.workshop_name === props.item.processing_workshop),
+    && card.flow_node_id === props.item.flow_node_id,
   )
 }
 </script>

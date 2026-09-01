@@ -19,6 +19,7 @@ from modules.production_core.qc_inventory_api import (
     project_qc_inventory_material,
     record_qc_inventory_movement,
 )
+from modules.production_core.qc_api import undo_qc_batch_result
 from modules.quality.command_api import (
     PreparedDestination,
     finalize_qualified_destination,
@@ -63,6 +64,17 @@ def inspect_qc_batch(
                 "当前工单不支持送 QC",
             ) from exc
         return record_inspection_result(prepared, payload, routing)
+
+
+def undo_qc_inspection(
+    batch_id: int,
+    actor_department: str | None,
+    actor_is_system: bool,
+) -> None:
+    if not can_access_department(actor_department, actor_is_system, "qc"):
+        raise DomainError("qc_access_denied", "只有 QC 可以撤回质检结果", status_code=403)
+    with SessionLocal.begin() as session:
+        undo_qc_batch_result(session, batch_id)
 
 
 def decide_qc_destination(
@@ -146,4 +158,4 @@ def _store_qualified_material(
     )
 
 
-__all__ = ["decide_qc_destination", "inspect_qc_batch"]
+__all__ = ["decide_qc_destination", "inspect_qc_batch", "undo_qc_inspection"]

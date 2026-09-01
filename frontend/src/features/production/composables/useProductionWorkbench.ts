@@ -2,17 +2,15 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { queryDepartmentWorkers } from '../api/departmentWorkers'
-import { queryProductionWorkbenchWorkshops } from '../api/productionWorkbench'
 import { createWorkOrder } from '../api/workOrders'
 import type {
-  ProductionWorkbenchWorkshop,
   StandardWorkbenchPosition,
   StandardWorkbenchSource,
 } from '../domain/productionWorkbench'
 import type { WorkerItem } from '../domain/types'
+import type { DepartmentProductionProgressItem } from '../domain/productionProgress'
 import type { WorkOrderCreationTarget } from '../domain/workOrderCreation'
 import { useProductionWorkbenchReader } from './useProductionWorkbenchReader'
-import { useProductionWorkOrderActions } from './useProductionWorkOrderActions'
 
 export function useProductionWorkbench(departmentCode: string) {
   const reader = useProductionWorkbenchReader<StandardWorkbenchPosition>(
@@ -20,10 +18,10 @@ export function useProductionWorkbench(departmentCode: string) {
     'standard',
   )
   const selectedSourceId = ref<number>()
-  const workshops = ref<ProductionWorkbenchWorkshop[]>([])
   const workers = ref<WorkerItem[]>([])
   const dialogVisible = ref(false)
   const submitting = ref(false)
+  let referenceDataLoaded = false
 
   const selectedSource = computed(() => reader.selectedPosition.value?.sources.find(
     item => item.repository_id === selectedSourceId.value,
@@ -51,12 +49,6 @@ export function useProductionWorkbench(departmentCode: string) {
     selectedSourceId.value = position.sources.length === 1
       ? position.sources[0]?.repository_id
       : undefined
-  }
-
-  async function selectPosition(position: StandardWorkbenchPosition) {
-    selectedSourceId.value = undefined
-    retainSingleSource(position)
-    await reader.selectPosition(position)
   }
 
   function selectSource(source: StandardWorkbenchSource) {
@@ -103,8 +95,10 @@ export function useProductionWorkbench(departmentCode: string) {
       dialogVisible.value = false
       await reloadWorkspace()
       ElMessage.success('工单已创建')
+      return true
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
+      return false
     } finally {
       submitting.value = false
     }
@@ -115,48 +109,42 @@ export function useProductionWorkbench(departmentCode: string) {
     if (reader.selectedPosition.value) retainSingleSource(reader.selectedPosition.value)
   }
 
-  async function applyFilters(filters: Parameters<typeof reader.applyFilters>[0]) {
-    selectedSourceId.value = undefined
-    await reader.applyFilters(filters)
-  }
-
-  async function changePositionPage(page: number) {
-    selectedSourceId.value = undefined
-    await reader.changePositionPage(page)
-  }
-
   async function loadReferenceData() {
-    await Promise.all([
-      queryProductionWorkbenchWorkshops(departmentCode)
-        .then(items => { workshops.value = items })
-        .catch(() => { ElMessage.warning('车间列表加载失败') }),
-      queryDepartmentWorkers(departmentCode)
-        .then(items => { workers.value = items })
-        .catch(() => { ElMessage.warning('工人列表加载失败') }),
-    ])
+    if (referenceDataLoaded) return
+    try {
+      workers.value = await queryDepartmentWorkers(departmentCode)
+      referenceDataLoaded = true
+    } catch {
+      ElMessage.warning('工人列表加载失败')
+    }
   }
 
-  async function load() {
-    await Promise.all([loadReferenceData(), reader.loadPositions(false)])
+  async function focusTask(task: DepartmentProductionProgressItem) {
+    selectedSourceId.value = undefined
+    await Promise.all([
+      loadReferenceData(),
+      reader.focusTask({
+        customerOrderItemId: task.customer_order_item_id,
+        productionItemId: task.production_item_id || undefined,
+        flowNodeId: task.flow_node_id,
+        workshopId: task.processing_workshop_id,
+      }),
+    ])
+    if (reader.selectedPosition.value) retainSingleSource(reader.selectedPosition.value)
   }
 
   return {
     ...reader,
-    applyFilters,
-    changePositionPage,
     creationTarget,
     dialogVisible,
-    load,
+    focusTask,
     openWorkOrder,
     refresh: reloadWorkspace,
     reloadWorkspace,
     saveWorkOrder,
-    selectPosition,
     selectSource,
     selectedSource,
     submitting,
-    workOrderActions: useProductionWorkOrderActions(reloadWorkspace),
     workOrderWorkers,
-    workshops,
   }
 }

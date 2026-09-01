@@ -48,9 +48,7 @@ onMounted(loadWorkers)
     >
       <StandardQcWorkspace ref="standardWorkspace" :workers="workers" />
       <template #supplier-processing>
-        <section class="production-card">
-          <SupplierProcessingQcPanel ref="supplierProcessingPanel" :workers="workers" />
-        </section>
+        <SupplierProcessingQcPanel ref="supplierProcessingPanel" :workers="workers" />
       </template>
     </DepartmentSectionTabs>
   </main>

@@ -1,11 +1,12 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from authorization import ensure_department_access, require_any_permission
 from domain.permissions import QC_INSPECT
 from schemas.production import (
-    PendingQcListEnvelope,
+    QcInspectionBatchListEnvelope,
     QcDestinationInput,
     QcInspection,
+    ProductionProgressWorkOrderResponse,
     WorkOrderBatchEnvelope,
 )
 from modules.supplier_processing.api import (
@@ -81,24 +82,34 @@ def supplier_processing_qc_release(
     }
 
 
-@router.get("/work-order-batches", response_model=PendingQcListEnvelope)
-def pending_qc_batches(
+@router.get("/inspection-batches", response_model=QcInspectionBatchListEnvelope)
+def qc_inspection_batches(
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
-    production_item_id: int | None = Query(default=None, gt=0),
     history: bool = Query(default=False),
     keyword: str | None = Query(default=None, max_length=200),
     user: dict = Depends(require_any_permission(QC_INSPECT)),
 ):
     ensure_department_access(user, "qc")
-    data, total = qc_department.list_qc_batches(
+    data, total = qc_department.list_qc_inspection_batches(
         page,
         page_size,
-        production_item_id,
         history,
         keyword,
     )
     return {"data": data, "total": total}
+
+
+@router.get(
+    "/work-orders/{work_order_id}",
+    response_model=ProductionProgressWorkOrderResponse,
+)
+def qc_work_order_detail(
+    work_order_id: int,
+    user: dict = Depends(require_any_permission(QC_INSPECT)),
+):
+    ensure_department_access(user, "qc")
+    return qc_department.get_qc_work_order_detail(work_order_id)
 
 
 @router.post(
@@ -119,6 +130,23 @@ def qc_batch_inspect(
             user["is_system"],
         )
     }
+
+
+@router.post(
+    "/work-order-batches/{batch_id}/inspection/undo",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def qc_batch_inspection_undo(
+    batch_id: int,
+    user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
+):
+    ensure_department_access(user, "qc")
+    qc_department.undo_qc_inspection(
+        batch_id,
+        user["department"],
+        user["is_system"],
+    )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.post(

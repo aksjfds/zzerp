@@ -3,53 +3,44 @@ from sqlalchemy import exists, func, or_, select
 from database import SessionLocal
 from domain.production_types import STANDARD_EXECUTION_WORK_ORDER_TYPES
 from modules.engineering.model_api import Product, ProductBom, ProductRouteTask
+from modules.errors import DomainError
+from modules.organization.model_api import Procedure, Workshop
 from modules.production_core.persistence import (
     ProductionItem,
-    ProductionOperationUndo,
     WorkOrder,
     WorkOrderBatch,
     WorkOrderMaterial,
 )
+from modules.production_core.work_order_record import build_work_order_record
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
+from modules.workforce.model_api import Worker
 from modules.production_core.work_order_presenters import (
     WorkOrderPresenterContext,
     build_work_order_presenter_context,
     item_display,
     serialize_batch,
+    serialize_work_order,
     work_order_context,
 )
 from modules.production_core.flow_api import qc_qualified_destinations
+from modules.production_core.work_order_progress import rework_pending_quantities
 
 
-def list_qc_batches(
+def list_qc_inspection_batches(
     page: int,
     page_size: int,
-    production_item_id: int | None = None,
     history: bool = False,
     keyword: str | None = None,
 ) -> tuple[list[dict], int]:
     with SessionLocal() as session:
-        statement = select(WorkOrderBatch).join(
+        statement = select(
+            WorkOrderBatch.id.label("batch_id"),
+        ).select_from(WorkOrderBatch).join(
             WorkOrder, WorkOrder.id == WorkOrderBatch.work_order_id
         ).where(
-            WorkOrder.work_order_type.in_(list(STANDARD_EXECUTION_WORK_ORDER_TYPES))
+            WorkOrder.work_order_type.in_(list(STANDARD_EXECUTION_WORK_ORDER_TYPES)),
+            _qc_batch_view_condition(history),
         )
-        destination_pending = (
-            (WorkOrderBatch.recorded_at.is_not(None))
-            & (WorkOrderBatch.qualified_quantity > 0)
-            & (WorkOrderBatch.destination_decided_at.is_(None))
-        )
-        if history:
-            statement = statement.where(
-                WorkOrderBatch.recorded_at.is_not(None),
-                ~destination_pending,
-            )
-        else:
-            statement = statement.where(
-                (WorkOrderBatch.recorded_at.is_(None)) | destination_pending
-            )
-        if production_item_id is not None:
-            statement = statement.where(_related_to_production_item(production_item_id))
         normalized_keyword = (keyword or "").strip().lower()
         if normalized_keyword:
             statement = (
@@ -87,14 +78,20 @@ def list_qc_batches(
                         ),
                     )),
                 ))
-        total = session.scalar(
-            select(func.count()).select_from(statement.order_by(None).subquery())
-        ) or 0
-        batches = list(session.scalars(
-            statement
-            .order_by(WorkOrderBatch.id.desc())
+        total = int(session.scalar(
+            select(func.count()).select_from(statement.subquery())
+        ) or 0)
+        batch_ids = list(session.scalars(
+            statement.order_by(WorkOrderBatch.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
+        ))
+        if not batch_ids:
+            return [], total
+
+        batches = list(session.scalars(
+            select(WorkOrderBatch)
+            .where(WorkOrderBatch.id.in_(batch_ids))
         ))
         order_ids = {batch.work_order_id for batch in batches}
         orders = {
@@ -104,31 +101,78 @@ def list_qc_batches(
             )
         } if order_ids else {}
         context = _load_order_relations(session, list(orders.values()))
-        visible: list[dict] = []
-        for batch in batches:
-            order = orders.get(batch.work_order_id)
-            if order is None:
-                continue
-            is_active = batch.recorded_at is None or (
-                (batch.qualified_quantity or 0) > 0
-                and batch.destination_decided_at is None
+        batches_by_id = {batch.id: batch for batch in batches}
+        batch_metadata = {
+            order_id: _qc_batch_metadata(context.batches.get(order_id, []))
+            for order_id in order_ids
+        }
+        return [
+            _serialize_qc_inspection_batch(
+                session,
+                orders[batches_by_id[batch_id].work_order_id],
+                batches_by_id[batch_id],
+                context,
+                batch_metadata[batches_by_id[batch_id].work_order_id],
             )
-            if (history and not is_active) or (not history and is_active):
-                item = _serialize_pending_batch(session, batch, context)
-                visible.append(item)
-        return visible, total
+            for batch_id in batch_ids
+        ], total
 
 
-def _related_to_production_item(production_item_id: int):
-    return or_(
-        WorkOrder.production_item_id == production_item_id,
-        exists(
-            select(WorkOrderMaterial.id).where(
-                WorkOrderMaterial.work_order_id == WorkOrder.id,
-                WorkOrderMaterial.production_item_id == production_item_id,
+def get_qc_work_order_detail(work_order_id: int) -> dict:
+    with SessionLocal() as session:
+        order = session.get(WorkOrder, work_order_id)
+        if (
+            order is None
+            or order.work_order_type not in STANDARD_EXECUTION_WORK_ORDER_TYPES
+        ):
+            raise DomainError(
+                "qc_work_order_not_found",
+                "质检工单不存在",
+                status_code=404,
             )
-        ),
+        context = _load_order_relations(session, [order])
+        _, _, _, flow_context = work_order_context(session, order, context)
+        node = flow_context.nodes.get(order.flow_node_id)
+        if node is None:
+            raise DomainError(
+                "qc_work_order_node_missing",
+                "质检工单流程节点不存在",
+            )
+        procedure = (
+            session.get(Procedure, order.procedure_id)
+            if order.procedure_id is not None else None
+        )
+        workshop = (
+            session.get(Workshop, procedure.workshop_id)
+            if procedure is not None else None
+        )
+        worker = (
+            session.get(Worker, order.worker_id)
+            if order.worker_id is not None else None
+        )
+        record, _progress = build_work_order_record(
+            node=node,
+            flow=flow_context.flow,
+            nodes=flow_context.nodes,
+            procedure=procedure,
+            workshop=workshop,
+            order=order,
+            batches=context.batches.get(order.id, []),
+            workers={worker.id: worker} if worker else {},
+        )
+        record["work_order"] = serialize_work_order(session, order, context)
+        return record
+
+
+def _qc_batch_view_condition(history: bool):
+    destination_pending = (
+        (WorkOrderBatch.recorded_at.is_not(None))
+        & (WorkOrderBatch.qualified_quantity > 0)
+        & (WorkOrderBatch.destination_decided_at.is_(None))
     )
+    if history:
+        return (WorkOrderBatch.recorded_at.is_not(None)) & ~destination_pending
+    return (WorkOrderBatch.recorded_at.is_(None)) | destination_pending
 
 
 def _load_order_relations(
@@ -138,7 +182,6 @@ def _load_order_relations(
     order_ids = [order.id for order in orders]
     batch_cache: dict[int, list[WorkOrderBatch]] = {}
     material_cache: dict[int, list[int]] = {}
-    undo_cache: dict[int, ProductionOperationUndo] = {}
     if order_ids:
         for batch in session.scalars(
             select(WorkOrderBatch)
@@ -153,62 +196,76 @@ def _load_order_relations(
             ).where(WorkOrderMaterial.work_order_id.in_(order_ids))
         ):
             material_cache.setdefault(work_order_id, []).append(production_item_id)
-        for operation in session.scalars(
-            select(ProductionOperationUndo)
-            .where(
-                ProductionOperationUndo.work_order_id.in_(order_ids),
-                ProductionOperationUndo.status == "applied",
-            )
-            .order_by(
-                ProductionOperationUndo.work_order_id,
-                ProductionOperationUndo.id.desc(),
-            )
-        ):
-            undo_cache.setdefault(operation.work_order_id, operation)
     return build_work_order_presenter_context(
         session,
         orders,
         batches=batch_cache,
         material_item_ids=material_cache,
-        undo_operations=undo_cache,
+        undo_operations={},
     )
 
 
-def _serialize_pending_batch(
+def _qc_batch_metadata(
+    batches: list[WorkOrderBatch],
+) -> tuple[dict[int, int], dict[int, int]]:
+    return (
+        {batch.id: index for index, batch in enumerate(batches, start=1)},
+        rework_pending_quantities(batches),
+    )
+
+
+def _serialize_qc_inspection_batch(
     session,
+    order: WorkOrder,
     batch: WorkOrderBatch,
     context: WorkOrderPresenterContext,
+    metadata: tuple[dict[int, int], dict[int, int]],
 ) -> dict:
-    order = session.get(WorkOrder, batch.work_order_id)
     customer_order, _, production_item, flow_context = work_order_context(
         session,
         order,
         context,
     )
     part_no, part_name = item_display(session, production_item, context.display)
-    data = serialize_batch(batch)
-    data.update(
-        {
-            "repository_id": order.repository_id,
-            "production_item_id": order.production_item_id,
-            "work_order_no": order.work_order_no,
-            "customer_order_no": customer_order.customer_order_no,
-            "part_no": part_no,
-            "part_name": part_name,
-            "work_order_name": order.work_order_name,
-            "allowed_destinations": list(
-                qc_qualified_destinations(
-                    flow_context.flow,
-                    flow_context.nodes,
-                    order.flow_node_id,
-                )
-            )
-            if (
-                batch.recorded_at is not None
-                and batch.qualified_quantity
-                and batch.destination_decided_at is None
-            )
-            else [],
-        }
+    batch_sequence, pending_rework = metadata
+    data = serialize_batch(
+        batch,
+        rework_pending_quantity=pending_rework.get(batch.id, 0),
+        track_rework=True,
     )
+    data.update({
+        "production_item_id": production_item.id,
+        "customer_order_no": customer_order.customer_order_no,
+        "part_no": part_no,
+        "part_name": part_name,
+        "work_order_id": order.id,
+        "work_order_no": order.work_order_no,
+        "work_order_name": order.work_order_name,
+        "worker_name": order.worker_name,
+        "batch_sequence": batch_sequence[batch.id],
+        "rework_source_batch_sequence": batch_sequence.get(
+            batch.rework_source_batch_id
+        ),
+        "can_undo_inspection": (
+            batch.recorded_at is not None
+            and batch.destination_decided_at is None
+            and not any(
+                child.rework_source_batch_id == batch.id
+                for child in context.batches.get(order.id, [])
+            )
+        ),
+        "allowed_destinations": list(
+            qc_qualified_destinations(
+                flow_context.flow,
+                flow_context.nodes,
+                order.flow_node_id,
+            )
+        )
+        if (
+            batch.recorded_at is not None
+            and batch.qualified_quantity
+            and batch.destination_decided_at is None
+        )
+        else [],
+    })
     return data

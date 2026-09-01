@@ -4,13 +4,14 @@ from dataclasses import dataclass
 from collections.abc import Collection
 from datetime import datetime
 
-from sqlalchemy import select, tuple_
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.orm import Session
 
 from domain.production_types import (
+    QcQualifiedDestination,
+    STANDARD_EXECUTION_WORK_ORDER_TYPES,
     WORK_ORDER_STATUS_OPEN,
     WORK_ORDER_SUPPLIER_PROCESSING,
-    QcQualifiedDestination,
     WorkOrderStatus,
 )
 from modules.errors import DomainError
@@ -43,6 +44,19 @@ class SupplierProcessingWorkOrderReference:
     production_item_id: int
     flow_node_id: str
     status: WorkOrderStatus
+
+
+@dataclass(frozen=True, slots=True)
+class TemporaryWorkOrderPriceReference:
+    id: int
+    work_order_no: str
+    product_id: int
+    product_version: int
+    origin_flow_node_id: str
+    flow_node_id: str
+    procedure_id: int
+    status: WorkOrderStatus
+    created_at: datetime
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +129,98 @@ class SupplierProcessingQcOrderReference:
 
 PartProductionIdentity = tuple[int, int, int, int, str]
 SupplierProcessingPosition = tuple[int, str]
+
+
+def temporary_work_order_price_references(
+    session: Session,
+    *,
+    procedure_ids: Collection[int],
+    offset: int,
+    limit: int,
+    keyword: str | None,
+) -> tuple[list[TemporaryWorkOrderPriceReference], int]:
+    if not procedure_ids:
+        return [], 0
+    statement = (
+        select(WorkOrder, ProductionItem)
+        .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
+        .where(
+            WorkOrder.is_temporary.is_(True),
+            WorkOrder.work_order_type.in_(list(STANDARD_EXECUTION_WORK_ORDER_TYPES)),
+            WorkOrder.procedure_id.in_(list(procedure_ids)),
+        )
+    )
+    value = (keyword or "").strip()
+    if value:
+        pattern = f"%{value}%"
+        statement = statement.where(or_(
+            WorkOrder.work_order_no.ilike(pattern),
+            WorkOrder.work_order_name.ilike(pattern),
+        ))
+    total = session.scalar(
+        select(func.count()).select_from(statement.order_by(None).subquery())
+    ) or 0
+    rows = session.execute(
+        statement
+        .order_by(WorkOrder.created_at.desc(), WorkOrder.id.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    references: list[TemporaryWorkOrderPriceReference] = []
+    for order, production_item in rows:
+        if order.work_order_no is None or order.procedure_id is None:
+            raise DomainError(
+                "temporary_work_order_price_context_invalid",
+                "临时工单计价信息不完整",
+                status_code=409,
+            )
+        references.append(TemporaryWorkOrderPriceReference(
+            id=order.id,
+            work_order_no=order.work_order_no,
+            product_id=production_item.product_id,
+            product_version=production_item.product_version,
+            origin_flow_node_id=production_item.origin_flow_node_id,
+            flow_node_id=order.flow_node_id,
+            procedure_id=order.procedure_id,
+            status=order.status,
+            created_at=order.created_at,
+        ))
+    return references, total
+
+
+def temporary_work_order_price_reference(
+    session: Session,
+    work_order_id: int,
+) -> TemporaryWorkOrderPriceReference | None:
+    row = session.execute(
+        select(WorkOrder, ProductionItem)
+        .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
+        .where(
+            WorkOrder.id == work_order_id,
+            WorkOrder.is_temporary.is_(True),
+            WorkOrder.work_order_type.in_(list(STANDARD_EXECUTION_WORK_ORDER_TYPES)),
+        )
+    ).one_or_none()
+    if row is None:
+        return None
+    order, production_item = row
+    if order.work_order_no is None or order.procedure_id is None:
+        raise DomainError(
+            "temporary_work_order_price_context_invalid",
+            "临时工单计价信息不完整",
+            status_code=409,
+        )
+    return TemporaryWorkOrderPriceReference(
+        id=order.id,
+        work_order_no=order.work_order_no,
+        product_id=production_item.product_id,
+        product_version=production_item.product_version,
+        origin_flow_node_id=production_item.origin_flow_node_id,
+        flow_node_id=order.flow_node_id,
+        procedure_id=order.procedure_id,
+        status=order.status,
+        created_at=order.created_at,
+    )
 
 
 def part_production_references(
@@ -385,6 +491,7 @@ __all__ = [
     "SupplierProcessingQcBatchReference",
     "SupplierProcessingQcOrderReference",
     "SupplierProcessingWorkOrderReference",
+    "TemporaryWorkOrderPriceReference",
     "has_product_version_production_reference",
     "has_standard_execution_order",
     "has_work_order_for_procedure",
@@ -394,4 +501,6 @@ __all__ = [
     "reserved_repository_quantities",
     "supplier_processing_work_order_references",
     "supplier_processing_qc_order_references",
+    "temporary_work_order_price_reference",
+    "temporary_work_order_price_references",
 ]

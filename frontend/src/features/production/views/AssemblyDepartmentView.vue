@@ -1,19 +1,151 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
-import AssemblyPositionOverview from '../components/AssemblyPositionOverview.vue'
-import AssemblyProductionPositionList from '../components/AssemblyProductionPositionList.vue'
 import AssemblyWorkOrderDialog from '../components/AssemblyWorkOrderDialog.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
-import ProductionProcedureSummary from '../components/ProductionProcedureSummary.vue'
-import ProductionWorkbenchFilterBar from '../components/ProductionWorkbenchFilterBar.vue'
-import ProductionWorkbenchWorkOrders from '../components/ProductionWorkbenchWorkOrders.vue'
+import TaskWorkOrderChoiceDialog from '../components/TaskWorkOrderChoiceDialog.vue'
+import DepartmentProductionProgressView from './DepartmentProductionProgressView.vue'
 import { useAssemblyWorkbench } from '../composables/useAssemblyWorkbench'
+import type {
+  DepartmentProductionProgressItem,
+  ProductionTaskProcessingStatus,
+} from '../domain/productionProgress'
+import type { TaskWorkOrderChoice } from '../domain/workOrderCreation'
 import '../styles/workspace.css'
 
 const workbench = useAssemblyWorkbench()
-onMounted(workbench.load)
+const taskView = ref<InstanceType<typeof DepartmentProductionProgressView>>()
+const choices = ref<TaskWorkOrderChoice[]>([])
+const choiceVisible = ref(false)
+let openRevision = 0
+
+function availableChoices(status: ProductionTaskProcessingStatus): TaskWorkOrderChoice[] {
+  const repositoryIds = new Set(status.repository_ids)
+  return workbench.positions.value.flatMap(position => {
+    if (position.position_type === 'standard') {
+      return position.sources
+        .filter(source => (
+          source.available_quantity > 0
+          && repositoryIds.has(source.repository_id)
+        ))
+        .map(source => ({
+          key: `${position.position_key}:standard:${source.repository_id}`,
+          position_key: position.position_key,
+          mode: 'standard' as const,
+          repository_id: source.repository_id,
+          label: `${position.item_name} · ${position.workshop_name}`,
+          description: `${position.source_node_label} · 可开工 ${source.available_quantity}`,
+        }))
+    }
+    const initial = (
+      status.creation_mode === 'assembly_initial'
+      && position.initial_capacity_quantity > 0
+    )
+      ? [{
+          key: `${position.position_key}:initial`,
+          position_key: position.position_key,
+          mode: 'assembly_initial' as const,
+          repository_id: null,
+          label: `${position.item_name} · 首次${position.workshop_name}`,
+          description: `多路物料投入 · 可开工 ${position.initial_capacity_quantity}`,
+        }]
+      : []
+    const continuation = position.continuation_sources
+      .filter(source => (
+        source.available_quantity > 0
+        && repositoryIds.has(source.repository_id)
+      ))
+      .map(source => ({
+        key: `${position.position_key}:continuation:${source.repository_id}`,
+        position_key: position.position_key,
+        mode: 'assembly_continuation' as const,
+        repository_id: source.repository_id,
+        label: `${position.item_name} · 后续${position.workshop_name}`,
+        description: `节点在制品 · 可开工 ${source.available_quantity}`,
+      }))
+    return [...initial, ...continuation]
+  })
+}
+
+function activateChoice(choice: TaskWorkOrderChoice) {
+  const position = workbench.positions.value.find(
+    item => item.position_key === choice.position_key,
+  )
+  if (!position) {
+    ElMessage.warning('开单来源已变化，请重新选择')
+    return
+  }
+  workbench.selectPositionForCreation(position)
+  choiceVisible.value = false
+  if (choice.mode === 'standard' && position.position_type === 'standard') {
+    const source = position.sources.find(item => item.repository_id === choice.repository_id)
+    if (!source) {
+      ElMessage.warning('开单来源已变化，请重新选择')
+      return
+    }
+    workbench.selectStandardSource(source)
+    workbench.openStandardWorkOrder()
+    return
+  }
+  if (choice.mode === 'assembly_initial' && position.position_type === 'assembly') {
+    workbench.openInitialAssemblyWorkOrder()
+    return
+  }
+  if (choice.mode === 'assembly_continuation' && position.position_type === 'assembly') {
+    const source = position.continuation_sources.find(
+      item => item.repository_id === choice.repository_id,
+    )
+    if (!source) {
+      ElMessage.warning('开单来源已变化，请重新选择')
+      return
+    }
+    workbench.selectContinuationSource(source)
+    workbench.openContinuationWorkOrder()
+  }
+}
+
+async function openTaskWorkOrder(
+  item: DepartmentProductionProgressItem,
+  status: ProductionTaskProcessingStatus,
+) {
+  const revision = ++openRevision
+  choiceVisible.value = false
+  choices.value = []
+  await workbench.focusTask(item)
+  if (revision !== openRevision) return
+  choices.value = availableChoices(status)
+  if (!choices.value.length) {
+    ElMessage.warning(
+      workbench.positions.value.length
+        ? '当前任务没有可开工数量'
+        : '物料尚未到达当前车间',
+    )
+    return
+  }
+  if (choices.value.length === 1 && choices.value[0]) {
+    activateChoice(choices.value[0])
+    return
+  }
+  choiceVisible.value = true
+}
+
+async function refresh() {
+  await taskView.value?.load()
+}
+
+async function saveStandardWorkOrder(
+  payload: Parameters<typeof workbench.saveStandardWorkOrder>[0],
+) {
+  if (await workbench.saveStandardWorkOrder(payload)) await taskView.value?.load()
+}
+
+async function saveAssemblyWorkOrder(
+  payload: Parameters<typeof workbench.saveAssemblyWorkOrder>[0],
+) {
+  if (await workbench.saveAssemblyWorkOrder(payload)) await taskView.value?.load()
+}
 </script>
 
 <template>
@@ -21,105 +153,42 @@ onMounted(workbench.load)
     <DepartmentPageHeader
       department-name="装配部"
       description="装配任务及装配部所属加工工艺。"
-      @refresh="workbench.refresh"
+      @refresh="refresh"
     />
     <DepartmentSectionTabs
       department-code="assembly"
+      workspace-label="生产任务"
       show-inventory
       show-workers
-      show-progress
       show-procedure-prices
-      @configuration-saved="workbench.reloadWorkspace"
     >
-      <ProductionWorkbenchFilterBar
-        :workshops="workbench.workshops.value"
-        @search="workbench.applyFilters"
+      <DepartmentProductionProgressView
+        ref="taskView"
+        embedded
+        department-code="assembly"
+        @create-work-order="openTaskWorkOrder"
       />
-      <section class="production-workspace production-workspace--viewport workbench-layout">
-        <div class="production-card production-scroll-column position-column">
-          <AssemblyProductionPositionList
-            :items="workbench.positions.value"
-            :loading="workbench.positionsLoading.value"
-            :selected-key="workbench.selectedPositionKey.value"
-            @select="workbench.selectPosition"
-          />
-          <ElPagination
-            v-model:current-page="workbench.positionPage.value"
-            class="production-pagination"
-            layout="prev, next, total"
-            :page-size="workbench.pageSize"
-            :total="workbench.positionTotal.value"
-            @current-change="workbench.changePositionPage"
-          />
-        </div>
 
-        <div class="production-execution production-scroll-column workbench-detail-column">
-          <template v-if="workbench.selectedPosition.value">
-            <AssemblyPositionOverview
-              :position="workbench.selectedPosition.value"
-              :selected-standard-source="workbench.selectedStandardSource.value"
-              :selected-continuation-source="workbench.selectedContinuationSource.value"
-              @select-standard-source="workbench.selectStandardSource"
-              @select-continuation-source="workbench.selectContinuationSource"
-              @create-standard="workbench.openStandardWorkOrder"
-              @create-initial-assembly="workbench.openInitialAssemblyWorkOrder"
-              @create-continuation="workbench.openContinuationWorkOrder"
-            />
-            <ProductionProcedureSummary
-              :items="workbench.procedureSummaries.value"
-              :selected="workbench.isProcedureSelected"
-              @select="workbench.selectProcedure"
-            />
-            <ProductionWorkbenchWorkOrders
-              :items="workbench.workOrders.value"
-              :loading="workbench.workOrdersLoading.value"
-              :special-printing="false"
-              :mode="workbench.selectedMode.value"
-              @submit-qc="workbench.workOrderActions.value.submitQc"
-              @submit-direct-result="workbench.workOrderActions.value.submitDirectResult"
-              @resubmit-qc="workbench.workOrderActions.value.resubmitQc"
-              @cancel="workbench.workOrderActions.value.cancel"
-              @undo="workbench.workOrderActions.value.undo"
-            />
-            <ElPagination
-              v-model:current-page="workbench.workOrderPage.value"
-              class="production-pagination"
-              layout="prev, pager, next, total"
-              :page-size="workbench.pageSize"
-              :total="workbench.workOrderTotal.value"
-              @current-change="workbench.changeWorkOrderPage"
-            />
-          </template>
-          <ElEmpty v-else description="请选择在位物料查看加工情况" :image-size="72" />
-        </div>
-      </section>
+      <TaskWorkOrderChoiceDialog
+        v-model="choiceVisible"
+        :choices="choices"
+        @confirm="activateChoice"
+      />
 
       <CreateWorkOrderDialog
         v-model="workbench.standardDialogVisible.value"
         :item="workbench.standardCreationTarget.value"
         :workers="workbench.workOrderWorkers.value"
         :submitting="workbench.submitting.value"
-        @submit="workbench.saveStandardWorkOrder"
+        @submit="saveStandardWorkOrder"
       />
       <AssemblyWorkOrderDialog
         v-model="workbench.assemblyDialogVisible.value"
         :item="workbench.activeAssemblyTarget.value"
         :workers="workbench.workOrderWorkers.value"
         :submitting="workbench.submitting.value"
-        @submit="workbench.saveAssemblyWorkOrder"
+        @submit="saveAssemblyWorkOrder"
       />
     </DepartmentSectionTabs>
   </main>
 </template>
-
-<style scoped>
-.workbench-layout { grid-template-columns: minmax(320px, 390px) minmax(0, 1fr); }
-.position-column { padding: 14px; }
-.workbench-detail-column { gap: 12px; padding-right: 3px; overflow-y: auto !important; scrollbar-gutter: stable; }
-.workbench-detail-column > :first-child { min-height: auto !important; flex: 0 0 auto !important; overflow: visible !important; }
-.workbench-detail-column > :deep(.el-empty) { margin: auto; }
-@media (max-width: 900px) {
-  .workbench-layout { grid-template-columns: 1fr; }
-  .workbench-detail-column { overflow-y: visible !important; }
-}
-</style>

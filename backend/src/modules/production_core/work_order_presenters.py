@@ -30,6 +30,26 @@ def serialize_work_order(
     return map_work_order(session, order, presenter_context)
 
 
+def serialize_work_orders(
+    session,
+    orders,
+    *,
+    batches=None,
+) -> dict[int, dict]:
+    """Serialize a loaded work-order collection with one shared read context."""
+    if not orders:
+        return {}
+    presenter_context = build_work_order_presenter_context(
+        session,
+        orders,
+        batches=batches,
+    )
+    return {
+        order.id: map_work_order(session, order, presenter_context)
+        for order in orders
+    }
+
+
 __all__ = [
     "ProductionItemDisplayContext",
     "WorkOrderPresenterContext",
@@ -40,5 +60,6 @@ __all__ = [
     "production_item_sort_order",
     "serialize_batch",
     "serialize_work_order",
+    "serialize_work_orders",
     "work_order_context",
 ]

@@ -2,7 +2,6 @@
 import { computed, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import DepartmentWorkersView from '../views/DepartmentWorkersView.vue'
-import DepartmentProductionProgressView from '../views/DepartmentProductionProgressView.vue'
 import ProcedurePriceView from '../views/ProcedurePriceView.vue'
 import ProductionPositionStorageView from '../views/ProductionPositionStorageView.vue'
 
@@ -12,7 +11,6 @@ const props = defineProps<{
   additionalTabs?: ReadonlyArray<{ name: string; label: string }>
   showInventory?: boolean
   showWorkers?: boolean
-  showProgress?: boolean
   showProcedurePrices?: boolean
 }>()
 const emit = defineEmits<{
@@ -28,7 +26,6 @@ const availableTabs = computed<DepartmentTab[]>(() => {
   const tabs: DepartmentTab[] = ['workspace']
   for (const tab of props.additionalTabs || []) tabs.push(tab.name)
   if (props.showInventory) tabs.push('inventory')
-  if (props.showProgress) tabs.push('progress')
   if (props.showProcedurePrices) tabs.push('tag-prices')
   if (props.showWorkers) tabs.push('workers')
   return tabs
@@ -65,7 +62,7 @@ async function switchTab(tab: DepartmentTab) {
 
 <template>
   <ElTabs v-model="activeTab" class="department-section-tabs">
-    <ElTabPane :label="workspaceLabel || '生产工作台'" name="workspace" lazy>
+    <ElTabPane :label="workspaceLabel || '工作台'" name="workspace" lazy>
       <slot />
     </ElTabPane>
 
@@ -98,14 +95,6 @@ async function switchTab(tab: DepartmentTab) {
       lazy
     >
       <DepartmentWorkersView embedded :department-code="departmentCode" />
-    </ElTabPane>
-    <ElTabPane
-      v-if="availableTabs.includes('progress')"
-      label="生产任务"
-      name="progress"
-      lazy
-    >
-      <DepartmentProductionProgressView embedded :department-code="departmentCode" />
     </ElTabPane>
     <ElTabPane
       v-if="availableTabs.includes('inventory')"

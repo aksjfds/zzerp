@@ -3,11 +3,17 @@ from fastapi import APIRouter, Depends, Query, Response
 from authorization import require_any_permission
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW
 from modules.standard_execution.api import (
+    cancel_procedure_configuration,
     confirm_procedure_configuration,
     list_procedure_prices,
+    update_temporary_work_order_price,
     update_procedure_price,
 )
-from schemas.procedure_prices import ProcedurePriceListEnvelope, ProcedurePriceUpdate
+from schemas.procedure_prices import (
+    ProcedurePriceListEnvelope,
+    ProcedurePriceUpdate,
+    TemporaryWorkOrderPriceUpdate,
+)
 
 
 router = APIRouter(tags=["procedure-prices"])
@@ -33,6 +39,26 @@ def procedure_prices(
         user["is_system"],
     )
     return {"data": data, "total": total}
+
+
+@router.put(
+    "/departments/{department_code}/procedure-prices/temporary-work-orders/{work_order_id}",
+    status_code=204,
+)
+def temporary_work_order_price_update(
+    department_code: str,
+    work_order_id: int,
+    payload: TemporaryWorkOrderPriceUpdate,
+    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
+):
+    update_temporary_work_order_price(
+        department_code,
+        work_order_id,
+        payload,
+        user["department"],
+        user["is_system"],
+    )
+    return Response(status_code=204)
 
 
 @router.put(
@@ -87,5 +113,30 @@ def procedure_configuration_confirm(
         user["department"],
         user["is_system"],
         user["username"],
+    )
+    return Response(status_code=204)
+
+
+@router.delete(
+    "/departments/{department_code}/procedure-prices/"
+    "{product_id}/{product_version}/{origin_flow_node_id}/{flow_node_id}/confirm",
+    status_code=204,
+)
+def procedure_configuration_cancel(
+    department_code: str,
+    product_id: int,
+    product_version: int,
+    origin_flow_node_id: str,
+    flow_node_id: str,
+    user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
+):
+    cancel_procedure_configuration(
+        department_code,
+        product_id,
+        product_version,
+        origin_flow_node_id,
+        flow_node_id,
+        user["department"],
+        user["is_system"],
     )
     return Response(status_code=204)

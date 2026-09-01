@@ -3,20 +3,40 @@ from __future__ import annotations
 """Pure and context-bound production-progress calculations."""
 
 from collections import defaultdict
-from modules.production_core.model_api import WorkOrder, WorkOrderBatch
-from modules.production_core.operational_api import calculate_work_order_progress
+
+from modules.production_core.model_api import ProductionMovement, WorkOrder
 from modules.planning.progress_routes import progress_route_nodes
 
-def _process_completion_summary(
+
+def released_task_quantity(
+    movements: list[ProductionMovement],
     work_orders: list[WorkOrder],
-    batches_by_order: dict[int, list[WorkOrderBatch]],
+    flow_node_id: str,
+    nodes: dict[str, dict],
 ) -> int:
+    """Quantity that has completed and physically left one execution node."""
+    work_order_ids = {work_order.id for work_order in work_orders}
     completed_quantity = 0
-    for work_order in work_orders:
-        batches = batches_by_order.get(work_order.id, [])
-        progress = calculate_work_order_progress(work_order, batches)
-        completed_quantity += progress.qualified_quantity
+    for movement in movements:
+        if movement.work_order_id not in work_order_ids:
+            continue
+        if movement.movement_type == "qc_inventory":
+            completed_quantity += movement.quantity
+            continue
+        target_node_id = movement.target_flow_node_id
+        if movement.movement_type == "qc_qualified":
+            if target_node_id != flow_node_id:
+                completed_quantity += movement.quantity
+            continue
+        if movement.movement_type not in {"process", "assembly_output"}:
+            continue
+        if target_node_id in {None, flow_node_id}:
+            continue
+        if nodes.get(target_node_id, {}).get("type") == "qc":
+            continue
+        completed_quantity += movement.quantity
     return completed_quantity
+
 
 def _physical_route(context, origin_node_id: str) -> list[dict]:
     return progress_route_nodes(

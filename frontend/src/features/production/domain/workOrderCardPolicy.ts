@@ -19,6 +19,30 @@ export interface WorkOrderCardPolicy {
   showCancel: (item: WorkOrder) => boolean
 }
 
+export type WorkOrderSubmissionEligibility = Pick<
+  WorkOrder,
+  | 'status'
+  | 'qc_available'
+  | 'direct_result_allowed'
+  | 'submitted_quantity'
+>
+
+export function canSubmitInitialQc(item: WorkOrderSubmissionEligibility) {
+  return (
+    item.status === 'open'
+    && item.qc_available
+    && item.submitted_quantity === 0
+  )
+}
+
+export function canSubmitDirectResult(item: WorkOrderSubmissionEligibility) {
+  return (
+    item.status === 'open'
+    && item.direct_result_allowed
+    && item.submitted_quantity === 0
+  )
+}
+
 export function initialProcessingQuantity(item: WorkOrder) {
   return Math.max(item.quantity - item.processed_quantity, 0)
 }
@@ -48,16 +72,8 @@ export const commonWorkOrderActions: Pick<
   | 'showUndo'
   | 'showCancel'
 > = {
-  showInitialQc: item => (
-    item.status === 'open'
-    && item.qc_available
-    && item.submitted_quantity === 0
-  ),
-  showDirectResult: item => (
-    item.status === 'open'
-    && item.direct_result_allowed
-    && item.submitted_quantity === 0
-  ),
+  showInitialQc: canSubmitInitialQc,
+  showDirectResult: canSubmitDirectResult,
   showReworkQc: (item, batch) => (
     item.status === 'open'
     && Boolean(batch.recorded_at)

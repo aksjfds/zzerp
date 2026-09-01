@@ -11,10 +11,6 @@ from sqlalchemy import select, tuple_
 
 from database import SessionLocal
 from domain.material_identity import production_item_material_key
-from domain.production_workbench import (
-    PRODUCTION_WORKBENCH_ATTENTION_FILTERS,
-    ProductionWorkbenchAttention,
-)
 from domain.time import business_iso
 from modules.engineering.model_api import (
     Product,
@@ -86,10 +82,10 @@ class CandidateView:
     position_type: str
     position_key: str
     representative_item_id: int
+    customer_order_item_id: int
     node: dict
     workshop: Workshop
     available_quantity: int
-    search_text: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,12 +101,11 @@ def list_production_workbench_positions(
     department_code: str,
     page: int,
     page_size: int,
-    keyword: str | None = None,
-    workshop_name: str | None = None,
-    attention: ProductionWorkbenchAttention = "all",
+    customer_order_item_id: int,
+    workshop_id: int,
+    flow_node_id: str,
+    production_item_id: int | None = None,
 ) -> tuple[list[dict], int]:
-    if attention not in PRODUCTION_WORKBENCH_ATTENTION_FILTERS:
-        raise DomainError("workbench_attention_invalid", "生产工作台关注状态无效")
     with SessionLocal() as session:
         department = session.scalar(
             select(Department).where(Department.department_code == department_code)
@@ -120,8 +115,21 @@ def list_production_workbench_positions(
         if department_code == "qc":
             return [], 0
 
-        repositories = _department_repositories(session, department.id)
-        activity = load_workbench_activity(session, department.id, department_code)
+        repositories = _department_repositories(
+            session,
+            department.id,
+            customer_order_item_id=customer_order_item_id,
+            production_item_id=production_item_id,
+            flow_node_id=flow_node_id,
+        )
+        activity = load_workbench_activity(
+            session,
+            department.id,
+            department_code,
+            customer_order_item_id=customer_order_item_id,
+            production_item_id=production_item_id,
+            flow_node_id=flow_node_id,
+        )
         item_ids = {repository.production_item_id for repository in repositories}
         item_ids.update(
             item_id
@@ -137,7 +145,11 @@ def list_production_workbench_positions(
             allocation.production_item_id
             for allocation in activity.assembly_allocations
         )
-        display = _load_display_data(session, item_ids)
+        display = _load_display_data(
+            session,
+            item_ids,
+            expand_order_items=production_item_id is None,
+        )
         standard, assembly = _group_candidates(
             repositories,
             activity.standard,
@@ -158,9 +170,10 @@ def list_production_workbench_positions(
         )
         candidates = _filter_candidates(
             candidates,
-            keyword,
-            workshop_name,
-            attention,
+            workshop_id,
+            customer_order_item_id,
+            production_item_id,
+            flow_node_id,
         )
         candidates.sort(key=_candidate_sort_key, reverse=True)
         total = len(candidates)
@@ -174,8 +187,15 @@ def list_production_workbench_positions(
         ), total
 
 
-def _department_repositories(session, department_id: int) -> list[Repository]:
-    return list(session.scalars(
+def _department_repositories(
+    session,
+    department_id: int,
+    *,
+    customer_order_item_id: int | None,
+    production_item_id: int | None,
+    flow_node_id: str | None,
+) -> list[Repository]:
+    statement = (
         select(Repository)
         .join(ProductionItem, ProductionItem.id == Repository.production_item_id)
         .join(
@@ -191,21 +211,39 @@ def _department_repositories(session, department_id: int) -> list[Repository]:
             ProductionPlan.status.in_(("confirmed", "completed")),
         )
         .order_by(Repository.id)
-    ))
+    )
+    if customer_order_item_id is not None:
+        statement = statement.where(
+            ProductionItem.customer_order_item_id == customer_order_item_id
+        )
+    if production_item_id is not None:
+        statement = statement.where(
+            Repository.production_item_id == production_item_id
+        )
+    if flow_node_id is not None:
+        statement = statement.where(Repository.flow_node_id == flow_node_id)
+    return list(session.scalars(statement))
 
 
-def _load_display_data(session, item_ids: set[int]) -> DisplayData:
+def _load_display_data(
+    session,
+    item_ids: set[int],
+    *,
+    expand_order_items: bool,
+) -> DisplayData:
     if not item_ids:
         return DisplayData({}, {}, {}, {}, {}, {})
     seed_items = list(session.scalars(
         select(ProductionItem).where(ProductionItem.id.in_(item_ids))
     ))
     order_item_ids = {item.customer_order_item_id for item in seed_items}
-    items = list(session.scalars(
-        select(ProductionItem).where(
-            ProductionItem.customer_order_item_id.in_(order_item_ids)
-        )
-    ))
+    items = seed_items
+    if expand_order_items:
+        items = list(session.scalars(
+            select(ProductionItem).where(
+                ProductionItem.customer_order_item_id.in_(order_item_ids)
+            )
+        ))
     order_items = list(session.scalars(
         select(CustomerOrderItem).where(CustomerOrderItem.id.in_(order_item_ids))
     ))
@@ -323,7 +361,6 @@ def _candidate_views(
         context = display.contexts[item.id]
         node = _require_node(context.nodes, key[1])
         workshop = _require_workshop(display, node, department.id)
-        item_code, item_name = _production_item_identity(item, context)
         available = sum(
             max(repository.quantity - reservation_by_id.get(repository.id, 0), 0)
             for repository in candidate.repositories
@@ -333,10 +370,10 @@ def _candidate_views(
             position_type="standard",
             position_key=_position_key("standard", department.department_code, *key),
             representative_item_id=item.id,
+            customer_order_item_id=item.customer_order_item_id,
             node=node,
             workshop=workshop,
             available_quantity=available,
-            search_text=_search_text(display, item, item_code, item_name),
         ))
     for key, candidate in assembly.items():
         representative_id = _assembly_representative_id(candidate, display)
@@ -349,49 +386,38 @@ def _candidate_views(
             display,
             reservation_by_id,
         )
-        output_code, output_name = _assembly_identity(node)
         views.append(CandidateView(
             candidate=candidate,
             position_type="assembly",
             position_key=_position_key("assembly", department.department_code, *key),
             representative_item_id=representative_id,
+            customer_order_item_id=key[0],
             node=node,
             workshop=workshop,
             available_quantity=availability.capacity_quantity,
-            search_text=_search_text(display, item, output_code, output_name),
         ))
     return views
 
 
 def _filter_candidates(
     candidates: list[CandidateView],
-    keyword: str | None,
-    workshop_name: str | None,
-    attention: str,
+    workshop_id: int,
+    customer_order_item_id: int,
+    production_item_id: int | None,
+    flow_node_id: str,
 ) -> list[CandidateView]:
-    normalized = (keyword or "").strip().lower()
-    tokens = [token for token in normalized.replace("-", " ").split() if token]
     result = []
     for view in candidates:
-        if workshop_name and view.workshop.workshop_name != workshop_name:
-            continue
-        if normalized and normalized not in view.search_text and not all(
-            token in view.search_text for token in tokens
-        ):
-            continue
-        activity = view.candidate.activity
-        if attention == "available" and view.available_quantity <= 0:
-            continue
-        if attention == "processing" and activity.processing_work_order_count <= 0:
+        if view.customer_order_item_id != customer_order_item_id:
             continue
         if (
-            attention == "ready_for_result"
-            and activity.ready_for_result_work_order_count <= 0
+            production_item_id is not None
+            and view.representative_item_id != production_item_id
         ):
             continue
-        if attention == "qc" and activity.pending_qc_work_order_count <= 0:
+        if view.node["id"] != flow_node_id:
             continue
-        if attention == "rework" and activity.rework_work_order_count <= 0:
+        if view.workshop.id != workshop_id:
             continue
         result.append(view)
     return result
@@ -985,26 +1011,6 @@ def _configured_procedure_response(procedure: ConfiguredProcedure) -> dict:
         "department_code": procedure.department_code,
         "procedure_name": procedure.procedure_name,
     }
-
-
-def _search_text(
-    display: DisplayData,
-    item: ProductionItem,
-    item_code: str,
-    item_name: str,
-) -> str:
-    context = display.contexts[item.id]
-    order = display.orders[context.order_item.customer_order_id]
-    customer = display.customers[order.customer_id]
-    product = display.products[item.product_id]
-    return " ".join((
-        order.customer_order_no,
-        customer.customer_name,
-        product.factory_code,
-        product.product_name,
-        item_code,
-        item_name,
-    )).lower()
 
 
 def _position_key(position_type: str, department_code: str, *identity) -> str:

@@ -6,6 +6,7 @@ import {
   inspectSupplierProcessingWorkOrder,
   querySupplierProcessingQcTasks,
   releaseSupplierProcessingBatch,
+  undoQcInspection,
 } from '../api/qc'
 import type {
   SupplierProcessingQcInspectionPayload,
@@ -14,6 +15,7 @@ import type {
   WorkerItem,
 } from '../domain/types'
 import SupplierProcessingQcInspectionDialog from './SupplierProcessingQcInspectionDialog.vue'
+import SupplierProcessingQcDrawer from './SupplierProcessingQcDrawer.vue'
 
 defineProps<{ workers: WorkerItem[] }>()
 
@@ -22,8 +24,11 @@ const total = ref(0)
 const loading = ref(false)
 const submitting = ref(false)
 const releasingBatchId = ref<number | null>(null)
+const undoingBatchId = ref<number | null>(null)
 const dialogVisible = ref(false)
 const activeTask = ref<SupplierProcessingQcTask>()
+const detailTask = ref<SupplierProcessingQcTask>()
+const detailVisible = ref(false)
 
 async function load() {
   loading.value = true
@@ -31,6 +36,12 @@ async function load() {
     const result = await querySupplierProcessingQcTasks()
     tasks.value = result.items
     total.value = result.total
+    if (detailTask.value) {
+      detailTask.value = result.items.find(
+        task => task.work_order_id === detailTask.value?.work_order_id,
+      )
+      if (!detailTask.value) detailVisible.value = false
+    }
   } catch (error) {
     ElMessage.error(getApiErrorDetail(error)?.message || '委外加工质检任务加载失败')
   } finally {
@@ -45,6 +56,11 @@ async function refresh() {
 function openInspection(task: SupplierProcessingQcTask) {
   activeTask.value = task
   dialogVisible.value = true
+}
+
+function openDetail(task: SupplierProcessingQcTask) {
+  detailTask.value = task
+  detailVisible.value = true
 }
 
 async function saveInspection(payload: SupplierProcessingQcInspectionPayload) {
@@ -67,7 +83,7 @@ async function saveInspection(payload: SupplierProcessingQcInspectionPayload) {
 async function release(batch: WorkOrderBatch) {
   try {
     await ElMessageBox.confirm(
-      `确认放行本批 ${batch.qualified_quantity || 0} 件合格品到正式下一节点？确认后不能更改。`,
+      `确认放行本批 ${batch.qualified_quantity || 0} 件合格品？确认后不能更改。`,
       '确认放行',
       { type: 'warning', confirmButtonText: '确认放行', cancelButtonText: '取消' },
     )
@@ -86,6 +102,36 @@ async function release(batch: WorkOrderBatch) {
   }
 }
 
+function taskStatus(task: SupplierProcessingQcTask) {
+  if (task.status === 'closed') return { label: '质检完成', type: 'success' as const }
+  if (task.pending_destination_quantity > 0) {
+    return { label: '待放行', type: 'primary' as const }
+  }
+  return { label: '待质检', type: 'warning' as const }
+}
+
+async function undoInspection(batch: WorkOrderBatch) {
+  try {
+    await ElMessageBox.confirm(
+      '确认撤回本次委外加工 QC 结果？本次分批质检记录将被删除。',
+      '撤回质检',
+      { type: 'warning', confirmButtonText: '确认撤回', cancelButtonText: '取消' },
+    )
+  } catch {
+    return
+  }
+  undoingBatchId.value = batch.id
+  try {
+    await undoQcInspection(batch.id)
+    await load()
+    ElMessage.success('委外加工 QC 结果已撤回')
+  } catch (error) {
+    ElMessage.error(getApiErrorDetail(error)?.message || '委外加工 QC 结果撤回失败')
+  } finally {
+    undoingBatchId.value = null
+  }
+}
+
 onMounted(refresh)
 defineExpose({ refresh })
 </script>
@@ -99,60 +145,41 @@ defineExpose({ refresh })
       </div>
       <span>待处理 {{ total }} 张工单</span>
     </header>
-    <article v-for="task in tasks" :key="task.work_order_id" class="supplier-qc-card">
-      <div class="card-heading">
-        <div>
-          <strong>{{ task.work_order_no }} · {{ task.item_code }} · {{ task.item_name }}</strong>
-          <p>{{ task.supplier_name }} · {{ task.supplier_process_name }}</p>
-        </div>
-        <ElButton type="primary" @click="openInspection(task)">录入本次结果</ElButton>
-      </div>
-      <div class="progress-grid">
-        <span>任务数<strong>{{ task.task_quantity }}</strong></span>
-        <span>累计质检<strong>{{ task.inspected_quantity }}</strong></span>
-        <span>累计合格<strong>{{ task.qualified_quantity }}</strong></span>
-        <span>累计返工<strong>{{ task.rework_quantity }}</strong></span>
-        <span>累计报废<strong>{{ task.scrap_quantity }}</strong></span>
-        <span>累计遗失<strong>{{ task.lost_quantity }}</strong></span>
-        <span>剩余待合格<strong>{{ task.remaining_qualified_quantity }}</strong></span>
-        <span>待放行<strong>{{ task.pending_destination_quantity }}</strong></span>
-        <span>已放行<strong>{{ task.released_quantity }}</strong></span>
-      </div>
-      <p v-if="task.remark" class="task-remark">备注：{{ task.remark }}</p>
-      <ElTable
-        v-if="task.batches.length"
-        v-table-column-widths="'production.supplier-processing-qc-batches'"
-        :data="task.batches"
-        border
-        table-layout="auto"
-        class="batch-history"
-      >
-        <ElTableColumn prop="recorded_at" label="质检时间" min-width="160" />
-        <ElTableColumn prop="qc_worker_name" label="QC 工人" min-width="110" />
-        <ElTableColumn prop="submitted_quantity" label="本次质检" min-width="100" />
-        <ElTableColumn prop="qualified_quantity" label="合格" min-width="80" />
-        <ElTableColumn prop="rework_quantity" label="返工" min-width="80" />
-        <ElTableColumn prop="scrap_quantity" label="报废" min-width="80" />
-        <ElTableColumn prop="lost_quantity" label="遗失" min-width="80" />
-        <ElTableColumn prop="defect_reason" label="不良原因" min-width="160" />
-        <ElTableColumn label="合格品去向" min-width="130">
-          <template #default="{ row }">
-            <ElTag v-if="row.qualified_destination === 'release'" type="success">已放行</ElTag>
-            <ElButton
-              v-else-if="row.qualified_quantity"
-              link
-              type="primary"
-              :loading="releasingBatchId === row.id"
-              :disabled="releasingBatchId !== null && releasingBatchId !== row.id"
-              @click="release(row)"
-            >放行</ElButton>
-            <span v-else class="no-release">无合格品</span>
-          </template>
-        </ElTableColumn>
-      </ElTable>
-      <ElEmpty v-else description="尚未录入质检结果" :image-size="48" />
-    </article>
-    <ElEmpty v-if="!loading && !tasks.length" description="暂无待处理委外加工工单" :image-size="72" />
+    <ElTable
+      v-table-column-widths="'production.supplier-processing-qc'"
+      :data="tasks"
+      row-key="work_order_id"
+      border
+      stripe
+      table-layout="auto"
+      empty-text="暂无待处理委外加工工单"
+    >
+      <ElTableColumn label="物料" min-width="190">
+        <template #default="{ row }">
+          <strong>{{ row.item_code }} {{ row.item_name }}</strong>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="工单号" min-width="170">
+        <template #default="{ row }"><strong>工单{{ row.work_order_no }}</strong></template>
+      </ElTableColumn>
+      <ElTableColumn prop="supplier_name" label="供应商" min-width="130" />
+      <ElTableColumn prop="supplier_process_name" label="工艺" min-width="130" />
+      <ElTableColumn label="状态" min-width="110">
+        <template #default="{ row }">
+          <ElTag :type="taskStatus(row).type" effect="light" size="small">
+            {{ taskStatus(row).label }}
+          </ElTag>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="操作" min-width="150">
+        <template #default="{ row }">
+          <div class="table-actions">
+            <ElButton type="primary" link @click="openInspection(row)">录入</ElButton>
+            <ElButton link @click="openDetail(row)">查看</ElButton>
+          </div>
+        </template>
+      </ElTableColumn>
+    </ElTable>
     <SupplierProcessingQcInspectionDialog
       v-model="dialogVisible"
       :task="activeTask"
@@ -160,25 +187,27 @@ defineExpose({ refresh })
       :submitting="submitting"
       @submit="saveInspection"
     />
+    <SupplierProcessingQcDrawer
+      v-model="detailVisible"
+      :task="detailTask"
+      :releasing-batch-id="releasingBatchId"
+      :undoing-batch-id="undoingBatchId"
+      @release="release"
+      @undo-inspection="undoInspection"
+    />
   </section>
 </template>
 
 <style scoped>
 .supplier-qc-panel { min-height: 300px; }
-.panel-heading, .card-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.panel-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .panel-heading { margin-bottom: 16px; }
 .panel-heading h2 { margin: 0; font-size: 20px; }
-.panel-heading p, .card-heading p, .task-remark { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
+.panel-heading p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
 .panel-heading > span { color: var(--el-text-color-secondary); font-size: 13px; }
-.supplier-qc-card { margin-bottom: 14px; padding: 16px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-lowest); }
-.progress-grid { display: grid; grid-template-columns: repeat(5, minmax(90px, 1fr)); gap: 10px; margin: 14px 0; }
-.progress-grid span { display: flex; flex-direction: column; gap: 4px; padding: 10px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); color: var(--el-text-color-secondary); font-size: 12px; }
-.progress-grid strong { color: var(--el-text-color-primary); font-size: 17px; }
-.batch-history { margin-top: 14px; }
-.no-release { color: var(--el-text-color-secondary); font-size: 13px; }
-@media (max-width: 900px) { .progress-grid { grid-template-columns: repeat(3, 1fr); } }
+.table-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.table-actions :deep(.el-button) { margin: 0; }
 @media (max-width: 640px) {
-  .panel-heading, .card-heading { align-items: stretch; flex-direction: column; }
-  .progress-grid { grid-template-columns: repeat(2, 1fr); }
+  .panel-heading { align-items: stretch; flex-direction: column; }
 }
 </style>

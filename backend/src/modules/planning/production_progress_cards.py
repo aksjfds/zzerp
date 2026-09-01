@@ -2,12 +2,16 @@ from __future__ import annotations
 
 """Pure production-progress card calculation and mapping."""
 
-from domain.time import business_iso
-from modules.production_core.operational_api import calculate_assembly_output_progress, calculate_work_order_progress
+from modules.production_core.presentation_api import (
+    build_work_order_record as build_progress_work_order_row,
+)
+
 
 def build_progress_card(
     *,
     node,
+    flow,
+    nodes,
     procedure,
     workshop,
     department,
@@ -26,20 +30,17 @@ def build_progress_card(
     rework_quantity = 0
     scrap_quantity = 0
     lost_quantity = 0
-    output_unit_quantity = (
-        max(int(node.get("output_pcs") or 1), 1)
-        if node.get("type") == "assembly" else 1
-    )
     for order in orders:
         batches = batches_by_order.get(order.id, [])
-        progress = (
-            calculate_assembly_output_progress(
-                order,
-                batches,
-                output_unit_quantity,
-            )
-            if node.get("type") == "assembly"
-            else calculate_work_order_progress(order, batches)
+        order_row, progress = build_progress_work_order_row(
+            node=node,
+            flow=flow,
+            nodes=nodes,
+            procedure=procedure,
+            workshop=workshop,
+            order=order,
+            batches=batches,
+            workers=workers,
         )
         processing_quantity += progress.processing_quantity
         ready_for_qc_quantity += progress.ready_for_qc_quantity
@@ -48,23 +49,7 @@ def build_progress_card(
         rework_quantity += progress.rework_quantity
         scrap_quantity += progress.scrap_quantity
         lost_quantity += progress.lost_quantity
-        worker = workers.get(order.worker_id)
-        order_rows.append({
-            "id": order.id,
-            "work_order_no": order.work_order_no,
-            "worker_name": worker.worker_name if worker else None,
-            "quantity": order.quantity * output_unit_quantity,
-            "processed_quantity": progress.processed_quantity,
-            "submitted_quantity": progress.submitted_quantity,
-            "pending_qc_quantity": progress.pending_qc_quantity,
-            "completed_quantity": progress.qualified_quantity,
-            "rework_quantity": progress.rework_quantity,
-            "scrap_quantity": progress.scrap_quantity,
-            "lost_quantity": progress.lost_quantity,
-            "status": order.status,
-            "created_at": business_iso(order.created_at),
-            "closed_at": business_iso(order.closed_at),
-        })
+        order_rows.append(order_row)
     status = calculate_card_status(
         task_quantity,
         arrived_quantity,
@@ -90,6 +75,7 @@ def build_progress_card(
         "card_name": card_name,
         "department_code": department.department_code,
         "department_name": department.department_name,
+        "workshop_id": workshop.id if workshop else None,
         "workshop_name": workshop.workshop_name if workshop else department.department_name,
         "procedure_name": procedure.procedure_name if procedure else node.get("label", "装配"),
         "status": status,
@@ -129,4 +115,8 @@ def calculate_card_status(
     return "not_arrived"
 
 
-__all__ = ["build_progress_card", "calculate_card_status"]
+__all__ = [
+    "build_progress_card",
+    "build_progress_work_order_row",
+    "calculate_card_status",
+]

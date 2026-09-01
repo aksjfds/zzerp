@@ -3,17 +3,41 @@ from __future__ import annotations
 """Department production-task dispatch and assembly-task query."""
 
 from collections import defaultdict
+
 from sqlalchemy import func, or_, select
+
 from database import SessionLocal
+from domain.material_identity import production_item_material_key
 from modules.engineering.model_api import Product, ProductBom
-from modules.planning.persistence import ProductionPlan, ProductionPlanItem, ProductionRouteTask
-from modules.planning.assembly_progress import assembly_arrival_progress, assembly_completion_summary
-from modules.planning.department_progress import list_standard_department_progress
 from modules.organization.model_api import Department, Workshop
-from modules.production_core.model_api import ProductionItem, ProductionMovement, WorkOrder, WorkOrderBatch
-from modules.sales.model_api import CustomerOrder, CustomerOrderItem
+from modules.planning.assembly_progress import assembly_arrival_progress
+from modules.planning.assembly_input_projection import normal_input_material_keys
+from modules.planning.department_progress import list_standard_department_progress
+from modules.planning.plan_builder import planned_product_quantity
+from modules.planning.persistence import (
+    ProductionPlan,
+    ProductionPlanItem,
+    ProductionRouteTask,
+)
+from modules.planning.progress_calculations import (
+    _group,
+    released_task_quantity,
+)
+from modules.planning.task_status_summary import (
+    TaskAvailableSource,
+    build_task_processing_statuses,
+)
+from modules.production_core.model_api import (
+    ProductionItem,
+    ProductionMovement,
+    Repository,
+    WorkOrder,
+    WorkOrderBatch,
+)
 from modules.production_core.operational_api import load_product_flow
-from modules.planning.progress_calculations import _group, _process_completion_summary
+from modules.production_core.workbench_read_api import reserved_quantities
+from modules.sales.model_api import CustomerOrder, CustomerOrderItem
+
 
 def list_department_production_progress(
     department_code: str,
@@ -29,6 +53,7 @@ def list_department_production_progress(
         page_size,
         keyword,
     )
+
 
 def _list_assembly_production_progress(
     page: int,
@@ -189,6 +214,18 @@ def _list_assembly_production_progress(
             order_item.id
             for _, _, order_item, *_rest in tasks
         }
+        plan_items_by_order_item = _group(
+            list(session.scalars(
+                select(ProductionPlanItem).where(
+                    ProductionPlanItem.customer_order_item_id.in_(order_item_ids)
+                )
+            )),
+            "customer_order_item_id",
+        )
+        planned_product_quantity_by_order_item = {
+            order_item_id: planned_product_quantity(items)
+            for order_item_id, items in plan_items_by_order_item.items()
+        }
         production_items = list(session.scalars(
             select(ProductionItem).where(
                 ProductionItem.customer_order_item_id.in_(order_item_ids)
@@ -232,6 +269,7 @@ def _list_assembly_production_progress(
                     work_order
                 )
         work_order_ids = {item.id for item in work_orders}
+        work_order_by_id = {item.id: item for item in work_orders}
         batches_by_order: dict[int, list[WorkOrderBatch]] = defaultdict(list)
         if work_order_ids:
             for batch in session.scalars(
@@ -240,6 +278,24 @@ def _list_assembly_production_progress(
                 )
             ):
                 batches_by_order[batch.work_order_id].append(batch)
+
+        repositories = list(session.scalars(
+            select(Repository).where(
+                Repository.production_item_id.in_(production_item_ids),
+                Repository.department_id == assembly_department.id,
+            )
+        )) if production_item_ids else []
+        repositories_by_order_item: dict[int, list[Repository]] = defaultdict(list)
+        for repository in repositories:
+            production_item = production_item_by_id.get(repository.production_item_id)
+            if production_item is not None:
+                repositories_by_order_item[
+                    production_item.customer_order_item_id
+                ].append(repository)
+        reserved_by_repository = reserved_quantities(
+            session,
+            [repository.id for repository in repositories],
+        )
 
         bom_items = {
             item.id: item
@@ -267,6 +323,10 @@ def _list_assembly_production_progress(
                 int(assembly_node.get("output_pcs") or 1),
                 1,
             )
+            task_quantity = (
+                planned_product_quantity_by_order_item.get(order_item.id, 0)
+                * output_unit_quantity
+            )
             remarks = [
                 value.strip()
                 for value in (order_item.remark, order.remark)
@@ -287,11 +347,22 @@ def _list_assembly_production_progress(
                 (order_item.id, task_node_id),
                 [],
             )
+            item_repositories = repositories_by_order_item.get(order_item.id, [])
+            task_repositories = [
+                repository
+                for repository in item_repositories
+                if repository.flow_node_id == task_node_id
+                and repository.quantity
+                    - reserved_by_repository.get(repository.id, 0) > 0
+            ]
+            available_sources: list[TaskAvailableSource] = []
+            task_movements = movements_by_order_item.get(order_item.id, [])
             if task_node_id == plan_item.flow_node_id:
-                completed_quantity = assembly_completion_summary(
+                completed_quantity = released_task_quantity(
+                    task_movements,
                     task_orders,
-                    batches_by_order,
-                    output_unit_quantity,
+                    task_node_id,
+                    nodes,
                 )
                 arrived_quantity, material_arrivals = assembly_arrival_progress(
                     flow,
@@ -301,35 +372,174 @@ def _list_assembly_production_progress(
                     production_items_by_order_item.get(order_item.id, []),
                     movements_by_order_item.get(order_item.id, []),
                     bom_items,
-                    plan_item.planned_production_quantity,
+                    task_quantity,
+                )
+                initial_capacity = _initial_assembly_capacity(
+                    task_repositories,
+                    reserved_by_repository,
+                    production_item_by_id,
+                    flow,
+                    nodes,
+                    task_node_id,
+                    bom_items,
+                )
+                if initial_capacity > 0:
+                    available_sources.append(
+                        TaskAvailableSource(
+                            repository_id=None,
+                            completed_work_order_name=None,
+                            creation_mode="assembly_initial",
+                            quantity=initial_capacity,
+                        )
+                    )
+                continuation_key = f"assembly:{task_node_id}"
+                available_sources.extend(
+                    _repository_status_sources(
+                        [
+                            repository
+                            for repository in task_repositories
+                            if production_item_material_key(
+                                production_item_by_id[repository.production_item_id]
+                            ) == continuation_key
+                        ],
+                        work_order_by_id,
+                        {task_node_id},
+                        reserved_by_repository,
+                    )
                 )
             else:
-                completed_quantity = _process_completion_summary(
+                completed_quantity = released_task_quantity(
+                    task_movements,
                     task_orders,
-                    batches_by_order,
+                    task_node_id,
+                    nodes,
                 )
                 arrived_quantity = sum(
                     movement.quantity
-                    for movement in movements_by_order_item.get(order_item.id, [])
+                    for movement in task_movements
                     if movement.target_flow_node_id == task_node_id
                     and movement.source_flow_node_id != task_node_id
                 )
                 material_arrivals = []
+                available_sources.extend(
+                    _repository_status_sources(
+                        [
+                            repository
+                            for repository in task_repositories
+                            if output_item is not None
+                            and repository.production_item_id == output_item.id
+                        ],
+                        work_order_by_id,
+                        {task_node_id},
+                        reserved_by_repository,
+                    )
+                )
             processing_workshop = (
                 task_workshop.workshop_name
                 if task_workshop else str(task_node.get("label") or "装配")
             )
-            rows.append({
-                "production_plan_item_id": plan_item.id,
-                "production_item_id": output_item.id if output_item else None,
-                "flow_node_id": task_node_id,
-                "part_no": plan_item.item_code,
-                "part_name": f"{product.product_name}-{plan_item.item_name}",
-                "processing_workshop": processing_workshop,
-                "task_quantity": plan_item.planned_production_quantity,
-                "arrived_quantity": arrived_quantity,
-                "material_arrivals": material_arrivals,
-                "completed_quantity": completed_quantity,
-                "remark": "；".join(dict.fromkeys(remarks)),
-            })
+            rows.append(
+                {
+                    "production_plan_item_id": plan_item.id,
+                    "customer_order_item_id": plan_item.customer_order_item_id,
+                    "production_item_id": output_item.id if output_item else None,
+                    "flow_node_id": task_node_id,
+                    "plan_status": _plan.status,
+                    "part_no": plan_item.item_code,
+                    "part_name": f"{product.product_name}-{plan_item.item_name}",
+                    "processing_workshop_id": task_workshop.id,
+                    "processing_workshop": processing_workshop,
+                    "task_quantity": task_quantity,
+                    "arrived_quantity": arrived_quantity,
+                    "material_arrivals": material_arrivals,
+                    "processing_statuses": build_task_processing_statuses(
+                        task_orders,
+                        batches_by_order,
+                        available_sources=available_sources,
+                        task_quantity=task_quantity,
+                        completed_quantity=completed_quantity,
+                        assembly_output_unit_quantity=(
+                            output_unit_quantity
+                            if task_node_id == plan_item.flow_node_id
+                            else None
+                        ),
+                    ),
+                    "completed_quantity": completed_quantity,
+                    "remark": "；".join(dict.fromkeys(remarks)),
+                }
+            )
         return rows, total
+
+
+def _repository_status_sources(
+    repositories: list[Repository],
+    work_order_by_id: dict[int, WorkOrder],
+    task_node_ids: set[str],
+    reserved_by_repository: dict[int, int],
+) -> list[TaskAvailableSource]:
+    result = []
+    for repository in repositories:
+        source_order = work_order_by_id.get(repository.source_work_order_id)
+        result.append(
+            TaskAvailableSource(
+                repository_id=repository.id,
+                completed_work_order_name=(
+                    source_order.work_order_name
+                    if source_order is not None
+                    and source_order.flow_node_id in task_node_ids
+                    else None
+                ),
+                creation_mode="repository",
+                quantity=max(
+                    repository.quantity
+                    - reserved_by_repository.get(repository.id, 0),
+                    0,
+                ),
+            )
+        )
+    return result
+
+
+def _initial_assembly_capacity(
+    repositories: list[Repository],
+    reserved_by_repository: dict[int, int],
+    production_item_by_id: dict[int, ProductionItem],
+    flow: dict,
+    nodes: dict[str, dict],
+    assembly_node_id: str,
+    bom_items: dict[int, ProductBom],
+) -> int:
+    required = set(
+        normal_input_material_keys(
+            flow,
+            nodes,
+            assembly_node_id,
+        )
+    )
+    if not required:
+        return 0
+    available_by_key: dict[str, int] = defaultdict(int)
+    unit_by_key: dict[str, int] = {}
+    for repository in repositories:
+        item = production_item_by_id.get(repository.production_item_id)
+        if item is None:
+            continue
+        key = production_item_material_key(item)
+        if key not in required:
+            continue
+        available_by_key[key] += max(
+            repository.quantity - reserved_by_repository.get(repository.id, 0),
+            0,
+        )
+        if item.product_bom_id is not None:
+            bom_item = bom_items.get(item.product_bom_id)
+            unit_by_key[key] = max(int(bom_item.pcs if bom_item else 1), 1)
+        else:
+            origin = nodes.get(item.origin_flow_node_id, {})
+            unit_by_key[key] = max(int(origin.get("output_pcs") or 1), 1)
+    if not required.issubset(available_by_key):
+        return 0
+    return min(
+        available_by_key[key] // unit_by_key.get(key, 1)
+        for key in required
+    )

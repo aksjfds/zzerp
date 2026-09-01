@@ -8,11 +8,6 @@ from modules.production_core.flow_api import assembly_material_key
 from modules.production_core.model_api import (
     ProductionItem,
     ProductionMovement,
-    WorkOrder,
-    WorkOrderBatch,
-)
-from modules.production_core.operational_api import (
-    calculate_assembly_output_progress,
 )
 
 
@@ -129,26 +124,7 @@ def assembly_arrival_progress(
     return complete_products * output_quantity, details
 
 
-def assembly_completion_summary(
-    work_orders: list[WorkOrder],
-    batches_by_order: dict[int, list[WorkOrderBatch]],
-    output_unit_quantity: int,
-) -> int:
-    completed_quantity = 0
-    for work_order in work_orders:
-        batches = batches_by_order.get(work_order.id, [])
-        progress = calculate_assembly_output_progress(
-            work_order,
-            batches,
-            output_unit_quantity,
-        )
-        completed_quantity += progress.qualified_quantity
-
-    return completed_quantity
-
-
 __all__ = [
     "assembly_arrival_progress",
     "assembly_arrived_output_quantity",
-    "assembly_completion_summary",
 ]

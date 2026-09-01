@@ -27,7 +27,7 @@ export function useProductionProgressDetail(
       const result = await queryProductionProgressItemDetail(
         currentDepartmentCode,
         currentItem.production_plan_item_id,
-        currentItem.processing_workshop,
+        currentItem.processing_workshop_id,
         currentItem.flow_node_id,
       )
       if (revision === requestRevision) detail.value = result
@@ -44,7 +44,7 @@ export function useProductionProgressDetail(
     () => [
       toValue(visible),
       toValue(item)?.production_plan_item_id,
-      toValue(item)?.processing_workshop,
+      toValue(item)?.processing_workshop_id,
       toValue(item)?.flow_node_id,
     ] as const,
     ([open]) => {

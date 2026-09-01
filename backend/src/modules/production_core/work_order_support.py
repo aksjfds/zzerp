@@ -1,5 +1,10 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from sqlalchemy import select
 
+from domain.production_types import STANDARD_EXECUTION_WORK_ORDER_TYPES
 from modules.engineering.model_api import ProductBom
 from modules.organization.model_api import Department, Workshop
 from modules.production_core.persistence import (
@@ -14,7 +19,31 @@ from modules.production_core.flow import (
     ProductionFlowContext,
     load_product_flow,
     load_production_flow,
+    process_qc_node,
 )
+
+
+@dataclass(frozen=True, slots=True)
+class WorkOrderSubmissionCapabilities:
+    qc_available: bool
+    direct_result_allowed: bool
+
+
+def work_order_submission_capabilities(
+    order: WorkOrder,
+    flow: dict,
+    nodes: dict[str, dict],
+) -> WorkOrderSubmissionCapabilities:
+    standard_execution = (
+        order.work_order_type in STANDARD_EXECUTION_WORK_ORDER_TYPES
+    )
+    return WorkOrderSubmissionCapabilities(
+        qc_available=(
+            standard_execution
+            and process_qc_node(flow, nodes, order.flow_node_id) is not None
+        ),
+        direct_result_allowed=standard_execution,
+    )
 
 
 def flow_context(session, production_item: ProductionItem) -> ProductionFlowContext:

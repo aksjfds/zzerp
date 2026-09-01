@@ -8,7 +8,6 @@ from domain.production_types import (
     WORK_ORDER_SUPPLIER_PROCESSING,
 )
 from domain.time import business_iso
-from modules.production_core.flow import process_qc_node
 from modules.production_core.persistence import WorkOrder, WorkOrderBatch
 from modules.production_core.production_item_presenters import assembly_output_name
 from modules.production_core.undo_presenters import serialize_undo_operation
@@ -19,6 +18,9 @@ from modules.production_core.work_order_presenter_context import (
 from modules.production_core.work_order_progress import (
     calculate_assembly_output_progress,
     calculate_work_order_progress,
+)
+from modules.production_core.work_order_support import (
+    work_order_submission_capabilities,
 )
 
 
@@ -111,14 +113,11 @@ def map_work_order(
         )
         if operation_batch is None or operation_batch.recorded_at is not None:
             undo_operation = None
-    configured_qc = process_qc_node(
+    submission_capabilities = work_order_submission_capabilities(
+        order,
         flow_context.flow,
         flow_context.nodes,
-        order.flow_node_id,
-    ) is not None
-    standard_execution = order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING
-    qc_available = configured_qc and standard_execution
-    direct_result_allowed = standard_execution
+    )
     return {
         "id": order.id,
         "work_order_no": order.work_order_no,
@@ -131,8 +130,10 @@ def map_work_order(
         "is_temporary": order.is_temporary,
         "supplier_name": order.supplier_name,
         "supplier_process_name": order.supplier_process_name,
-        "qc_available": qc_available,
-        "direct_result_allowed": direct_result_allowed,
+        "qc_available": submission_capabilities.qc_available,
+        "direct_result_allowed": (
+            submission_capabilities.direct_result_allowed
+        ),
         "customer_order_no": customer_order.customer_order_no,
         "factory_code": product.factory_code if product else "",
         "product_name": product.product_name if product else "",

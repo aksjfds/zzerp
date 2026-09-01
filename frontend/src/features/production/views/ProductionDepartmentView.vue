@@ -1,14 +1,17 @@
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref } from 'vue'
+import { ElMessage } from 'element-plus'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
-import ProductionPositionList from '../components/ProductionPositionList.vue'
-import ProductionPositionOverview from '../components/ProductionPositionOverview.vue'
-import ProductionProcedureSummary from '../components/ProductionProcedureSummary.vue'
-import ProductionWorkbenchFilterBar from '../components/ProductionWorkbenchFilterBar.vue'
-import ProductionWorkbenchWorkOrders from '../components/ProductionWorkbenchWorkOrders.vue'
+import TaskWorkOrderChoiceDialog from '../components/TaskWorkOrderChoiceDialog.vue'
+import DepartmentProductionProgressView from './DepartmentProductionProgressView.vue'
 import { useProductionWorkbench } from '../composables/useProductionWorkbench'
+import type {
+  DepartmentProductionProgressItem,
+  ProductionTaskProcessingStatus,
+} from '../domain/productionProgress'
+import type { TaskWorkOrderChoice } from '../domain/workOrderCreation'
 import '../styles/workspace.css'
 
 const props = withDefaults(defineProps<{
@@ -18,8 +21,83 @@ const props = withDefaults(defineProps<{
   specialPrinting?: boolean
 }>(), { specialPrinting: false })
 const workbench = useProductionWorkbench(props.departmentCode)
+const taskView = ref<InstanceType<typeof DepartmentProductionProgressView>>()
+const choices = ref<TaskWorkOrderChoice[]>([])
+const choiceVisible = ref(false)
+let openRevision = 0
 
-onMounted(workbench.load)
+function availableChoices(status: ProductionTaskProcessingStatus): TaskWorkOrderChoice[] {
+  const repositoryIds = new Set(status.repository_ids)
+  return workbench.positions.value.flatMap(position => position.sources
+    .filter(source => (
+      source.available_quantity > 0
+      && repositoryIds.has(source.repository_id)
+    ))
+    .map(source => ({
+      key: `${position.position_key}:${source.repository_id}`,
+      position_key: position.position_key,
+      mode: 'standard' as const,
+      repository_id: source.repository_id,
+      label: `${position.item_name} · ${position.workshop_name}`,
+      description: `${position.source_node_label} · 可开工 ${source.available_quantity}`,
+    })))
+}
+
+function activateChoice(choice: TaskWorkOrderChoice) {
+  const position = workbench.positions.value.find(
+    item => item.position_key === choice.position_key,
+  )
+  const source = position?.sources.find(
+    item => item.repository_id === choice.repository_id,
+  )
+  if (!position || !source) {
+    ElMessage.warning('开单来源已变化，请重新选择')
+    return
+  }
+  workbench.selectPositionForCreation(position)
+  workbench.selectSource(source)
+  choiceVisible.value = false
+  workbench.openWorkOrder()
+}
+
+async function openTaskWorkOrder(
+  item: DepartmentProductionProgressItem,
+  status: ProductionTaskProcessingStatus,
+) {
+  const revision = ++openRevision
+  choiceVisible.value = false
+  choices.value = []
+  if (item.production_item_id === null) {
+    ElMessage.warning('物料尚未进入生产流程')
+    return
+  }
+  await workbench.focusTask(item)
+  if (revision !== openRevision) return
+  choices.value = availableChoices(status)
+  if (!choices.value.length) {
+    ElMessage.warning(
+      workbench.positions.value.length
+        ? '当前任务没有可开工数量'
+        : '物料尚未到达当前车间',
+    )
+    return
+  }
+  if (choices.value.length === 1 && choices.value[0]) {
+    activateChoice(choices.value[0])
+    return
+  }
+  choiceVisible.value = true
+}
+
+async function refresh() {
+  await taskView.value?.load()
+}
+
+async function saveWorkOrder(
+  payload: Parameters<typeof workbench.saveWorkOrder>[0],
+) {
+  if (await workbench.saveWorkOrder(payload)) await taskView.value?.load()
+}
 </script>
 
 <template>
@@ -27,93 +105,36 @@ onMounted(workbench.load)
     <DepartmentPageHeader
       :department-name="departmentName"
       :description="description"
-      @refresh="workbench.refresh"
+      @refresh="refresh"
     />
     <DepartmentSectionTabs
       :department-code="departmentCode"
+      workspace-label="生产任务"
       show-inventory
       show-workers
-      show-progress
       show-procedure-prices
-      @configuration-saved="workbench.reloadWorkspace"
     >
-      <ProductionWorkbenchFilterBar
-        :workshops="workbench.workshops.value"
-        @search="workbench.applyFilters"
+      <DepartmentProductionProgressView
+        ref="taskView"
+        embedded
+        :department-code="departmentCode"
+        :special-printing="specialPrinting"
+        @create-work-order="openTaskWorkOrder"
       />
-      <section class="production-workspace production-workspace--viewport workbench-layout">
-        <div class="production-card production-scroll-column position-column">
-          <ProductionPositionList
-            :items="workbench.positions.value"
-            :loading="workbench.positionsLoading.value"
-            :selected-key="workbench.selectedPositionKey.value"
-            @select="workbench.selectPosition"
-          />
-          <ElPagination
-            v-model:current-page="workbench.positionPage.value"
-            class="production-pagination"
-            layout="prev, next, total"
-            :page-size="workbench.pageSize"
-            :total="workbench.positionTotal.value"
-            @current-change="workbench.changePositionPage"
-          />
-        </div>
 
-        <div class="production-execution production-scroll-column workbench-detail-column">
-          <template v-if="workbench.selectedPosition.value">
-            <ProductionPositionOverview
-              :position="workbench.selectedPosition.value"
-              :selected-source="workbench.selectedSource.value"
-              @select-source="workbench.selectSource"
-              @create-work-order="workbench.openWorkOrder"
-            />
-            <ProductionProcedureSummary
-              :items="workbench.procedureSummaries.value"
-              :selected="workbench.isProcedureSelected"
-              @select="workbench.selectProcedure"
-            />
-            <ProductionWorkbenchWorkOrders
-              :items="workbench.workOrders.value"
-              :loading="workbench.workOrdersLoading.value"
-              :special-printing="specialPrinting"
-              @submit-qc="workbench.workOrderActions.submitQc"
-              @submit-direct-result="workbench.workOrderActions.submitDirectResult"
-              @resubmit-qc="workbench.workOrderActions.resubmitQc"
-              @cancel="workbench.workOrderActions.cancel"
-              @undo="workbench.workOrderActions.undo"
-            />
-            <ElPagination
-              v-model:current-page="workbench.workOrderPage.value"
-              class="production-pagination"
-              layout="prev, pager, next, total"
-              :page-size="workbench.pageSize"
-              :total="workbench.workOrderTotal.value"
-              @current-change="workbench.changeWorkOrderPage"
-            />
-          </template>
-          <ElEmpty v-else description="请选择在位物料查看加工情况" :image-size="72" />
-        </div>
-      </section>
+      <TaskWorkOrderChoiceDialog
+        v-model="choiceVisible"
+        :choices="choices"
+        @confirm="activateChoice"
+      />
 
       <CreateWorkOrderDialog
         v-model="workbench.dialogVisible.value"
         :item="workbench.creationTarget.value"
         :workers="workbench.workOrderWorkers.value"
         :submitting="workbench.submitting.value"
-        @submit="workbench.saveWorkOrder"
+        @submit="saveWorkOrder"
       />
     </DepartmentSectionTabs>
   </main>
 </template>
-
-<style scoped>
-.workbench-layout { grid-template-columns: minmax(310px, 370px) minmax(0, 1fr); }
-.position-column { padding: 14px; }
-.workbench-detail-column { gap: 12px; padding-right: 3px; overflow-y: auto !important; scrollbar-gutter: stable; }
-.workbench-detail-column > :first-child { min-height: auto !important; flex: 0 0 auto !important; overflow: visible !important; }
-.workbench-detail-column > :deep(.el-empty) { margin: auto; }
-@media (max-width: 900px) {
-  .workbench-layout { grid-template-columns: 1fr; }
-  .workbench-detail-column { overflow-y: visible !important; }
-}
-</style>

@@ -1,6 +1,9 @@
 """Map loaded department progress context to the API response."""
 
-from modules.planning.production_progress_cards import build_progress_card
+from modules.planning.production_progress_cards import (
+    build_progress_card,
+    build_progress_work_order_row,
+)
 
 
 def build_department_progress_response(
@@ -9,6 +12,8 @@ def build_department_progress_response(
     plan,
     order,
     product,
+    flow,
+    nodes,
     department_route_nodes,
     procedures,
     workshops,
@@ -16,6 +21,7 @@ def build_department_progress_response(
     department_codes,
     production_item_ids,
     work_orders,
+    serialized_work_orders,
     batches_by_order,
     workers,
     arrivals_by_node,
@@ -42,6 +48,8 @@ def build_department_progress_response(
             procedure = procedures.get(procedure_id) if procedure_id else None
             cards.append(build_progress_card(
                 node=node,
+                flow=flow,
+                nodes=nodes,
                 procedure=procedure,
                 workshop=workshop,
                 department=department,
@@ -56,6 +64,42 @@ def build_department_progress_response(
                 sort_order=sort_order,
             ))
 
+    for card in cards:
+        for work_order_row in card["work_orders"]:
+            work_order_row["work_order"] = serialized_work_orders[
+                work_order_row["id"]
+            ]
+
+    work_order_rows = {
+        item["id"]: item
+        for card in cards
+        for item in card["work_orders"]
+    }
+    node_by_id = {node["id"]: node for node in department_route_nodes}
+    for work_order in work_orders:
+        if work_order.id in work_order_rows:
+            continue
+        node = node_by_id.get(work_order.flow_node_id)
+        if node is None:
+            continue
+        workshop = workshops.get(node.get("workshop_id"))
+        procedure = (
+            procedures.get(work_order.procedure_id)
+            if work_order.procedure_id else None
+        )
+        row, _progress = build_progress_work_order_row(
+            node=node,
+            flow=flow,
+            nodes=nodes,
+            procedure=procedure,
+            workshop=workshop,
+            order=work_order,
+            batches=batches_by_order.get(work_order.id, []),
+            workers=workers,
+        )
+        row["work_order"] = serialized_work_orders[work_order.id]
+        work_order_rows[work_order.id] = row
+
     return {
         "production_plan_item_id": plan_item.id,
         "production_item_ids": sorted(production_item_ids),
@@ -67,6 +111,10 @@ def build_department_progress_response(
         "plan_status": plan.status,
         "task_quantity": plan_item.planned_production_quantity,
         "cards": cards,
+        "work_orders": [
+            work_order_rows[work_order_id]
+            for work_order_id in sorted(work_order_rows, reverse=True)
+        ],
     }
 
 

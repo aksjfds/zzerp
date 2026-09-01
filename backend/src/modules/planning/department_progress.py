@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from sqlalchemy import func, or_, select, tuple_
+from sqlalchemy import func, or_, select
 
 from database import SessionLocal
 from modules.engineering.model_api import Product
@@ -14,16 +14,20 @@ from modules.planning.persistence import (
     ProductionPlanItem,
     ProductionRouteTask,
 )
+from modules.planning.progress_calculations import released_task_quantity
+from modules.planning.task_status_summary import (
+    TaskAvailableSource,
+    build_task_processing_statuses,
+)
 from modules.production_core.model_api import (
     ProductionItem,
     ProductionMovement,
+    Repository,
     WorkOrder,
     WorkOrderBatch,
 )
-from modules.production_core.operational_api import (
-    calculate_work_order_progress,
-    load_product_flow,
-)
+from modules.production_core.operational_api import load_product_flow
+from modules.production_core.workbench_read_api import reserved_quantities
 from modules.sales.model_api import Customer, CustomerOrder, CustomerOrderItem
 
 
@@ -44,12 +48,13 @@ def list_standard_department_progress(
         normalized_keyword = (keyword or "").strip()
         candidate = (
             select(
+                ProductionRouteTask.id.label("route_task_id"),
                 ProductionRouteTask.production_plan_item_id.label("plan_item_id"),
                 ProductionRouteTask.workshop_id.label("workshop_id"),
-                func.max(CustomerOrder.created_at).label("order_created_at"),
-                func.max(CustomerOrder.customer_order_no).label("order_no"),
-                func.max(ProductionPlanItem.item_code).label("item_code"),
-                func.min(ProductionRouteTask.route_order).label("route_order"),
+                CustomerOrder.created_at.label("order_created_at"),
+                CustomerOrder.customer_order_no.label("order_no"),
+                ProductionPlanItem.item_code.label("item_code"),
+                ProductionRouteTask.route_order.label("route_order"),
             )
             .join(
                 ProductionPlanItem,
@@ -80,10 +85,6 @@ def list_standard_department_progress(
                 ProductionPlanItem.item_type.in_(("part", "assembly")),
                 ProductionPlanItem.planned_production_quantity > 0,
             )
-            .group_by(
-                ProductionRouteTask.production_plan_item_id,
-                ProductionRouteTask.workshop_id,
-            )
         )
         if normalized_keyword:
             pattern = f"%{normalized_keyword}%"
@@ -103,32 +104,25 @@ def list_standard_department_progress(
             session.scalar(select(func.count()).select_from(candidate_subquery))
             or 0
         )
-        page_pairs = list(
-            session.execute(
-                select(
-                    candidate_subquery.c.plan_item_id,
-                    candidate_subquery.c.workshop_id,
-                )
+        route_task_ids = list(
+            session.scalars(
+                select(candidate_subquery.c.route_task_id)
                 .order_by(
                     candidate_subquery.c.order_created_at.desc(),
                     candidate_subquery.c.order_no.desc(),
                     candidate_subquery.c.item_code.desc(),
                     candidate_subquery.c.plan_item_id.desc(),
                     candidate_subquery.c.route_order,
-                    candidate_subquery.c.workshop_id,
+                    candidate_subquery.c.route_task_id,
                 )
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
         )
-        if not page_pairs:
+        if not route_task_ids:
             return [], total
 
-        pair_keys = [
-            (int(row.plan_item_id), int(row.workshop_id))
-            for row in page_pairs
-        ]
-        context_rows = session.execute(
+        context_rows = list(session.execute(
             select(
                 ProductionRouteTask,
                 ProductionPlanItem,
@@ -159,39 +153,32 @@ def list_standard_department_progress(
             .join(Product, Product.id == ProductionPlanItem.product_id)
             .join(Workshop, Workshop.id == ProductionRouteTask.workshop_id)
             .where(
-                tuple_(
-                    ProductionRouteTask.production_plan_item_id,
-                    ProductionRouteTask.workshop_id,
-                ).in_(pair_keys),
+                ProductionRouteTask.id.in_(route_task_ids),
                 ProductionRouteTask.route_node_type == "process",
             )
             .order_by(ProductionRouteTask.route_order)
-        )
-        grouped_context: dict[tuple[int, int], list[tuple]] = defaultdict(list)
-        for row in context_rows:
-            grouped_context[
-                (row[0].production_plan_item_id, row[0].workshop_id)
-            ].append(row)
+        ))
+        context_by_id = {row[0].id: row for row in context_rows}
         flow_cache: dict[tuple[int, int], tuple[dict, dict[str, dict]]] = {}
         tasks = []
-        for pair_key in pair_keys:
-            rows_for_pair = grouped_context.get(pair_key, [])
-            if not rows_for_pair:
+        for route_task_id in route_task_ids:
+            context = context_by_id.get(route_task_id)
+            if context is None:
                 continue
             (
-                _route_task,
+                route_task,
                 plan_item,
                 plan,
                 order_item,
                 order,
                 product,
                 workshop,
-            ) = rows_for_pair[0]
+            ) = context
             flow_key = (plan_item.product_id, plan_item.product_version)
             if flow_key not in flow_cache:
                 flow_cache[flow_key] = load_product_flow(session, *flow_key)
             _flow, nodes = flow_cache[flow_key]
-            route_nodes = [nodes[row[0].route_flow_node_id] for row in rows_for_pair]
+            route_nodes = [nodes[route_task.route_flow_node_id]]
             tasks.append((
                 plan_item,
                 plan,
@@ -261,6 +248,22 @@ def list_standard_department_progress(
             )
             for work_order in work_orders:
                 orders_by_item[work_order.production_item_id].append(work_order)
+        work_order_by_id = {item.id: item for item in work_orders}
+        repositories_by_item: dict[int, list[Repository]] = defaultdict(list)
+        repositories = []
+        if production_item_ids:
+            repositories = list(session.scalars(
+                select(Repository).where(
+                    Repository.production_item_id.in_(production_item_ids),
+                    Repository.department_id == department.id,
+                )
+            ))
+            for repository in repositories:
+                repositories_by_item[repository.production_item_id].append(repository)
+        reserved_by_repository = reserved_quantities(
+            session,
+            [repository.id for repository in repositories],
+        )
         batches_by_order: dict[int, list[WorkOrderBatch]] = defaultdict(list)
         work_order_ids = {item.id for item in work_orders}
         if work_order_ids:
@@ -313,36 +316,60 @@ def list_standard_department_progress(
                     else "等待前序生产"
                 )
             node_ids = {node["id"] for node in route_nodes}
-            arrived_quantity = _workshop_arrived_quantity(
-                movements,
-                nodes,
+            task_work_orders = [
+                work_order
+                for work_order in work_orders_for_item
+                if work_order.flow_node_id in node_ids
+            ]
+            available_sources = _available_status_sources(
+                (
+                    repositories_by_item.get(production_item.id, [])
+                    if production_item is not None
+                    else []
+                ),
+                reserved_by_repository,
+                work_order_by_id,
                 node_ids,
-                workshop.id,
             )
-            completed_quantity = _workshop_completed_quantity(
-                work_orders_for_item,
-                batches_by_order,
+            arrived_quantity = _node_arrived_quantity(
+                movements,
                 node_ids,
+            )
+            completed_quantity = released_task_quantity(
+                movements,
+                task_work_orders,
+                route_nodes[0]["id"],
+                nodes,
             )
             rows.append(
                 {
                     "production_plan_item_id": plan_item.id,
+                    "customer_order_item_id": plan_item.customer_order_item_id,
                     "production_item_id": (
                         production_item.id
                         if production_item is not None
                         else None
                     ),
-                    "flow_node_id": None,
+                    "flow_node_id": route_nodes[0]["id"],
+                    "plan_status": plan.status,
                     "part_no": plan_item.item_code,
                     "part_name": (
                         f"{product.product_name}-{plan_item.item_name}"
                     ),
+                    "processing_workshop_id": workshop.id,
                     "processing_workshop": (
                         workshop.workshop_name
                     ),
                     "task_quantity": plan_item.planned_production_quantity,
                     "arrived_quantity": arrived_quantity,
                     "material_arrivals": [],
+                    "processing_statuses": build_task_processing_statuses(
+                        task_work_orders,
+                        batches_by_order,
+                        available_sources=available_sources,
+                        task_quantity=plan_item.planned_production_quantity,
+                        completed_quantity=completed_quantity,
+                    ),
                     "completed_quantity": completed_quantity,
                     "remark": "；".join(dict.fromkeys(remarks)),
                 }
@@ -350,38 +377,48 @@ def list_standard_department_progress(
         return rows, total
 
 
-def _workshop_arrived_quantity(
+def _node_arrived_quantity(
     movements: list[ProductionMovement],
-    nodes: dict[str, dict],
     target_node_ids: set[str],
-    workshop_id: int,
 ) -> int:
     return sum(
         movement.quantity
         for movement in movements
         if movement.target_flow_node_id in target_node_ids
-        and nodes.get(movement.source_flow_node_id or "", {}).get("workshop_id")
-        != workshop_id
+        and movement.source_flow_node_id not in target_node_ids
     )
 
 
-def _workshop_completed_quantity(
-    work_orders: list[WorkOrder],
-    batches_by_order: dict[int, list[WorkOrderBatch]],
-    flow_node_ids: set[str],
-) -> int:
-    completed_by_operation: dict[tuple[str, int], int] = defaultdict(int)
-    for work_order in work_orders:
-        if work_order.flow_node_id not in flow_node_ids:
-            continue
-        progress = calculate_work_order_progress(
-            work_order,
-            batches_by_order.get(work_order.id, []),
+def _available_status_sources(
+    repositories: list[Repository],
+    reserved_by_repository: dict[int, int],
+    work_order_by_id: dict[int, WorkOrder],
+    task_node_ids: set[str],
+) -> list[TaskAvailableSource]:
+    sources = []
+    for repository in repositories:
+        available_quantity = (
+            repository.quantity
+            - reserved_by_repository.get(repository.id, 0)
         )
-        completed_by_operation[
-            (work_order.flow_node_id, work_order.procedure_id)
-        ] += progress.qualified_quantity
-    return max(completed_by_operation.values(), default=0)
+        if (
+            repository.flow_node_id not in task_node_ids
+            or available_quantity <= 0
+        ):
+            continue
+        source_order = work_order_by_id.get(repository.source_work_order_id)
+        sources.append(TaskAvailableSource(
+            repository_id=repository.id,
+            completed_work_order_name=(
+                source_order.work_order_name
+                if source_order is not None
+                and source_order.flow_node_id in task_node_ids
+                else None
+            ),
+            creation_mode="repository",
+            quantity=available_quantity,
+        ))
+    return sources
 
 
 __all__ = ["list_standard_department_progress"]

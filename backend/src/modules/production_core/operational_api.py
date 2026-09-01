@@ -25,6 +25,7 @@ from modules.production_core.work_order_presenters import (
     production_item_name,
     serialize_batch,
     serialize_work_order,
+    serialize_work_orders,
 )
 from modules.production_core.work_order_progress import (
     SupplierProcessingQcProgress,
@@ -39,6 +40,7 @@ from modules.production_core.work_order_progress import (
     validate_supplier_processing_work_order_progress,
 )
 from modules.production_core.work_order_support import (
+    WorkOrderSubmissionCapabilities,
     consume_repository,
     move_to_node,
     node_context,
@@ -46,12 +48,14 @@ from modules.production_core.work_order_support import (
     finished_inbound_node_and_unit_quantity,
     target_department_id,
     terminal_unit_quantity,
+    work_order_submission_capabilities,
 )
 
 __all__ = [
     "InventorySource",
     "ProductionItemDisplayContext",
     "SupplierProcessingQcProgress",
+    "WorkOrderSubmissionCapabilities",
     "can_close_production_work_order",
     "calculate_assembly_output_progress",
     "calculate_supplier_processing_qc_progress",
@@ -76,8 +80,10 @@ __all__ = [
     "rework_pending_quantities",
     "serialize_batch",
     "serialize_work_order",
+    "serialize_work_orders",
     "finished_inbound_node_and_unit_quantity",
     "target_department_id",
     "terminal_unit_quantity",
     "validate_supplier_processing_work_order_progress",
+    "work_order_submission_capabilities",
 ]

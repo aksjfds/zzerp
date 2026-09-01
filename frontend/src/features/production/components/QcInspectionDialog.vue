@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { PendingQcBatch, QcInspectionPayload, WorkerItem } from '../domain/types'
+import type { QcBatchRow, QcInspectionPayload, WorkerItem } from '../domain/types'
 
 const props = defineProps<{
   modelValue: boolean
-  batch?: PendingQcBatch
+  batch?: QcBatchRow
   workers: WorkerItem[]
   submitting?: boolean
 }>()
@@ -58,7 +58,7 @@ function submit() {
 
 <template>
   <ElDialog :model-value="modelValue" title="录入 QC 结果" width="520px" @update:model-value="emit('update:modelValue', $event)">
-    <p class="inspection-title">{{ batch?.work_order_name }} · 送检数量：{{ batch?.submitted_quantity }}</p>
+    <p class="inspection-title">第 {{ batch?.batch_sequence }} 批 · 送检数量：{{ batch?.submitted_quantity }}</p>
     <ElFormItem label="QC 工人" required>
       <ElSelect v-model="inspection.qc_worker_id" placement="top-start" :fallback-placements="['top-start', 'top-end']" placeholder="请选择 QC 工人" style="width: 100%">
         <ElOption v-for="worker in workers" :key="worker.id" :label="worker.worker_name" :value="worker.id" />

@@ -1,4 +1,5 @@
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -15,6 +16,7 @@ class ProcedurePriceItem(ProcedurePriceModel):
 
 
 class ProcedurePriceScope(ProcedurePriceModel):
+    row_type: Literal["formal"]
     product_id: int
     product_version: int
     product_name: str
@@ -27,14 +29,10 @@ class ProcedurePriceScope(ProcedurePriceModel):
     part_name: str
     part_no: str
     confirmed: bool
+    can_cancel: bool
     confirmed_at: str | None
     confirmed_by: str | None
     procedures: list[ProcedurePriceItem]
-
-
-class ProcedurePriceListEnvelope(ProcedurePriceModel):
-    data: list[ProcedurePriceScope]
-    total: int
 
 
 class ProcedurePriceInput(ProcedurePriceModel):
@@ -45,3 +43,34 @@ class ProcedurePriceInput(ProcedurePriceModel):
 
 class ProcedurePriceUpdate(ProcedurePriceModel):
     procedures: list[ProcedurePriceInput] = Field(default_factory=list, max_length=100)
+
+
+class TemporaryWorkOrderPriceItem(ProcedurePriceModel):
+    row_type: Literal["temporary"]
+    work_order_id: int
+    work_order_no: str
+    product_id: int
+    product_version: int
+    product_name: str
+    factory_code: str
+    part_name: str
+    part_no: str
+    workshop_name: str
+    procedure_name: str
+    unit_price: Decimal | None
+    status: str
+    created_at: str
+
+
+class ProcedurePriceListEnvelope(ProcedurePriceModel):
+    data: list[ProcedurePriceScope | TemporaryWorkOrderPriceItem]
+    total: int
+
+
+class TemporaryWorkOrderPriceUpdate(ProcedurePriceModel):
+    unit_price: Decimal | None = Field(
+        default=None,
+        ge=0,
+        max_digits=12,
+        decimal_places=2,
+    )

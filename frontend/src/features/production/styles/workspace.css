@@ -1,45 +1,7 @@
 .production-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
-.production-workspace { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 18px; align-items: start; }
-.production-execution { min-width: 0; }
 .production-card { margin-bottom: 18px; padding: 20px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.production-workspace--viewport {
-  height: calc(100dvh - var(--erp-page-gutter) - 120px);
-  max-height: calc(100dvh - var(--erp-page-gutter) - 120px);
-  align-items: stretch;
-}
-.production-workspace--viewport .production-scroll-column {
-  display: flex;
-  min-height: 0;
-  max-height: 100%;
-  flex-direction: column;
-  overflow: hidden;
-}
-.production-workspace--viewport .production-card.production-scroll-column { margin-bottom: 0; }
-.production-workspace--viewport .production-scroll-column > :first-child {
-  min-height: 0;
-  flex: 1;
-  align-content: start;
-  overflow-y: auto;
-  scrollbar-gutter: stable;
-}
-.production-workspace--viewport .production-scroll-column > .production-pagination {
-  flex: 0 0 auto;
-}
-.production-details { min-height: 260px; }
-.production-selection { display: flex; justify-content: space-between; gap: 16px; align-items: center; padding-bottom: 14px; }
-.production-selection span { color: var(--md-on-surface-variant); font-size: 13px; }
 .production-pagination { justify-content: flex-end; margin-top: 14px; }
-@media (max-width: 900px) {
-  .production-workspace { grid-template-columns: 1fr; }
-  .production-workspace--viewport {
-    height: auto;
-    max-height: none;
-  }
-  .production-workspace--viewport .production-scroll-column { max-height: none; overflow: visible; }
-  .production-workspace--viewport .production-scroll-column > :first-child { overflow-y: visible; }
-}
 @media (max-width: 600px) {
   .production-page { padding: 12px; }
   .production-card { padding: 14px; border-radius: var(--erp-radius); }
-  .production-selection { align-items: flex-start; flex-direction: column; gap: 4px; }
 }

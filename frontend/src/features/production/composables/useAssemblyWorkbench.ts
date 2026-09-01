@@ -2,35 +2,32 @@ import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { queryDepartmentWorkers } from '../api/departmentWorkers'
-import { queryProductionWorkbenchWorkshops } from '../api/productionWorkbench'
 import { createAssemblyWorkOrder, createWorkOrder } from '../api/workOrders'
 import type {
   AssemblyWorkbenchContinuationSource,
   AssemblyWorkbenchPosition,
   ProductionWorkbenchPosition,
-  ProductionWorkbenchWorkshop,
   StandardWorkbenchSource,
   WorkbenchInventorySource,
 } from '../domain/productionWorkbench'
 import type { WorkerItem } from '../domain/types'
+import type { DepartmentProductionProgressItem } from '../domain/productionProgress'
 import type {
   AssemblyWorkOrderCreationMaterial,
   AssemblyWorkOrderCreationTarget,
   WorkOrderCreationTarget,
 } from '../domain/workOrderCreation'
-import { useAssemblyWorkOrderActions } from './useAssemblyWorkOrderActions'
 import { useProductionWorkbenchReader } from './useProductionWorkbenchReader'
-import { useProductionWorkOrderActions } from './useProductionWorkOrderActions'
 
 export function useAssemblyWorkbench() {
   const reader = useProductionWorkbenchReader<ProductionWorkbenchPosition>('assembly')
-  const workshops = ref<ProductionWorkbenchWorkshop[]>([])
   const workers = ref<WorkerItem[]>([])
   const selectedStandardSourceId = ref<number>()
   const selectedContinuationSourceId = ref<number>()
   const standardDialogVisible = ref(false)
   const assemblyDialogVisible = ref(false)
   const submitting = ref(false)
+  let referenceDataLoaded = false
 
   const selectedStandardSource = computed(() => {
     const position = reader.selectedPosition.value
@@ -44,11 +41,6 @@ export function useAssemblyWorkbench() {
       item => item.repository_id === selectedContinuationSourceId.value,
     )
   })
-  const selectedMode = computed(() => (
-    reader.selectedPosition.value?.position_type === 'assembly'
-      ? 'assembly' as const
-      : 'production' as const
-  ))
   const workOrderWorkers = computed(() => workers.value.filter(
     item => item.workshop_id === reader.selectedPosition.value?.workshop_id,
   ))
@@ -147,13 +139,6 @@ export function useAssemblyWorkbench() {
   })
   const activeAssemblyTarget = ref<AssemblyWorkOrderCreationTarget>()
 
-  async function selectPosition(position: ProductionWorkbenchPosition) {
-    selectedStandardSourceId.value = undefined
-    selectedContinuationSourceId.value = undefined
-    retainSingleSources(position)
-    await reader.selectPosition(position)
-  }
-
   function selectStandardSource(source: StandardWorkbenchSource) {
     selectedStandardSourceId.value = source.repository_id
   }
@@ -232,8 +217,10 @@ export function useAssemblyWorkbench() {
       standardDialogVisible.value = false
       await reloadWorkspace()
       ElMessage.success('工单已创建')
+      return true
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
+      return false
     } finally {
       submitting.value = false
     }
@@ -263,8 +250,10 @@ export function useAssemblyWorkbench() {
       activeAssemblyTarget.value = undefined
       await reloadWorkspace()
       ElMessage.success('工单已创建')
+      return true
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建工单失败')
+      return false
     } finally {
       submitting.value = false
     }
@@ -275,46 +264,35 @@ export function useAssemblyWorkbench() {
     if (reader.selectedPosition.value) retainSingleSources(reader.selectedPosition.value)
   }
 
-  async function applyFilters(filters: Parameters<typeof reader.applyFilters>[0]) {
-    selectedStandardSourceId.value = undefined
-    selectedContinuationSourceId.value = undefined
-    await reader.applyFilters(filters)
-  }
-
-  async function changePositionPage(page: number) {
-    selectedStandardSourceId.value = undefined
-    selectedContinuationSourceId.value = undefined
-    await reader.changePositionPage(page)
-  }
-
   async function loadReferenceData() {
+    if (referenceDataLoaded) return
+    try {
+      workers.value = await queryDepartmentWorkers('assembly')
+      referenceDataLoaded = true
+    } catch {
+      ElMessage.warning('工人列表加载失败')
+    }
+  }
+
+  async function focusTask(task: DepartmentProductionProgressItem) {
+    selectedStandardSourceId.value = undefined
+    selectedContinuationSourceId.value = undefined
     await Promise.all([
-      queryProductionWorkbenchWorkshops('assembly')
-        .then(items => { workshops.value = items })
-        .catch(() => { ElMessage.warning('车间列表加载失败') }),
-      queryDepartmentWorkers('assembly')
-        .then(items => { workers.value = items })
-        .catch(() => { ElMessage.warning('工人列表加载失败') }),
+      loadReferenceData(),
+      reader.focusTask({
+        customerOrderItemId: task.customer_order_item_id,
+        flowNodeId: task.flow_node_id,
+        workshopId: task.processing_workshop_id,
+      }),
     ])
+    if (reader.selectedPosition.value) retainSingleSources(reader.selectedPosition.value)
   }
-
-  async function load() {
-    await Promise.all([loadReferenceData(), reader.loadPositions(false)])
-  }
-
-  const assemblyActions = useAssemblyWorkOrderActions(reloadWorkspace)
-  const productionActions = useProductionWorkOrderActions(reloadWorkspace)
-  const workOrderActions = computed(() => (
-    selectedMode.value === 'assembly' ? assemblyActions : productionActions
-  ))
 
   return {
     ...reader,
     activeAssemblyTarget,
-    applyFilters,
     assemblyDialogVisible,
-    changePositionPage,
-    load,
+    focusTask,
     openContinuationWorkOrder,
     openInitialAssemblyWorkOrder,
     openStandardWorkOrder,
@@ -323,16 +301,12 @@ export function useAssemblyWorkbench() {
     saveAssemblyWorkOrder,
     saveStandardWorkOrder,
     selectContinuationSource,
-    selectPosition,
     selectStandardSource,
     selectedContinuationSource,
-    selectedMode,
     selectedStandardSource,
     standardCreationTarget,
     standardDialogVisible,
     submitting,
-    workOrderActions,
     workOrderWorkers,
-    workshops,
   }
 }

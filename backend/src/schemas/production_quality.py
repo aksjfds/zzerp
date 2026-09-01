@@ -41,17 +41,23 @@ class WorkOrderBatchEnvelope(ProductionModel):
     data: WorkOrderBatchResponse
 
 
-class PendingQcResponse(WorkOrderBatchResponse):
-    repository_id: int | None
+class QcBatchRowResponse(WorkOrderBatchResponse):
+    batch_sequence: int
+    rework_source_batch_sequence: int | None
+    allowed_destinations: list[QcQualifiedDestination]
+    can_undo_inspection: bool
+
+
+class QcInspectionBatchRowResponse(QcBatchRowResponse):
     production_item_id: int
-    work_order_no: str
     customer_order_no: str
     part_no: str
     part_name: str
+    work_order_no: str
     work_order_name: str
-    allowed_destinations: list[QcQualifiedDestination]
+    worker_name: str | None
 
 
-class PendingQcListEnvelope(ProductionModel):
-    data: list[PendingQcResponse]
+class QcInspectionBatchListEnvelope(ProductionModel):
+    data: list[QcInspectionBatchRowResponse]
     total: int

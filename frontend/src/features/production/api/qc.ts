@@ -1,27 +1,26 @@
 import { service } from '@/api/request'
 import type {
-  PendingQcBatch,
+  QcInspectionBatchRow,
   QcDestination,
   QcInspectionPayload,
   SupplierProcessingQcInspectionPayload,
   SupplierProcessingQcTask,
   WorkOrderBatch,
 } from '../domain/types'
+import type { ProductionProgressWorkOrder } from '../domain/productionProgress'
 
-export async function queryPendingQcBatches(
+export async function queryQcInspectionBatches(
   page = 1,
   pageSize = 50,
-  productionItemId?: number | null,
   history = false,
   keyword = '',
 ) {
-  const response = await service.get<{ data: PendingQcBatch[]; total: number }>(
-    '/qc/work-order-batches',
+  const response = await service.get<{ data: QcInspectionBatchRow[]; total: number }>(
+    '/qc/inspection-batches',
     {
       params: {
         page,
         page_size: pageSize,
-        production_item_id: productionItemId || undefined,
         history,
         keyword: keyword || undefined,
       },
@@ -30,12 +29,23 @@ export async function queryPendingQcBatches(
   return { items: response.data.data, total: response.data.total }
 }
 
+export async function queryQcWorkOrderDetail(workOrderId: number) {
+  const response = await service.get<ProductionProgressWorkOrder>(
+    `/qc/work-orders/${workOrderId}`,
+  )
+  return response.data
+}
+
 export async function inspectQcBatch(batchId: number, payload: QcInspectionPayload) {
   const response = await service.post<{ data: WorkOrderBatch }>(
     `/qc/work-order-batches/${batchId}/inspection`,
     payload,
   )
   return response.data.data
+}
+
+export async function undoQcInspection(batchId: number) {
+  await service.post(`/qc/work-order-batches/${batchId}/inspection/undo`)
 }
 
 export async function decideQcDestination(batchId: number, destination: QcDestination) {

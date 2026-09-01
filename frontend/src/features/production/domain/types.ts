@@ -104,15 +104,21 @@ export type WorkOrder = {
   } | null
 }
 
-export type PendingQcBatch = WorkOrderBatch & {
-  repository_id: number | null
+export type QcBatchRow = WorkOrderBatch & {
+  batch_sequence: number
+  rework_source_batch_sequence: number | null
+  allowed_destinations: QcDestination[]
+  can_undo_inspection: boolean
+}
+
+export type QcInspectionBatchRow = QcBatchRow & {
   production_item_id: number
-  work_order_no: string
   customer_order_no: string
   part_no: string
   part_name: string
+  work_order_no: string
   work_order_name: string
-  allowed_destinations: QcDestination[]
+  worker_name: string | null
 }
 
 export type CompletionAction = 'direct' | 'qc'

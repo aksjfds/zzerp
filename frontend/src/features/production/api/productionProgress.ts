@@ -26,14 +26,14 @@ export async function queryDepartmentProductionProgress(
 export async function queryProductionProgressItemDetail(
   departmentCode: string,
   productionPlanItemId: number,
-  processingWorkshop?: string,
+  processingWorkshopId?: number,
   flowNodeId?: string | null,
 ) {
   const response = await service.get<ProductionProgressItemDetail>(
     `/departments/${departmentCode}/production-progress/items/${productionPlanItemId}`,
     {
       params: {
-        processing_workshop: processingWorkshop || undefined,
+        processing_workshop_id: processingWorkshopId || undefined,
         flow_node_id: flowNodeId || undefined,
       },
     },

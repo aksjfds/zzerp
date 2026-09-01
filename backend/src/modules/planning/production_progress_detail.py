@@ -18,13 +18,15 @@ from modules.production_core.model_api import (
     WorkOrder,
     WorkOrderBatch,
 )
-from modules.production_core.operational_api import load_product_flow
+from modules.production_core.operational_api import (
+    load_product_flow,
+    serialize_work_orders,
+)
 from modules.planning.production_progress_mapper import (
     build_department_progress_response,
 )
 from modules.planning.production_progress_routes import (
     _node_department_code,
-    _node_workshop_name,
 )
 from modules.planning.progress_routes import progress_route_nodes
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
@@ -34,7 +36,7 @@ from modules.workforce.model_api import Worker
 def get_department_production_progress_item(
     department_code: str,
     production_plan_item_id: int,
-    processing_workshop: str | None = None,
+    processing_workshop_id: int | None = None,
     flow_node_id: str | None = None,
 ) -> dict:
     with SessionLocal() as session:
@@ -100,14 +102,11 @@ def get_department_production_progress_item(
                     "当前生产任务节点不存在，请刷新后重试",
                     status_code=404,
                 )
-        if processing_workshop:
+        if processing_workshop_id:
             department_route_nodes = [
                 node
                 for node in department_route_nodes
-                if _node_workshop_name(
-                    node,
-                    workshops,
-                ) == processing_workshop
+                if node.get("workshop_id") == processing_workshop_id
             ]
             if not department_route_nodes:
                 raise DomainError(
@@ -154,6 +153,11 @@ def get_department_production_progress_item(
         batches_by_order: dict[int, list[WorkOrderBatch]] = defaultdict(list)
         for batch in batches:
             batches_by_order[batch.work_order_id].append(batch)
+        serialized_work_orders = serialize_work_orders(
+            session,
+            work_orders,
+            batches=batches_by_order,
+        )
 
         worker_ids = {item.worker_id for item in work_orders if item.worker_id}
         workers = {
@@ -199,6 +203,8 @@ def get_department_production_progress_item(
             plan=plan,
             order=order,
             product=product,
+            flow=flow,
+            nodes=nodes,
             department_route_nodes=department_route_nodes,
             procedures=procedures,
             workshops=workshops,
@@ -206,6 +212,7 @@ def get_department_production_progress_item(
             department_codes=department_codes,
             production_item_ids=production_item_ids,
             work_orders=work_orders,
+            serialized_work_orders=serialized_work_orders,
             batches_by_order=batches_by_order,
             workers=workers,
             arrivals_by_node=arrivals_by_node,

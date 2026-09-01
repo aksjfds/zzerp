@@ -8,11 +8,6 @@ from departments.contracts import (
 )
 from departments.registry import department_api
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
-from domain.production_workbench import (
-    ProductionWorkbenchAttention,
-    ProductionWorkbenchPositionType,
-)
-from modules.organization.api import list_workshops_by_department_code
 from departments.warehouse_orchestration import (
     list_completed_plan_positions,
     store_completed_plan_position,
@@ -29,10 +24,8 @@ from schemas.production import (
     DepartmentWorkerPayEnvelope,
     ProductionProgressItemDetailResponse,
     ProductionWorkbenchPositionListEnvelope,
-    ProductionWorkbenchWorkOrderListEnvelope,
     WorkerListEnvelope,
 )
-from schemas.organization import WorkshopResponse
 
 
 router = APIRouter(tags=["production"])
@@ -72,18 +65,6 @@ def department_position_warehouse_storage(
 
 
 @router.get(
-    "/departments/{department_code}/production-workbench/workshops",
-    response_model=list[WorkshopResponse],
-)
-def department_production_workbench_workshops(
-    department_code: str,
-    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
-):
-    ensure_department_access(user, department_code)
-    return list_workshops_by_department_code(department_code)
-
-
-@router.get(
     "/departments/{department_code}/production-progress",
     response_model=DepartmentProductionProgressEnvelope,
 )
@@ -110,7 +91,7 @@ def department_production_progress(
 def department_production_progress_item(
     department_code: str,
     production_plan_item_id: int,
-    processing_workshop: str | None = Query(default=None, max_length=100),
+    processing_workshop_id: int | None = Query(default=None, gt=0),
     flow_node_id: str | None = Query(default=None, max_length=200),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
@@ -120,7 +101,7 @@ def department_production_progress_item(
         CAP_PRODUCTION_PROGRESS,
     ).get_production_progress_item(
         production_plan_item_id,
-        processing_workshop,
+        processing_workshop_id,
         flow_node_id,
     )
 
@@ -133,9 +114,10 @@ def department_production_workbench_positions(
     department_code: str,
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
-    keyword: str | None = Query(default=None, max_length=200),
-    workshop_name: str | None = Query(default=None, max_length=200),
-    attention: ProductionWorkbenchAttention = Query(default="all"),
+    customer_order_item_id: int = Query(gt=0),
+    workshop_id: int = Query(gt=0),
+    flow_node_id: str = Query(min_length=1, max_length=200),
+    production_item_id: int | None = Query(default=None, gt=0),
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
@@ -145,49 +127,12 @@ def department_production_workbench_positions(
     ).list_production_workbench_positions(
         page,
         page_size,
-        keyword,
-        workshop_name,
-        attention,
+        customer_order_item_id,
+        workshop_id,
+        flow_node_id,
+        production_item_id,
     )
     return {"data": data, "total": total}
-
-
-@router.get(
-    "/departments/{department_code}/production-workbench/work-orders",
-    response_model=ProductionWorkbenchWorkOrderListEnvelope,
-)
-def department_production_workbench_work_orders(
-    department_code: str,
-    position_type: ProductionWorkbenchPositionType = Query(),
-    page: int = Query(default=1, gt=0),
-    page_size: int = Query(default=50, gt=0, le=200),
-    production_item_id: int | None = Query(default=None, gt=0),
-    customer_order_item_id: int | None = Query(default=None, gt=0),
-    flow_node_id: str = Query(min_length=1, max_length=200),
-    source_flow_node_id: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=200,
-    ),
-    procedure_id: int | None = Query(default=None, gt=0),
-    is_temporary: bool | None = Query(default=None),
-    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
-):
-    ensure_department_access(user, department_code)
-    return department_api(
-        department_code,
-        CAP_PRODUCTION_WORKBENCH,
-    ).list_production_workbench_work_orders(
-        position_type,
-        page,
-        page_size,
-        production_item_id=production_item_id,
-        customer_order_item_id=customer_order_item_id,
-        flow_node_id=flow_node_id,
-        source_flow_node_id=source_flow_node_id,
-        procedure_id=procedure_id,
-        is_temporary=is_temporary,
-    )
 
 
 @router.get(
