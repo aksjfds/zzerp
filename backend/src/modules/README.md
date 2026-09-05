@@ -36,7 +36,7 @@ create copies of the production state machine.
 - `inventory.finished_receipt_api`: pending finished receipts from either a QC release batch or a completed packaging work order; the two source identities are mutually exclusive.
 - `inventory`: temporary non-finished warehouse operations, unified finished stock, reservations and immutable ledgers.
 - `workforce`: worker administration, history and pay projections.
-- `planning`: production plans, PMC and other cross-module read models.
+- `planning`: production plans and cross-module progress read models.
 - `supplier_processing`: business-owned task creation plus supplier-processing QC orchestration; it owns no duplicate production tables and does not reuse outsource-department execution.
 
 ## Dependency rules
@@ -84,7 +84,7 @@ they may not construct or mutate foreign-owned records.
 | `planning.department_progress` | planning | ordinary department task list |
 | `planning.production_workbench` / `production_workbench_orders` | planning | production-position workbench and related work-order projections |
 | `planning.production_progress_detail` | planning | department task detail drawer |
-| `planning.order_status_view` / `sales_progress_api` | planning | sales order production summaries and flow status |
+| `planning.order_status_view` / `sales_material_progress` / `sales_progress_api` | planning | sales order flow summaries and product-material-position progress projections |
 | `inventory.api` | inventory | temporary warehouse and unified finished-stock HTTP facade |
 | `inventory.finished_stock_query_api` | inventory | unified finished stock, reservation and transaction read models |
 | `production_core.work_order_queries` / `work_order_presenters` | production_core | owner work-order query and response mapping |

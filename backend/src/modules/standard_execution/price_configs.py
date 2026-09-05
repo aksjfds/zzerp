@@ -1,7 +1,7 @@
 from collections import defaultdict
 from dataclasses import dataclass
 
-from sqlalchemy import func, or_, select, tuple_, update
+from sqlalchemy import func, or_, select, tuple_
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -31,6 +31,7 @@ from modules.production_core.reference_api import (
 from modules.standard_execution.persistence import (
     ProcedureConfiguration,
     ProcedurePrice,
+    ProcedurePriceRevision,
     WorkOrderPayDetail,
 )
 from schemas.procedure_prices import ProcedurePriceUpdate, TemporaryWorkOrderPriceUpdate
@@ -38,9 +39,35 @@ from schemas.procedure_prices import ProcedurePriceUpdate, TemporaryWorkOrderPri
 
 @dataclass(frozen=True, slots=True)
 class _ConfigurationScope:
+    department_id: int
     material_key: str
     workshop_id: int
     expected_input_mode: str
+    target_prefix: str
+
+
+def _record_price_revision(
+    session,
+    *,
+    department_id: int,
+    target_type: str,
+    target_id: int,
+    target_label: str,
+    previous_unit_price,
+    new_unit_price,
+    actor_username: str,
+) -> None:
+    if previous_unit_price == new_unit_price:
+        return
+    session.add(ProcedurePriceRevision(
+        department_id=department_id,
+        target_type=target_type,
+        target_id=target_id,
+        target_label=target_label,
+        previous_unit_price=previous_unit_price,
+        new_unit_price=new_unit_price,
+        actor_username=actor_username,
+    ))
 
 
 def _reachable_workshop_nodes(flow: dict, origin_id: str) -> list[dict]:
@@ -322,6 +349,8 @@ def _temporary_work_order_price_rows(
             "work_order_no": reference.work_order_no,
             "product_id": reference.product_id,
             "product_version": reference.product_version,
+            "origin_flow_node_id": reference.origin_flow_node_id,
+            "flow_node_id": reference.flow_node_id,
             "product_name": product.product_name,
             "factory_code": product.factory_code,
             "part_name": route.origin_item_name,
@@ -341,6 +370,7 @@ def update_temporary_work_order_price(
     payload: TemporaryWorkOrderPriceUpdate,
     user_department: str | None,
     user_is_system: bool,
+    actor_username: str,
 ) -> None:
     with SessionLocal.begin() as session:
         department = _department(
@@ -378,7 +408,61 @@ def update_temporary_work_order_price(
                 "临时工单计价信息不完整",
                 status_code=409,
             )
+        _record_price_revision(
+            session,
+            department_id=department.id,
+            target_type="temporary",
+            target_id=pay_detail.id,
+            target_label=f"临时工单 {reference.work_order_no} · {pay_detail.procedure_name}",
+            previous_unit_price=pay_detail.unit_price,
+            new_unit_price=payload.unit_price,
+            actor_username=actor_username,
+        )
         pay_detail.unit_price = payload.unit_price
+
+
+def list_procedure_price_revisions(
+    department_code: str,
+    page: int,
+    page_size: int,
+    user_department: str | None,
+    user_is_system: bool,
+) -> tuple[list[dict], int]:
+    with SessionLocal() as session:
+        department = _department(
+            session,
+            department_code,
+            user_department,
+            user_is_system,
+        )
+        base = select(ProcedurePriceRevision).where(
+            ProcedurePriceRevision.department_id == department.id
+        )
+        total = session.scalar(
+            select(func.count(ProcedurePriceRevision.id)).where(
+                ProcedurePriceRevision.department_id == department.id
+            )
+        ) or 0
+        rows = list(session.scalars(
+            base.order_by(
+                ProcedurePriceRevision.created_at.desc(),
+                ProcedurePriceRevision.id.desc(),
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ))
+        return [
+            {
+                "id": item.id,
+                "target_type": item.target_type,
+                "target_label": item.target_label,
+                "previous_unit_price": item.previous_unit_price,
+                "new_unit_price": item.new_unit_price,
+                "actor_username": item.actor_username,
+                "created_at": business_iso(item.created_at),
+            }
+            for item in rows
+        ], total
 
 
 def update_procedure_price(
@@ -509,13 +593,6 @@ def _save_procedure_configuration(
         user_department,
         user_is_system,
     )
-    scoped_order_ids = list_standard_execution_order_ids(
-        session,
-        product_id=product_id,
-        product_version=product_version,
-        origin_flow_node_id=origin_flow_node_id,
-        flow_node_id=flow_node_id,
-    )
     normalized: dict[str, tuple[int | None, object]] = {}
     for item in payload.procedures:
         name = item.procedure_name.strip()
@@ -576,17 +653,34 @@ def _save_procedure_configuration(
         retained_ids.add(procedure.id)
         price = existing_by_procedure.get(procedure.id)
         if price is None:
-            session.add(ProcedurePrice(
+            price = ProcedurePrice(
                 configuration_id=configuration.id,
                 procedure_id=procedure.id, unit_price=unit_price,
-            ))
+            )
+            session.add(price)
+            session.flush()
+            _record_price_revision(
+                session,
+                department_id=scope.department_id,
+                target_type="formal",
+                target_id=price.id,
+                target_label=f"{scope.target_prefix} · {procedure.procedure_name}",
+                previous_unit_price=None,
+                new_unit_price=unit_price,
+                actor_username=actor_username,
+            )
         else:
+            _record_price_revision(
+                session,
+                department_id=scope.department_id,
+                target_type="formal",
+                target_id=price.id,
+                target_label=f"{scope.target_prefix} · {procedure.procedure_name}",
+                previous_unit_price=price.unit_price,
+                new_unit_price=unit_price,
+                actor_username=actor_username,
+            )
             price.unit_price = unit_price
-        if scoped_order_ids:
-            session.execute(update(WorkOrderPayDetail).where(
-                WorkOrderPayDetail.procedure_id == procedure.id,
-                WorkOrderPayDetail.work_order_id.in_(scoped_order_ids),
-            ).values(unit_price=unit_price))
     for price in existing_prices:
         if price.procedure_id in retained_ids:
             continue
@@ -600,6 +694,24 @@ def _save_procedure_configuration(
         ):
             raise DomainError("procedure_referenced", "已被工单引用的工艺不能删除")
         procedure_id = price.procedure_id
+        procedure_name = next(
+            (
+                item.procedure_name
+                for item in get_department_procedure_routes(session, scope.department_id)
+                if item.id == procedure_id
+            ),
+            str(procedure_id),
+        )
+        _record_price_revision(
+            session,
+            department_id=scope.department_id,
+            target_type="formal",
+            target_id=price.id,
+            target_label=f"{scope.target_prefix} · {procedure_name}",
+            previous_unit_price=price.unit_price,
+            new_unit_price=None,
+            actor_username=actor_username,
+        )
         session.delete(price)
         session.flush()
         has_price = session.scalar(
@@ -673,9 +785,15 @@ def _resolve_configuration_scope(
         raise DomainError("procedure_price_workshop_invalid", "当前车间不属于该部门")
     bom_id = origin.get("bom_item_id") if origin.get("type") == "part" else None
     return _ConfigurationScope(
+        department_id=department.id,
         material_key=_material_key(bom_id, origin_flow_node_id),
         workshop_id=workshop.id,
         expected_input_mode="multiple" if node.get("type") == "assembly" else "single",
+        target_prefix=(
+            f"{product.factory_code}-{product.product_name} · "
+            f"{origin.get('part_no') or origin.get('assembly_code') or ''} "
+            f"{origin.get('label') or ''} · {workshop.workshop_name}"
+        ).strip(),
     )
 
 

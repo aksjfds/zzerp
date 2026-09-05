@@ -65,10 +65,6 @@ export function useAssemblyWorkbench() {
     selectedStandardSourceId.value = undefined
   }
 
-  function sourceLabel(index: number, source: WorkbenchInventorySource) {
-    return `来源 ${index + 1} · 可用 ${source.available_quantity} · 到达 ${source.arrived_at || '—'}`
-  }
-
   function initialMaterials(
     position: AssemblyWorkbenchPosition,
   ): AssemblyWorkOrderCreationMaterial[] {
@@ -77,9 +73,9 @@ export function useAssemblyWorkbench() {
       item_code: material.item_code,
       item_name: material.item_name,
       unit_quantity: material.unit_quantity,
-      sources: material.sources.map((source, index) => ({
+      sources: material.sources.map(source => ({
         repository_id: source.repository_id,
-        source_label: sourceLabel(index, source),
+        arrived_at: source.arrived_at,
         available_quantity: source.available_quantity,
       })),
     }))
@@ -131,7 +127,7 @@ export function useAssemblyWorkbench() {
         unit_quantity: 1,
         sources: [{
           repository_id: source.repository_id,
-          source_label: '所选节点在制品',
+          arrived_at: source.arrived_at,
           available_quantity: source.available_quantity,
         }],
       }],

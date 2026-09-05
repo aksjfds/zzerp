@@ -6,6 +6,7 @@ from domain.permissions import (
     SUPPLIER_PROCESSING_VIEW,
 )
 from modules.supplier_processing.api import (
+    cancel_supplier_processing_work_order,
     create_supplier_processing_work_order,
     list_tasks,
 )
@@ -48,6 +49,25 @@ def supplier_processing_work_order_create(
             supplier_name=payload.supplier_name,
             supplier_process_name=payload.supplier_process_name,
             remark=payload.remark,
+            actor_username=user["username"],
+        )
+    }
+
+
+@router.post(
+    "/work-orders/{work_order_id}/cancel",
+    response_model=WorkOrderEnvelope,
+)
+def supplier_processing_work_order_cancel(
+    work_order_id: int,
+    user: dict = Depends(
+        require_any_permission(SUPPLIER_PROCESSING_CREATE, csrf=True)
+    ),
+):
+    ensure_department_access(user, "business")
+    return {
+        "data": cancel_supplier_processing_work_order(
+            work_order_id=work_order_id,
             actor_username=user["username"],
         )
     }

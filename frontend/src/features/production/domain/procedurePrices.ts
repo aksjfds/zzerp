@@ -9,11 +9,11 @@ export type ProcedurePriceScope = {
   row_type: 'formal'
   product_id: number
   product_version: number
+  origin_flow_node_id: string
+  flow_node_id: string
   product_name: string
   factory_code: string
   product_bom_id: number | null
-  origin_flow_node_id: string
-  flow_node_id: string
   workshop_id: number
   workshop_name: string
   part_name: string
@@ -31,6 +31,8 @@ export type TemporaryWorkOrderPriceItem = {
   work_order_no: string
   product_id: number
   product_version: number
+  origin_flow_node_id: string
+  flow_node_id: string
   product_name: string
   factory_code: string
   part_name: string
@@ -43,3 +45,13 @@ export type TemporaryWorkOrderPriceItem = {
 }
 
 export type ProcedurePriceListItem = ProcedurePriceScope | TemporaryWorkOrderPriceItem
+
+export type ProcedurePriceRevision = {
+  id: number
+  target_type: 'formal' | 'temporary'
+  target_label: string
+  previous_unit_price: number | string | null
+  new_unit_price: number | string | null
+  actor_username: string
+  created_at: string
+}

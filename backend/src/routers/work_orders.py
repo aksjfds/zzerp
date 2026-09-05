@@ -17,9 +17,7 @@ from departments.work_order_orchestration import (
     cancel_work_order,
     resubmit_work_order_rework_batch,
     submit_work_order,
-)
-from modules.production_core.api import (
-    undo_production_operation,
+    undo_work_order_operation,
 )
 
 
@@ -118,7 +116,7 @@ def production_operation_undo(
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     return {
-        "data": undo_production_operation(
+        "data": undo_work_order_operation(
             operation_id,
             user["department"],
             user["is_system"],

@@ -10,13 +10,12 @@ import WorkOrderRecordCard from './WorkOrderRecordCard.vue'
 const props = defineProps<{
   modelValue: boolean
   task?: SupplierProcessingQcTask
-  releasingBatchId?: number | null
   undoingBatchId?: number | null
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
-  release: [batch: WorkOrderBatch]
   undoInspection: [batch: WorkOrderBatch]
+  undoRelease: [batch: WorkOrderBatch]
 }>()
 
 const visible = computed({
@@ -82,17 +81,9 @@ function closeByContextMenu() {
         <p v-if="task.remark" class="task-remark">备注：{{ task.remark }}</p>
       </template>
       <template #batchActions="{ batch }">
-        <footer v-if="!batch.qualified_destination" class="batch-actions">
+        <footer class="batch-actions">
           <ElButton
-            v-if="batch.qualified_quantity"
-            type="primary"
-            plain
-            size="small"
-            :loading="releasingBatchId === batch.id"
-            :disabled="releasingBatchId !== null && releasingBatchId !== batch.id"
-            @click="emit('release', batch)"
-          >放行</ElButton>
-          <ElButton
+            v-if="task.status === 'open' && !batch.qualified_destination"
             type="danger"
             plain
             size="small"
@@ -100,6 +91,15 @@ function closeByContextMenu() {
             :disabled="undoingBatchId !== null && undoingBatchId !== batch.id"
             @click="emit('undoInspection', batch)"
           >撤回质检</ElButton>
+          <ElButton
+            v-if="batch.qualified_destination"
+            type="danger"
+            plain
+            size="small"
+            :loading="undoingBatchId === batch.id"
+            :disabled="undoingBatchId !== null && undoingBatchId !== batch.id"
+            @click="emit('undoRelease', batch)"
+          >撤回放行</ElButton>
         </footer>
       </template>
     </WorkOrderRecordCard>

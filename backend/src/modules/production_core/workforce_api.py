@@ -112,10 +112,17 @@ def get_production_item_display(
     )
 
 
+def worker_has_work_orders(session: Session, worker_id: int) -> bool:
+    return session.scalar(
+        select(WorkOrder.id).where(WorkOrder.worker_id == worker_id).limit(1)
+    ) is not None
+
+
 __all__ = [
     "ProductionItemDisplay",
     "WorkOrderActivity",
     "get_production_item_display",
     "list_work_order_activities",
     "list_worker_activity_orders",
+    "worker_has_work_orders",
 ]

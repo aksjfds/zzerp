@@ -30,7 +30,6 @@ from modules.planning.production_progress_routes import (
 )
 from modules.planning.progress_routes import progress_route_nodes
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
-from modules.workforce.model_api import Worker
 
 
 def get_department_production_progress_item(
@@ -159,14 +158,6 @@ def get_department_production_progress_item(
             batches=batches_by_order,
         )
 
-        worker_ids = {item.worker_id for item in work_orders if item.worker_id}
-        workers = {
-            item.id: item
-            for item in session.scalars(
-                select(Worker).where(Worker.id.in_(worker_ids))
-            ).all()
-        } if worker_ids else {}
-
         movement_items = (
             order_production_items
             if plan_item.item_type == "assembly"
@@ -214,7 +205,6 @@ def get_department_production_progress_item(
             work_orders=work_orders,
             serialized_work_orders=serialized_work_orders,
             batches_by_order=batches_by_order,
-            workers=workers,
             arrivals_by_node=arrivals_by_node,
         )
 

@@ -8,6 +8,7 @@ from schemas.production import (
     QcInspection,
     ProductionProgressWorkOrderResponse,
     WorkOrderBatchEnvelope,
+    WorkOrderEnvelope,
 )
 from modules.supplier_processing.api import (
     list_qc_tasks as list_supplier_processing_qc_tasks,
@@ -31,10 +32,11 @@ qc_department = department_api("qc", CAP_QUALITY)
     response_model=SupplierProcessingQcTaskListEnvelope,
 )
 def supplier_processing_qc_tasks(
+    history: bool = Query(default=False),
     user: dict = Depends(require_any_permission(QC_INSPECT)),
 ):
     ensure_department_access(user, "qc")
-    data, total = list_supplier_processing_qc_tasks()
+    data, total = list_supplier_processing_qc_tasks(history=history)
     return {"data": data, "total": total}
 
 
@@ -163,6 +165,25 @@ def qc_batch_destination(
         "data": qc_department.decide_qc_destination(
             batch_id,
             payload,
+            user["username"],
+            user["department"],
+            user["is_system"],
+        )
+    }
+
+
+@router.post(
+    "/work-order-batches/{batch_id}/destination/undo",
+    response_model=WorkOrderEnvelope,
+)
+def qc_batch_destination_undo(
+    batch_id: int,
+    user: dict = Depends(require_any_permission(QC_INSPECT, csrf=True)),
+):
+    ensure_department_access(user, "qc")
+    return {
+        "data": qc_department.undo_qc_destination(
+            batch_id,
             user["username"],
             user["department"],
             user["is_system"],

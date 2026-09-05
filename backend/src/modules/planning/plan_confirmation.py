@@ -13,8 +13,8 @@ from modules.inventory.warehouse_api import WarehouseOutboundRequest
 from modules.planning.execution_contract import PlanExecutionCollaborators
 from modules.planning.persistence import ProductionPlan, ProductionPlanItem
 from modules.planning.plan_stock_view import (
-    completion_node_by_status,
     completion_status_priority,
+    processing_state_by_status,
 )
 
 
@@ -73,10 +73,20 @@ def _withdraw_material_stock(
     flow_cache: dict,
 ) -> tuple[IssuedInventoryStock, ...]:
     priority = completion_status_priority(session, item, flow_cache)
+    states = processing_state_by_status(session, item, flow_cache)
+    if not priority:
+        raise DomainError(
+            "production_plan_inventory_state_missing",
+            "可用仓库库存缺少本产品版本的加工状态记录",
+            status_code=409,
+            path="items",
+        )
     result = collaborators.withdraw_warehouse_stock(
         session,
         WarehouseOutboundRequest(
-            operation_group_no=f"plan:{plan.id}:item:{item.id}:confirm",
+            operation_group_no=(
+                f"plan:{plan.id}:item:{item.id}:confirm:revision:{plan.revision}"
+            ),
             context=WarehouseOperationContext(
                 source_type=WAREHOUSE_SOURCE_PLAN_CONFIRMATION,
                 production_plan_id=plan.id,
@@ -87,6 +97,7 @@ def _withdraw_material_stock(
             product_version=item.product_version,
             item_type=item.item_type,
             completion_status_priority=priority,
+            processing_state_ids=tuple((status, states[status].id) for status in priority),
             quantity=quantity,
             actor_username=actor_username,
         ),
@@ -98,12 +109,12 @@ def _withdraw_material_stock(
             status_code=409,
             path="items",
         )
-    node_by_status = completion_node_by_status(session, item, flow_cache)
     stocks: list[IssuedInventoryStock] = []
     for operation in result.operations:
-        completed_node_id = node_by_status.get(operation.completion_status)
+        state = states.get(operation.completion_status)
         if (
-            completed_node_id is None
+            state is None
+            or operation.processing_state_id != state.id
             or operation.warehouse_stock_id is None
             or operation.quantity_before is None
             or operation.quantity_after is None
@@ -119,7 +130,8 @@ def _withdraw_material_stock(
             product_id=plan_item.product_id,
             product_version=plan_item.product_version,
             flow_node_id=plan_item.flow_node_id,
-            completed_flow_node_id=completed_node_id,
+            processing_state_id=state.id,
+            resume_flow_node_id=state.resume_flow_node_id,
             quantity=operation.quantity,
             quantity_before=operation.quantity_before,
             quantity_after=operation.quantity_after,

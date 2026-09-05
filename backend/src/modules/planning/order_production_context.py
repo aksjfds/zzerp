@@ -12,7 +12,7 @@ from domain.production_types import (
     WORK_ORDER_STANDARD,
     WORK_ORDER_SUPPLIER_PROCESSING,
 )
-from modules.engineering.model_api import Product, ProductBom
+from modules.engineering.model_api import Product, ProductBom, ProductProcessFlow
 from modules.inventory.reference_api import finished_receipt_states_by_qc_batch
 from modules.production_core.flow_api import load_product_flow
 from modules.production_core.model_api import (
@@ -121,6 +121,17 @@ def _load_order_production_context(
         order_items={item.id: item for item in order_items},
         bom_items={item.id: item for item in bom_items},
     )
+    display.flow_cache.update({
+        (item.product_id, item.product_version): item
+        for item in session.scalars(
+            select(ProductProcessFlow).where(
+                tuple_(
+                    ProductProcessFlow.product_id,
+                    ProductProcessFlow.product_version,
+                ).in_(version_keys)
+            )
+        )
+    })
     for item in order_items:
         load_product_flow(
             session,

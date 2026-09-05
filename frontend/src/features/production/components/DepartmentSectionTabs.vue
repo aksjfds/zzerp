@@ -98,7 +98,7 @@ async function switchTab(tab: DepartmentTab) {
     </ElTabPane>
     <ElTabPane
       v-if="availableTabs.includes('inventory')"
-      label="物料入库"
+      label="物料"
       name="inventory"
       lazy
     >

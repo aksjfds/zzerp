@@ -77,6 +77,77 @@ class ProductionItem(Base):
     origin_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
 
 
+class MaterialProcessingState(Base):
+    __tablename__ = "material_processing_state"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_id", "product_version"],
+            ["product_version.product_id", "product_version.version"],
+            name="fk_material_processing_state_product_version",
+        ),
+        ForeignKeyConstraint(
+            ["product_bom_id", "product_id", "product_version"],
+            ["product_bom.id", "product_bom.product_id", "product_bom.product_version"],
+            name="fk_material_processing_state_bom_version",
+        ),
+        CheckConstraint("product_version > 0", name="ck_material_processing_state_version"),
+        CheckConstraint(
+            "item_type IN ('part', 'assembly')",
+            name="ck_material_processing_state_item_type",
+        ),
+        CheckConstraint(
+            "(item_type = 'part' AND product_bom_id IS NOT NULL) OR "
+            "(item_type = 'assembly' AND product_bom_id IS NULL)",
+            name="ck_material_processing_state_material",
+        ),
+        CheckConstraint(
+            "qc_status IN ('none', 'returned', 'released', 'stored')",
+            name="ck_material_processing_state_qc_status",
+        ),
+        CheckConstraint(
+            "display_text = btrim(display_text) AND display_text <> ''",
+            name="ck_material_processing_state_display",
+        ),
+        CheckConstraint(
+            "origin_flow_node_id = btrim(origin_flow_node_id) AND origin_flow_node_id <> '' "
+            "AND completed_flow_node_id = btrim(completed_flow_node_id) AND completed_flow_node_id <> '' "
+            "AND resume_flow_node_id = btrim(resume_flow_node_id) AND resume_flow_node_id <> ''",
+            name="ck_material_processing_state_nodes",
+        ),
+        CheckConstraint(
+            "jsonb_typeof(procedure_history) = 'array'",
+            name="ck_material_processing_state_history",
+        ),
+        CheckConstraint(
+            "length(state_signature) = 64",
+            name="ck_material_processing_state_signature",
+        ),
+        UniqueConstraint("state_signature", name="uq_material_processing_state_signature"),
+        UniqueConstraint(
+            "id", "product_id", "product_version",
+            name="uq_material_processing_state_context",
+        ),
+        Index(
+            "idx_material_processing_state_lookup",
+            "product_id", "product_version", "item_type", "product_bom_id",
+            "origin_flow_node_id", "display_text",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    item_type: Mapped[str] = mapped_column(Text, nullable=False)
+    product_bom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    origin_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    completed_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    resume_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    procedure_history: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    qc_status: Mapped[str] = mapped_column(Text, nullable=False)
+    display_text: Mapped[str] = mapped_column(Text, nullable=False)
+    state_signature: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 class Repository(Base):
     __tablename__ = "repository"
     __table_args__ = (
@@ -86,13 +157,21 @@ class Repository(Base):
             "production_item_id",
             name="uq_repository_id_production_item",
         ),
+        UniqueConstraint(
+            "id",
+            "production_item_id",
+            "processing_state_id",
+            name="uq_repository_source_context",
+        ),
         Index("idx_repository_department", "department_id"),
+        Index("idx_repository_processing_state", "processing_state_id"),
         Index(
             "uq_repository_initial_position",
             "production_item_id",
             "flow_node_id",
             "source_flow_node_id",
             "department_id",
+            "processing_state_id",
             unique=True,
             postgresql_where=text("source_work_order_id IS NULL"),
         ),
@@ -101,6 +180,7 @@ class Repository(Base):
             "source_work_order_id",
             "production_item_id",
             "flow_node_id",
+            "processing_state_id",
             unique=True,
             postgresql_where=text("source_work_order_id IS NOT NULL"),
         ),
@@ -110,6 +190,11 @@ class Repository(Base):
     production_item_id: Mapped[int] = mapped_column(
         BigInteger,
         ForeignKey("production_item.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    processing_state_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("material_processing_state.id"),
         nullable=False,
     )
     flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -187,6 +272,7 @@ class WorkOrder(Base):
             "AND supplier_process_name IS NULL) OR "
             "(work_order_type = 'standard' "
             "AND procedure_id IS NOT NULL "
+            "AND source_processing_state_id IS NOT NULL "
             "AND source_flow_node_id IS NOT NULL "
             "AND supplier_name IS NULL "
             "AND supplier_process_name IS NULL "
@@ -194,6 +280,7 @@ class WorkOrder(Base):
             "OR repository_id IS NOT NULL)) OR "
             "(work_order_type = 'supplier_processing' "
             "AND procedure_id IS NULL "
+            "AND source_processing_state_id IS NULL "
             "AND is_temporary = FALSE "
             "AND repository_id IS NULL "
             "AND worker_id IS NULL "
@@ -204,8 +291,8 @@ class WorkOrder(Base):
             name="ck_work_order_type_source",
         ),
         ForeignKeyConstraint(
-            ["repository_id", "production_item_id"],
-            ["repository.id", "repository.production_item_id"],
+            ["repository_id", "production_item_id", "source_processing_state_id"],
+            ["repository.id", "repository.production_item_id", "repository.processing_state_id"],
             name="fk_work_order_repository_item",
         ),
         UniqueConstraint("work_order_no", name="uq_work_order_no"),
@@ -216,6 +303,7 @@ class WorkOrder(Base):
             text("id DESC"),
         ),
         Index("idx_work_order_repository", "repository_id"),
+        Index("idx_work_order_source_processing_state", "source_processing_state_id"),
         Index("idx_work_order_production_item", "production_item_id"),
         Index(
             "idx_work_order_no_trgm",
@@ -254,7 +342,9 @@ class WorkOrder(Base):
             "production_item_id",
             "flow_node_id",
             unique=True,
-            postgresql_where=text("work_order_type = 'supplier_processing'"),
+            postgresql_where=text(
+                "work_order_type = 'supplier_processing' AND status <> 'cancelled'"
+            ),
         ),
         Index("idx_work_order_process_position", "production_item_id", "flow_node_id", "procedure_id", text("id DESC")),
     )
@@ -264,6 +354,11 @@ class WorkOrder(Base):
     repository_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     production_item_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("production_item.id"), nullable=False
+    )
+    source_processing_state_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("material_processing_state.id"),
+        nullable=True,
     )
     procedure_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("procedure.id"), nullable=True
@@ -300,12 +395,18 @@ class WorkOrderMaterial(Base):
     __table_args__ = (
         CheckConstraint("quantity > 0", name="ck_work_order_material_quantity"),
         ForeignKeyConstraint(
-            ["repository_id", "production_item_id"],
-            ["repository.id", "repository.production_item_id"],
+            ["repository_id", "production_item_id", "source_processing_state_id"],
+            ["repository.id", "repository.production_item_id", "repository.processing_state_id"],
             name="fk_work_order_material_repository_item",
         ),
         Index("idx_work_order_material_production_item", "production_item_id"),
         Index("idx_work_order_material_repository", "repository_id"),
+        Index(
+            "idx_work_order_material_open_occupancy",
+            "source_department_id",
+            "work_order_id",
+            postgresql_where=text("repository_id IS NULL"),
+        ),
         UniqueConstraint(
             "work_order_id",
             "repository_id",
@@ -326,6 +427,11 @@ class WorkOrderMaterial(Base):
     repository_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     production_item_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("production_item.id"), nullable=False
+    )
+    source_processing_state_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("material_processing_state.id"),
+        nullable=False,
     )
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -443,7 +549,7 @@ class ProductionMovement(Base):
         CheckConstraint(
             "movement_type IN ('initial', 'process', 'assembly_input', "
             "'assembly_output', 'qc_qualified', 'qc_inventory', "
-            "'production_inventory', 'qc_rework', "
+            "'production_inventory', 'production_inventory_restore', 'qc_rework', "
             "'inventory_issue', 'assembly_input_restore', 'scrap', 'lost')",
             name="ck_production_movement_type",
         ),
@@ -480,6 +586,10 @@ class ProductionMovement(Base):
             "AND source_flow_node_id IS NOT NULL AND target_flow_node_id IS NULL "
             "AND source_department_id IS NOT NULL AND target_department_id IS NOT NULL "
             "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
+            "(movement_type = 'production_inventory_restore' "
+            "AND source_flow_node_id IS NOT NULL AND target_flow_node_id IS NOT NULL "
+            "AND source_department_id IS NOT NULL AND target_department_id IS NOT NULL "
+            "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
             "(movement_type = 'qc_rework' AND source_flow_node_id IS NOT NULL "
             "AND target_flow_node_id IS NOT NULL AND source_department_id IS NOT NULL "
             "AND target_department_id IS NOT NULL "
@@ -498,9 +608,9 @@ class ProductionMovement(Base):
             name="ck_production_movement_assembly_material",
         ),
         CheckConstraint(
-            "(movement_type = 'production_inventory' "
+            "(movement_type IN ('production_inventory', 'production_inventory_restore') "
             "AND warehouse_operation_id IS NOT NULL) OR "
-            "(movement_type <> 'production_inventory' "
+            "(movement_type NOT IN ('production_inventory', 'production_inventory_restore') "
             "AND warehouse_operation_id IS NULL)",
             name="ck_production_movement_warehouse_operation",
         ),
@@ -621,11 +731,54 @@ class ProductionMovement(Base):
     )
 
 
+class ProductionWarehouseStorageLine(Base):
+    __tablename__ = "production_warehouse_storage_line"
+    __table_args__ = (
+        UniqueConstraint(
+            "warehouse_operation_id",
+            "original_repository_id",
+            name="uq_production_warehouse_storage_line",
+        ),
+        CheckConstraint("quantity > 0", name="ck_production_warehouse_storage_line_quantity"),
+        Index("idx_production_warehouse_storage_line_state", "processing_state_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    warehouse_operation_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("warehouse_operation.id"),
+        nullable=False,
+    )
+    original_repository_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    production_item_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("production_item.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    processing_state_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("material_processing_state.id"),
+        nullable=False,
+    )
+    flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    department_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department.id"), nullable=False)
+    source_work_order_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("work_order.id"),
+        nullable=True,
+    )
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class ProductionOperationUndo(Base):
     __tablename__ = "production_operation_undo"
     __table_args__ = (
         CheckConstraint(
-            "operation_type IN ('submission', 'rework_submission')",
+            "operation_type IN ('submission', 'rework_submission', 'qc_destination')",
             name="ck_production_operation_undo_type",
         ),
         CheckConstraint(

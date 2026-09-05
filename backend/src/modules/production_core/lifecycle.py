@@ -49,3 +49,34 @@ def cancel_order_production(session, order: CustomerOrder) -> None:
     ).all()
     for production_item in production_items:
         session.delete(production_item)
+
+
+def rollback_unstarted_order_production(session, order: CustomerOrder) -> None:
+    work_order_id = session.scalar(
+        select(WorkOrder.id)
+        .join(ProductionItem, ProductionItem.id == WorkOrder.production_item_id)
+        .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
+        .where(CustomerOrderItem.customer_order_id == order.id)
+        .limit(1)
+    )
+    if work_order_id is not None:
+        raise DomainError(
+            "production_plan_work_order_exists",
+            "生产计划已经创建工单，不能撤回确认",
+            status_code=409,
+        )
+    session.scalar(
+        select(func.set_config(
+            "zzerp.plan_unconfirm_order_id",
+            str(order.id),
+            True,
+        ))
+    )
+    production_items = list(session.scalars(
+        select(ProductionItem)
+        .join(CustomerOrderItem, CustomerOrderItem.id == ProductionItem.customer_order_item_id)
+        .where(CustomerOrderItem.customer_order_id == order.id)
+        .with_for_update()
+    ))
+    for production_item in production_items:
+        session.delete(production_item)

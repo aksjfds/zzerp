@@ -5,7 +5,8 @@ from sqlalchemy import select
 from domain.production_inventory import IssuedInventoryStock, IssuedPlanItem
 from modules.errors import DomainError
 from modules.organization.model_api import Department
-from modules.production_core.flow import load_product_flow, normal_target
+from modules.production_core.flow import load_product_flow
+from modules.production_core.material_state_api import get_material_state
 from modules.production_core.movements import record_movement
 from modules.production_core.persistence import ProductionItem
 from modules.production_core.work_order_support import move_to_node
@@ -24,18 +25,28 @@ def accept_issued_inventory(
     order_item = session.get(CustomerOrderItem, plan_item.customer_order_item_id)
     if order_item is None:
         raise DomainError("customer_order_item_not_found", "订单产品不存在", status_code=409)
-    flow, nodes = load_product_flow(session, plan_item.product_id, plan_item.product_version)
+    _flow, nodes = load_product_flow(session, plan_item.product_id, plan_item.product_version)
     if plan_item.item_type == "finished_product":
         raise DomainError(
             "finished_stock_reservation_injected",
             "成品库存占用不能作为生产物料注入",
             status_code=409,
         )
-    target, source_node_id = _resume_target(
-        flow,
-        nodes,
-        issued_stock.completed_flow_node_id,
-    )
+    processing_state = get_material_state(session, issued_stock.processing_state_id)
+    if (
+        processing_state.resume_flow_node_id != issued_stock.resume_flow_node_id
+        or processing_state.product_id != plan_item.product_id
+        or processing_state.product_version != plan_item.product_version
+        or processing_state.product_bom_id != plan_item.product_bom_id
+        or processing_state.origin_flow_node_id != plan_item.flow_node_id
+    ):
+        raise DomainError(
+            "inventory_processing_state_changed",
+            "库存加工状态与出库记录不一致",
+            status_code=409,
+        )
+    target = nodes.get(processing_state.resume_flow_node_id)
+    source_node_id = processing_state.completed_flow_node_id
     if target is None:
         raise DomainError("inventory_issue_target_missing", "库存项目没有可进入的后续节点", status_code=409)
     production_item = _load_or_create_production_item(
@@ -55,6 +66,7 @@ def accept_issued_inventory(
         target,
         quantity,
         source_node_id,
+        processing_state_id=processing_state.id,
     )
     record_movement(
         session,
@@ -94,15 +106,6 @@ def _load_or_create_production_item(
         session.add(production_item)
         session.flush()
     return production_item
-
-
-def _resume_target(flow, nodes, completed_node_id: str):
-    target = normal_target(flow, nodes, completed_node_id)
-    source_node_id = completed_node_id
-    if target and target.get("type") == "qc":
-        source_node_id = target["id"]
-        target = normal_target(flow, nodes, target["id"])
-    return target, source_node_id
 
 
 def _department_id(session, code: str) -> int:

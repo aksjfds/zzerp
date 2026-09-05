@@ -3,6 +3,7 @@ from departments.qc_orchestration import (
     decide_qc_destination,
     inspect_qc_batch,
     undo_qc_inspection,
+    undo_qc_destination,
 )
 from modules.quality import api as quality
 from schemas.production import QcDestinationInput, QcInspection
@@ -68,3 +69,18 @@ class QualityCapability:
     ) -> None:
         self.require_capability(CAP_QUALITY)
         undo_qc_inspection(batch_id, actor_department, actor_is_system)
+
+    def undo_qc_destination(
+        self,
+        batch_id: int,
+        actor_username: str,
+        actor_department: str | None,
+        actor_is_system: bool,
+    ) -> dict:
+        self.require_capability(CAP_QUALITY)
+        return undo_qc_destination(
+            batch_id,
+            actor_username,
+            actor_department,
+            actor_is_system,
+        )

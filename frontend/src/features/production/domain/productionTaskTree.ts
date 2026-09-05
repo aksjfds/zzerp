@@ -69,7 +69,8 @@ export function productionTaskOverviewStatuses(
     if (status.status === 'exception') {
       addQuantity('exception', status.quantity)
     } else if (status.status === 'not_started') {
-      addQuantity(status.action === 'none' ? 'waiting_material' : 'ready', status.quantity)
+      const key = status.action === 'none' ? 'waiting_material' : 'ready'
+      addQuantity(key, status.quantity)
     } else if (status.status === 'completed') {
       addQuantity('ready', status.quantity)
     } else if (status.status !== 'department_completed') {
@@ -116,7 +117,7 @@ function combineExceptionStatuses(
   }
   return {
     status: 'exception',
-    label: '异常',
+    label: procedureNames.size ? `${[...procedureNames].join('、')} · 异常` : '异常',
     action: 'view_work_orders',
     quantity: statuses.reduce((sum, status) => sum + status.quantity, 0),
     procedure_names: [...procedureNames],

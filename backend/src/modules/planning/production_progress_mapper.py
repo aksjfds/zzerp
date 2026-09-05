@@ -23,7 +23,6 @@ def build_department_progress_response(
     work_orders,
     serialized_work_orders,
     batches_by_order,
-    workers,
     arrivals_by_node,
 ) -> dict:
     cards = []
@@ -58,7 +57,6 @@ def build_department_progress_response(
                     if item.procedure_id == procedure_id
                 ],
                 batches_by_order=batches_by_order,
-                workers=workers,
                 task_quantity=plan_item.planned_production_quantity,
                 arrived_quantity=arrivals_by_node.get(node["id"], 0),
                 sort_order=sort_order,
@@ -95,7 +93,6 @@ def build_department_progress_response(
             workshop=workshop,
             order=work_order,
             batches=batches_by_order.get(work_order.id, []),
-            workers=workers,
         )
         row["work_order"] = serialized_work_orders[work_order.id]
         work_order_rows[work_order.id] = row

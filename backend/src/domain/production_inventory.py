@@ -21,7 +21,8 @@ class IssuedInventoryStock:
     product_id: int
     product_version: int
     flow_node_id: str
-    completed_flow_node_id: str
+    processing_state_id: int
+    resume_flow_node_id: str
     quantity: int
     quantity_before: int
     quantity_after: int

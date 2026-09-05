@@ -22,12 +22,14 @@ from modules.production_core.workforce_api import (
     get_production_item_display,
     list_work_order_activities,
     list_worker_activity_orders,
+    worker_has_work_orders,
 )
 from modules.quality.workforce_api import (
     WorkOrderBatchActivity,
     list_batch_activities,
     list_qualified_batch_order_ids,
     list_qc_worker_order_ids,
+    worker_has_qc_batches,
 )
 from modules.standard_execution.pay_reference_api import (
     PayDetailView,
@@ -44,41 +46,6 @@ PRODUCTION_DEPARTMENT_CODES = (
     "qc",
     "assembly",
 )
-
-
-def worker_overview() -> list[dict]:
-    with SessionLocal() as session:
-        departments = get_department_views_by_codes(
-            session,
-            PRODUCTION_DEPARTMENT_CODES,
-        )
-        workshops = {
-            item.id: item
-            for item in get_workshop_views(
-                session,
-                department_ids={item.id for item in departments},
-            )
-        }
-        workers_by_department: dict[int, list[Worker]] = defaultdict(list)
-        for worker in session.scalars(
-            select(Worker)
-            .where(Worker.department_id.in_([item.id for item in departments]))
-            .order_by(Worker.worker_name, Worker.id)
-        ).all():
-            workers_by_department[worker.department_id].append(worker)
-
-        return [
-            {
-                "department_id": department.id,
-                "department_name": department.department_name,
-                "department_code": department.department_code,
-                "workers": [
-                    _serialize_worker(department, worker, workshops.get(worker.workshop_id))
-                    for worker in workers_by_department.get(department.id, [])
-                ],
-            }
-            for department in departments
-        ]
 
 
 def department_worker_overview(department_code: str) -> dict:
@@ -134,6 +101,8 @@ def create_department_worker(
     workshop_id: int | None,
 ) -> dict:
     normalized_name = worker_name.strip()
+    if not normalized_name:
+        raise DomainError("worker_name_required", "工人名称不能为空")
     with SessionLocal.begin() as session:
         department = _production_department(session, department_code)
         department_workshops = get_workshop_views(
@@ -166,6 +135,73 @@ def create_department_worker(
         session.add(worker)
         session.flush()
         return _serialize_worker(department, worker, workshop)
+
+
+def update_department_worker(
+    department_code: str,
+    worker_id: int,
+    worker_name: str,
+    workshop_id: int | None,
+) -> dict:
+    normalized_name = worker_name.strip()
+    if not normalized_name:
+        raise DomainError("worker_name_required", "工人名称不能为空")
+    with SessionLocal.begin() as session:
+        department = _production_department(session, department_code)
+        worker = session.get(Worker, worker_id, with_for_update=True)
+        if worker is None or worker.department_id != department.id:
+            raise DomainError("worker_not_found", "工人不存在", status_code=404)
+        workshops = {
+            item.id: item
+            for item in get_workshop_views(session, department_ids={department.id})
+        }
+        workshop = workshops.get(workshop_id) if workshop_id else None
+        if workshops and workshop_id is None:
+            raise DomainError("worker_workshop_required", "请选择工人所属车间")
+        if workshop_id is not None and workshop is None:
+            raise DomainError("worker_workshop_invalid", "所选车间不属于当前部门")
+        if workshop_id != worker.workshop_id and _worker_has_history(session, worker.id):
+            raise DomainError(
+                "worker_workshop_locked",
+                "工人已经被工单或质检引用，只能更正名称",
+                status_code=409,
+            )
+        duplicate = session.scalar(
+            select(Worker.id).where(
+                Worker.id != worker.id,
+                Worker.department_id == department.id,
+                Worker.workshop_id == workshop_id,
+                Worker.worker_name == normalized_name,
+            ).limit(1)
+        )
+        if duplicate is not None:
+            raise DomainError("worker_already_exists", "当前部门和车间已存在同名工人")
+        worker.worker_name = normalized_name
+        worker.workshop_id = workshop_id
+        session.flush()
+        return _serialize_worker(department, worker, workshop)
+
+
+def delete_department_worker(department_code: str, worker_id: int) -> None:
+    with SessionLocal.begin() as session:
+        department = _production_department(session, department_code)
+        worker = session.get(Worker, worker_id, with_for_update=True)
+        if worker is None or worker.department_id != department.id:
+            raise DomainError("worker_not_found", "工人不存在", status_code=404)
+        if _worker_has_history(session, worker.id):
+            raise DomainError(
+                "worker_in_use",
+                "工人已经被工单或质检引用，不能删除",
+                status_code=409,
+            )
+        session.delete(worker)
+
+
+def _worker_has_history(session, worker_id: int) -> bool:
+    return (
+        worker_has_work_orders(session, worker_id)
+        or worker_has_qc_batches(session, worker_id)
+    )
 
 
 def worker_history(

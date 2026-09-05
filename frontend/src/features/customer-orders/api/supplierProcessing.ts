@@ -16,3 +16,7 @@ export async function createSupplierProcessingWorkOrder(
 ) {
   await service.post('/supplier-processing/work-orders', payload)
 }
+
+export async function cancelSupplierProcessingWorkOrder(workOrderId: number) {
+  await service.post(`/supplier-processing/work-orders/${workOrderId}/cancel`)
+}

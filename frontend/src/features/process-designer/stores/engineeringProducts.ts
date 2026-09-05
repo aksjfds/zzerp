@@ -3,8 +3,6 @@ import { defineStore } from 'pinia'
 import {
   createProduct as createProductApi,
   createProductVersion as createProductVersionApi,
-  deleteProduct as deleteProductApi,
-  deleteProductVersion as deleteProductVersionApi,
   queryProduct,
   queryProducts,
   replaceProductBom,
@@ -121,13 +119,6 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     })
   }
 
-  async function removeProduct(productId: number, expectedRevision: number) {
-    await deleteProductApi(productId, expectedRevision)
-    if (activeProduct.value?.id === productId) activeProduct.value = null
-    products.value = products.value.filter(product => product.id !== productId)
-    productTotal.value = Math.max(productTotal.value - 1, 0)
-  }
-
   async function createVersion(
     productId: number,
     expectedRevision: number,
@@ -141,28 +132,6 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
       )
       commitActive(product)
       return product
-    })
-  }
-
-  async function removeProductVersion(
-    productId: number,
-    productVersion: number,
-    expectedRevision: number,
-  ) {
-    return withSaving(async () => {
-      const product = await deleteProductVersionApi(
-        productId,
-        productVersion,
-        expectedRevision,
-      )
-      if (product) {
-        commitActive(product)
-        return product
-      }
-      if (activeProduct.value?.id === productId) activeProduct.value = null
-      products.value = products.value.filter(item => item.id !== productId)
-      productTotal.value = Math.max(productTotal.value - 1, 0)
-      return null
     })
   }
 
@@ -204,8 +173,6 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     loading,
     products,
     productTotal,
-    removeProduct,
-    removeProductVersion,
     saveProcessFlow,
     saveProcessFlowDraft,
     saveProductBom,

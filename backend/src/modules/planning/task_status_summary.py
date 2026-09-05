@@ -42,7 +42,8 @@ STATUS_ORDER: tuple[TaskProcessingStatus, ...] = (
 @dataclass(frozen=True, slots=True)
 class TaskAvailableSource:
     repository_id: int | None
-    completed_work_order_name: str | None
+    processing_status: str
+    has_current_position_processing: bool
     creation_mode: TaskCreationMode
     quantity: int
 
@@ -75,9 +76,10 @@ def build_task_processing_statuses(
         _StatusRow,
     ] = {}
     for source in available_sources:
-        procedure_name = source.completed_work_order_name
-        status: TaskProcessingStatus = "completed" if procedure_name else "not_started"
-        label = f"{procedure_name}完" if procedure_name else "未加工"
+        status: TaskProcessingStatus = (
+            "completed" if source.has_current_position_processing else "not_started"
+        )
+        label = source.processing_status
         key = (status, label, source.creation_mode)
         row = rows.setdefault(
             key,
@@ -89,8 +91,6 @@ def build_task_processing_statuses(
             ),
         )
         row.quantity += source.quantity
-        if procedure_name:
-            row.procedure_names.add(procedure_name)
         if source.repository_id is not None:
             row.repository_ids.add(source.repository_id)
 

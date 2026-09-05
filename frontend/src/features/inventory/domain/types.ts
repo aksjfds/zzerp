@@ -11,11 +11,34 @@ export type FinishedReceipt = {
   item_code: string
   item_name: string
   quantity: number
-  status: 'pending' | 'received'
+  status: 'pending' | 'received' | 'cancelled' | 'reversed'
   received_at: string | null
   received_by: string | null
+  corrected_at: string | null
+  corrected_by: string | null
+  correction_reason: string | null
   created_at: string
   revision: number
+}
+
+export type PendingFinishedReceipt = {
+  id: number
+  work_order_batch_id: number | null
+  work_order_id: number | null
+  quantity: number
+  created_at: string
+}
+
+export type FinishedInboundItem = {
+  product_id: number
+  product_version: number
+  item_code: string
+  item_name: string
+  planned_quantity: number
+  production_plan_count: number
+  arrived_quantity: number
+  pending_receipts: PendingFinishedReceipt[]
+  updated_at: string
 }
 
 export type FinishedStock = {
@@ -36,6 +59,8 @@ export type FinishedStockTransaction = {
   finished_stock_id: number
   finished_receipt_id: number | null
   finished_stock_reservation_id: number | null
+  operation_group_no: string
+  reversal_of_transaction_id: number | null
   customer_order_id: number | null
   customer_order_no: string
   customer_order_item_id: number | null
@@ -43,7 +68,7 @@ export type FinishedStockTransaction = {
   product_version: number
   item_code: string
   item_name: string
-  transaction_type: 'receipt' | 'customer_shipment'
+  transaction_type: 'receipt' | 'receipt_reversal' | 'customer_shipment' | 'customer_shipment_reversal'
   quantity: number
   quantity_before: number
   quantity_after: number
@@ -71,7 +96,7 @@ export type FinishedShipmentCandidate = {
 export type WarehouseItemType = 'part' | 'assembly'
 export type WarehouseOperationType = 'inbound' | 'outbound'
 export type WarehouseOperationStatus = 'pending' | 'succeeded' | 'failed' | 'uncertain'
-export type WarehouseOperationSource = 'plan_confirmation' | 'qc_inventory' | 'production_position'
+export type WarehouseOperationSource = 'plan_confirmation' | 'qc_inventory' | 'production_position' | 'reversal'
 
 export type WarehouseStock = {
   id: number
@@ -100,6 +125,8 @@ export type WarehouseOperation = {
   work_order_id: number | null
   work_order_batch_id: number | null
   production_item_id: number | null
+  processing_state_id: number
+  reversal_of_operation_id: number | null
   warehouse_stock_id: number | null
   item_code: string
   item_name: string

@@ -23,6 +23,7 @@ from modules.planning.assembly_input_projection import normal_input_material_key
 from modules.planning.persistence import ProductionPlan
 from modules.production_core.flow_api import ProductionFlowContext, load_production_flow
 from modules.production_core.model_api import (
+    MaterialProcessingState,
     ProductionItem,
     ProductionMovement,
     Repository,
@@ -443,18 +444,19 @@ def _serialize_page(
     department: Department,
     reservation_by_id: dict[int, int],
 ) -> list[dict]:
-    source_order_ids = {
-        repository.source_work_order_id
+    processing_state_ids = {
+        repository.processing_state_id
         for view in selected
         for repository in view.candidate.repositories
-        if repository.source_work_order_id is not None
     }
-    source_orders = {
-        order.id: order
-        for order in session.scalars(
-            select(WorkOrder).where(WorkOrder.id.in_(source_order_ids))
+    processing_states = {
+        state.id: state
+        for state in session.scalars(
+            select(MaterialProcessingState).where(
+                MaterialProcessingState.id.in_(processing_state_ids)
+            )
         )
-    } if source_order_ids else {}
+    } if processing_state_ids else {}
     arrivals = _arrival_times(session, selected, display, department.id)
     scopes = {
         _procedure_scope(view, display)
@@ -469,7 +471,7 @@ def _serialize_page(
                 display,
                 department,
                 reservation_by_id,
-                source_orders,
+                processing_states,
                 arrivals,
                 configured,
             ))
@@ -479,7 +481,7 @@ def _serialize_page(
                 display,
                 department,
                 reservation_by_id,
-                source_orders,
+                processing_states,
                 arrivals,
                 configured,
             ))
@@ -491,7 +493,7 @@ def _serialize_standard(
     display: DisplayData,
     department: Department,
     reservation_by_id: dict[int, int],
-    source_orders: dict[int, WorkOrder],
+    processing_states: dict[int, MaterialProcessingState],
     arrivals: dict[tuple, datetime],
     configured: dict[ProcedureConfigurationScope, list[ConfiguredProcedure]],
 ) -> dict:
@@ -507,22 +509,21 @@ def _serialize_standard(
     for repository in candidate.repositories:
         reserved = reservation_by_id.get(repository.id, 0)
         available = max(repository.quantity - reserved, 0)
-        source_order = source_orders.get(repository.source_work_order_id)
-        completed_procedure_id = (
-            source_order.procedure_id
-            if source_order is not None
-            and source_order.flow_node_id == repository.flow_node_id
-            else None
-        )
+        completed_procedure_ids = {
+            history.get("procedure_id")
+            for history in processing_states[repository.processing_state_id].procedure_history
+            if history.get("flow_node_id") == repository.flow_node_id
+        }
         procedures = [
             procedure
             for procedure in configured_procedures
-            if procedure.id != completed_procedure_id
+            if procedure.id not in completed_procedure_ids
         ]
         sources.append({
             "repository_id": repository.id,
             "production_item_id": repository.production_item_id,
             "source_work_order_id": repository.source_work_order_id,
+            "processing_status": processing_states[repository.processing_state_id].display_text,
             "on_hand_quantity": repository.quantity,
             "reserved_quantity": reserved,
             "available_quantity": available,
@@ -560,7 +561,7 @@ def _serialize_assembly(
     display: DisplayData,
     department: Department,
     reservation_by_id: dict[int, int],
-    source_orders: dict[int, WorkOrder],
+    processing_states: dict[int, MaterialProcessingState],
     arrivals: dict[tuple, datetime],
     configured: dict[ProcedureConfigurationScope, list[ConfiguredProcedure]],
 ) -> dict:
@@ -577,12 +578,13 @@ def _serialize_assembly(
         reservation_by_id,
         arrived_at,
         availability.required_material_keys,
+        processing_states,
     )
     continuation_sources = _assembly_continuation_sources(
         candidate,
         display,
         reservation_by_id,
-        source_orders,
+        processing_states,
         arrived_at,
         configured_procedures,
         scope in configured,
@@ -632,7 +634,7 @@ def _assembly_continuation_sources(
     candidate: AssemblyCandidate,
     display: DisplayData,
     reservation_by_id: dict[int, int],
-    source_orders: dict[int, WorkOrder],
+    processing_states: dict[int, MaterialProcessingState],
     arrived_at: datetime | None,
     configured_procedures: list[ConfiguredProcedure],
     configuration_confirmed: bool,
@@ -643,17 +645,15 @@ def _assembly_continuation_sources(
         item = _require_item(display, repository.production_item_id)
         if production_item_material_key(item) != continuation_key:
             continue
-        source_order = source_orders.get(repository.source_work_order_id)
-        completed_procedure_id = (
-            source_order.procedure_id
-            if source_order is not None
-            and source_order.flow_node_id == candidate.key[1]
-            else None
-        )
+        completed_procedure_ids = {
+            history.get("procedure_id")
+            for history in processing_states[repository.processing_state_id].procedure_history
+            if history.get("flow_node_id") == candidate.key[1]
+        }
         procedures = [
             procedure
             for procedure in configured_procedures
-            if procedure.id != completed_procedure_id
+            if procedure.id not in completed_procedure_ids
         ]
         reserved = reservation_by_id.get(repository.id, 0)
         available = max(repository.quantity - reserved, 0)
@@ -661,6 +661,7 @@ def _assembly_continuation_sources(
             "repository_id": repository.id,
             "production_item_id": repository.production_item_id,
             "source_work_order_id": repository.source_work_order_id,
+            "processing_status": processing_states[repository.processing_state_id].display_text,
             "on_hand_quantity": repository.quantity,
             "reserved_quantity": reserved,
             "available_quantity": available,
@@ -733,6 +734,7 @@ def _assembly_input_materials(
     reservation_by_id: dict[int, int],
     arrived_at: datetime | None,
     required_material_keys: frozenset[str],
+    processing_states: dict[int, MaterialProcessingState],
 ) -> list[dict]:
     repositories_by_key: dict[str, list[Repository]] = {}
     item_by_key: dict[str, ProductionItem] = {}
@@ -770,6 +772,7 @@ def _assembly_input_materials(
                 "repository_id": repository.id,
                 "production_item_id": repository.production_item_id,
                 "source_work_order_id": repository.source_work_order_id,
+                "processing_status": processing_states[repository.processing_state_id].display_text,
                 "on_hand_quantity": repository.quantity,
                 "reserved_quantity": reserved,
                 "available_quantity": max(repository.quantity - reserved, 0),

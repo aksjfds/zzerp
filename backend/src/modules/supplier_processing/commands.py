@@ -7,6 +7,7 @@ from modules.planning.supplier_processing_api import (
 )
 from modules.production_core.operational_api import serialize_work_order
 from modules.production_core.ownership_api import (
+    cancel_supplier_processing_work_order_record,
     create_supplier_processing_work_order_record,
 )
 
@@ -82,6 +83,21 @@ def _required_text(
     return normalized
 
 
+def cancel_supplier_processing_work_order(
+    *,
+    work_order_id: int,
+    actor_username: str,
+) -> dict:
+    if not actor_username.strip():
+        raise DomainError("supplier_processing_actor_required", "取消操作人不能为空")
+    with SessionLocal.begin() as session:
+        order = cancel_supplier_processing_work_order_record(
+            session,
+            work_order_id=work_order_id,
+        )
+        return serialize_work_order(session, order)
+
+
 def _optional_text(
     value: str | None,
     *,
@@ -94,4 +110,7 @@ def _optional_text(
     return normalized or None
 
 
-__all__ = ["create_supplier_processing_work_order"]
+__all__ = [
+    "cancel_supplier_processing_work_order",
+    "create_supplier_processing_work_order",
+]

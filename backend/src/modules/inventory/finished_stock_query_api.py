@@ -140,6 +140,8 @@ def list_finished_stock_transactions(
                 "finished_stock_reservation_id": (
                     transaction.finished_stock_reservation_id
                 ),
+                "operation_group_no": transaction.operation_group_no,
+                "reversal_of_transaction_id": transaction.reversal_of_transaction_id,
                 "customer_order_id": transaction.customer_order_id,
                 "customer_order_no": order.customer_order_no if order else "",
                 "customer_order_item_id": transaction.customer_order_item_id,

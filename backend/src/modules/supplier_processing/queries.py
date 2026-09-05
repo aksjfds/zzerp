@@ -3,11 +3,13 @@
 from dataclasses import asdict
 
 from database import SessionLocal
+from domain.production_types import WORK_ORDER_STATUS_OPEN
 from domain.time import business_iso
 from modules.errors import DomainError
 from modules.planning.supplier_processing_api import (
     list_supplier_processing_tasks,
 )
+from modules.production_core.flow_api import load_product_flow, qc_release_target
 from modules.production_core.reference_api import (
     SupplierProcessingQcOrderReference,
     supplier_processing_qc_order_references,
@@ -27,31 +29,68 @@ def list_tasks(
         return data, len(data)
 
 
-def list_qc_tasks() -> tuple[list[dict], int]:
+def list_qc_tasks(*, history: bool = False) -> tuple[list[dict], int]:
     with SessionLocal() as session:
         tasks = list_supplier_processing_tasks(session)
         tasks_by_order_id = {
             task.work_order_id: task
             for task in tasks
-            if task.work_order_id is not None and task.work_order_status == "open"
+            if (
+                task.work_order_id is not None
+                and (
+                    task.work_order_status != WORK_ORDER_STATUS_OPEN
+                    if history
+                    else task.work_order_status == WORK_ORDER_STATUS_OPEN
+                )
+            )
         }
         order_references = supplier_processing_qc_order_references(
             session,
+            history=history,
         )
         if set(tasks_by_order_id) != set(order_references):
             raise DomainError(
                 "supplier_processing_qc_context_missing",
-                "开放委外加工工单与生产计划任务不一致",
+                "委外加工工单与生产计划任务不一致",
                 status_code=409,
             )
         data = []
+        flow_cache = {}
         for order in order_references.values():
             task = tasks_by_order_id[order.id]
-            data.append(_serialize_qc_task(task, order))
+            flow, nodes = load_product_flow(
+                session,
+                task.product_id,
+                task.product_version,
+                flow_cache,
+            )
+            release_target = qc_release_target(
+                flow,
+                nodes,
+                task.supplier_flow_node_id,
+            )
+            data.append(_serialize_qc_task(
+                task,
+                order,
+                release_target_name=(
+                    str(
+                        release_target.get("label")
+                        or release_target.get("output_name")
+                        or release_target["id"]
+                    )
+                    if release_target is not None
+                    else None
+                ),
+            ))
         return data, len(data)
 
 
-def _serialize_qc_task(task, order: SupplierProcessingQcOrderReference) -> dict:
+def _serialize_qc_task(
+    task,
+    order: SupplierProcessingQcOrderReference,
+    *,
+    release_target_name: str | None,
+) -> dict:
     return {
         "production_plan_id": task.production_plan_id,
         "production_plan_item_id": task.production_plan_item_id,
@@ -68,6 +107,7 @@ def _serialize_qc_task(task, order: SupplierProcessingQcOrderReference) -> dict:
         "work_order_no": order.work_order_no,
         "supplier_name": order.supplier_name,
         "supplier_process_name": order.supplier_process_name,
+        "release_target_name": release_target_name,
         "remark": order.remark,
         "task_quantity": order.quantity,
         "inspected_quantity": order.inspected_quantity,

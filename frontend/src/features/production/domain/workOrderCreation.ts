@@ -11,7 +11,7 @@ export type WorkOrderCreationTarget = {
 
 export type AssemblyWorkOrderCreationSource = {
   repository_id: number
-  source_label: string
+  arrived_at: string | null
   available_quantity: number
 }
 

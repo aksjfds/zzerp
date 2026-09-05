@@ -3,11 +3,24 @@ import type {
   FinishedStock,
   FinishedStockTransaction,
   FinishedReceipt,
+  FinishedInboundItem,
   FinishedShipmentCandidate,
   WarehouseOperation,
   WarehouseOperationStatus,
   WarehouseStock,
 } from '../domain/types'
+
+export async function queryFinishedInboundItems(page: number, pageSize: number) {
+  const response = await service.get<{
+    data: FinishedInboundItem[]
+    total: number
+    page: number
+    page_size: number
+  }>('/inventory/finished-inbound-items', {
+    params: { page, page_size: pageSize },
+  })
+  return response.data
+}
 
 export async function queryWarehouseStocks() {
   const response = await service.get<{ data: WarehouseStock[] }>(
@@ -35,6 +48,12 @@ export async function reviewWarehouseOperation(
   return response.data.data
 }
 
+export async function reverseProductionStorage(operationGroupNo: string) {
+  await service.post('/inventory/warehouse-operations/reverse-production-storage', {
+    operation_group_no: operationGroupNo,
+  })
+}
+
 export async function queryFinishedStocks() {
   const response = await service.get<{ data: FinishedStock[] }>(
     '/inventory/finished-stocks',
@@ -49,16 +68,19 @@ export async function queryFinishedStockTransactions() {
   return response.data.data
 }
 
-export async function queryFinishedReceipts() {
-  const response = await service.get<{ data: FinishedReceipt[] }>('/inventory/finished-receipts')
-  return response.data.data
-}
-
 export async function receiveFinishedReceipt(receiptId: number) {
   const response = await service.post<{ data: FinishedReceipt }>(
     `/inventory/finished-receipts/${receiptId}/receive`,
   )
   return response.data.data
+}
+
+export async function reverseFinishedReceipt(receiptId: number) {
+  await service.post(`/inventory/finished-receipts/${receiptId}/reverse`, {})
+}
+
+export async function reverseFinishedShipment(transactionId: number) {
+  await service.post(`/inventory/finished-shipment-transactions/${transactionId}/reverse`, {})
 }
 
 export async function queryFinishedShipmentCandidates() {

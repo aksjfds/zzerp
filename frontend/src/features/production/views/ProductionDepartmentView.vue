@@ -39,7 +39,7 @@ function availableChoices(status: ProductionTaskProcessingStatus): TaskWorkOrder
       mode: 'standard' as const,
       repository_id: source.repository_id,
       label: `${position.item_name} · ${position.workshop_name}`,
-      description: `${position.source_node_label} · 可开工 ${source.available_quantity}`,
+      description: `${source.processing_status} · 可开工 ${source.available_quantity}`,
     })))
 }
 

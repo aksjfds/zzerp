@@ -6,10 +6,10 @@ from domain.production_types import (
     WORK_ORDER_STATUS_OPEN,
 )
 from modules.errors import DomainError
+from modules.production_core.context_api import WorkOrderContext
 from modules.production_core.qc_api import (
     create_qc_batch,
     load_qc_batch,
-    load_qc_work_order,
     rework_submitted_quantity,
 )
 
@@ -17,15 +17,13 @@ from modules.production_core.qc_api import (
 def create_inspection_batch(
     session,
     *,
-    work_order_id: int,
+    order: WorkOrderContext,
     submitted_quantity: int,
     execution_flow_node_id: str,
     rework_source_batch_id: int | None = None,
     expected_submission_quantity: int | None = None,
 ):
-    order = load_qc_work_order(session, work_order_id, for_update=True)
-    if order is None:
-        raise DomainError("work_order_not_found", "送检工单不存在", status_code=404)
+    """Create a QC batch for the work order locked by the transaction owner."""
     if order.work_order_type not in QC_SUPPORTED_WORK_ORDER_TYPES:
         raise DomainError("qc_work_order_type_invalid", "当前工单不支持送QC")
     if order.status != WORK_ORDER_STATUS_OPEN:
@@ -63,7 +61,7 @@ def create_inspection_batch(
 
     return create_qc_batch(
         session,
-        work_order_id=work_order_id,
+        work_order_id=order.id,
         submitted_quantity=submitted_quantity,
         source_flow_node_id=execution_flow_node_id,
         rework_source_batch_id=rework_source_batch_id,

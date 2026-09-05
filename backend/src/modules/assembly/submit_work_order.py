@@ -28,6 +28,10 @@ from modules.production_core.ownership_api import (
     add_repository_quantity,
     assign_work_order_repository,
 )
+from modules.production_core.material_state_api import (
+    QC_NONE,
+    transition_work_order_material_state,
+)
 from modules.quality.submission_api import create_inspection_batch
 
 
@@ -80,6 +84,7 @@ def submit_assembly_work_order(
             len(materials) != 1
             or materials[0].repository_id is not None
             or materials[0].production_item_id != source.production_item_id
+            or materials[0].source_processing_state_id != source.processing_state_id
             or materials[0].quantity != quantity
             or materials[0].source_work_order_id != source.source_work_order_id
         ):
@@ -97,7 +102,7 @@ def submit_assembly_work_order(
             raise DomainError("department_not_found", "QC部门不存在")
         batch = create_inspection_batch(
             session,
-            work_order_id=order.id,
+            order=order,
             submitted_quantity=output_quantity,
             execution_flow_node_id=assembly_node["id"],
             expected_submission_quantity=output_quantity,
@@ -123,9 +128,20 @@ def submit_assembly_work_order(
         return serialize_work_order(session, order)
 
     assembly_department = target_department_id(session, assembly_node)
+    processing_state = transition_work_order_material_state(
+        session,
+        production_item=output_item,
+        context=context,
+        order=order,
+        completed_flow_node_id=assembly_node["id"],
+        resume_flow_node_id=assembly_node["id"],
+        qc_status=QC_NONE,
+        reset_history=not continuation,
+    )
     add_repository_quantity(
         session,
         production_item_id=output_item.id,
+        processing_state_id=processing_state.id,
         flow_node_id=assembly_node["id"],
         source_flow_node_id=assembly_node["id"],
         department_id=assembly_department,

@@ -78,39 +78,5 @@ export function useProductVersionActions(options: Options) {
     }
   }
 
-  async function deleteSelectedVersion() {
-    if (!productId.value || !selectedVersion.value || form.revision === null) return
-    if (versionDirty.value) {
-      ElMessage.warning('当前产品资料有未保存内容，请先保存或切换查看模式后再删除版本')
-      return
-    }
-    try {
-      await ElMessageBox.confirm(
-        `确认删除 V${selectedVersion.value}？该版本的 BOM 和流程图会一起删除。`,
-        '删除产品版本',
-        { type: 'warning', confirmButtonText: '删除' },
-      )
-    } catch {
-      return
-    }
-    try {
-      const product = await store.removeProductVersion(
-        productId.value,
-        selectedVersion.value,
-        form.revision,
-      )
-      if (!product) {
-        ElMessage.success('产品已删除')
-        await router.replace('/products')
-        return
-      }
-      await reloadVersions()
-      await loadProductVersion(product.version)
-      ElMessage.success('版本已删除')
-    } catch (error) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '版本删除失败')
-    }
-  }
-
-  return { createVersion, deleteSelectedVersion, enterEditMode, returnViewMode }
+  return { createVersion, enterEditMode, returnViewMode }
 }

@@ -15,6 +15,7 @@ GRANT ALL ON SCHEMA public TO public;
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- ============================================================
 -- 表结构
@@ -266,6 +267,27 @@ CREATE TABLE procedure_price (
         UNIQUE (configuration_id, procedure_id)
 );
 
+-- procedure_price_revision：追加保存正式与临时工艺单价的每次实际变更。
+CREATE TABLE procedure_price_revision (
+    id BIGSERIAL PRIMARY KEY,
+    department_id BIGINT NOT NULL REFERENCES department(id),
+    target_type TEXT NOT NULL,
+    target_id BIGINT NOT NULL,
+    target_label TEXT NOT NULL,
+    previous_unit_price NUMERIC(12, 2),
+    new_unit_price NUMERIC(12, 2),
+    actor_username VARCHAR(50) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_procedure_price_revision_target_type
+        CHECK (target_type IN ('formal', 'temporary')),
+    CONSTRAINT ck_procedure_price_revision_previous_nonnegative
+        CHECK (previous_unit_price IS NULL OR previous_unit_price >= 0),
+    CONSTRAINT ck_procedure_price_revision_new_nonnegative
+        CHECK (new_unit_price IS NULL OR new_unit_price >= 0)
+);
+CREATE INDEX idx_procedure_price_revision_department
+    ON procedure_price_revision(department_id, created_at DESC, id DESC);
+
 -- worker：保存部门或车间下可分配到工单、QC 批次的工作人员。
 CREATE TABLE worker (
     id BIGSERIAL PRIMARY KEY,
@@ -473,32 +495,46 @@ CREATE TABLE finished_receipt (
     id BIGSERIAL PRIMARY KEY,
     work_order_batch_id BIGINT,
     work_order_id BIGINT,
+    replacement_for_receipt_id BIGINT,
     product_id BIGINT NOT NULL,
     product_version INT NOT NULL,
     quantity INT NOT NULL,
     status TEXT NOT NULL DEFAULT 'pending',
     received_at TIMESTAMPTZ,
     received_by TEXT,
+    corrected_at TIMESTAMPTZ,
+    corrected_by TEXT,
+    correction_reason TEXT,
     revision INT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_finished_receipt_product_version
         FOREIGN KEY (product_id, product_version)
         REFERENCES product_version(product_id, version),
-    CONSTRAINT uq_finished_receipt_qc_batch UNIQUE (work_order_batch_id),
-    CONSTRAINT uq_finished_receipt_packaging_order UNIQUE (work_order_id),
+    CONSTRAINT fk_finished_receipt_replacement
+        FOREIGN KEY (replacement_for_receipt_id) REFERENCES finished_receipt(id),
+    CONSTRAINT uq_finished_receipt_replacement UNIQUE (replacement_for_receipt_id),
     CONSTRAINT ck_finished_receipt_source CHECK (
         (work_order_batch_id IS NOT NULL AND work_order_id IS NULL)
         OR (work_order_batch_id IS NULL AND work_order_id IS NOT NULL)
     ),
     CONSTRAINT ck_finished_receipt_version CHECK (product_version > 0),
     CONSTRAINT ck_finished_receipt_quantity CHECK (quantity > 0),
-    CONSTRAINT ck_finished_receipt_status CHECK (status IN ('pending', 'received')),
+    CONSTRAINT ck_finished_receipt_status
+        CHECK (status IN ('pending', 'received', 'cancelled', 'reversed')),
     CONSTRAINT ck_finished_receipt_revision CHECK (revision > 0),
     CONSTRAINT ck_finished_receipt_lifecycle CHECK (
-        (status = 'pending' AND received_at IS NULL AND received_by IS NULL)
+        (status = 'pending' AND received_at IS NULL AND received_by IS NULL
+            AND corrected_at IS NULL AND corrected_by IS NULL)
         OR (status = 'received' AND received_at IS NOT NULL
             AND received_by IS NOT NULL
-            AND received_by = btrim(received_by) AND received_by <> '')
+            AND received_by = btrim(received_by) AND received_by <> ''
+            AND corrected_at IS NULL AND corrected_by IS NULL)
+        OR (status = 'cancelled' AND received_at IS NULL AND received_by IS NULL
+            AND corrected_at IS NOT NULL AND corrected_by IS NOT NULL
+            AND corrected_by = btrim(corrected_by) AND corrected_by <> '')
+        OR (status = 'reversed' AND received_at IS NOT NULL AND received_by IS NOT NULL
+            AND corrected_at IS NOT NULL AND corrected_by IS NOT NULL
+            AND corrected_by = btrim(corrected_by) AND corrected_by <> '')
     )
 );
 
@@ -541,8 +577,6 @@ CREATE TABLE finished_stock_reservation (
         ) REFERENCES production_plan_item(
             id, production_plan_id, customer_order_item_id
         ),
-    CONSTRAINT uq_finished_stock_reservation_plan_item
-        UNIQUE (production_plan_item_id, finished_stock_id),
     CONSTRAINT uq_finished_stock_reservation_context
         UNIQUE (id, finished_stock_id, customer_order_item_id),
     CONSTRAINT ck_finished_stock_reservation_reserved CHECK (reserved_quantity > 0),
@@ -561,6 +595,8 @@ CREATE TABLE finished_stock_transaction (
     customer_order_id BIGINT REFERENCES customer_order(id),
     customer_order_item_id BIGINT REFERENCES customer_order_item(id),
     finished_stock_reservation_id BIGINT,
+    operation_group_no TEXT NOT NULL,
+    reversal_of_transaction_id BIGINT,
     transaction_type TEXT NOT NULL,
     quantity INT NOT NULL,
     quantity_before INT NOT NULL,
@@ -568,7 +604,11 @@ CREATE TABLE finished_stock_transaction (
     actor_username TEXT NOT NULL,
     reason TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_finished_stock_transaction_receipt UNIQUE (finished_receipt_id),
+    CONSTRAINT uq_finished_stock_transaction_reversal
+        UNIQUE (reversal_of_transaction_id),
+    CONSTRAINT fk_finished_stock_transaction_reversal
+        FOREIGN KEY (reversal_of_transaction_id)
+        REFERENCES finished_stock_transaction(id),
     CONSTRAINT fk_finished_stock_transaction_order_item
         FOREIGN KEY (customer_order_item_id, customer_order_id)
         REFERENCES customer_order_item(id, customer_order_id),
@@ -579,21 +619,27 @@ CREATE TABLE finished_stock_transaction (
             id, finished_stock_id, customer_order_item_id
         ),
     CONSTRAINT ck_finished_stock_transaction_type CHECK (
-        transaction_type IN ('receipt', 'customer_shipment')
+        transaction_type IN (
+            'receipt', 'receipt_reversal',
+            'customer_shipment', 'customer_shipment_reversal'
+        )
     ),
     CONSTRAINT ck_finished_stock_transaction_quantity CHECK (quantity > 0),
+    CONSTRAINT ck_finished_stock_transaction_group CHECK (
+        operation_group_no = btrim(operation_group_no) AND operation_group_no <> ''
+    ),
     CONSTRAINT ck_finished_stock_transaction_before CHECK (quantity_before >= 0),
     CONSTRAINT ck_finished_stock_transaction_after CHECK (quantity_after >= 0),
     CONSTRAINT ck_finished_stock_transaction_actor CHECK (
         actor_username = btrim(actor_username) AND actor_username <> ''
     ),
     CONSTRAINT ck_finished_stock_transaction_source CHECK (
-        (transaction_type = 'receipt'
+        (transaction_type IN ('receipt', 'receipt_reversal')
             AND finished_receipt_id IS NOT NULL
             AND customer_order_id IS NULL
             AND customer_order_item_id IS NULL
             AND finished_stock_reservation_id IS NULL)
-        OR (transaction_type = 'customer_shipment'
+        OR (transaction_type IN ('customer_shipment', 'customer_shipment_reversal')
             AND finished_receipt_id IS NULL
             AND customer_order_id IS NOT NULL
             AND customer_order_item_id IS NOT NULL)
@@ -603,12 +649,75 @@ CREATE TABLE finished_stock_transaction (
             AND quantity_after = quantity_before + quantity)
         OR (transaction_type = 'customer_shipment'
             AND quantity_after = quantity_before - quantity)
+        OR (transaction_type = 'receipt_reversal'
+            AND quantity_after = quantity_before - quantity)
+        OR (transaction_type = 'customer_shipment_reversal'
+            AND quantity_after = quantity_before + quantity)
+    ),
+    CONSTRAINT ck_finished_stock_transaction_reversal CHECK (
+        (transaction_type IN ('receipt', 'customer_shipment')
+            AND reversal_of_transaction_id IS NULL)
+        OR (transaction_type IN ('receipt_reversal', 'customer_shipment_reversal')
+            AND reversal_of_transaction_id IS NOT NULL)
     )
 );
 
 -- ------------------------------------------------------------
 -- 生产库存、工单、QC 批次与流动记录
 -- ------------------------------------------------------------
+
+-- material_processing_state：不保存数量，只定义可合并物料的加工履历、QC 去向和继续节点。
+CREATE TABLE material_processing_state (
+    id BIGSERIAL PRIMARY KEY,
+    product_id BIGINT NOT NULL,
+    product_version INT NOT NULL,
+    item_type TEXT NOT NULL,
+    product_bom_id BIGINT,
+    origin_flow_node_id TEXT NOT NULL,
+    completed_flow_node_id TEXT NOT NULL,
+    resume_flow_node_id TEXT NOT NULL,
+    procedure_history JSONB NOT NULL DEFAULT '[]'::jsonb,
+    qc_status TEXT NOT NULL,
+    display_text TEXT NOT NULL,
+    state_signature VARCHAR(64) NOT NULL,
+    CONSTRAINT fk_material_processing_state_product_version
+        FOREIGN KEY (product_id, product_version)
+        REFERENCES product_version(product_id, version),
+    CONSTRAINT fk_material_processing_state_bom_version
+        FOREIGN KEY (product_bom_id, product_id, product_version)
+        REFERENCES product_bom(id, product_id, product_version),
+    CONSTRAINT ck_material_processing_state_version CHECK (product_version > 0),
+    CONSTRAINT ck_material_processing_state_item_type
+        CHECK (item_type IN ('part', 'assembly')),
+    CONSTRAINT ck_material_processing_state_material CHECK (
+        (item_type = 'part' AND product_bom_id IS NOT NULL)
+        OR (item_type = 'assembly' AND product_bom_id IS NULL)
+    ),
+    CONSTRAINT ck_material_processing_state_qc_status
+        CHECK (qc_status IN ('none', 'returned', 'released', 'stored')),
+    CONSTRAINT ck_material_processing_state_display
+        CHECK (display_text = btrim(display_text) AND display_text <> ''),
+    CONSTRAINT ck_material_processing_state_nodes CHECK (
+        origin_flow_node_id = btrim(origin_flow_node_id) AND origin_flow_node_id <> ''
+        AND completed_flow_node_id = btrim(completed_flow_node_id)
+            AND completed_flow_node_id <> ''
+        AND resume_flow_node_id = btrim(resume_flow_node_id)
+            AND resume_flow_node_id <> ''
+    ),
+    CONSTRAINT ck_material_processing_state_history
+        CHECK (jsonb_typeof(procedure_history) = 'array'),
+    CONSTRAINT ck_material_processing_state_signature
+        CHECK (length(state_signature) = 64),
+    CONSTRAINT uq_material_processing_state_signature UNIQUE (state_signature),
+    CONSTRAINT uq_material_processing_state_context
+        UNIQUE (id, product_id, product_version)
+);
+
+CREATE INDEX idx_material_processing_state_lookup
+ON material_processing_state(
+    product_id, product_version, item_type, product_bom_id,
+    origin_flow_node_id, display_text
+);
 
 -- production_item：保存订单确认后生成的具体生产对象，包括 BOM 配件或装配产出。
 CREATE TABLE production_item (
@@ -635,12 +744,15 @@ CREATE TABLE repository (
     id BIGSERIAL PRIMARY KEY,
     production_item_id BIGINT NOT NULL
         REFERENCES production_item(id) ON DELETE CASCADE,
+    processing_state_id BIGINT NOT NULL REFERENCES material_processing_state(id),
     flow_node_id TEXT NOT NULL,
     source_flow_node_id TEXT NOT NULL,
     department_id BIGINT NOT NULL REFERENCES department(id),
     source_work_order_id BIGINT,
     quantity INT NOT NULL,
     CONSTRAINT uq_repository_id_production_item UNIQUE (id, production_item_id),
+    CONSTRAINT uq_repository_source_context
+        UNIQUE (id, production_item_id, processing_state_id),
     CONSTRAINT ck_repository_quantity_positive CHECK (quantity > 0)
 );
 
@@ -650,6 +762,7 @@ CREATE TABLE work_order (
     work_order_no TEXT,
     repository_id BIGINT,
     production_item_id BIGINT NOT NULL REFERENCES production_item(id),
+    source_processing_state_id BIGINT REFERENCES material_processing_state(id),
     procedure_id BIGINT REFERENCES procedure(id),
     work_order_type TEXT NOT NULL,
     is_temporary BOOLEAN NOT NULL,
@@ -715,6 +828,7 @@ CREATE TABLE work_order (
             AND supplier_process_name IS NULL)
         OR (work_order_type = 'standard'
             AND procedure_id IS NOT NULL
+            AND source_processing_state_id IS NOT NULL
             AND source_flow_node_id IS NOT NULL
             AND supplier_name IS NULL
             AND supplier_process_name IS NULL
@@ -723,6 +837,7 @@ CREATE TABLE work_order (
                 OR repository_id IS NOT NULL))
         OR (work_order_type = 'supplier_processing'
             AND procedure_id IS NULL
+            AND source_processing_state_id IS NULL
             AND is_temporary = FALSE
             AND repository_id IS NULL
             AND worker_id IS NULL
@@ -732,8 +847,8 @@ CREATE TABLE work_order (
             AND supplier_process_name IS NOT NULL)
     ),
     CONSTRAINT fk_work_order_repository_item
-        FOREIGN KEY (repository_id, production_item_id)
-        REFERENCES repository(id, production_item_id)
+        FOREIGN KEY (repository_id, production_item_id, source_processing_state_id)
+        REFERENCES repository(id, production_item_id, processing_state_id)
 );
 
 ALTER TABLE repository
@@ -761,14 +876,15 @@ CREATE TABLE work_order_material (
     work_order_id BIGINT NOT NULL REFERENCES work_order(id) ON DELETE CASCADE,
     repository_id BIGINT,
     production_item_id BIGINT NOT NULL REFERENCES production_item(id),
+    source_processing_state_id BIGINT NOT NULL REFERENCES material_processing_state(id),
     quantity INT NOT NULL,
     source_flow_node_id TEXT NOT NULL,
     source_previous_flow_node_id TEXT NOT NULL,
     source_department_id BIGINT NOT NULL REFERENCES department(id),
     source_work_order_id BIGINT,
     CONSTRAINT fk_work_order_material_repository_item
-        FOREIGN KEY (repository_id, production_item_id)
-        REFERENCES repository(id, production_item_id),
+        FOREIGN KEY (repository_id, production_item_id, source_processing_state_id)
+        REFERENCES repository(id, production_item_id, processing_state_id),
     CONSTRAINT uq_work_order_material_repository UNIQUE (work_order_id, repository_id),
     CONSTRAINT uq_work_order_material_movement_context
         UNIQUE (id, work_order_id, production_item_id),
@@ -853,6 +969,8 @@ CREATE TABLE warehouse_operation (
     work_order_id BIGINT,
     work_order_batch_id BIGINT,
     production_item_id BIGINT,
+    processing_state_id BIGINT NOT NULL,
+    reversal_of_operation_id BIGINT,
     warehouse_stock_id BIGINT,
     item_code TEXT NOT NULL,
     item_name TEXT NOT NULL,
@@ -875,6 +993,9 @@ CREATE TABLE warehouse_operation (
     manual_reviewed_by TEXT,
     manual_review_note TEXT,
     CONSTRAINT uq_warehouse_operation_no UNIQUE (operation_no),
+    CONSTRAINT uq_warehouse_operation_reversal UNIQUE (reversal_of_operation_id),
+    CONSTRAINT fk_warehouse_operation_reversal
+        FOREIGN KEY (reversal_of_operation_id) REFERENCES warehouse_operation(id),
     CONSTRAINT fk_warehouse_operation_plan
         FOREIGN KEY (production_plan_id) REFERENCES production_plan(id),
     CONSTRAINT fk_warehouse_operation_plan_item
@@ -887,6 +1008,8 @@ CREATE TABLE warehouse_operation (
         REFERENCES work_order_batch(id, work_order_id),
     CONSTRAINT fk_warehouse_operation_production_item
         FOREIGN KEY (production_item_id) REFERENCES production_item(id),
+    CONSTRAINT fk_warehouse_operation_processing_state
+        FOREIGN KEY (processing_state_id) REFERENCES material_processing_state(id),
     CONSTRAINT fk_warehouse_operation_stock_context
         FOREIGN KEY (
             warehouse_stock_id, item_code, product_version,
@@ -897,12 +1020,15 @@ CREATE TABLE warehouse_operation (
     CONSTRAINT ck_warehouse_operation_type
         CHECK (operation_type IN ('inbound', 'outbound')),
     CONSTRAINT ck_warehouse_operation_source_type CHECK (
-        source_type IN ('plan_confirmation', 'qc_inventory', 'production_position')
+        source_type IN (
+            'plan_confirmation', 'qc_inventory', 'production_position', 'reversal'
+        )
     ),
     CONSTRAINT ck_warehouse_operation_direction CHECK (
         (source_type = 'plan_confirmation' AND operation_type = 'outbound')
         OR (source_type IN ('qc_inventory', 'production_position')
             AND operation_type = 'inbound')
+        OR source_type = 'reversal'
     ),
     CONSTRAINT ck_warehouse_operation_source_context CHECK (
         (source_type = 'plan_confirmation'
@@ -923,6 +1049,13 @@ CREATE TABLE warehouse_operation (
             AND production_plan_item_id IS NULL
             AND work_order_id IS NULL
             AND work_order_batch_id IS NULL)
+        OR (source_type = 'reversal'
+            AND reversal_of_operation_id IS NOT NULL
+            AND production_plan_id IS NULL
+            AND production_plan_item_id IS NULL
+            AND work_order_id IS NULL
+            AND work_order_batch_id IS NULL
+            AND production_item_id IS NULL)
     ),
     CONSTRAINT ck_warehouse_operation_group_no
         CHECK (operation_group_no = btrim(operation_group_no)
@@ -999,6 +1132,7 @@ CREATE TABLE production_movement (
         movement_type IN (
             'initial', 'process', 'assembly_input', 'assembly_output',
             'qc_qualified', 'qc_inventory', 'production_inventory', 'qc_rework',
+            'production_inventory_restore',
             'inventory_issue', 'assembly_input_restore',
             'scrap', 'lost'
         )
@@ -1076,6 +1210,13 @@ CREATE TABLE production_movement (
             AND target_department_id IS NOT NULL
             AND work_order_id IS NULL
             AND work_order_batch_id IS NULL)
+        OR (movement_type = 'production_inventory_restore'
+            AND source_flow_node_id IS NOT NULL
+            AND target_flow_node_id IS NOT NULL
+            AND source_department_id IS NOT NULL
+            AND target_department_id IS NOT NULL
+            AND work_order_id IS NULL
+            AND work_order_batch_id IS NULL)
         OR (movement_type IN ('scrap', 'lost')
             AND source_flow_node_id IS NOT NULL
             AND target_flow_node_id IS NULL
@@ -1091,9 +1232,29 @@ CREATE TABLE production_movement (
             AND work_order_material_id IS NULL)
     ),
     CONSTRAINT ck_production_movement_warehouse_operation CHECK (
-        (movement_type = 'production_inventory' AND warehouse_operation_id IS NOT NULL)
-        OR (movement_type <> 'production_inventory' AND warehouse_operation_id IS NULL)
+        (movement_type IN ('production_inventory', 'production_inventory_restore')
+            AND warehouse_operation_id IS NOT NULL)
+        OR (movement_type NOT IN ('production_inventory', 'production_inventory_restore')
+            AND warehouse_operation_id IS NULL)
     )
+);
+
+-- production_warehouse_storage_line：生产节点物料入库实际消耗的生产仓位快照，用于受限冲销。
+CREATE TABLE production_warehouse_storage_line (
+    id BIGSERIAL PRIMARY KEY,
+    warehouse_operation_id BIGINT NOT NULL REFERENCES warehouse_operation(id),
+    original_repository_id BIGINT NOT NULL,
+    production_item_id BIGINT NOT NULL REFERENCES production_item(id) ON DELETE CASCADE,
+    processing_state_id BIGINT NOT NULL REFERENCES material_processing_state(id),
+    flow_node_id TEXT NOT NULL,
+    source_flow_node_id TEXT NOT NULL,
+    department_id BIGINT NOT NULL REFERENCES department(id),
+    source_work_order_id BIGINT REFERENCES work_order(id),
+    quantity INT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_production_warehouse_storage_line
+        UNIQUE (warehouse_operation_id, original_repository_id),
+    CONSTRAINT ck_production_warehouse_storage_line_quantity CHECK (quantity > 0)
 );
 
 -- production_operation_undo：保存生产提交前后的库存与工单快照，用于在没有后续流转时安全撤回。
@@ -1112,7 +1273,7 @@ CREATE TABLE production_operation_undo (
     reversed_at TIMESTAMPTZ,
     reversed_by TEXT,
     CONSTRAINT ck_production_operation_undo_type
-        CHECK (operation_type IN ('submission', 'rework_submission')),
+        CHECK (operation_type IN ('submission', 'rework_submission', 'qc_destination')),
     CONSTRAINT ck_production_operation_undo_status
         CHECK (status IN ('applied', 'reversed')),
     CONSTRAINT ck_production_operation_undo_reversed CHECK (
@@ -1427,6 +1588,7 @@ $$ LANGUAGE plpgsql;
 CREATE FUNCTION protect_qc_batch_history() RETURNS TRIGGER AS $$
 DECLARE
     qc_undo_batch_id_text TEXT;
+    operation_undo_id_text TEXT;
 BEGIN
     IF OLD.recorded_at IS NOT NULL AND NEW IS DISTINCT FROM OLD THEN
         qc_undo_batch_id_text := current_setting(
@@ -1464,6 +1626,34 @@ BEGIN
                 FROM work_order_batch AS child_batch
                 WHERE child_batch.work_order_id = OLD.work_order_id
                   AND child_batch.rework_source_batch_id = OLD.id
+            ) THEN
+            RETURN NEW;
+        END IF;
+        operation_undo_id_text := current_setting(
+            'zzerp.undo_operation_id',
+            TRUE
+        );
+        IF operation_undo_id_text IS NOT NULL
+            AND operation_undo_id_text ~ '^[0-9]+$'
+            AND OLD.qualified_destination IS NOT NULL
+            AND NEW.qualified_destination IS NULL
+            AND NEW.destination_decided_at IS NULL
+            AND NEW.destination_decided_by IS NULL
+            AND (to_jsonb(NEW) - ARRAY[
+                'qualified_destination', 'destination_decided_at',
+                'destination_decided_by'
+            ]) = (to_jsonb(OLD) - ARRAY[
+                'qualified_destination', 'destination_decided_at',
+                'destination_decided_by'
+            ])
+            AND EXISTS (
+                SELECT 1
+                FROM production_operation_undo AS undo_operation
+                WHERE undo_operation.id = operation_undo_id_text::BIGINT
+                  AND undo_operation.status = 'applied'
+                  AND undo_operation.operation_type = 'qc_destination'
+                  AND undo_operation.work_order_id = OLD.work_order_id
+                  AND undo_operation.work_order_batch_id = OLD.id
             ) THEN
             RETURN NEW;
         END IF;
@@ -1801,6 +1991,7 @@ CREATE FUNCTION protect_production_movement_history() RETURNS TRIGGER AS $$
 DECLARE
     undo_operation_id_text TEXT;
     qc_undo_batch_id_text TEXT;
+    plan_unconfirm_order_id_text TEXT;
 BEGIN
     IF TG_OP = 'UPDATE' THEN
         RAISE EXCEPTION 'production movement history is immutable'
@@ -1849,6 +2040,30 @@ BEGIN
         ) THEN
         RETURN OLD;
     END IF;
+    plan_unconfirm_order_id_text := current_setting(
+        'zzerp.plan_unconfirm_order_id',
+        TRUE
+    );
+    IF plan_unconfirm_order_id_text IS NOT NULL
+        AND plan_unconfirm_order_id_text ~ '^[0-9]+$'
+        AND OLD.movement_type IN ('initial', 'inventory_issue')
+        AND OLD.work_order_id IS NULL
+        AND OLD.work_order_batch_id IS NULL
+        AND EXISTS (
+            SELECT 1
+            FROM production_item AS plan_item
+            JOIN customer_order_item AS order_item
+              ON order_item.id = plan_item.customer_order_item_id
+            WHERE plan_item.id = OLD.production_item_id
+              AND order_item.customer_order_id
+                    = plan_unconfirm_order_id_text::BIGINT
+              AND NOT EXISTS (
+                  SELECT 1 FROM work_order
+                  WHERE work_order.production_item_id = plan_item.id
+              )
+        ) THEN
+        RETURN OLD;
+    END IF;
     IF OLD.movement_type <> 'initial'
         OR OLD.work_order_id IS NOT NULL
         OR OLD.work_order_batch_id IS NOT NULL THEN
@@ -1876,6 +2091,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE FUNCTION protect_append_only_history() RETURNS TRIGGER AS $$
+BEGIN
+    RAISE EXCEPTION 'append-only history cannot be modified'
+        USING ERRCODE = '23514';
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE FUNCTION protect_finished_receipt_history() RETURNS TRIGGER AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
@@ -1894,6 +2116,30 @@ BEGIN
         ]) THEN
         RETURN NEW;
     END IF;
+    IF OLD.status = 'pending'
+        AND NEW.status = 'cancelled'
+        AND NEW.corrected_at IS NOT NULL
+        AND NEW.corrected_by IS NOT NULL
+        AND NEW.revision = OLD.revision + 1
+        AND (to_jsonb(NEW) - ARRAY[
+            'status', 'corrected_at', 'corrected_by', 'correction_reason', 'revision'
+        ]) = (to_jsonb(OLD) - ARRAY[
+            'status', 'corrected_at', 'corrected_by', 'correction_reason', 'revision'
+        ]) THEN
+        RETURN NEW;
+    END IF;
+    IF OLD.status = 'received'
+        AND NEW.status = 'reversed'
+        AND NEW.corrected_at IS NOT NULL
+        AND NEW.corrected_by IS NOT NULL
+        AND NEW.revision = OLD.revision + 1
+        AND (to_jsonb(NEW) - ARRAY[
+            'status', 'corrected_at', 'corrected_by', 'correction_reason', 'revision'
+        ]) = (to_jsonb(OLD) - ARRAY[
+            'status', 'corrected_at', 'corrected_by', 'correction_reason', 'revision'
+        ]) THEN
+        RETURN NEW;
+    END IF;
     RAISE EXCEPTION 'finished receipt only supports one complete receipt transition'
         USING ERRCODE = '23514';
 END;
@@ -1904,6 +2150,18 @@ BEGIN
     IF TG_OP = 'DELETE' THEN
         RAISE EXCEPTION 'finished stock reservation history cannot be deleted'
             USING ERRCODE = '23514';
+    END IF;
+    IF current_setting(
+        'zzerp.finished_shipment_reversal_reservation_id', true
+    ) = OLD.id::TEXT
+        AND NEW.shipped_quantity <= OLD.shipped_quantity
+        AND NEW.released_quantity <= OLD.released_quantity
+        AND (to_jsonb(NEW) - ARRAY[
+            'shipped_quantity', 'released_quantity', 'updated_at'
+        ]) = (to_jsonb(OLD) - ARRAY[
+            'shipped_quantity', 'released_quantity', 'updated_at'
+        ]) THEN
+        RETURN NEW;
     END IF;
     IF (
         NEW.finished_stock_id,
@@ -2061,6 +2319,10 @@ CREATE TRIGGER trg_production_movement_history
 BEFORE UPDATE OR DELETE ON production_movement
 FOR EACH ROW EXECUTE FUNCTION protect_production_movement_history();
 
+CREATE TRIGGER trg_material_processing_state_history
+BEFORE UPDATE OR DELETE ON material_processing_state
+FOR EACH ROW EXECUTE FUNCTION protect_append_only_history();
+
 CREATE TRIGGER trg_warehouse_operation_history
 BEFORE UPDATE OR DELETE ON warehouse_operation
 FOR EACH ROW EXECUTE FUNCTION protect_warehouse_operation_history();
@@ -2076,6 +2338,10 @@ FOR EACH ROW EXECUTE FUNCTION protect_finished_stock_reservation_history();
 CREATE TRIGGER trg_finished_stock_transaction_history
 BEFORE UPDATE OR DELETE ON finished_stock_transaction
 FOR EACH ROW EXECUTE FUNCTION protect_inventory_transaction_history();
+
+CREATE TRIGGER trg_procedure_price_revision_history
+BEFORE UPDATE OR DELETE ON procedure_price_revision
+FOR EACH ROW EXECUTE FUNCTION protect_append_only_history();
 
 CREATE TRIGGER trg_product_updated_at
 BEFORE UPDATE ON product
@@ -2194,11 +2460,23 @@ CREATE INDEX idx_warehouse_operation_work_order
     ON warehouse_operation(work_order_id, work_order_batch_id);
 CREATE INDEX idx_warehouse_operation_production_item
     ON warehouse_operation(production_item_id, id);
+CREATE INDEX idx_warehouse_operation_processing_state
+    ON warehouse_operation(processing_state_id, id);
 CREATE INDEX idx_warehouse_operation_stock
     ON warehouse_operation(warehouse_stock_id, id);
 CREATE INDEX idx_finished_receipt_pending
-    ON finished_receipt(status, created_at, id)
+ON finished_receipt(status, created_at, id)
     WHERE status = 'pending';
+CREATE UNIQUE INDEX uq_finished_receipt_active_qc_batch
+    ON finished_receipt(work_order_batch_id)
+    WHERE work_order_batch_id IS NOT NULL AND status IN ('pending', 'received');
+CREATE UNIQUE INDEX uq_finished_receipt_active_packaging_order
+    ON finished_receipt(work_order_id)
+    WHERE work_order_id IS NOT NULL AND status IN ('pending', 'received');
+
+CREATE UNIQUE INDEX uq_finished_stock_transaction_receipt
+ON finished_stock_transaction(finished_receipt_id)
+WHERE transaction_type = 'receipt';
 CREATE INDEX idx_finished_stock_reservation_plan
     ON finished_stock_reservation(production_plan_id, production_plan_item_id, id);
 CREATE INDEX idx_finished_stock_reservation_order_open
@@ -2234,11 +2512,20 @@ CREATE INDEX idx_production_movement_assembly_material
     ON production_movement(work_order_material_id)
     WHERE work_order_material_id IS NOT NULL;
 CREATE INDEX idx_repository_department ON repository(department_id);
+CREATE INDEX idx_repository_processing_state ON repository(processing_state_id);
+CREATE INDEX idx_production_warehouse_storage_line_state
+    ON production_warehouse_storage_line(processing_state_id);
 CREATE UNIQUE INDEX uq_repository_initial_position
-    ON repository(production_item_id, flow_node_id, source_flow_node_id, department_id)
+    ON repository(
+        production_item_id,
+        flow_node_id,
+        source_flow_node_id,
+        department_id,
+        processing_state_id
+    )
     WHERE source_work_order_id IS NULL;
 CREATE UNIQUE INDEX uq_repository_work_order_output
-    ON repository(source_work_order_id, production_item_id, flow_node_id)
+    ON repository(source_work_order_id, production_item_id, flow_node_id, processing_state_id)
     WHERE source_work_order_id IS NOT NULL;
 CREATE INDEX idx_procedure_price_scope
     ON procedure_price(procedure_id, configuration_id);
@@ -2248,6 +2535,7 @@ CREATE UNIQUE INDEX uq_production_item_part_origin
     ON production_item(customer_order_item_id, product_bom_id, origin_flow_node_id)
     WHERE product_bom_id IS NOT NULL;
 CREATE INDEX idx_work_order_repository ON work_order(repository_id);
+CREATE INDEX idx_work_order_source_processing_state ON work_order(source_processing_state_id);
 CREATE INDEX idx_work_order_production_item ON work_order(production_item_id);
 CREATE INDEX idx_work_order_no_trgm
     ON work_order USING GIN (work_order_no gin_trgm_ops);
@@ -2269,8 +2557,8 @@ CREATE INDEX idx_work_order_open_workbench
     )
     WHERE status = 'open';
 CREATE UNIQUE INDEX uq_work_order_supplier_task
-    ON work_order(production_item_id, flow_node_id)
-    WHERE work_order_type = 'supplier_processing';
+ON work_order(production_item_id, flow_node_id)
+WHERE work_order_type = 'supplier_processing' AND status <> 'cancelled';
 CREATE INDEX idx_work_order_process_position
     ON work_order(production_item_id, flow_node_id, procedure_id, id DESC);
 CREATE INDEX idx_work_order_pay_detail_procedure
@@ -2280,6 +2568,9 @@ CREATE INDEX idx_work_order_batch_rework_source
     ON work_order_batch(rework_source_batch_id);
 CREATE INDEX idx_work_order_material_repository ON work_order_material(repository_id);
 CREATE INDEX idx_work_order_material_production_item ON work_order_material(production_item_id);
+CREATE INDEX idx_work_order_material_open_occupancy
+    ON work_order_material(source_department_id, work_order_id)
+    WHERE repository_id IS NULL;
 CREATE INDEX idx_work_order_batch_pending ON work_order_batch(id DESC, work_order_id)
     WHERE recorded_at IS NULL
         OR (qualified_quantity > 0 AND destination_decided_at IS NULL);
@@ -2294,9 +2585,6 @@ CREATE UNIQUE INDEX uq_production_movement_batch_qualified_destination
 CREATE UNIQUE INDEX uq_production_movement_warehouse_operation
     ON production_movement(warehouse_operation_id)
     WHERE warehouse_operation_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_warehouse_operation_qc_batch_success
-    ON warehouse_operation(work_order_batch_id)
-    WHERE source_type = 'qc_inventory' AND status = 'succeeded';
 CREATE INDEX idx_user_sessions_expires_at ON user_sessions(expires_at);
 CREATE INDEX idx_user_sessions_user ON user_sessions(user_id);
 CREATE INDEX idx_worker_department_name ON worker(department_id, worker_name, id);
@@ -2338,7 +2626,6 @@ CREATE INDEX idx_production_operation_undo_active
 INSERT INTO department (department_name, department_code) VALUES
 ('工程部', 'engineering'),
 ('业务部', 'business'),
-('PMC部门', 'pmc'),
 ('冲压部', 'stamp'),
 ('机加部', 'cnc'),
 ('表面处理部', 'polish'),
@@ -2352,20 +2639,12 @@ INSERT INTO users (
     username, password, department, is_system, role, permissions
 ) VALUES
 (
-    'admin',
-    '1',
-    NULL,
-    TRUE,
-    'supervisor',
-    'engineering:product:view,engineering:product:add,engineering:product:edit,engineering:product:delete,order:view,order:add,order:edit,order:confirm,order:cancel,production:view,production:manage,qc:inspect,supplier_processing:view,supplier_processing:create,sys:user:add'
-),
-(
     'engineering',
     '1',
     'engineering',
     FALSE,
     'engineer',
-    'engineering:product:view,engineering:product:add,engineering:product:edit,engineering:product:delete'
+    'engineering:product:view,engineering:product:add,engineering:product:edit'
 ),
 (
     'business',
@@ -2374,14 +2653,6 @@ INSERT INTO users (
     FALSE,
     'sales',
     'engineering:product:view,order:view,order:add,order:edit,order:confirm,order:cancel,supplier_processing:view,supplier_processing:create'
-),
-(
-    'pmc',
-    '1',
-    'pmc',
-    FALSE,
-    'pmc',
-    'engineering:product:view,order:view,production:view'
 ),
 (
     'stamp', '1', 'stamp', FALSE, 'operator', 'production:view,production:manage'
@@ -2634,6 +2905,800 @@ SELECT
     '{"schema_version": 5, "nodes": [], "edges": []}'::jsonb
 FROM product
 WHERE product.factory_code IN ('Z8737', 'Z8739', 'Z8740', 'Z8711', 'Z8609');
+
+-- Z8711 D10 磁力包扣正式流程：
+-- logo件 → 激光开料 → QC ┐
+--                         装配 → QC → 装包 → 入库
+-- 脚钉（外购）→ 委外加工 → QC ┘
+UPDATE product_process_flow AS process_flow
+SET
+    flow_json = jsonb_build_object(
+        'schema_version', 5,
+        'nodes', jsonb_build_array(
+            jsonb_build_object(
+                'id', 'z8711-part-logo',
+                'type', 'part',
+                'x', 0,
+                'y', 0,
+                'label', logo_part.part_name,
+                'bom_item_id', logo_part.id,
+                'part_no', logo_part.part_no
+            ),
+            jsonb_build_object(
+                'id', 'z8711-process-laser',
+                'type', 'process',
+                'x', 500,
+                'y', 0,
+                'label', laser_workshop.workshop_name,
+                'workshop_id', laser_workshop.id
+            ),
+            jsonb_build_object(
+                'id', 'z8711-qc-logo',
+                'type', 'qc',
+                'x', 1000,
+                'y', 0,
+                'label', 'QC'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-part-outsourced-stud',
+                'type', 'part',
+                'x', 0,
+                'y', 500,
+                'label', stud_part.part_name,
+                'bom_item_id', stud_part.id,
+                'part_no', stud_part.part_no
+            ),
+            jsonb_build_object(
+                'id', 'z8711-supplier-processing',
+                'type', 'supplier_processing',
+                'x', 500,
+                'y', 500,
+                'label', '委外加工'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-qc-outsourced-stud',
+                'type', 'qc',
+                'x', 1000,
+                'y', 500,
+                'label', 'QC'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-assembly-81',
+                'type', 'assembly',
+                'x', 1500,
+                'y', 250,
+                'label', assembly_workshop.workshop_name,
+                'workshop_id', assembly_workshop.id,
+                'output_name', 'logo件-脚钉（外购）装配体',
+                'output_pcs', 1,
+                'assembly_sequence', 81,
+                'assembly_code', 'Z8711-81',
+                'assembly_name', 'logo件-脚钉（外购）装配体'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-qc-assembly',
+                'type', 'qc',
+                'x', 2000,
+                'y', 250,
+                'label', 'QC'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-process-packaging',
+                'type', 'process',
+                'x', 2500,
+                'y', 250,
+                'label', packaging_workshop.workshop_name,
+                'workshop_id', packaging_workshop.id
+            ),
+            jsonb_build_object(
+                'id', 'z8711-finished-inbound',
+                'type', 'finished_inbound',
+                'x', 3000,
+                'y', 250,
+                'label', '入库'
+            )
+        ),
+        'edges', jsonb_build_array(
+            jsonb_build_object(
+                'id', 'z8711-edge-logo-laser',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-part-logo',
+                'target_node_id', 'z8711-process-laser'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-laser-qc',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-process-laser',
+                'target_node_id', 'z8711-qc-logo'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-logo-qc-assembly',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-qc-logo',
+                'target_node_id', 'z8711-assembly-81'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-stud-supplier',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-part-outsourced-stud',
+                'target_node_id', 'z8711-supplier-processing'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-supplier-qc',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-supplier-processing',
+                'target_node_id', 'z8711-qc-outsourced-stud'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-stud-qc-assembly',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-qc-outsourced-stud',
+                'target_node_id', 'z8711-assembly-81'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-assembly-qc',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-assembly-81',
+                'target_node_id', 'z8711-qc-assembly'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-assembly-qc-packaging',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-qc-assembly',
+                'target_node_id', 'z8711-process-packaging'
+            ),
+            jsonb_build_object(
+                'id', 'z8711-edge-packaging-inbound',
+                'edge_type', 'polyline',
+                'source_node_id', 'z8711-process-packaging',
+                'target_node_id', 'z8711-finished-inbound'
+            )
+        )
+    ),
+    draft_flow_json = NULL,
+    updated_at = CURRENT_TIMESTAMP
+FROM product
+JOIN product_bom AS logo_part
+    ON logo_part.product_id = product.id
+    AND logo_part.product_version = 1
+    AND logo_part.part_no = 'Z8711-01'
+JOIN product_bom AS stud_part
+    ON stud_part.product_id = product.id
+    AND stud_part.product_version = 1
+    AND stud_part.part_no = 'Z8711-02'
+JOIN department AS stamp_department
+    ON stamp_department.department_code = 'stamp'
+JOIN workshop AS laser_workshop
+    ON laser_workshop.department_id = stamp_department.id
+    AND laser_workshop.workshop_name = '激光开料车间'
+JOIN department AS assembly_department
+    ON assembly_department.department_code = 'assembly'
+JOIN workshop AS assembly_workshop
+    ON assembly_workshop.department_id = assembly_department.id
+    AND assembly_workshop.workshop_name = '装配车间'
+JOIN workshop AS packaging_workshop
+    ON packaging_workshop.department_id = assembly_department.id
+    AND packaging_workshop.workshop_name = '装包车间'
+WHERE process_flow.product_id = product.id
+    AND process_flow.product_version = 1
+    AND product.factory_code = 'Z8711';
+
+UPDATE product
+SET revision = revision + 1,
+    updated_at = CURRENT_TIMESTAMP
+WHERE factory_code = 'Z8711';
+
+-- 正式流程的部门任务投影，与工程部保存流程时生成的口径一致。
+INSERT INTO product_route_task (
+    product_id,
+    product_version,
+    product_bom_id,
+    origin_flow_node_id,
+    origin_node_type,
+    origin_item_code,
+    origin_item_name,
+    route_flow_node_id,
+    route_node_type,
+    workshop_id,
+    department_id,
+    route_order
+)
+SELECT
+    product.id,
+    1,
+    bom.id,
+    route.origin_flow_node_id,
+    'part',
+    bom.part_no,
+    bom.part_name,
+    route.route_flow_node_id,
+    route.route_node_type,
+    workshop.id,
+    department.id,
+    route.route_order
+FROM product
+JOIN (
+    VALUES
+        ('Z8711-01', 'z8711-part-logo', 'z8711-process-laser',
+            'process', 'stamp', '激光开料车间', 0),
+        ('Z8711-01', 'z8711-part-logo', 'z8711-assembly-81',
+            'assembly', 'assembly', '装配车间', 2),
+        ('Z8711-02', 'z8711-part-outsourced-stud', 'z8711-supplier-processing',
+            'supplier_processing', 'business', NULL, 0),
+        ('Z8711-02', 'z8711-part-outsourced-stud', 'z8711-assembly-81',
+            'assembly', 'assembly', '装配车间', 2)
+) AS route(
+    part_no,
+    origin_flow_node_id,
+    route_flow_node_id,
+    route_node_type,
+    department_code,
+    workshop_name,
+    route_order
+) ON TRUE
+JOIN product_bom AS bom
+    ON bom.product_id = product.id
+    AND bom.product_version = 1
+    AND bom.part_no = route.part_no
+JOIN department
+    ON department.department_code = route.department_code
+LEFT JOIN workshop
+    ON workshop.department_id = department.id
+    AND workshop.workshop_name = route.workshop_name
+WHERE product.factory_code = 'Z8711';
+
+INSERT INTO product_route_task (
+    product_id,
+    product_version,
+    product_bom_id,
+    origin_flow_node_id,
+    origin_node_type,
+    origin_item_code,
+    origin_item_name,
+    route_flow_node_id,
+    route_node_type,
+    workshop_id,
+    department_id,
+    route_order
+)
+SELECT
+    product.id,
+    1,
+    NULL,
+    'z8711-assembly-81',
+    'assembly',
+    'Z8711-81',
+    'logo件-脚钉（外购）装配体',
+    route.route_flow_node_id,
+    route.route_node_type,
+    workshop.id,
+    department.id,
+    route.route_order
+FROM product
+JOIN (
+    VALUES
+        ('z8711-assembly-81', 'assembly', '装配车间', 0),
+        ('z8711-process-packaging', 'process', '装包车间', 2)
+) AS route(
+    route_flow_node_id,
+    route_node_type,
+    workshop_name,
+    route_order
+) ON TRUE
+JOIN department
+    ON department.department_code = 'assembly'
+JOIN workshop
+    ON workshop.department_id = department.id
+    AND workshop.workshop_name = route.workshop_name
+WHERE product.factory_code = 'Z8711';
+
+-- 磁力包扣示例订单：客户需求 15 件；生产计划按 20 件确认并开始生产。
+INSERT INTO customer_order (
+    customer_order_no,
+    customer_id,
+    status,
+    revision,
+    remark
+)
+SELECT
+    'ORDER-Z8711-0001',
+    customer.id,
+    'planned',
+    3,
+    'D10 磁力包扣流程示例'
+FROM customer
+WHERE customer.customer_name = 'Celine';
+
+INSERT INTO customer_order_item (
+    customer_order_id,
+    product_id,
+    product_version,
+    quantity,
+    delivery_date,
+    remark
+)
+SELECT
+    customer_order.id,
+    product.id,
+    1,
+    15,
+    DATE '2026-09-30',
+    NULL
+FROM customer_order
+JOIN product
+    ON product.factory_code = 'Z8711'
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+INSERT INTO production_plan (
+    customer_order_id,
+    status,
+    revision,
+    confirmed_at,
+    confirmed_by
+)
+SELECT
+    customer_order.id,
+    'confirmed',
+    3,
+    CURRENT_TIMESTAMP,
+    'business'
+FROM customer_order
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+INSERT INTO production_plan_item (
+    production_plan_id,
+    customer_order_id,
+    customer_order_item_id,
+    identity_key,
+    item_type,
+    product_id,
+    product_version,
+    product_bom_id,
+    flow_node_id,
+    item_code,
+    item_name,
+    unit_requirement,
+    gross_required_quantity,
+    estimated_inventory_quantity,
+    net_required_quantity,
+    planned_production_quantity,
+    allocated_inventory_quantity,
+    sort_order
+)
+SELECT
+    production_plan.id,
+    customer_order.id,
+    customer_order_item.id,
+    'finished:finished_product:' || product.id || ':1:-:z8711-finished-inbound',
+    'finished_product',
+    product.id,
+    1,
+    NULL,
+    'z8711-finished-inbound',
+    product.factory_code,
+    product.product_name,
+    1,
+    15,
+    0,
+    15,
+    15,
+    0,
+    0
+FROM customer_order
+JOIN customer_order_item
+    ON customer_order_item.customer_order_id = customer_order.id
+JOIN product
+    ON product.id = customer_order_item.product_id
+JOIN production_plan
+    ON production_plan.customer_order_id = customer_order.id
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+INSERT INTO production_plan_item (
+    production_plan_id,
+    customer_order_id,
+    customer_order_item_id,
+    identity_key,
+    item_type,
+    product_id,
+    product_version,
+    product_bom_id,
+    flow_node_id,
+    item_code,
+    item_name,
+    unit_requirement,
+    gross_required_quantity,
+    estimated_inventory_quantity,
+    net_required_quantity,
+    planned_production_quantity,
+    allocated_inventory_quantity,
+    sort_order
+)
+SELECT
+    production_plan.id,
+    customer_order.id,
+    customer_order_item.id,
+    'warehouse:assembly:' || product.id || ':1:-:z8711-assembly-81',
+    'assembly',
+    product.id,
+    1,
+    NULL,
+    'z8711-assembly-81',
+    'Z8711-81',
+    'logo件-脚钉（外购）装配体',
+    1,
+    15,
+    0,
+    15,
+    20,
+    0,
+    1
+FROM customer_order
+JOIN customer_order_item
+    ON customer_order_item.customer_order_id = customer_order.id
+JOIN product
+    ON product.id = customer_order_item.product_id
+JOIN production_plan
+    ON production_plan.customer_order_id = customer_order.id
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+INSERT INTO production_plan_item (
+    production_plan_id,
+    customer_order_id,
+    customer_order_item_id,
+    identity_key,
+    item_type,
+    product_id,
+    product_version,
+    product_bom_id,
+    flow_node_id,
+    item_code,
+    item_name,
+    unit_requirement,
+    gross_required_quantity,
+    estimated_inventory_quantity,
+    net_required_quantity,
+    planned_production_quantity,
+    allocated_inventory_quantity,
+    sort_order
+)
+SELECT
+    production_plan.id,
+    customer_order.id,
+    customer_order_item.id,
+    'warehouse:part:' || product.id || ':1:' || bom.id || ':' || part.flow_node_id,
+    'part',
+    product.id,
+    1,
+    bom.id,
+    part.flow_node_id,
+    bom.part_no,
+    bom.part_name,
+    bom.pcs,
+    15 * bom.pcs,
+    0,
+    15 * bom.pcs,
+    20 * bom.pcs,
+    0,
+    1000 + bom.sort_order * 10
+FROM customer_order
+JOIN customer_order_item
+    ON customer_order_item.customer_order_id = customer_order.id
+JOIN product
+    ON product.id = customer_order_item.product_id
+JOIN product_bom AS bom
+    ON bom.product_id = product.id
+    AND bom.product_version = customer_order_item.product_version
+JOIN (
+    VALUES
+        ('Z8711-01', 'z8711-part-logo'),
+        ('Z8711-02', 'z8711-part-outsourced-stud')
+) AS part(part_no, flow_node_id)
+    ON part.part_no = bom.part_no
+JOIN production_plan
+    ON production_plan.customer_order_id = customer_order.id
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+-- 草稿计划的部门路线投影；计划确认时后端会按同一正式流程重新生成。
+INSERT INTO production_route_task (
+    production_plan_id,
+    production_plan_item_id,
+    route_flow_node_id,
+    route_node_type,
+    workshop_id,
+    department_id,
+    route_order
+)
+SELECT
+    production_plan.id,
+    plan_item.id,
+    route.route_flow_node_id,
+    route.route_node_type,
+    workshop.id,
+    department.id,
+    route.route_order
+FROM customer_order
+JOIN production_plan
+    ON production_plan.customer_order_id = customer_order.id
+JOIN production_plan_item AS plan_item
+    ON plan_item.production_plan_id = production_plan.id
+JOIN (
+    VALUES
+        ('z8711-part-logo', 'z8711-process-laser',
+            'process', 'stamp', '激光开料车间', 0),
+        ('z8711-part-logo', 'z8711-assembly-81',
+            'assembly', 'assembly', '装配车间', 2),
+        ('z8711-part-outsourced-stud', 'z8711-supplier-processing',
+            'supplier_processing', 'business', NULL, 0),
+        ('z8711-part-outsourced-stud', 'z8711-assembly-81',
+            'assembly', 'assembly', '装配车间', 2),
+        ('z8711-assembly-81', 'z8711-assembly-81',
+            'assembly', 'assembly', '装配车间', 0),
+        ('z8711-assembly-81', 'z8711-process-packaging',
+            'process', 'assembly', '装包车间', 2)
+) AS route(
+    origin_flow_node_id,
+    route_flow_node_id,
+    route_node_type,
+    department_code,
+    workshop_name,
+    route_order
+) ON route.origin_flow_node_id = plan_item.flow_node_id
+JOIN department
+    ON department.department_code = route.department_code
+LEFT JOIN workshop
+    ON workshop.department_id = department.id
+    AND workshop.workshop_name = route.workshop_name
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+-- 计划确认后的生产物料。外购脚钉由业务部后续创建唯一委外工单，
+-- 因此只创建生产对象；logo件同时进入激光开料节点。
+INSERT INTO material_processing_state (
+    product_id,
+    product_version,
+    item_type,
+    product_bom_id,
+    origin_flow_node_id,
+    completed_flow_node_id,
+    resume_flow_node_id,
+    procedure_history,
+    qc_status,
+    display_text,
+    state_signature
+)
+SELECT
+    product.id,
+    1,
+    'part',
+    bom.id,
+    'z8711-part-logo',
+    'z8711-part-logo',
+    'z8711-process-laser',
+    '[]'::jsonb,
+    'none',
+    '未加工 · 待激光开料车间',
+    encode(
+        digest(
+            '{"completed_flow_node_id":"z8711-part-logo",'
+            || '"item_type":"part",'
+            || '"origin_flow_node_id":"z8711-part-logo",'
+            || '"procedure_history":[],"product_bom_id":'
+            || bom.id::text
+            || ',"product_id":'
+            || product.id::text
+            || ',"product_version":1,"qc_status":"none",'
+            || '"resume_flow_node_id":"z8711-process-laser"}',
+            'sha256'
+        ),
+        'hex'
+    )
+FROM product
+JOIN product_bom AS bom
+    ON bom.product_id = product.id
+    AND bom.product_version = 1
+    AND bom.part_no = 'Z8711-01'
+WHERE product.factory_code = 'Z8711';
+
+INSERT INTO production_item (
+    customer_order_item_id,
+    product_id,
+    product_version,
+    product_bom_id,
+    origin_flow_node_id
+)
+SELECT
+    customer_order_item.id,
+    product.id,
+    1,
+    bom.id,
+    part.origin_flow_node_id
+FROM customer_order
+JOIN customer_order_item
+    ON customer_order_item.customer_order_id = customer_order.id
+JOIN product
+    ON product.id = customer_order_item.product_id
+JOIN product_bom AS bom
+    ON bom.product_id = product.id
+    AND bom.product_version = customer_order_item.product_version
+JOIN (
+    VALUES
+        ('Z8711-01', 'z8711-part-logo'),
+        ('Z8711-02', 'z8711-part-outsourced-stud')
+) AS part(part_no, origin_flow_node_id)
+    ON part.part_no = bom.part_no
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+INSERT INTO repository (
+    production_item_id,
+    processing_state_id,
+    flow_node_id,
+    source_flow_node_id,
+    department_id,
+    source_work_order_id,
+    quantity
+)
+SELECT
+    production_item.id,
+    processing_state.id,
+    'z8711-process-laser',
+    'z8711-part-logo',
+    department.id,
+    NULL,
+    20
+FROM customer_order
+JOIN customer_order_item
+    ON customer_order_item.customer_order_id = customer_order.id
+JOIN production_item
+    ON production_item.customer_order_item_id = customer_order_item.id
+JOIN product_bom AS bom
+    ON bom.id = production_item.product_bom_id
+    AND bom.part_no = 'Z8711-01'
+JOIN material_processing_state AS processing_state
+    ON processing_state.product_id = production_item.product_id
+    AND processing_state.product_version = production_item.product_version
+    AND processing_state.product_bom_id = production_item.product_bom_id
+    AND processing_state.origin_flow_node_id = production_item.origin_flow_node_id
+    AND processing_state.resume_flow_node_id = 'z8711-process-laser'
+JOIN department
+    ON department.department_code = 'stamp'
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+INSERT INTO production_movement (
+    production_item_id,
+    source_flow_node_id,
+    target_flow_node_id,
+    source_department_id,
+    target_department_id,
+    quantity,
+    movement_type
+)
+SELECT
+    repository.production_item_id,
+    repository.source_flow_node_id,
+    repository.flow_node_id,
+    NULL,
+    repository.department_id,
+    repository.quantity,
+    'initial'
+FROM customer_order
+JOIN customer_order_item
+    ON customer_order_item.customer_order_id = customer_order.id
+JOIN production_item
+    ON production_item.customer_order_item_id = customer_order_item.id
+JOIN repository
+    ON repository.production_item_id = production_item.id
+    AND repository.source_work_order_id IS NULL
+WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001';
+
+DO $$
+BEGIN
+    IF (
+        SELECT COUNT(*)
+        FROM product_process_flow
+        JOIN product ON product.id = product_process_flow.product_id
+        WHERE product.factory_code = 'Z8711'
+            AND product_process_flow.product_version = 1
+            AND jsonb_array_length(product_process_flow.flow_json->'nodes') = 10
+            AND jsonb_array_length(product_process_flow.flow_json->'edges') = 9
+    ) <> 1 THEN
+        RAISE EXCEPTION 'Z8711 正式流程初始化不完整';
+    END IF;
+
+    IF (
+        SELECT COUNT(*)
+        FROM product_route_task
+        JOIN product ON product.id = product_route_task.product_id
+        WHERE product.factory_code = 'Z8711'
+            AND product_route_task.product_version = 1
+    ) <> 6 THEN
+        RAISE EXCEPTION 'Z8711 正式流程任务投影初始化不完整';
+    END IF;
+
+    IF (
+        SELECT COUNT(*)
+        FROM customer_order
+        JOIN customer_order_item
+            ON customer_order_item.customer_order_id = customer_order.id
+        WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001'
+            AND customer_order.status = 'planned'
+            AND customer_order_item.quantity = 15
+    ) <> 1 THEN
+        RAISE EXCEPTION 'Z8711 示例订单初始化不完整';
+    END IF;
+
+    IF (
+        SELECT COUNT(*)
+        FROM customer_order
+        JOIN production_plan
+            ON production_plan.customer_order_id = customer_order.id
+        JOIN production_plan_item
+            ON production_plan_item.production_plan_id = production_plan.id
+        WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001'
+            AND production_plan.status = 'confirmed'
+            AND production_plan.confirmed_by = 'business'
+            AND production_plan_item.item_type = 'part'
+            AND production_plan_item.planned_production_quantity = 20
+    ) <> 2 THEN
+        RAISE EXCEPTION 'Z8711 示例生产计划初始化不完整';
+    END IF;
+
+    IF (
+        SELECT COUNT(*)
+        FROM customer_order
+        JOIN production_plan
+            ON production_plan.customer_order_id = customer_order.id
+        JOIN production_plan_item
+            ON production_plan_item.production_plan_id = production_plan.id
+        WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001'
+            AND production_plan_item.item_type = 'assembly'
+            AND production_plan_item.planned_production_quantity = 20
+    ) <> 1 THEN
+        RAISE EXCEPTION 'Z8711 示例装配计划数量初始化不完整';
+    END IF;
+
+    IF (
+        SELECT COUNT(*)
+        FROM customer_order
+        JOIN production_plan
+            ON production_plan.customer_order_id = customer_order.id
+        JOIN production_route_task
+            ON production_route_task.production_plan_id = production_plan.id
+        WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001'
+    ) <> 6 THEN
+        RAISE EXCEPTION 'Z8711 示例生产计划任务投影初始化不完整';
+    END IF;
+
+    IF (
+        SELECT COUNT(*)
+        FROM customer_order
+        JOIN customer_order_item
+            ON customer_order_item.customer_order_id = customer_order.id
+        JOIN production_item
+            ON production_item.customer_order_item_id = customer_order_item.id
+        WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001'
+    ) <> 2 THEN
+        RAISE EXCEPTION 'Z8711 示例生产对象初始化不完整';
+    END IF;
+
+    IF (
+        SELECT COUNT(*)
+        FROM customer_order
+        JOIN customer_order_item
+            ON customer_order_item.customer_order_id = customer_order.id
+        JOIN production_item
+            ON production_item.customer_order_item_id = customer_order_item.id
+        JOIN repository
+            ON repository.production_item_id = production_item.id
+        JOIN production_movement
+            ON production_movement.production_item_id = production_item.id
+            AND production_movement.movement_type = 'initial'
+        WHERE customer_order.customer_order_no = 'ORDER-Z8711-0001'
+            AND repository.quantity = 20
+            AND repository.flow_node_id = 'z8711-process-laser'
+    ) <> 1 THEN
+        RAISE EXCEPTION 'Z8711 logo件初始生产位置初始化不完整';
+    END IF;
+END;
+$$;
 
 -- ------------------------------------------------------------
 -- 可删除的开发示例人员

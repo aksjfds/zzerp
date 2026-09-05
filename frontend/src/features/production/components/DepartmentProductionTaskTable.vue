@@ -41,13 +41,22 @@ function statusType(status: ProductionTaskProcessingStatus) {
   return productionTaskStatusPresentation[status.status].type
 }
 
-function isWaitingForMaterials(
+function showsMaterialArrivals(
   row: ProductionTaskTreeRow,
 ): row is ProductionTaskStatusRow {
   return row.row_type === 'status'
     && row.status.status === 'not_started'
-    && row.status.action === 'none'
     && row.task.material_arrivals.length > 0
+}
+
+function statusLabel(row: ProductionTaskStatusRow) {
+  if (row.status.status !== 'not_started' || row.status.action !== 'none') {
+    return row.status.label
+  }
+  const missingMaterials = row.task.material_arrivals
+    .filter(material => material.arrived_quantity < material.task_quantity)
+    .map(material => material.material_name)
+  return `等待：${(missingMaterials.length ? missingMaterials : [row.task.part_name]).join('、')}`
 }
 
 function materialArrivalType(
@@ -106,10 +115,10 @@ function materialArrivalType(
               effect="light"
               size="small"
             >
-              {{ row.status.label }} · {{ row.status.quantity }}
+              {{ statusLabel(row) }} · {{ row.status.quantity }}
             </ElTag>
           </span>
-          <div v-if="isWaitingForMaterials(row)" class="material-arrival-list">
+          <div v-if="showsMaterialArrivals(row)" class="material-arrival-list">
             <ElTag
               v-for="material in row.task.material_arrivals"
               :key="`${material.material_type}:${material.material_no}`"

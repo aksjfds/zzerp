@@ -41,6 +41,12 @@ def _batch_activity(batch: WorkOrderBatch) -> WorkOrderBatchActivity:
     )
 
 
+def worker_has_qc_batches(session: Session, worker_id: int) -> bool:
+    return session.scalar(
+        select(WorkOrderBatch.id).where(WorkOrderBatch.qc_worker_id == worker_id).limit(1)
+    ) is not None
+
+
 def list_qc_worker_order_ids(
     session: Session,
     worker_id: int,
@@ -112,4 +118,5 @@ __all__ = [
     "list_batch_activities",
     "list_qualified_batch_order_ids",
     "list_qc_worker_order_ids",
+    "worker_has_qc_batches",
 ]

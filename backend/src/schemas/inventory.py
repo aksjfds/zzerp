@@ -51,6 +51,8 @@ class WarehouseOperationResponse(InventoryModel):
     work_order_id: int | None
     work_order_batch_id: int | None
     production_item_id: int | None
+    processing_state_id: int
+    reversal_of_operation_id: int | None
     warehouse_stock_id: int | None
     item_code: str
     item_name: str
@@ -84,6 +86,10 @@ class WarehouseOperationReviewInput(InventoryModel):
     review_note: str = Field(min_length=1)
 
 
+class WarehouseOperationReversalInput(InventoryModel):
+    operation_group_no: str = Field(min_length=1)
+
+
 class FinishedReceiptResponse(InventoryModel):
     id: int
     work_order_batch_id: int | None
@@ -93,9 +99,12 @@ class FinishedReceiptResponse(InventoryModel):
     item_code: str
     item_name: str
     quantity: int
-    status: Literal["pending", "received"]
+    status: Literal["pending", "received", "cancelled", "reversed"]
     received_at: datetime | None
     received_by: str | None
+    corrected_at: datetime | None
+    corrected_by: str | None
+    correction_reason: str | None
     created_at: datetime
     revision: int
 
@@ -106,6 +115,33 @@ class FinishedReceiptEnvelope(InventoryModel):
 
 class FinishedReceiptItemEnvelope(InventoryModel):
     data: FinishedReceiptResponse
+
+
+class PendingFinishedReceiptResponse(InventoryModel):
+    id: int
+    work_order_batch_id: int | None
+    work_order_id: int | None
+    quantity: int
+    created_at: datetime
+
+
+class FinishedInboundItemResponse(InventoryModel):
+    product_id: int
+    product_version: int
+    item_code: str
+    item_name: str
+    planned_quantity: int
+    production_plan_count: int
+    arrived_quantity: int
+    pending_receipts: list[PendingFinishedReceiptResponse]
+    updated_at: datetime
+
+
+class FinishedInboundItemEnvelope(InventoryModel):
+    data: list[FinishedInboundItemResponse]
+    total: int
+    page: int
+    page_size: int
 
 
 class FinishedStockResponse(InventoryModel):
@@ -154,6 +190,8 @@ class FinishedStockTransactionResponse(InventoryModel):
     finished_stock_id: int
     finished_receipt_id: int | None
     finished_stock_reservation_id: int | None
+    operation_group_no: str
+    reversal_of_transaction_id: int | None
     customer_order_id: int | None
     customer_order_no: str
     customer_order_item_id: int | None
@@ -161,7 +199,12 @@ class FinishedStockTransactionResponse(InventoryModel):
     product_version: int
     item_code: str
     item_name: str
-    transaction_type: Literal["receipt", "customer_shipment"]
+    transaction_type: Literal[
+        "receipt",
+        "receipt_reversal",
+        "customer_shipment",
+        "customer_shipment_reversal",
+    ]
     quantity: int
     quantity_before: int
     quantity_after: int
@@ -200,3 +243,7 @@ class FinishedShipmentCandidateItemEnvelope(InventoryModel):
 
 class FinishedShipmentInput(InventoryModel):
     quantity: int = Field(gt=0)
+
+
+class OperationCorrectionInput(InventoryModel):
+    reason: str | None = Field(default=None, max_length=1000)

@@ -6,17 +6,39 @@ from modules.standard_execution.api import (
     cancel_procedure_configuration,
     confirm_procedure_configuration,
     list_procedure_prices,
+    list_procedure_price_revisions,
     update_temporary_work_order_price,
     update_procedure_price,
 )
 from schemas.procedure_prices import (
     ProcedurePriceListEnvelope,
+    ProcedurePriceRevisionListEnvelope,
     ProcedurePriceUpdate,
     TemporaryWorkOrderPriceUpdate,
 )
 
 
 router = APIRouter(tags=["procedure-prices"])
+
+
+@router.get(
+    "/departments/{department_code}/procedure-price-revisions",
+    response_model=ProcedurePriceRevisionListEnvelope,
+)
+def procedure_price_revisions(
+    department_code: str,
+    page: int = Query(default=1, gt=0),
+    page_size: int = Query(default=50, gt=0, le=200),
+    user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
+):
+    data, total = list_procedure_price_revisions(
+        department_code,
+        page,
+        page_size,
+        user["department"],
+        user["is_system"],
+    )
+    return {"data": data, "total": total}
 
 
 @router.get(
@@ -57,6 +79,7 @@ def temporary_work_order_price_update(
         payload,
         user["department"],
         user["is_system"],
+        user["username"],
     )
     return Response(status_code=204)
 

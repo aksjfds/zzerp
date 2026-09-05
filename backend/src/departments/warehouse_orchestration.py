@@ -1,4 +1,6 @@
-"""Application orchestration for completed-plan production-position storage."""
+"""Application orchestration for production-position storage."""
+
+from dataclasses import asdict
 
 from database import SessionLocal
 from domain.warehouse import (
@@ -11,63 +13,64 @@ from modules.inventory.warehouse_api import (
     WarehouseInboundRequest,
     list_warehouse_operations,
     receive_c01_stock,
+    replayable_operation_group,
+    reverse_warehouse_operation_group,
 )
 from modules.organization.read_api import (
     DepartmentView,
     get_department_ids_by_codes,
     get_department_views_by_codes,
 )
-from modules.planning.execution_api import (
-    completed_plan_order_item_ids,
-    ensure_production_plan_completed,
-)
 from modules.production_core.position_inventory_api import (
-    ProductionPositionCandidate,
+    DepartmentMaterialPosition,
     consume_position_for_warehouse,
-    department_position_order_item_ids,
-    get_available_production_position,
-    list_available_production_positions,
+    get_department_material_position,
+    list_department_material_positions,
     lock_production_position,
     position_inventory_movement_matches,
+    restore_position_from_warehouse,
 )
 
 
-def list_completed_plan_positions(department_code: str) -> list[dict]:
+def list_department_materials(department_code: str) -> list[dict]:
     if department_code == "qc":
         return []
     with SessionLocal() as session:
         department = _department(session, department_code)
-        order_item_ids = department_position_order_item_ids(session, department.id)
-        completed_ids = completed_plan_order_item_ids(session, order_item_ids)
         return [
             _serialize_candidate(candidate)
-            for candidate in list_available_production_positions(
+            for candidate in list_department_material_positions(
                 session,
                 department_id=department.id,
                 department_code=department_code,
-                completed_order_item_ids=completed_ids,
             )
         ]
 
 
-def store_completed_plan_position(
+def store_production_position(
     department_code: str,
     production_item_id: int,
+    processing_state_id: int,
     flow_node_id: str,
     source_flow_node_id: str,
     position_version: str,
     quantity: int,
     actor_username: str,
 ) -> dict:
-    operation_group_no = _operation_group_no(
+    base_operation_group_no = _operation_group_no(
         department_code,
         production_item_id,
+        processing_state_id,
         flow_node_id,
         source_flow_node_id,
         position_version,
         quantity,
     )
     with SessionLocal.begin() as session:
+        operation_group_no = replayable_operation_group(
+            session,
+            base_operation_group_no,
+        )
         existing = _existing_storage_result(
             session,
             operation_group_no,
@@ -76,11 +79,12 @@ def store_completed_plan_position(
         if existing is not None:
             return existing
         department = _department(session, department_code)
-        candidate = get_available_production_position(
+        candidate = get_department_material_position(
             session,
             department_id=department.id,
             department_code=department_code,
             production_item_id=production_item_id,
+            processing_state_id=processing_state_id,
             flow_node_id=flow_node_id,
             source_flow_node_id=source_flow_node_id,
         )
@@ -102,10 +106,6 @@ def store_completed_plan_position(
                 f"最多可存入仓库 {candidate.available_quantity} 件",
                 status_code=409,
             )
-        ensure_production_plan_completed(
-            session,
-            candidate.customer_order_item_id,
-        )
         result = receive_c01_stock(
             session,
             WarehouseInboundRequest(
@@ -118,7 +118,8 @@ def store_completed_plan_position(
                 item_name=candidate.item_name,
                 product_version=candidate.product_version,
                 item_type=candidate.item_type,
-                completion_status=candidate.completion_status,
+                completion_status=candidate.processing_status,
+                processing_state_id=candidate.processing_state_id,
                 quantity=quantity,
                 actor_username=actor_username,
             ),
@@ -142,6 +143,7 @@ def store_completed_plan_position(
                 department_id=department.id,
                 department_code=department_code,
                 production_item_id=production_item_id,
+                processing_state_id=processing_state_id,
                 flow_node_id=flow_node_id,
                 source_flow_node_id=source_flow_node_id,
                 position_version=position_version,
@@ -150,7 +152,7 @@ def store_completed_plan_position(
         except DomainError as error:
             if error.code != "warehouse_storage_position_changed":
                 raise
-            replayed = _completed_storage_replay(
+            replayed = _successful_storage_replay(
                 session,
                 operation_group_no,
                 production_item_id,
@@ -175,6 +177,46 @@ def store_completed_plan_position(
         return _storage_response(operation)
 
 
+def reverse_production_position_storage(
+    operation_group_no: str,
+    actor_username: str,
+) -> list[dict]:
+    with SessionLocal.begin() as session:
+        originals = list_warehouse_operations(
+            session,
+            operation_group_no=operation_group_no,
+            limit=2,
+        )
+        if len(originals) != 1 or originals[0].source_type != WAREHOUSE_SOURCE_PRODUCTION_POSITION:
+            raise DomainError(
+                "warehouse_storage_operation_invalid",
+                "只有生产节点物料入库操作可以从此入口冲销",
+                status_code=409,
+            )
+        original = originals[0]
+        result = reverse_warehouse_operation_group(
+            session,
+            original_group_no=operation_group_no,
+            reversal_group_no=f"{operation_group_no}:reversal",
+            actor_username=actor_username,
+        )
+        if result.status != WAREHOUSE_OPERATION_SUCCEEDED or len(result.operations) != 1:
+            raise DomainError(
+                "warehouse_storage_reversal_failed",
+                result.error_message or "生产节点物料入库冲销失败",
+                status_code=409,
+            )
+        restore_position_from_warehouse(
+            session,
+            original_warehouse_operation_id=original.id,
+            reversal_warehouse_operation_id=result.operations[0].id,
+        )
+        return [
+            {**asdict(operation), "can_review": False}
+            for operation in result.operations
+        ]
+
+
 def _department(session, department_code: str) -> DepartmentView:
     department = next(
         iter(get_department_views_by_codes(session, {department_code})),
@@ -185,13 +227,15 @@ def _department(session, department_code: str) -> DepartmentView:
     return department
 
 
-def _serialize_candidate(candidate: ProductionPositionCandidate) -> dict:
+def _serialize_candidate(candidate: DepartmentMaterialPosition) -> dict:
     return {
         "key": (
             f"position:{candidate.production_item_id}:"
+            f"{candidate.processing_state_id}:"
             f"{candidate.flow_node_id}:{candidate.source_flow_node_id}"
         ),
         "production_item_id": candidate.production_item_id,
+        "processing_state_id": candidate.processing_state_id,
         "customer_order_no": candidate.customer_order_no,
         "product_code": candidate.product_code,
         "product_name": candidate.product_name,
@@ -204,7 +248,12 @@ def _serialize_candidate(candidate: ProductionPositionCandidate) -> dict:
         "source_flow_node_id": candidate.source_flow_node_id,
         "current_node_label": candidate.current_node_label,
         "completed_flow_node_id": candidate.completed_flow_node_id,
-        "completion_status": candidate.completion_status,
+        "resume_flow_node_id": candidate.resume_flow_node_id,
+        "procedure_history": list(candidate.procedure_history),
+        "qc_status": candidate.qc_status,
+        "processing_status": candidate.processing_status,
+        "on_hand_quantity": candidate.on_hand_quantity,
+        "occupied_quantity": candidate.occupied_quantity,
         "available_quantity": candidate.available_quantity,
         "position_version": candidate.position_version,
     }
@@ -213,13 +262,14 @@ def _serialize_candidate(candidate: ProductionPositionCandidate) -> dict:
 def _operation_group_no(
     department_code: str,
     production_item_id: int,
+    processing_state_id: int,
     flow_node_id: str,
     source_flow_node_id: str,
     position_version: str,
     quantity: int,
 ) -> str:
     return (
-        f"position:{department_code}:{production_item_id}:{flow_node_id}:"
+        f"position:{department_code}:{production_item_id}:{processing_state_id}:{flow_node_id}:"
         f"{source_flow_node_id}:{position_version}:quantity:{quantity}"
     )
 
@@ -255,7 +305,7 @@ def _existing_storage_result(
     return _storage_response(operation)
 
 
-def _completed_storage_replay(
+def _successful_storage_replay(
     session,
     operation_group_no: str,
     production_item_id: int,
@@ -307,11 +357,12 @@ def _storage_response(operation) -> dict:
         "operation_group_no": operation.operation_group_no,
         "warehouse_stock_id": operation.warehouse_stock_id,
         "quantity": operation.quantity,
-        "completion_status": operation.completion_status,
+        "processing_status": operation.completion_status,
     }
 
 
 __all__ = [
-    "list_completed_plan_positions",
-    "store_completed_plan_position",
+    "list_department_materials",
+    "store_production_position",
+    "reverse_production_position_storage",
 ]

@@ -138,7 +138,7 @@ def _default_warehouse(item_type: str) -> tuple[str, str]:
 def _inventory_item_row(
     item: ProductionPlanItem,
     stock_id: int | None,
-    completed_node_label: str,
+    processing_status: str,
     warehouse_code: str,
     warehouse_name: str,
     stock_quantity: int,
@@ -158,7 +158,7 @@ def _inventory_item_row(
         "flow_node_id": item.flow_node_id,
         "item_code": item.item_code,
         "item_name": item_name or item.item_name,
-        "completed_node_label": completed_node_label,
+        "processing_status": processing_status,
         "warehouse_code": warehouse_code,
         "warehouse_name": warehouse_name,
         "stock_quantity": stock_quantity,

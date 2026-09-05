@@ -11,6 +11,11 @@ from modules.production_core.context_api import (
 from modules.production_core.flow_api import process_qc_node, qc_release_target
 from modules.production_core.operational_api import move_to_node
 from modules.production_core.ownership_api import add_repository_quantity
+from modules.production_core.material_state_api import (
+    QC_RELEASED,
+    QC_RETURNED,
+    transition_work_order_material_state,
+)
 from modules.quality.routing_api import QualifiedRouteResult, ReworkRouteResult
 
 
@@ -42,9 +47,20 @@ def route_qualified(
     if destination == "return":
         if assembly_department_id is None:
             raise DomainError("department_not_found", "装配部不存在")
+        processing_state = transition_work_order_material_state(
+            session,
+            production_item=production_item,
+            context=context,
+            order=order,
+            completed_flow_node_id=node["id"],
+            resume_flow_node_id=node["id"],
+            qc_status=QC_RETURNED,
+            reset_history=order.source_processing_state_id is None,
+        )
         add_repository_quantity(
             session,
             production_item_id=production_item.id,
+            processing_state_id=processing_state.id,
             flow_node_id=node["id"],
             source_flow_node_id=node["id"],
             department_id=assembly_department_id,
@@ -58,12 +74,27 @@ def route_qualified(
     target = qc_release_target(context.flow, context.nodes, node["id"])
     if target is None:
         raise DomainError("qc_target_missing", "当前装配节点没有可放行的后续流程节点")
+    processing_state = (
+        None
+        if target.get("type") == "finished_inbound"
+        else transition_work_order_material_state(
+            session,
+            production_item=production_item,
+            context=context,
+            order=order,
+            completed_flow_node_id=node["id"],
+            resume_flow_node_id=target["id"],
+            qc_status=QC_RELEASED,
+            reset_history=order.source_processing_state_id is None,
+        )
+    )
     department_id = move_to_node(
         session,
         production_item,
         target,
         quantity,
         qc_node["id"] if qc_node is not None else node["id"],
+        processing_state_id=processing_state.id if processing_state is not None else None,
         source_work_order_id=order.id,
     )
     if department_id is None:

@@ -44,6 +44,7 @@ def restore_cancelled_assembly_materials(session, order: WorkOrderContext) -> No
         repository = add_repository_quantity(
             session,
             production_item_id=material.production_item_id,
+            processing_state_id=material.source_processing_state_id,
             flow_node_id=material.source_flow_node_id,
             source_flow_node_id=material.source_previous_flow_node_id,
             department_id=material.source_department_id,

@@ -72,6 +72,7 @@ class SupplierProcessingQcTaskResponse(ProductionModel):
     work_order_no: str
     supplier_name: str
     supplier_process_name: str
+    release_target_name: str | None
     remark: str | None
     task_quantity: int
     inspected_quantity: int

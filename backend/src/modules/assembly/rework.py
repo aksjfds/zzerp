@@ -66,7 +66,7 @@ def resubmit_assembly_rework_batch(
 
         batch = create_inspection_batch(
             session,
-            work_order_id=order.id,
+            order=order,
             submitted_quantity=quantity,
             execution_flow_node_id=assembly_node["id"],
             rework_source_batch_id=source_batch.id,

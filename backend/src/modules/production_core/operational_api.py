@@ -13,6 +13,7 @@ from modules.production_core.movements import record_movement
 from modules.production_core.operation_undo import (
     capture_operation_state,
     record_undoable_operation,
+    undo_production_operation_in_session,
 )
 from modules.production_core.work_order_commands import (
     InventorySource,
@@ -75,6 +76,7 @@ __all__ = [
     "production_item_unit_quantity",
     "record_movement",
     "record_undoable_operation",
+    "undo_production_operation_in_session",
     "refresh_qc_work_order_closed",
     "rework_pending_by_order",
     "rework_pending_quantities",

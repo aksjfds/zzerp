@@ -88,4 +88,7 @@ def list_product_versions(product_id: int) -> list[int]:
         product = EngineeringProductRepository(session).get(product_id)
         if product is None:
             raise product_not_found()
-        return sorted((item.version for item in product.versions), reverse=True)
+        return sorted(
+            (item.version for item in product.versions),
+            reverse=True,
+        )

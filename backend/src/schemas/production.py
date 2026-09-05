@@ -4,9 +4,9 @@ Contracts are owned by focused modules; this facade preserves existing imports.
 """
 
 from schemas.production_inventory import (
-    ProductionPositionStorageCandidate,
+    DepartmentMaterialPosition,
+    DepartmentMaterialPositionListEnvelope,
     ProductionPositionStorageInput,
-    ProductionPositionStorageListEnvelope,
     ProductionPositionStorageResponse,
 )
 from schemas.production_progress import (
@@ -38,6 +38,7 @@ from schemas.production_work_orders import (
 from schemas.production_workbench import ProductionWorkbenchPositionListEnvelope
 from schemas.production_workforce import (
     DepartmentWorkerCreate,
+    DepartmentWorkerUpdate,
     DepartmentWorkerEnvelope,
     DepartmentWorkerHistoryEnvelope,
     DepartmentWorkerHistoryItem,

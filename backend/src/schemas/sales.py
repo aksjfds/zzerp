@@ -72,6 +72,40 @@ class CustomerOrderListEnvelope(SalesModel):
     total: int
 
 
+class CustomerOrderMaterialPosition(SalesModel):
+    flow_node_id: str
+    route_order: int
+    position_name: str
+    department_name: str
+    status: Literal[
+        "plan_unconfirmed",
+        "plan_cancelled",
+        "not_arrived",
+        "not_started",
+        "processing",
+        "submitted_qc",
+        "rework",
+        "completed",
+        "exception",
+        "department_completed",
+        "assembly_consumed",
+        "stored",
+        "transferred",
+    ]
+    status_label: str
+    quantity: int
+    procedure_names: list[str]
+
+
+class CustomerOrderMaterialProgress(SalesModel):
+    production_plan_item_id: int
+    item_type: Literal["part", "assembly"]
+    item_code: str
+    item_name: str
+    task_quantity: int
+    positions: list[CustomerOrderMaterialPosition]
+
+
 class CustomerOrderProgressDetail(SalesModel):
     customer_order_id: int
     customer_order_item_id: int
@@ -86,6 +120,7 @@ class CustomerOrderProgressDetail(SalesModel):
     outstanding_quantity: int
     delivery_date: date
     remark: str
+    materials: list[CustomerOrderMaterialProgress]
 
 
 class CustomerOrderProgressDetailEnvelope(SalesModel):
@@ -153,7 +188,7 @@ class ProductionPlanInventoryItem(SalesModel):
     flow_node_id: str
     item_code: str
     item_name: str
-    completed_node_label: str
+    processing_status: str
     warehouse_code: str
     warehouse_name: str
     stock_quantity: int

@@ -9,9 +9,10 @@ export type ProcedureOption = {
   procedure_name: string
 }
 
-export type ProductionPositionStorageCandidate = {
+export type DepartmentMaterialPosition = {
   key: string
   production_item_id: number
+  processing_state_id: number
   customer_order_no: string
   product_code: string
   product_name: string
@@ -24,7 +25,18 @@ export type ProductionPositionStorageCandidate = {
   source_flow_node_id: string
   current_node_label: string
   completed_flow_node_id: string
-  completion_status: string
+  resume_flow_node_id: string
+  procedure_history: Array<{
+    flow_node_id: string
+    procedure_id: number | null
+    procedure_name: string
+    is_temporary: boolean
+    completion_result: 'none' | 'returned' | 'released' | 'stored'
+  }>
+  qc_status: 'none' | 'returned' | 'released' | 'stored'
+  processing_status: string
+  on_hand_quantity: number
+  occupied_quantity: number
   available_quantity: number
   position_version: string
 }
@@ -108,6 +120,7 @@ export type QcBatchRow = WorkOrderBatch & {
   batch_sequence: number
   rework_source_batch_sequence: number | null
   allowed_destinations: QcDestination[]
+  release_target_name: string | null
   can_undo_inspection: boolean
 }
 
@@ -155,6 +168,7 @@ export type SupplierProcessingQcTask = {
   work_order_no: string
   supplier_name: string
   supplier_process_name: string
+  release_target_name: string | null
   remark: string | null
   task_quantity: number
   inspected_quantity: number

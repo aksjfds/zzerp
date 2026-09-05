@@ -46,6 +46,10 @@ class DepartmentWorkerCreate(ProductionModel):
     workshop_id: int | None = Field(default=None, gt=0)
 
 
+class DepartmentWorkerUpdate(DepartmentWorkerCreate):
+    pass
+
+
 class DepartmentWorkerEnvelope(ProductionModel):
     data: DepartmentWorkerResponse
 

@@ -27,7 +27,6 @@ UserDepartmentCode: TypeAlias = Literal[
     "engineering",
     "finished",
     "outsource",
-    "pmc",
     "polish",
     "qc",
     "stamp",

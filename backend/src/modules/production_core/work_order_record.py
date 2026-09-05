@@ -19,7 +19,6 @@ def build_work_order_record(
     workshop,
     order,
     batches,
-    workers,
 ):
     output_unit_quantity = (
         max(int(node.get("output_pcs") or 1), 1)
@@ -35,7 +34,6 @@ def build_work_order_record(
         if node.get("type") == "assembly"
         else work_order_progress
     )
-    worker = workers.get(order.worker_id)
     submission_capabilities = work_order_submission_capabilities(
         order,
         flow,
@@ -57,7 +55,7 @@ def build_work_order_record(
             workshop.workshop_name
             if workshop else str(node.get("label") or "—")
         ),
-        "worker_name": order.worker_name or (worker.worker_name if worker else None),
+        "worker_name": order.worker_name,
         "work_order_quantity": order.quantity,
         "quantity": order.quantity * output_unit_quantity,
         "processed_quantity": progress.processed_quantity,

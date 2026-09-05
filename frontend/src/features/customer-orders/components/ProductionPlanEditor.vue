@@ -13,13 +13,6 @@ const emit = defineEmits<{
 const plan = ref<ProductionPlan>()
 const loading = ref(false)
 const saving = ref(false)
-type InventoryGroup = {
-  orderItemId: number
-  factoryCode: string
-  productName: string
-  productVersion: number
-  items: ProductionPlan['inventory_items']
-}
 const inventoryTypeLabels = {
   part: '普通配件',
   assembly: '装配体',
@@ -33,24 +26,6 @@ function inventoryWarehouseLabel(item: ProductionPlan['inventory_items'][number]
   if (item.warehouse_code === '—') return '—'
   return `${item.warehouse_code} · ${item.warehouse_name}`
 }
-function productDecomposition(group: InventoryGroup) {
-  const parts = new Map<number, {
-    product_bom_id: number
-    item_code: string
-    item_name: string
-    quantity: number
-  }>()
-  let finishedQuantity = 0
-  for (const item of group.items) {
-    finishedQuantity += item.decomposition.finished_equivalent_quantity
-    for (const part of item.decomposition.parts) {
-      const existing = parts.get(part.product_bom_id)
-      if (existing) existing.quantity += part.quantity
-      else parts.set(part.product_bom_id, { ...part })
-    }
-  }
-  return { finishedQuantity, parts: [...parts.values()] }
-}
 const inventoryGroups = computed(() => {
   const itemsByOrderItem = new Map<number, ProductionPlan['inventory_items']>()
   for (const item of plan.value?.inventory_items || []) {
@@ -58,14 +33,21 @@ const inventoryGroups = computed(() => {
     items.push(item)
     itemsByOrderItem.set(item.customer_order_item_id, items)
   }
-  return (plan.value?.product_summaries || []).map(summary => ({
-    orderItemId: summary.customer_order_item_id,
-    factoryCode: summary.product_code,
-    productName: summary.product_name,
-    productVersion: summary.product_version,
-    items: itemsByOrderItem.get(summary.customer_order_item_id) || [],
-  }))
+  return (plan.value?.product_summaries || [])
+    .map(summary => ({
+      orderItemId: summary.customer_order_item_id,
+      factoryCode: summary.product_code,
+      productName: summary.product_name,
+      productVersion: summary.product_version,
+      items: (itemsByOrderItem.get(summary.customer_order_item_id) || [])
+        .filter(item => item.available_quantity > 0),
+    }))
+    .filter(group => group.items.length > 0)
 })
+const inventoryItemCount = computed(() => inventoryGroups.value.reduce(
+  (total, group) => total + group.items.length,
+  0,
+))
 const groups = computed(() => {
   const grouped = new Map<number, ProductionPlanItem[]>()
   for (const item of plan.value?.items.filter(item => item.item_type === 'part') || []) {
@@ -140,120 +122,89 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="plan-editor">
-    <section class="inventory-card">
-      <div class="plan-heading">
-        <div>
-          <h2>库存</h2>
-          <p>展示当前实存、占用和可用数量；确认时成品只占用，配件和装配体按现有规则出库。</p>
-        </div>
+  <div v-loading="loading" class="plan-editor">
+    <section class="inventory-panel">
+      <div class="inventory-panel-heading">
+        <h2>库存参考</h2>
+        <ElTag effect="plain" size="small">{{ inventoryItemCount }} 项</ElTag>
       </div>
       <ElEmpty v-if="!loading && !inventoryGroups.length" description="暂无相关产品库存" />
-      <section
-        v-for="group in inventoryGroups"
-        :key="group.orderItemId"
-        v-loading="loading"
-        class="inventory-product"
-      >
-        <div class="inventory-product-heading">
-          <div>
-            <strong>{{ group.factoryCode }} · {{ group.productName }}</strong>
-            <span>V{{ group.productVersion }}</span>
-          </div>
-          <ElPopover
-            placement="bottom-end"
-            trigger="click"
-            :width="620"
-          >
-            <template #reference>
-              <ElButton plain type="primary">查看库存换算</ElButton>
-            </template>
-            <div class="decomposition-heading">
-              <div>
-                <strong>{{ group.factoryCode }} · {{ group.productName }}</strong>
-                <span>V{{ group.productVersion }} · 汇总当前全部可用库存</span>
-              </div>
-              <ElTag type="success" effect="light">
-                成品等值 {{ productDecomposition(group).finishedQuantity }} 件
-              </ElTag>
-            </div>
-            <p class="decomposition-note">将该产品的配件、装配体和成品库存统一换算；仅供查看，不会改变实际库存。</p>
-            <ElTable
-              v-table-column-widths="'sales.inventory-decomposition'"
-              :data="productDecomposition(group).parts"
-              border
-              stripe
-              max-height="360"
-              empty-text="该产品没有可展开的配件库存"
-            >
-              <ElTableColumn prop="item_code" label="配件编号" min-width="140" />
-              <ElTableColumn prop="item_name" label="配件名称" min-width="180" />
-              <ElTableColumn prop="quantity" label="配件等值数量" width="140" align="right" />
-            </ElTable>
-          </ElPopover>
-        </div>
-        <ElTable
-          v-table-column-widths="'sales.plan-inventory'"
-          :data="group.items"
-          border
-          stripe
-          table-layout="auto"
-          empty-text="该产品暂无相关库存"
+      <div v-else class="inventory-products">
+        <section
+          v-for="group in inventoryGroups"
+          :key="group.orderItemId"
+          class="inventory-product-card"
         >
-          <ElTableColumn label="库存类型" width="100">
-            <template #default="{ row }">{{ inventoryTypeLabel(row.item_type) }}</template>
-          </ElTableColumn>
-          <ElTableColumn prop="item_code" label="编号" min-width="130" />
-          <ElTableColumn prop="item_name" label="名称" min-width="170" />
-          <ElTableColumn prop="completed_node_label" label="完成状态" min-width="120">
-            <template #default="{ row }">{{ row.completed_node_label }}</template>
-          </ElTableColumn>
-          <ElTableColumn label="仓库" min-width="120">
-            <template #default="{ row }">{{ inventoryWarehouseLabel(row) }}</template>
-          </ElTableColumn>
-          <ElTableColumn prop="stock_quantity" label="实存" width="85" align="right" />
-          <ElTableColumn prop="reserved_quantity" label="已占用" width="90" align="right" />
-          <ElTableColumn prop="available_quantity" label="可用" width="85" align="right" />
-          <ElTableColumn label="确认时分配" width="120" align="right">
-            <template #default="{ row }">
-              {{ row.planned_allocation_quantity
-                ? `${row.allocation_mode === 'reservation' ? '占用' : '出库'} ${row.planned_allocation_quantity}`
-                : '—' }}
-            </template>
-          </ElTableColumn>
-        </ElTable>
-      </section>
+          <div class="inventory-product-heading">
+            <div>
+              <strong>{{ group.factoryCode }} · {{ group.productName }}</strong>
+              <span>V{{ group.productVersion }}</span>
+            </div>
+          </div>
+          <div class="inventory-items">
+            <article
+              v-for="item in group.items"
+              :key="`${item.item_type}:${item.product_bom_id ?? item.flow_node_id}:${item.id}`"
+              class="inventory-item"
+            >
+              <div class="inventory-item-content">
+                <div class="inventory-identity">
+                  <strong>{{ item.item_code }} · {{ item.item_name }}</strong>
+                  <div class="inventory-meta">
+                    <ElTag effect="plain" size="small">{{ inventoryTypeLabel(item.item_type) }}</ElTag>
+                    <span>{{ item.processing_status }}</span>
+                    <span>{{ inventoryWarehouseLabel(item) }}</span>
+                  </div>
+                </div>
+                <div class="inventory-metrics">
+                  <div>
+                    <span>实存</span>
+                    <strong>{{ item.stock_quantity }}</strong>
+                  </div>
+                  <div>
+                    <span>占用</span>
+                    <strong>{{ item.reserved_quantity }}</strong>
+                  </div>
+                  <div class="available-metric">
+                    <span>可用</span>
+                    <strong>{{ item.available_quantity }}</strong>
+                  </div>
+                </div>
+              </div>
+              <div v-if="item.planned_allocation_quantity" class="inventory-allocation">
+                确认时{{ item.allocation_mode === 'reservation' ? '占用' : '出库' }}
+                <strong>{{ item.planned_allocation_quantity }}</strong>
+              </div>
+            </article>
+          </div>
+        </section>
+      </div>
     </section>
 
     <section class="plan-card">
-      <div class="plan-heading">
-        <div>
-          <h2>生产计划</h2>
-          <p>填写各配件的新生产数量；确认时系统重新计算需求并分配当时可用库存。</p>
-        </div>
-      </div>
+      <h2>计划数量</h2>
       <ElEmpty v-if="!loading && !groups.length" description="暂无生产计划项目" />
       <section v-for="group in groups" :key="group.orderItemId" class="product-plan">
         <div class="product-heading">
           <div>
             <strong>{{ group.factoryCode }} · {{ group.productName }}</strong>
-            <span>V{{ group.productVersion }} · 客户需求 {{ group.orderQuantity }}</span>
+            <span>V{{ group.productVersion }}</span>
           </div>
-          <ElTag :type="groupSatisfied(group) ? 'success' : 'danger'">
-            BOM 最多可满足 {{ plannedFinishedQuantity(group) }} 件
-          </ElTag>
+          <div class="plan-summary">
+            <div class="order-quantity">
+              <span>订单数量</span>
+              <strong>{{ group.orderQuantity }} 件</strong>
+            </div>
+          </div>
         </div>
-        <ElTable v-table-column-widths="'sales.plan-items'" v-loading="loading" :data="group.items" border stripe table-layout="auto">
+        <ElTable v-table-column-widths="'sales.plan-items'" :data="group.items" border stripe table-layout="auto">
           <ElTableColumn prop="item_code" label="编号" min-width="130" />
           <ElTableColumn prop="item_name" label="配件" min-width="210" />
           <ElTableColumn prop="unit_requirement" label="单件用量" width="95" align="right" />
-          <ElTableColumn label="配件总需求" width="110" align="right">
-            <template #default="{ row }">{{ row.gross_required_quantity }}</template>
-          </ElTableColumn>
-          <ElTableColumn label="待分配数量" width="115" align="right">
+          <ElTableColumn label="净需求" width="110" align="right">
             <template #default="{ row }">{{ row.net_required_quantity }}</template>
           </ElTableColumn>
-          <ElTableColumn label="计划生产数量" width="160" align="right">
+          <ElTableColumn label="计划数量" width="150" align="right">
             <template #default="{ row }">
               <ElInputNumber
                 v-if="editable && plan?.status === 'draft'"
@@ -267,29 +218,44 @@ onMounted(load)
         </ElTable>
       </section>
     </section>
-
   </div>
 </template>
 
 <style scoped>
 .plan-editor { display: grid; gap: 18px; }
-.inventory-card, .plan-card { padding: 20px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.plan-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 14px; }
-.inventory-product + .inventory-product { margin-top: 18px; }
-.inventory-product-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; padding: 10px 12px; border-left: 3px solid var(--erp-primary); border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
+.plan-card, .inventory-panel { padding: 18px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); }
+.inventory-panel-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.inventory-products { display: grid; gap: 14px; }
+.inventory-product-card { overflow: hidden; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface); }
+.inventory-product-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 14px; background: var(--md-surface-container-low); }
 .inventory-product-heading > div { display: grid; gap: 2px; }
 .inventory-product-heading span { color: var(--el-text-color-secondary); font-size: 13px; }
-.product-plan + .product-plan { margin-top: 18px; }
+.inventory-items { display: grid; }
+.inventory-item { position: relative; padding: 13px 14px; }
+.inventory-item + .inventory-item { border-top: 1px solid var(--md-outline-variant); }
+.inventory-item-content { display: grid; grid-template-columns: minmax(260px, 1fr) auto; gap: 18px; align-items: center; }
+.inventory-identity { display: grid; gap: 7px; min-width: 0; }
+.inventory-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--el-text-color-secondary); font-size: 12px; }
+.inventory-metrics { display: grid; grid-template-columns: repeat(3, minmax(68px, 1fr)); gap: 8px; }
+.inventory-metrics > div { display: grid; min-width: 68px; gap: 2px; padding: 7px 10px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); text-align: right; }
+.inventory-metrics span { color: var(--el-text-color-secondary); font-size: 11px; }
+.inventory-metrics strong { font-variant-numeric: tabular-nums; }
+.inventory-metrics .available-metric { color: var(--erp-primary); background: var(--md-primary-container); }
+.inventory-allocation { margin-top: 9px; color: var(--el-text-color-secondary); font-size: 12px; text-align: right; }
+.inventory-allocation strong { margin-left: 4px; color: var(--erp-primary); }
+.product-plan { margin-top: 14px; }
 .product-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; padding: 10px 12px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
 .product-heading > div { display: grid; gap: 2px; }
 .product-heading span { color: var(--el-text-color-secondary); font-size: 13px; }
-.decomposition-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 12px 14px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
-.decomposition-heading > div { display: grid; gap: 4px; }
-.decomposition-heading span { color: var(--el-text-color-secondary); font-size: 13px; }
-.decomposition-note { margin: 12px 0; }
+.product-heading .plan-summary { display: flex; align-items: center; gap: 10px; }
+.order-quantity { display: flex; align-items: baseline; gap: 7px; padding: 7px 11px; border-radius: var(--erp-radius); color: var(--md-on-primary-container); background: var(--md-primary-container); }
+.order-quantity span { color: inherit; font-size: 12px; font-weight: 600; }
+.order-quantity strong { font-variant-numeric: tabular-nums; }
 h2 { margin: 0; font-size: 18px; }
-p { margin: 4px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
 @media (max-width: 680px) {
-  .plan-heading, .product-heading, .inventory-product-heading, .decomposition-heading { align-items: stretch; flex-direction: column; }
+  .product-heading, .inventory-product-heading { align-items: stretch; flex-direction: column; }
+  .product-heading .plan-summary { justify-content: space-between; }
+  .inventory-item-content { grid-template-columns: 1fr; }
+  .inventory-metrics { width: 100%; }
 }
 </style>

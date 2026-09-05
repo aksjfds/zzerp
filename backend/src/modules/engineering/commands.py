@@ -142,6 +142,45 @@ def _validate_flow_departments_and_workshops(
     return packaging_workshop_ids(workshops)
 
 
+def _synchronize_product_flow_material_metadata(
+    repository: EngineeringProductRepository,
+    product: Product,
+    factory_code: str,
+) -> None:
+    for flow_record in product.process_flows:
+        version_bom = {
+            item.id: (item.part_name, item.part_no)
+            for item in product.bom_items
+            if item.product_version == flow_record.product_version
+        }
+        formal_flow = synchronize_part_metadata(
+            ProcessFlowPayload.model_validate(flow_record.flow_json),
+            version_bom,
+            factory_code,
+        )
+        draft_json = flow_record.draft_flow_json
+        draft_flow = (
+            synchronize_part_metadata(
+                ProcessFlowPayload.model_validate(draft_json),
+                version_bom,
+                factory_code,
+            )
+            if draft_json is not None
+            else None
+        )
+        repository.set_process_flow(
+            product,
+            flow_record.product_version,
+            formal_flow.model_dump(exclude_none=True),
+        )
+        if draft_flow is not None:
+            repository.set_process_flow_draft(
+                product,
+                flow_record.product_version,
+                draft_flow.model_dump(exclude_none=True),
+            )
+
+
 def create_product(payload: CreateProductPayload) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -199,22 +238,11 @@ def update_product_info(
                 return command_result(repository, product)
             ensure_base_info_editable(session, product.id, collaborators)
             if product.factory_code != payload.factory_code:
-                for flow_record in product.process_flows:
-                    version_bom = {
-                        item.id: (item.part_name, item.part_no)
-                        for item in product.bom_items
-                        if item.product_version == flow_record.product_version
-                    }
-                    synchronized = synchronize_part_metadata(
-                        ProcessFlowPayload.model_validate(flow_record.flow_json),
-                        version_bom,
-                        payload.factory_code,
-                    )
-                    repository.set_process_flow(
-                        product,
-                        flow_record.product_version,
-                        synchronized.model_dump(exclude_none=True),
-                    )
+                _synchronize_product_flow_material_metadata(
+                    repository,
+                    product,
+                    payload.factory_code,
+                )
             product.customer_id = customer.id
             product.product_name = payload.product_name
             product.factory_code = payload.factory_code
@@ -226,7 +254,6 @@ def update_product_info(
         raise_integrity_error(exc)
     except StaleDataError as exc:
         raise_stale_data_error(exc)
-
 
 def replace_product_bom(
     product_id: int,
@@ -414,25 +441,5 @@ def save_product_process_flow_draft(
             return command_result(repository, product, product_version)
     except IntegrityError as exc:
         raise_integrity_error(exc)
-    except StaleDataError as exc:
-        raise_stale_data_error(exc)
-
-
-def delete_product(product_id: int, expected_revision: int) -> None:
-    try:
-        with SessionLocal.begin() as session:
-            repository = EngineeringProductRepository(session)
-            product = repository.get(product_id)
-            if product is None:
-                raise product_not_found()
-            session.refresh(product, with_for_update=True)
-            validate_expected_revision(product.revision, expected_revision)
-            repository.delete(product)
-    except IntegrityError as exc:
-        raise DomainError(
-            "product_in_use",
-            "产品已被客户订单引用，不能删除",
-            status_code=409,
-        ) from exc
     except StaleDataError as exc:
         raise_stale_data_error(exc)

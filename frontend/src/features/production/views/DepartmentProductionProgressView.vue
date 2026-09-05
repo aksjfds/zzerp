@@ -119,7 +119,7 @@ onMounted(load)
       v-if="!embedded"
       :department-name="departmentName"
       page-title="生产任务"
-      description="生产计划创建后即可查看本部门需要生产的配件或装配体。"
+      description="生产计划确认后可查看本部门需要生产的配件或装配体。"
       @refresh="load"
     />
 

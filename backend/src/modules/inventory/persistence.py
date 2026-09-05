@@ -104,6 +104,10 @@ class WarehouseOperation(Base):
             ["production_plan_item.id", "production_plan_item.production_plan_id"],
             name="fk_warehouse_operation_plan_item",
         ),
+        UniqueConstraint(
+            "reversal_of_operation_id",
+            name="uq_warehouse_operation_reversal",
+        ),
         ForeignKeyConstraint(
             ["work_order_batch_id", "work_order_id"],
             ["work_order_batch.id", "work_order_batch.work_order_id"],
@@ -133,13 +137,13 @@ class WarehouseOperation(Base):
             name="ck_warehouse_operation_type",
         ),
         CheckConstraint(
-            "source_type IN ('plan_confirmation', 'qc_inventory', 'production_position')",
+            "source_type IN ('plan_confirmation', 'qc_inventory', 'production_position', 'reversal')",
             name="ck_warehouse_operation_source_type",
         ),
         CheckConstraint(
             "(source_type = 'plan_confirmation' AND operation_type = 'outbound') OR "
             "(source_type IN ('qc_inventory', 'production_position') "
-            "AND operation_type = 'inbound')",
+            "AND operation_type = 'inbound') OR source_type = 'reversal'",
             name="ck_warehouse_operation_direction",
         ),
         CheckConstraint(
@@ -153,7 +157,11 @@ class WarehouseOperation(Base):
             "AND production_plan_id IS NULL AND production_plan_item_id IS NULL) OR "
             "(source_type = 'production_position' AND production_item_id IS NOT NULL "
             "AND production_plan_id IS NULL AND production_plan_item_id IS NULL "
-            "AND work_order_id IS NULL AND work_order_batch_id IS NULL)",
+            "AND work_order_id IS NULL AND work_order_batch_id IS NULL) OR "
+            "(source_type = 'reversal' AND reversal_of_operation_id IS NOT NULL "
+            "AND production_plan_id IS NULL AND production_plan_item_id IS NULL "
+            "AND work_order_id IS NULL AND work_order_batch_id IS NULL "
+            "AND production_item_id IS NULL)",
             name="ck_warehouse_operation_source_context",
         ),
         CheckConstraint(
@@ -250,15 +258,8 @@ class WarehouseOperation(Base):
         ),
         Index("idx_warehouse_operation_work_order", "work_order_id", "work_order_batch_id"),
         Index("idx_warehouse_operation_production_item", "production_item_id", "id"),
+        Index("idx_warehouse_operation_processing_state", "processing_state_id", "id"),
         Index("idx_warehouse_operation_stock", "warehouse_stock_id", "id"),
-        Index(
-            "uq_warehouse_operation_qc_batch_success",
-            "work_order_batch_id",
-            unique=True,
-            postgresql_where=text(
-                "source_type = 'qc_inventory' AND status = 'succeeded'"
-            ),
-        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -281,6 +282,16 @@ class WarehouseOperation(Base):
     production_item_id: Mapped[int | None] = mapped_column(
         BigInteger,
         ForeignKey("production_item.id", name="fk_warehouse_operation_production_item"),
+        nullable=True,
+    )
+    processing_state_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("material_processing_state.id", name="fk_warehouse_operation_processing_state"),
+        nullable=False,
+    )
+    reversal_of_operation_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("warehouse_operation.id", name="fk_warehouse_operation_reversal"),
         nullable=True,
     )
     warehouse_stock_id: Mapped[int | None] = mapped_column(
@@ -321,12 +332,8 @@ class FinishedReceipt(Base):
             name="fk_finished_receipt_product_version",
         ),
         UniqueConstraint(
-            "work_order_batch_id",
-            name="uq_finished_receipt_qc_batch",
-        ),
-        UniqueConstraint(
-            "work_order_id",
-            name="uq_finished_receipt_packaging_order",
+            "replacement_for_receipt_id",
+            name="uq_finished_receipt_replacement",
         ),
         CheckConstraint(
             "(work_order_batch_id IS NOT NULL AND work_order_id IS NULL) OR "
@@ -336,15 +343,22 @@ class FinishedReceipt(Base):
         CheckConstraint("product_version > 0", name="ck_finished_receipt_version"),
         CheckConstraint("quantity > 0", name="ck_finished_receipt_quantity"),
         CheckConstraint(
-            "status IN ('pending', 'received')",
+            "status IN ('pending', 'received', 'cancelled', 'reversed')",
             name="ck_finished_receipt_status",
         ),
         CheckConstraint("revision > 0", name="ck_finished_receipt_revision"),
         CheckConstraint(
-            "(status = 'pending' AND received_at IS NULL AND received_by IS NULL) OR "
+            "(status = 'pending' AND received_at IS NULL AND received_by IS NULL "
+            "AND corrected_at IS NULL AND corrected_by IS NULL) OR "
             "(status = 'received' AND received_at IS NOT NULL "
             "AND received_by IS NOT NULL AND received_by = btrim(received_by) "
-            "AND received_by <> '')",
+            "AND received_by <> '' AND corrected_at IS NULL AND corrected_by IS NULL) OR "
+            "(status = 'cancelled' AND received_at IS NULL AND received_by IS NULL "
+            "AND corrected_at IS NOT NULL AND corrected_by IS NOT NULL "
+            "AND corrected_by = btrim(corrected_by) AND corrected_by <> '') OR "
+            "(status = 'reversed' AND received_at IS NOT NULL AND received_by IS NOT NULL "
+            "AND corrected_at IS NOT NULL AND corrected_by IS NOT NULL "
+            "AND corrected_by = btrim(corrected_by) AND corrected_by <> '')",
             name="ck_finished_receipt_lifecycle",
         ),
         Index(
@@ -353,6 +367,22 @@ class FinishedReceipt(Base):
             "created_at",
             "id",
             postgresql_where=text("status = 'pending'"),
+        ),
+        Index(
+            "uq_finished_receipt_active_qc_batch",
+            "work_order_batch_id",
+            unique=True,
+            postgresql_where=text(
+                "work_order_batch_id IS NOT NULL AND status IN ('pending', 'received')"
+            ),
+        ),
+        Index(
+            "uq_finished_receipt_active_packaging_order",
+            "work_order_id",
+            unique=True,
+            postgresql_where=text(
+                "work_order_id IS NOT NULL AND status IN ('pending', 'received')"
+            ),
         ),
     )
 
@@ -367,12 +397,20 @@ class FinishedReceipt(Base):
         ForeignKey("work_order.id", name="fk_finished_receipt_packaging_order"),
         nullable=True,
     )
+    replacement_for_receipt_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("finished_receipt.id", name="fk_finished_receipt_replacement"),
+        nullable=True,
+    )
     product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     product_version: Mapped[int] = mapped_column(Integer, nullable=False)
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="pending")
     received_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     received_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    corrected_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    corrected_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    correction_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
@@ -430,11 +468,6 @@ class FinishedStockReservation(Base):
                 "production_plan_item.customer_order_item_id",
             ],
             name="fk_finished_stock_reservation_plan_item",
-        ),
-        UniqueConstraint(
-            "production_plan_item_id",
-            "finished_stock_id",
-            name="uq_finished_stock_reservation_plan_item",
         ),
         UniqueConstraint(
             "id",
@@ -507,8 +540,8 @@ class FinishedStockTransaction(Base):
     __tablename__ = "finished_stock_transaction"
     __table_args__ = (
         UniqueConstraint(
-            "finished_receipt_id",
-            name="uq_finished_stock_transaction_receipt",
+            "reversal_of_transaction_id",
+            name="uq_finished_stock_transaction_reversal",
         ),
         ForeignKeyConstraint(
             ["customer_order_item_id", "customer_order_id"],
@@ -529,10 +562,15 @@ class FinishedStockTransaction(Base):
             name="fk_finished_stock_transaction_reservation",
         ),
         CheckConstraint(
-            "transaction_type IN ('receipt', 'customer_shipment')",
+            "transaction_type IN ('receipt', 'receipt_reversal', "
+            "'customer_shipment', 'customer_shipment_reversal')",
             name="ck_finished_stock_transaction_type",
         ),
         CheckConstraint("quantity > 0", name="ck_finished_stock_transaction_quantity"),
+        CheckConstraint(
+            "operation_group_no = btrim(operation_group_no) AND operation_group_no <> ''",
+            name="ck_finished_stock_transaction_group",
+        ),
         CheckConstraint(
             "quantity_before >= 0",
             name="ck_finished_stock_transaction_before",
@@ -546,10 +584,12 @@ class FinishedStockTransaction(Base):
             name="ck_finished_stock_transaction_actor",
         ),
         CheckConstraint(
-            "(transaction_type = 'receipt' AND finished_receipt_id IS NOT NULL "
+            "(transaction_type IN ('receipt', 'receipt_reversal') "
+            "AND finished_receipt_id IS NOT NULL "
             "AND customer_order_id IS NULL AND customer_order_item_id IS NULL "
             "AND finished_stock_reservation_id IS NULL) OR "
-            "(transaction_type = 'customer_shipment' AND finished_receipt_id IS NULL "
+            "(transaction_type IN ('customer_shipment', 'customer_shipment_reversal') "
+            "AND finished_receipt_id IS NULL "
             "AND customer_order_id IS NOT NULL AND customer_order_item_id IS NOT NULL)",
             name="ck_finished_stock_transaction_source",
         ),
@@ -557,8 +597,25 @@ class FinishedStockTransaction(Base):
             "(transaction_type = 'receipt' "
             "AND quantity_after = quantity_before + quantity) OR "
             "(transaction_type = 'customer_shipment' "
-            "AND quantity_after = quantity_before - quantity)",
+            "AND quantity_after = quantity_before - quantity) OR "
+            "(transaction_type = 'receipt_reversal' "
+            "AND quantity_after = quantity_before - quantity) OR "
+            "(transaction_type = 'customer_shipment_reversal' "
+            "AND quantity_after = quantity_before + quantity)",
             name="ck_finished_stock_transaction_balance",
+        ),
+        CheckConstraint(
+            "(transaction_type IN ('receipt', 'customer_shipment') "
+            "AND reversal_of_transaction_id IS NULL) OR "
+            "(transaction_type IN ('receipt_reversal', 'customer_shipment_reversal') "
+            "AND reversal_of_transaction_id IS NOT NULL)",
+            name="ck_finished_stock_transaction_reversal",
+        ),
+        Index(
+            "uq_finished_stock_transaction_receipt",
+            "finished_receipt_id",
+            unique=True,
+            postgresql_where=text("transaction_type = 'receipt'"),
         ),
         Index(
             "idx_finished_stock_transaction_stock",
@@ -603,6 +660,15 @@ class FinishedStockTransaction(Base):
     )
     finished_stock_reservation_id: Mapped[int | None] = mapped_column(
         BigInteger,
+        nullable=True,
+    )
+    operation_group_no: Mapped[str] = mapped_column(Text, nullable=False)
+    reversal_of_transaction_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "finished_stock_transaction.id",
+            name="fk_finished_stock_transaction_reversal",
+        ),
         nullable=True,
     )
     transaction_type: Mapped[str] = mapped_column(Text, nullable=False)

@@ -3,32 +3,32 @@ import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import {
-  queryProductionPositionStorageCandidates,
+  queryDepartmentMaterials,
   storeProductionPosition,
 } from '../api/productionStorage'
-import type { ProductionPositionStorageCandidate } from '../domain/types'
+import type { DepartmentMaterialPosition } from '../domain/types'
 
 const props = defineProps<{ departmentCode: string }>()
 const loading = ref(false)
 const submittingKey = ref<string | null>(null)
-const items = ref<ProductionPositionStorageCandidate[]>([])
+const items = ref<DepartmentMaterialPosition[]>([])
 const itemTypeLabels = { part: '普通配件', assembly: '装配体' } as const
 
 async function load() {
   loading.value = true
   try {
-    items.value = await queryProductionPositionStorageCandidates(props.departmentCode)
+    items.value = await queryDepartmentMaterials(props.departmentCode)
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '可入库物料加载失败')
+    ElMessage.error(getApiErrorDetail(error)?.message || '物料加载失败')
   } finally {
     loading.value = false
   }
 }
 
-async function store(item: ProductionPositionStorageCandidate) {
+async function store(item: DepartmentMaterialPosition) {
   try {
     const { value } = await ElMessageBox.prompt(
-      `生产计划已完成，当前可用 ${item.available_quantity} 件。入库后不能再用于开工单。`,
+      `当前可用 ${item.available_quantity} 件。入库后不能再用于开工单。`,
       '当前物料存入仓库',
       {
         inputValue: String(item.available_quantity),
@@ -46,7 +46,7 @@ async function store(item: ProductionPositionStorageCandidate) {
     submittingKey.value = item.key
     const result = await storeProductionPosition(props.departmentCode, item, quantity)
     ElMessage.success(
-      `已存入仓库 ${result.quantity} 件，完成状态：${result.completion_status}`,
+      `已存入仓库 ${result.quantity} 件，加工情况：${result.processing_status}`,
     )
     await load()
   } catch (error) {
@@ -65,12 +65,12 @@ onMounted(load)
   <section v-loading="loading" class="position-storage">
     <div class="position-storage-heading">
       <div>
-        <h2>可入库物料</h2>
-        <p>仅展示生产计划已完成、当前节点尚未加工且未被工单占用的配件和装配体。</p>
+        <h2>当前物料</h2>
+        <p>展示当前部门的配件和装配体，包含已被工单占用的数量。</p>
       </div>
       <ElButton @click="load">刷新</ElButton>
     </div>
-    <ElTable v-table-column-widths="'production.position-storage'" :data="items" border stripe table-layout="auto" empty-text="暂无可入库物料">
+    <ElTable v-table-column-widths="'production.position-storage'" :data="items" border stripe table-layout="auto" empty-text="当前部门暂无物料">
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="140" />
       <ElTableColumn label="产品" min-width="190">
         <template #default="{ row }">
@@ -83,16 +83,20 @@ onMounted(load)
       <ElTableColumn prop="item_code" label="编号" min-width="130" />
       <ElTableColumn prop="item_name" label="名称" min-width="160" />
       <ElTableColumn prop="current_node_label" label="所在节点" min-width="130" />
-      <ElTableColumn prop="completion_status" label="完成状态" min-width="120" />
-      <ElTableColumn prop="available_quantity" label="可入库数量" width="110" align="right" />
-      <ElTableColumn label="操作" width="120" fixed="right">
+      <ElTableColumn prop="processing_status" label="加工情况" min-width="180" />
+      <ElTableColumn prop="on_hand_quantity" label="当前数量" width="105" align="right" />
+      <ElTableColumn prop="occupied_quantity" label="工单占用" width="105" align="right" />
+      <ElTableColumn prop="available_quantity" label="可用数量" width="95" align="right" />
+      <ElTableColumn label="操作" width="130" fixed="right">
         <template #default="{ row }">
           <ElButton
+            v-if="row.available_quantity > 0"
             link
             type="primary"
             :loading="submittingKey === row.key"
             @click="store(row)"
           >存入仓库</ElButton>
+          <ElTag v-else type="info" effect="plain" size="small">已被工单占用</ElTag>
         </template>
       </ElTableColumn>
     </ElTable>

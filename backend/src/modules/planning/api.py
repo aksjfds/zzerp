@@ -1,4 +1,4 @@
-"""Public read API for PMC and production reporting."""
+"""Public API for production planning and progress reporting."""
 
 from modules.planning.assembly_department_progress import (
     list_department_production_progress,

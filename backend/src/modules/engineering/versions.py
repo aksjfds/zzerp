@@ -2,7 +2,6 @@ from copy import deepcopy
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm.exc import StaleDataError
 
 from database import SessionLocal
 from domain.engineering_products import validate_expected_revision
@@ -11,7 +10,6 @@ from domain.time import utc_now
 from modules.engineering.persistence import ProductVersion
 from modules.engineering.collaboration_contract import EngineeringCollaborators
 from modules.engineering.command_support import command_result, product_versions
-from modules.engineering.editability import ensure_product_version_editable
 from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import (
     empty_process_flow,
@@ -42,7 +40,7 @@ def create_product_version(
             copy_from_version = source_version or product.version
             if copy_from_version not in available_versions:
                 raise product_not_found()
-            next_version = max(available_versions | {product.version}) + 1
+            next_version = max(item.version for item in product.versions) + 1
             product.versions.append(ProductVersion(version=next_version))
             repository.flush()
             source_items = [
@@ -111,48 +109,3 @@ def create_product_version(
             return command_result(repository, product)
     except IntegrityError as exc:
         raise_integrity_error(exc)
-
-
-def delete_product_version(
-    product_id: int,
-    product_version: int,
-    expected_revision: int,
-    collaborators: EngineeringCollaborators,
-) -> dict | None:
-    try:
-        with SessionLocal.begin() as session:
-            repository = EngineeringProductRepository(session)
-            product = repository.get(product_id)
-            if product is None:
-                raise product_not_found()
-            session.refresh(product, with_for_update=True)
-            validate_expected_revision(product.revision, expected_revision)
-            versions = sorted(product_versions(product))
-            if product_version not in versions:
-                raise product_not_found()
-            ensure_product_version_editable(session, product.id, product_version, collaborators)
-            if len(versions) == 1:
-                repository.delete(product)
-                return None
-
-            for item in list(product.bom_items):
-                if item.product_version == product_version:
-                    product.bom_items.remove(item)
-            for item in list(product.process_flows):
-                if item.product_version == product_version:
-                    product.process_flows.remove(item)
-            for item in list(product.versions):
-                if item.version == product_version:
-                    product.versions.remove(item)
-            product.version = max(version for version in versions if version != product_version)
-            product.revision += 1
-            product.updated_at = utc_now()
-            return command_result(repository, product)
-    except IntegrityError as exc:
-        raise DomainError(
-            "product_version_in_use",
-            "当前产品版本已被订单或生产数据引用，不能删除",
-            status_code=409,
-        ) from exc
-    except StaleDataError as exc:
-        raise_stale_data_error(exc)

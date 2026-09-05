@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { PRODUCTION_PERMISSIONS } from '@/permission/constants'
@@ -8,6 +8,7 @@ import {
   queryWarehouseOperations,
   queryWarehouseStocks,
   reviewWarehouseOperation,
+  reverseProductionStorage,
 } from '../api/inventory'
 import type {
   WarehouseOperation,
@@ -27,7 +28,36 @@ const operationSourceLabels = {
   plan_confirmation: '生产计划确认',
   qc_inventory: 'QC 合格品入库',
   production_position: '生产节点直接入库',
+  reversal: '冲销',
 } as const
+const reversedOperationIds = computed(() => new Set(
+  operations.value
+    .map(item => item.reversal_of_operation_id)
+    .filter((id): id is number => id !== null),
+))
+
+function canReverseStorage(operation: WarehouseOperation) {
+  return operation.source_type === 'production_position'
+    && operation.status === 'succeeded'
+    && !reversedOperationIds.value.has(operation.id)
+}
+
+async function reverseStorage(operation: WarehouseOperation) {
+  try {
+    await ElMessageBox.confirm(
+      '仅该批库存尚未被领用、且物料没有后续生产流转时可以冲销。库存会扣回并恢复原生产位置。',
+      '冲销生产节点物料入库',
+      { type: 'warning', confirmButtonText: '确认冲销', cancelButtonText: '取消' },
+    )
+    await reverseProductionStorage(operation.operation_group_no)
+    await load()
+    ElMessage.success('生产节点物料入库已冲销')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(getApiErrorDetail(error)?.message || '生产节点物料入库冲销失败')
+    }
+  }
+}
 const operationStatusLabels = {
   pending: '待执行',
   succeeded: '成功',
@@ -199,6 +229,13 @@ onMounted(load)
                 :disabled="reviewingGroupNo !== null && reviewingGroupNo !== row.operation_group_no"
                 @click="review(row)"
               >记录核对</ElButton>
+              <ElButton
+                v-else-if="canReverseStorage(row)"
+                v-permission="PRODUCTION_PERMISSIONS.manage"
+                link
+                type="danger"
+                @click="reverseStorage(row)"
+              >冲销</ElButton>
               <span v-else>—</span>
             </template>
           </ElTableColumn>

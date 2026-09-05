@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { queryProductionWorkbenchPositions } from '../api/productionWorkbench'
@@ -10,7 +10,7 @@ export function useProductionWorkbenchReader<Position extends ProductionWorkbenc
   departmentCode: string,
   positionType?: PositionType,
 ) {
-  const positions = ref<Position[]>([])
+  const positions = shallowRef<Position[]>([])
   const positionsLoading = ref(false)
   const workshopId = ref<number>()
   const taskCustomerOrderItemId = ref<number>()

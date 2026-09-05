@@ -8,6 +8,8 @@ from modules.sales.orders import (
     get_order,
     list_order_progress_details,
     list_orders,
+    reopen_completed_production_plan,
+    unconfirm_production_plan,
     update_order,
 )
 
@@ -20,5 +22,7 @@ __all__ = [
     "get_order",
     "list_order_progress_details",
     "list_orders",
+    "reopen_completed_production_plan",
+    "unconfirm_production_plan",
     "update_order",
 ]

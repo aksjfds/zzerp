@@ -28,6 +28,7 @@ const {
   submitting,
   total,
   undoInspection,
+  undoDestination,
   undoingBatchId,
 } = useQcDepartment()
 
@@ -35,7 +36,7 @@ const searchText = ref('')
 const detailWorkOrderId = ref<number | null>(null)
 const detailVisible = ref(false)
 
-function selectView(value: string | number) {
+function selectView(value: unknown) {
   if (value === 'active' || value === 'history') void changeView(value)
 }
 
@@ -55,14 +56,15 @@ defineExpose({ refresh })
 <template>
   <section class="standard-qc-workspace">
     <div class="qc-filter-bar">
-      <ElSelect
+      <ElSegmented
         :model-value="activeView"
+        :options="[
+          { label: '待处理', value: 'active' },
+          { label: '历史记录', value: 'history' },
+        ]"
         aria-label="质检状态"
         @update:model-value="selectView"
-      >
-        <ElOption label="待处理" value="active" />
-        <ElOption label="历史记录" value="history" />
-      </ElSelect>
+      />
       <ElInput
         v-model="searchText"
         clearable
@@ -83,6 +85,7 @@ defineExpose({ refresh })
         @view="openDetail"
         @decide="decideDestination"
         @undo-inspection="undoInspection"
+        @undo-destination="undoDestination"
       />
       <ElPagination
         v-model:current-page="page"

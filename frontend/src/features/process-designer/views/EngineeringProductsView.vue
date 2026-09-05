@@ -13,7 +13,6 @@ const { loading, products, productTotal } = storeToRefs(store)
 const keyword = ref('')
 const page = ref(1)
 const pageSize = 50
-
 const filteredProducts = computed(() => {
   const value = keyword.value.trim().toLowerCase()
   if (!value) return products.value
@@ -72,7 +71,7 @@ onMounted(() => store.loadProducts(page.value, pageSize))
           </template>
         </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" min-width="160" />
-        <ElTableColumn label="操作" width="140" fixed="right">
+        <ElTableColumn label="操作" min-width="120" fixed="right">
           <template #default="{ row }">
             <div class="row-actions">
               <ElButton

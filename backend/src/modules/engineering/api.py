@@ -2,7 +2,6 @@
 
 from modules.engineering.commands import (
     create_product,
-    delete_product,
 )
 from modules.engineering.queries import (
     get_product,
@@ -13,7 +12,6 @@ from modules.engineering.queries import (
 
 __all__ = [
     "create_product",
-    "delete_product",
     "get_product",
     "list_product_versions",
     "list_products",

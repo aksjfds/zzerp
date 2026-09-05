@@ -1,7 +1,6 @@
 PRODUCT_VIEW = "engineering:product:view"
 PRODUCT_ADD = "engineering:product:add"
 PRODUCT_EDIT = "engineering:product:edit"
-PRODUCT_DELETE = "engineering:product:delete"
 ORDER_VIEW = "order:view"
 ORDER_ADD = "order:add"
 ORDER_EDIT = "order:edit"

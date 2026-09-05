@@ -54,6 +54,46 @@ class ProcedurePrice(Base):
     )
 
 
+class ProcedurePriceRevision(Base):
+    __tablename__ = "procedure_price_revision"
+    __table_args__ = (
+        CheckConstraint(
+            "target_type IN ('formal', 'temporary')",
+            name="ck_procedure_price_revision_target_type",
+        ),
+        CheckConstraint(
+            "previous_unit_price IS NULL OR previous_unit_price >= 0",
+            name="ck_procedure_price_revision_previous_nonnegative",
+        ),
+        CheckConstraint(
+            "new_unit_price IS NULL OR new_unit_price >= 0",
+            name="ck_procedure_price_revision_new_nonnegative",
+        ),
+        Index(
+            "idx_procedure_price_revision_department",
+            "department_id",
+            text("created_at DESC"),
+            text("id DESC"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    department_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey("department.id"),
+        nullable=False,
+    )
+    target_type: Mapped[str] = mapped_column(Text, nullable=False)
+    target_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    target_label: Mapped[str] = mapped_column(Text, nullable=False)
+    previous_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    new_unit_price: Mapped[Decimal | None] = mapped_column(Numeric(12, 2))
+    actor_username: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
+    )
+
+
 class ProcedureConfiguration(Base):
     __tablename__ = "procedure_configuration"
     __table_args__ = (

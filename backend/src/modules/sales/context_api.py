@@ -56,11 +56,11 @@ class SalesPlanningPort(Protocol):
         for_update: bool = False,
     ) -> OrderPlanState | None: ...
 
-    def planned_product_quantities(
+    def order_progress_by_order_item(
         self,
         session: Any,
         customer_order_item_ids: list[int],
-    ) -> dict[int, int]: ...
+    ) -> dict[int, dict]: ...
 
     def delete_order_plan(self, session: Any, order_id: int) -> None: ...
     def rebuild_order_plan(self, session: Any, order: Any) -> Any: ...
@@ -72,6 +72,24 @@ class SalesPlanningPort(Protocol):
     ) -> None: ...
 
     def confirm_order_plan(
+        self,
+        session: Any,
+        order: Any,
+        *,
+        expected_revision: int,
+        actor_username: str,
+    ) -> Any: ...
+
+    def unconfirm_order_plan(
+        self,
+        session: Any,
+        order: Any,
+        *,
+        expected_revision: int,
+        actor_username: str,
+    ) -> Any: ...
+
+    def reopen_completed_order_plan(
         self,
         session: Any,
         order: Any,

@@ -6,6 +6,7 @@ import {
   inspectQcBatch,
   queryQcInspectionBatches,
   undoQcInspection,
+  undoQcDestination,
 } from '../api/qc'
 import type {
   QcBatchRow,
@@ -83,14 +84,14 @@ export function useQcDepartment() {
   }
 
   async function decideDestination(batch: QcBatchRow, destination: QcDestination) {
-    const labels: Record<QcDestination, string> = {
-      return: '返回当前车间',
-      release: '放行下一节点',
+    const actions: Record<QcDestination, string> = {
+      return: '送回当前车间',
+      release: `放行至「${batch.release_target_name || '未配置下一节点'}」`,
       inventory: '存入仓库',
     }
     try {
       await ElMessageBox.confirm(
-        `确认将 ${batch.qualified_quantity || 0} 件合格品${labels[destination]}？确认后不能更改。`,
+        `确认将 ${batch.qualified_quantity || 0} 件合格品${actions[destination]}？尚未被下游使用时可以撤回。`,
         '确认合格品去向',
         { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' },
       )
@@ -126,6 +127,28 @@ export function useQcDepartment() {
       ElMessage.success('QC 结果已撤回')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || 'QC 结果撤回失败')
+    } finally {
+      undoingBatchId.value = null
+    }
+  }
+
+  async function undoDestination(batch: QcBatchRow) {
+    try {
+      await ElMessageBox.confirm(
+        '仅合格品尚未被下游使用时可以撤回；入库操作会同时生成反向库存记录。',
+        '撤回合格品去向',
+        { type: 'warning', confirmButtonText: '确认撤回', cancelButtonText: '取消' },
+      )
+    } catch {
+      return
+    }
+    undoingBatchId.value = batch.id
+    try {
+      await undoQcDestination(batch.id)
+      await loadInspectionBatches()
+      ElMessage.success('合格品去向已撤回')
+    } catch (error) {
+      ElMessage.error(getApiErrorDetail(error)?.message || '合格品去向撤回失败')
     } finally {
       undoingBatchId.value = null
     }
@@ -177,6 +200,7 @@ export function useQcDepartment() {
     submitting,
     total,
     undoInspection,
+    undoDestination,
     undoingBatchId,
   }
 }

@@ -19,11 +19,11 @@ class ProcedurePriceScope(ProcedurePriceModel):
     row_type: Literal["formal"]
     product_id: int
     product_version: int
+    origin_flow_node_id: str
+    flow_node_id: str
     product_name: str
     factory_code: str
     product_bom_id: int | None
-    origin_flow_node_id: str
-    flow_node_id: str
     workshop_id: int
     workshop_name: str
     part_name: str
@@ -51,6 +51,8 @@ class TemporaryWorkOrderPriceItem(ProcedurePriceModel):
     work_order_no: str
     product_id: int
     product_version: int
+    origin_flow_node_id: str
+    flow_node_id: str
     product_name: str
     factory_code: str
     part_name: str
@@ -74,3 +76,18 @@ class TemporaryWorkOrderPriceUpdate(ProcedurePriceModel):
         max_digits=12,
         decimal_places=2,
     )
+
+
+class ProcedurePriceRevisionResponse(ProcedurePriceModel):
+    id: int
+    target_type: Literal["formal", "temporary"]
+    target_label: str
+    previous_unit_price: Decimal | None
+    new_unit_price: Decimal | None
+    actor_username: str
+    created_at: str
+
+
+class ProcedurePriceRevisionListEnvelope(ProcedurePriceModel):
+    data: list[ProcedurePriceRevisionResponse]
+    total: int

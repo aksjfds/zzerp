@@ -11,7 +11,11 @@ from modules.production_core.context_api import (
 )
 from modules.production_core.flow_api import (
     ProductionFlowContext,
-    material_completion_status,
+    qc_release_target,
+)
+from modules.production_core.material_state_api import (
+    QC_STORED,
+    transition_work_order_material_state,
 )
 from modules.production_core.movements import record_movement
 
@@ -23,19 +27,36 @@ class QcInventoryMaterial:
     product_version: int
     item_type: WarehouseItemType
     completion_status: str
+    processing_state_id: int
 
 
 def project_qc_inventory_material(
+    session,
     production_item: ProductionItemContext,
     flow_context: ProductionFlowContext,
+    work_order: WorkOrderContext,
     completed_flow_node_id: str,
 ) -> QcInventoryMaterial:
     item_code, item_name = _inventory_identity(production_item, flow_context)
-    completion = material_completion_status(
+    target = qc_release_target(
         flow_context.flow,
         flow_context.nodes,
-        production_item.origin_flow_node_id,
         completed_flow_node_id,
+    )
+    if target is None or target.get("type") == "finished_inbound":
+        raise DomainError("qc_inventory_resume_target_missing", "当前物料没有可恢复生产的后续节点")
+    processing_state = transition_work_order_material_state(
+        session,
+        production_item=production_item,
+        context=flow_context,
+        order=work_order,
+        completed_flow_node_id=completed_flow_node_id,
+        resume_flow_node_id=target["id"],
+        qc_status=QC_STORED,
+        reset_history=(
+            work_order.work_order_type in {"assembly", "supplier_processing"}
+            and work_order.source_processing_state_id is None
+        ),
     )
     return QcInventoryMaterial(
         item_code=item_code,
@@ -44,7 +65,8 @@ def project_qc_inventory_material(
         item_type=(
             "part" if production_item.product_bom_id is not None else "assembly"
         ),
-        completion_status=completion.completion_status,
+        completion_status=processing_state.display_text,
+        processing_state_id=processing_state.id,
     )
 
 

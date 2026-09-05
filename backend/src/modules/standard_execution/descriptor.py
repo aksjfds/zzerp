@@ -7,6 +7,7 @@ MODULE = ModuleDescriptor(
     owns=(
         "procedure_configuration",
         "procedure_price",
+        "procedure_price_revision",
         "work_order_pay_detail",
     ),
     collaborates_with=(

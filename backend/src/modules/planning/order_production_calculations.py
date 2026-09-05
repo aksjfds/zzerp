@@ -10,7 +10,12 @@ from domain.production_types import (
     WORK_ORDER_SUPPLIER_PROCESSING,
 )
 from modules.errors import DomainError
-from modules.production_core.model_api import Repository
+from modules.production_core.model_api import (
+    ProductionMovement,
+    Repository,
+    WorkOrder,
+    WorkOrderBatch,
+)
 from modules.sales.model_api import CustomerOrderItem
 from modules.production_core.flow_api import assembly_material_key
 from modules.production_core.operational_api import (
@@ -35,19 +40,71 @@ class _SupplierProgressProjection:
     abnormal_quantity: int
 
 
+@dataclass(frozen=True, slots=True)
+class _OrderItemProgressData:
+    repositories: list[Repository]
+    movements: list[ProductionMovement]
+    work_orders: list[WorkOrder]
+    work_order_batches: list[WorkOrderBatch]
+    batches_by_id: dict[int, WorkOrderBatch]
+    pending_finished_quantity: int
+    received_finished_quantity: int
+
+
+@dataclass(slots=True)
+class _ProgressTotals:
+    current_by_node: dict[str, int]
+    current_inputs: dict[str, dict[str, int]]
+    current_repository_sources: dict[str, dict[str, list[Repository]]]
+    pending_rework_by_node: dict[str, int]
+    material_inputs: dict[str, dict[str, int]]
+    entered_by_node: dict[str, int]
+    transferred_by_node: dict[str, int]
+    transferred_by_edge: dict[str, int]
+    abnormal_by_node: dict[str, int]
+    assembly_output_by_node: dict[str, int]
+    internal_process_returns: dict[str, int]
+    process_abnormal_by_node: dict[str, int]
+
+
 def _calculate_order_item_state(
     context: OrderProductionReadContext,
     order_item: CustomerOrderItem,
     flow: dict,
     nodes: dict[str, dict],
 ) -> dict:
-    session = context.session
-    bom_items = [
-        item for item in context.bom_items.values()
-        if item.product_id == order_item.product_id
-        and item.product_version == order_item.product_version
-    ]
-    bom_by_id = {item.id: item for item in bom_items}
+    data = _load_order_item_progress_data(context, order_item)
+    totals = _initialize_progress_totals(context, data)
+    edge_id_by_nodes, targets_by_source = _flow_connections(flow)
+    _apply_supplier_projections(
+        context, data, totals, nodes, edge_id_by_nodes, targets_by_source
+    )
+    _apply_production_movements(
+        context, data, totals, edge_id_by_nodes
+    )
+    stats = _build_node_stats(context, data, totals, flow, nodes)
+    transferred_by_node = {
+        item["flow_node_id"]: item["transferred_quantity"] for item in stats
+    }
+    return {
+        "node_stats": stats,
+        "edge_stats": [
+            {
+                "flow_edge_id": edge["id"],
+                "transferred_quantity": transferred_by_node.get(
+                    edge["source_node_id"],
+                    totals.transferred_by_edge[edge["id"]],
+                ),
+            }
+            for edge in flow.get("edges", [])
+        ],
+    }
+
+
+def _load_order_item_progress_data(
+    context: OrderProductionReadContext,
+    order_item: CustomerOrderItem,
+) -> _OrderItemProgressData:
     production_items = context.production_items_by_order_item.get(order_item.id, [])
     production_item_ids = [item.id for item in production_items]
     repositories = [
@@ -70,54 +127,54 @@ def _calculate_order_item_state(
         for work_order in work_orders
         for batch in context.batches_by_order.get(work_order.id, [])
     ]
-    finished_receipt_states = [
+    receipt_states = [
         context.finished_receipts_by_batch[batch.id]
         for batch in work_order_batches
         if batch.id in context.finished_receipts_by_batch
     ]
-    pending_finished_quantity = sum(
-        quantity
-        for status, quantity in finished_receipt_states
-        if status == "pending"
+    return _OrderItemProgressData(
+        repositories=repositories,
+        movements=movements,
+        work_orders=work_orders,
+        work_order_batches=work_order_batches,
+        batches_by_id={batch.id: batch for batch in work_order_batches},
+        pending_finished_quantity=sum(
+            quantity for status, quantity in receipt_states if status == "pending"
+        ),
+        received_finished_quantity=sum(
+            quantity for status, quantity in receipt_states if status == "received"
+        ),
     )
-    received_finished_quantity = sum(
-        quantity
-        for status, quantity in finished_receipt_states
-        if status == "received"
-    )
-    batches_by_id = {batch.id: batch for batch in work_order_batches}
-    pending_qc_by_node: dict[str, int] = defaultdict(int)
-    for movement in movements:
-        batch = batches_by_id.get(movement.work_order_batch_id)
-        result_pending_destination = (
-            batch is not None
-            and batch.recorded_at is not None
-            and (batch.qualified_quantity or 0) > 0
-            and batch.destination_decided_at is None
-        )
-        if (
-            batch is not None
-            and (batch.recorded_at is None or result_pending_destination)
-            and movement.target_flow_node_id
-            and movement.movement_type in {
-                "process",
-                "assembly_output",
-            }
-        ):
-            pending_qc_by_node[movement.target_flow_node_id] += (
-                int(batch.qualified_quantity or 0)
-                if result_pending_destination
-                else batch.submitted_quantity
-            )
 
-    current_by_node: dict[str, int] = defaultdict(int)
-    current_inputs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    current_repository_sources: dict[str, dict[str, list[Repository]]] = defaultdict(
-        lambda: defaultdict(list)
+
+def _empty_progress_totals() -> _ProgressTotals:
+    nested_ints = lambda: defaultdict(int)
+    nested_repositories = lambda: defaultdict(list)
+    return _ProgressTotals(
+        current_by_node=defaultdict(int),
+        current_inputs=defaultdict(nested_ints),
+        current_repository_sources=defaultdict(nested_repositories),
+        pending_rework_by_node=defaultdict(int),
+        material_inputs=defaultdict(nested_ints),
+        entered_by_node=defaultdict(int),
+        transferred_by_node=defaultdict(int),
+        transferred_by_edge=defaultdict(int),
+        abnormal_by_node=defaultdict(int),
+        assembly_output_by_node=defaultdict(int),
+        internal_process_returns=defaultdict(int),
+        process_abnormal_by_node=defaultdict(int),
     )
-    for repository in repositories:
-        current_by_node[repository.flow_node_id] += repository.quantity
-        current_repository_sources[repository.flow_node_id][
+
+
+def _initialize_progress_totals(
+    context: OrderProductionReadContext,
+    data: _OrderItemProgressData,
+) -> _ProgressTotals:
+    totals = _empty_progress_totals()
+    for repository in data.repositories:
+        node_id = repository.flow_node_id
+        totals.current_by_node[node_id] += repository.quantity
+        totals.current_repository_sources[node_id][
             repository.source_flow_node_id
         ].append(repository)
         production_item = context.display.production_items.get(
@@ -125,309 +182,376 @@ def _calculate_order_item_state(
         )
         source_name = (
             production_item_name(
-                session,
-                production_item,
-                set(),
-                context.display,
+                context.session, production_item, set(), context.display
             )
             if production_item
             else "未知来源"
         )
-        current_inputs[repository.flow_node_id][source_name] += repository.quantity
-    for flow_node_id, quantity in pending_qc_by_node.items():
-        if flow_node_id:
-            current_by_node[flow_node_id] += int(quantity or 0)
-    held_qc_by_node: dict[str, int] = defaultdict(int)
-    for movement in movements:
+        totals.current_inputs[node_id][source_name] += repository.quantity
+    pending_qc_by_node = _pending_qc_quantities(data)
+    for node_id, quantity in pending_qc_by_node.items():
+        totals.current_by_node[node_id] += quantity
+    for movement in data.movements:
         if (
             movement.movement_type == "qc_qualified"
             and movement.source_flow_node_id == movement.target_flow_node_id
             and movement.source_department_id == movement.target_department_id
             and movement.target_flow_node_id
         ):
-            held_qc_by_node[movement.target_flow_node_id] += movement.quantity
-    for flow_node_id, quantity in held_qc_by_node.items():
-        current_by_node[flow_node_id] += max(quantity, 0)
-    rework_tracked_order_ids = {
+            totals.current_by_node[movement.target_flow_node_id] += max(
+                movement.quantity, 0
+            )
+    tracked_order_ids = {
         order.id
-        for order in work_orders
+        for order in data.work_orders
         if order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING
     }
     pending_rework = rework_pending_by_order(
         batch
-        for batch in work_order_batches
-        if batch.work_order_id in rework_tracked_order_ids
+        for batch in data.work_order_batches
+        if batch.work_order_id in tracked_order_ids
     )
-    pending_rework_by_node: dict[str, int] = defaultdict(int)
-    for work_order in work_orders:
+    for work_order in data.work_orders:
         quantity = pending_rework.get(work_order.id, 0)
-        current_by_node[work_order.flow_node_id] += quantity
-        pending_rework_by_node[work_order.flow_node_id] += quantity
+        totals.current_by_node[work_order.flow_node_id] += quantity
+        totals.pending_rework_by_node[work_order.flow_node_id] += quantity
+    return totals
 
-    material_inputs: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
-    entered_by_node: dict[str, int] = defaultdict(int)
-    transferred_by_node: dict[str, int] = defaultdict(int)
-    transferred_by_edge: dict[str, int] = defaultdict(int)
-    abnormal_by_node: dict[str, int] = defaultdict(int)
-    assembly_output_by_node: dict[str, int] = defaultdict(int)
-    internal_process_returns: dict[str, int] = defaultdict(int)
-    process_abnormal_by_node: dict[str, int] = defaultdict(int)
-    work_order_by_id = {order.id: order for order in work_orders}
+
+def _pending_qc_quantities(data: _OrderItemProgressData) -> dict[str, int]:
+    result: dict[str, int] = defaultdict(int)
+    for movement in data.movements:
+        batch = data.batches_by_id.get(movement.work_order_batch_id)
+        pending_destination = (
+            batch is not None
+            and batch.recorded_at is not None
+            and (batch.qualified_quantity or 0) > 0
+            and batch.destination_decided_at is None
+        )
+        if (
+            batch is not None
+            and (batch.recorded_at is None or pending_destination)
+            and movement.target_flow_node_id
+            and movement.movement_type in {"process", "assembly_output"}
+        ):
+            result[movement.target_flow_node_id] += (
+                int(batch.qualified_quantity or 0)
+                if pending_destination
+                else batch.submitted_quantity
+            )
+    return result
+
+
+def _flow_connections(
+    flow: dict,
+) -> tuple[dict[tuple[str, str], str], dict[str, list[str]]]:
     edge_id_by_nodes = {
         (edge["source_node_id"], edge["target_node_id"]): edge["id"]
         for edge in flow.get("edges", [])
     }
-    target_node_ids_by_source: dict[str, list[str]] = defaultdict(list)
+    targets_by_source: dict[str, list[str]] = defaultdict(list)
     for edge in flow.get("edges", []):
-        target_node_ids_by_source[edge["source_node_id"]].append(
-            edge["target_node_id"]
-        )
+        targets_by_source[edge["source_node_id"]].append(edge["target_node_id"])
+    return edge_id_by_nodes, targets_by_source
 
-    supplier_projections = _supplier_progress_projections(
-        work_orders=work_orders,
+
+def _apply_supplier_projections(
+    context: OrderProductionReadContext,
+    data: _OrderItemProgressData,
+    totals: _ProgressTotals,
+    nodes: dict[str, dict],
+    edge_id_by_nodes: dict[tuple[str, str], str],
+    targets_by_source: dict[str, list[str]],
+) -> None:
+    projections = _supplier_progress_projections(
+        work_orders=data.work_orders,
         batches_by_order=context.batches_by_order,
         nodes=nodes,
-        target_node_ids_by_source=target_node_ids_by_source,
+        target_node_ids_by_source=targets_by_source,
         edge_id_by_nodes=edge_id_by_nodes,
     )
-    for projection in supplier_projections:
-        entered_by_node[projection.supplier_node_id] += projection.task_quantity
-        current_by_node[
-            projection.supplier_node_id
-        ] += projection.remaining_qualified_quantity
-        transferred_by_node[
-            projection.supplier_node_id
-        ] += projection.inspected_quantity
-        abnormal_by_node[
-            projection.supplier_node_id
-        ] += projection.abnormal_quantity
-
-        transferred_by_node[projection.source_node_id] += projection.task_quantity
-        transferred_by_edge[projection.source_edge_id] += projection.task_quantity
-        transferred_by_edge[
+    for projection in projections:
+        supplier_id = projection.supplier_node_id
+        totals.entered_by_node[supplier_id] += projection.task_quantity
+        totals.current_by_node[supplier_id] += projection.remaining_qualified_quantity
+        totals.transferred_by_node[supplier_id] += projection.inspected_quantity
+        totals.abnormal_by_node[supplier_id] += projection.abnormal_quantity
+        totals.transferred_by_node[
+            projection.source_node_id
+        ] += projection.task_quantity
+        totals.transferred_by_edge[
+            projection.source_edge_id
+        ] += projection.task_quantity
+        totals.transferred_by_edge[
             projection.qc_edge_id
         ] += projection.inspected_quantity
-        current_by_node[
+        totals.current_by_node[
             projection.qc_node_id
         ] += projection.pending_destination_quantity
-        abnormal_by_node[projection.qc_node_id] += projection.abnormal_quantity
+        totals.abnormal_by_node[
+            projection.qc_node_id
+        ] += projection.abnormal_quantity
 
-    for movement in movements:
-        movement_order = work_order_by_id.get(movement.work_order_id)
-        if (
-            movement.target_flow_node_id
-            and movement.movement_type in {"qc_qualified", "qc_rework"}
-            and movement_order is not None
-            and movement_order.flow_node_id == movement.target_flow_node_id
-        ):
-            internal_process_returns[
-                movement.target_flow_node_id
-            ] += movement.quantity
-        if (
-            movement.target_flow_node_id
-            and movement.target_flow_node_id != movement.source_flow_node_id
-        ):
-            entered_by_node[movement.target_flow_node_id] += movement.quantity
-        leaves_source_node = (
-            movement.target_flow_node_id != movement.source_flow_node_id
-            and (
-                movement.target_flow_node_id is not None
-                or movement.work_order_batch_id is None
-                or movement.movement_type in {"qc_qualified", "qc_inventory"}
-            )
+
+def _apply_production_movements(
+    context: OrderProductionReadContext,
+    data: _OrderItemProgressData,
+    totals: _ProgressTotals,
+    edge_id_by_nodes: dict[tuple[str, str], str],
+) -> None:
+    work_order_by_id = {order.id: order for order in data.work_orders}
+    for movement in data.movements:
+        work_order = work_order_by_id.get(movement.work_order_id)
+        _apply_movement_quantities(
+            totals, movement, work_order, edge_id_by_nodes
         )
-        if (
-            movement.source_flow_node_id
-            and movement.movement_type not in {"scrap", "lost"}
-            and leaves_source_node
-        ):
-            transferred_by_node[movement.source_flow_node_id] += movement.quantity
-        if movement.source_flow_node_id and movement.movement_type in {"scrap", "lost"}:
-            abnormal_by_node[movement.source_flow_node_id] += movement.quantity
-            if movement_order is not None:
-                process_abnormal_by_node[
-                    movement_order.flow_node_id
-                ] += movement.quantity
-        edge_id = edge_id_by_nodes.get(
-            (movement.source_flow_node_id, movement.target_flow_node_id)
-        )
-        if edge_id is not None:
-            transferred_by_edge[edge_id] += movement.quantity
-        movement_batch = batches_by_id.get(movement.work_order_batch_id)
+        batch = data.batches_by_id.get(movement.work_order_batch_id)
         if (
             movement.movement_type == "assembly_output"
             and movement.source_flow_node_id
-            and (
-                movement_batch is None
-                or movement_batch.rework_source_batch_id is None
-            )
+            and (batch is None or batch.rework_source_batch_id is None)
         ):
-            assembly_output_by_node[movement.source_flow_node_id] += movement.quantity
-        if movement.movement_type != "assembly_input" or not movement.source_flow_node_id:
-            continue
-        production_item = context.display.production_items.get(
-            movement.production_item_id
-        )
-        source_name = (
-            production_item_name(
-                session,
-                production_item,
-                set(),
-                context.display,
+            totals.assembly_output_by_node[
+                movement.source_flow_node_id
+            ] += movement.quantity
+        if (
+            movement.movement_type == "assembly_input"
+            and movement.source_flow_node_id
+        ):
+            production_item = context.display.production_items.get(
+                movement.production_item_id
             )
-            if production_item else "未知来源"
-        )
-        material_inputs[movement.source_flow_node_id][source_name] += movement.quantity
+            source_name = (
+                production_item_name(
+                    context.session, production_item, set(), context.display
+                )
+                if production_item
+                else "未知来源"
+            )
+            totals.material_inputs[
+                movement.source_flow_node_id
+            ][source_name] += movement.quantity
 
-    process_totals_by_node = {
+
+def _apply_movement_quantities(
+    totals: _ProgressTotals,
+    movement: ProductionMovement,
+    work_order: WorkOrder | None,
+    edge_id_by_nodes: dict[tuple[str, str], str],
+) -> None:
+    source_id = movement.source_flow_node_id
+    target_id = movement.target_flow_node_id
+    if (
+        target_id
+        and movement.movement_type in {"qc_qualified", "qc_rework"}
+        and work_order is not None
+        and work_order.flow_node_id == target_id
+    ):
+        totals.internal_process_returns[target_id] += movement.quantity
+    if target_id and target_id != source_id:
+        totals.entered_by_node[target_id] += movement.quantity
+    leaves_source = target_id != source_id and (
+        target_id is not None
+        or movement.work_order_batch_id is None
+        or movement.movement_type in {"qc_qualified", "qc_inventory"}
+    )
+    if (
+        source_id
+        and movement.movement_type not in {"scrap", "lost"}
+        and leaves_source
+    ):
+        totals.transferred_by_node[source_id] += movement.quantity
+    if source_id and movement.movement_type in {"scrap", "lost"}:
+        totals.abnormal_by_node[source_id] += movement.quantity
+        if work_order is not None:
+            totals.process_abnormal_by_node[
+                work_order.flow_node_id
+            ] += movement.quantity
+    edge_id = edge_id_by_nodes.get((source_id, target_id))
+    if edge_id is not None:
+        totals.transferred_by_edge[edge_id] += movement.quantity
+
+
+def _build_node_stats(
+    context: OrderProductionReadContext,
+    data: _OrderItemProgressData,
+    totals: _ProgressTotals,
+    flow: dict,
+    nodes: dict[str, dict],
+) -> list[dict]:
+    process_totals = {
         node["id"]: _process_node_totals(
-            entered_by_node[node["id"]],
-            internal_process_returns[node["id"]],
-            current_by_node[node["id"]],
-            process_abnormal_by_node[node["id"]],
+            totals.entered_by_node[node["id"]],
+            totals.internal_process_returns[node["id"]],
+            totals.current_by_node[node["id"]],
+            totals.process_abnormal_by_node[node["id"]],
         )
         for node in flow.get("nodes", [])
         if node.get("type") == "process"
     }
-    node_type_by_id = {
-        node["id"]: node.get("type")
-        for node in flow.get("nodes", [])
+    node_types = {
+        node["id"]: node.get("type") for node in flow.get("nodes", [])
     }
-    qc_totals_by_node = {
+    qc_totals = {
         node["id"]: _qc_node_totals(
             [
                 (
-                    process_totals_by_node[source_id][1]
-                    if node_type_by_id.get(source_id) == "process"
-                    else transferred_by_edge[edge["id"]]
+                    process_totals[source_id][1]
+                    if node_types.get(source_id) == "process"
+                    else totals.transferred_by_edge[edge["id"]]
                 )
                 for edge in flow.get("edges", [])
                 if edge["target_node_id"] == node["id"]
                 for source_id in [edge["source_node_id"]]
             ],
-            current_by_node[node["id"]],
-            abnormal_by_node[node["id"]],
+            totals.current_by_node[node["id"]],
+            totals.abnormal_by_node[node["id"]],
         )
         for node in flow.get("nodes", [])
         if node.get("type") == "qc"
     }
-
-    stats = []
-    for node in flow.get("nodes", []):
-        node_id = node["id"]
-        node_type = node.get("type")
-        current = current_by_node[node_id]
-        entered = entered_by_node[node_id]
-        transferred = transferred_by_node[node_id]
-        abnormal = abnormal_by_node[node_id]
-        input_details: dict[str, int] = {}
-        output_quantity = 0
-        if node_type == "part":
-            transferred = transferred_by_node[node_id]
-            entered = transferred
-            current = max(entered - transferred, 0)
-        elif node_type == "process":
-            abnormal = process_abnormal_by_node[node_id]
-            entered, transferred = process_totals_by_node[node_id]
-        elif node_type == WORK_ORDER_SUPPLIER_PROCESSING:
-            entered = entered_by_node[node_id]
-            transferred = transferred_by_node[node_id]
-        elif node_type == "qc":
-            entered, transferred = qc_totals_by_node[node_id]
-        elif node_type == "assembly":
-            input_details = dict(current_inputs[node_id])
-            for name, quantity in material_inputs[node_id].items():
-                input_details[name] = input_details.get(name, 0) + quantity
-            output_quantity = assembly_output_by_node[node_id]
-            output_pcs = int(node.get("output_pcs", 1))
-            transferred = output_quantity // output_pcs if output_pcs else 0
-            required_source_ids = {
-                edge["source_node_id"]
-                for edge in flow.get("edges", [])
-                if edge["target_node_id"] == node_id
-            }
-            required_source_groups: dict[str, list[str]] = defaultdict(list)
-            for source_id in required_source_ids:
-                material_key = assembly_material_key(flow, nodes, source_id)
-                if material_key is not None:
-                    required_source_groups[material_key].append(source_id)
-            source_capacities = []
-            for source_ids in required_source_groups.values():
-                source_repositories = [
-                    repository
-                    for source_id in source_ids
-                    for repository in current_repository_sources[node_id].get(source_id, [])
-                ]
-                if not source_repositories:
-                    source_capacities.append(0)
-                    continue
-                first_item = context.display.production_items.get(
-                    source_repositories[0].production_item_id
-                )
-                bom_item = (
-                    context.bom_items.get(first_item.product_bom_id)
-                    if first_item and first_item.product_bom_id else None
-                )
-                unit_quantity = bom_item.pcs if bom_item else int(
-                    nodes.get(
-                        first_item.origin_flow_node_id if first_item else "",
-                        {},
-                    ).get("output_pcs", 1)
-                )
-                source_quantity = sum(
-                    repository.quantity for repository in source_repositories
-                )
-                source_capacities.append(
-                    source_quantity // unit_quantity if unit_quantity else 0
-                )
-            current = (
-                min(source_capacities, default=0)
-                + pending_rework_by_node[node_id]
-            )
-        elif node_type == "finished_inbound":
-            entered = pending_finished_quantity + received_finished_quantity
-            current = pending_finished_quantity
-            transferred = received_finished_quantity
-            output_quantity = entered
-        stats.append(
-            {
-                "flow_node_id": node_id,
-                "node_type": node_type,
-                "current_quantity": current,
-                "entered_quantity": entered,
-                "transferred_quantity": transferred,
-                "abnormal_quantity": abnormal,
-                "output_quantity": output_quantity,
-                "pending_receipt_quantity": (
-                    pending_finished_quantity
-                    if node_type == "finished_inbound"
-                    else 0
-                ),
-                "received_quantity": (
-                    received_finished_quantity
-                    if node_type == "finished_inbound"
-                    else 0
-                ),
-                "input_details": input_details,
-            }
-        )
-    transferred_by_node_id = {
-        item["flow_node_id"]: item["transferred_quantity"]
-        for item in stats
-    }
-    edge_stats = [
-        {
-            "flow_edge_id": edge["id"],
-            "transferred_quantity": transferred_by_node_id.get(
-                edge["source_node_id"],
-                transferred_by_edge[edge["id"]],
-            ),
-        }
-        for edge in flow.get("edges", [])
+    return [
+        _node_stat(context, data, totals, flow, nodes, node, process_totals, qc_totals)
+        for node in flow.get("nodes", [])
     ]
-    return {"node_stats": stats, "edge_stats": edge_stats}
 
 
+def _node_stat(
+    context: OrderProductionReadContext,
+    data: _OrderItemProgressData,
+    totals: _ProgressTotals,
+    flow: dict,
+    nodes: dict[str, dict],
+    node: dict,
+    process_totals: dict[str, tuple[int, int]],
+    qc_totals: dict[str, tuple[int, int]],
+) -> dict:
+    node_id = node["id"]
+    node_type = node.get("type")
+    current = totals.current_by_node[node_id]
+    entered = totals.entered_by_node[node_id]
+    transferred = totals.transferred_by_node[node_id]
+    abnormal = totals.abnormal_by_node[node_id]
+    input_details: dict[str, int] = {}
+    output_quantity = 0
+    if node_type == "part":
+        entered = transferred
+        current = max(entered - transferred, 0)
+    elif node_type == "process":
+        abnormal = totals.process_abnormal_by_node[node_id]
+        entered, transferred = process_totals[node_id]
+    elif node_type == WORK_ORDER_SUPPLIER_PROCESSING:
+        entered = totals.entered_by_node[node_id]
+        transferred = totals.transferred_by_node[node_id]
+    elif node_type == "qc":
+        entered, transferred = qc_totals[node_id]
+    elif node_type == "assembly":
+        input_details = _assembly_input_details(totals, node_id)
+        output_quantity = totals.assembly_output_by_node[node_id]
+        output_pcs = int(node.get("output_pcs", 1))
+        transferred = output_quantity // output_pcs if output_pcs else 0
+        current = _assembly_current_quantity(
+            context, totals, flow, nodes, node_id
+        )
+    elif node_type == "finished_inbound":
+        entered = (
+            data.pending_finished_quantity + data.received_finished_quantity
+        )
+        current = data.pending_finished_quantity
+        transferred = data.received_finished_quantity
+        output_quantity = entered
+    return {
+        "flow_node_id": node_id,
+        "node_type": node_type,
+        "current_quantity": current,
+        "entered_quantity": entered,
+        "transferred_quantity": transferred,
+        "abnormal_quantity": abnormal,
+        "output_quantity": output_quantity,
+        "pending_receipt_quantity": (
+            data.pending_finished_quantity
+            if node_type == "finished_inbound"
+            else 0
+        ),
+        "received_quantity": (
+            data.received_finished_quantity
+            if node_type == "finished_inbound"
+            else 0
+        ),
+        "input_details": input_details,
+    }
+
+
+def _assembly_input_details(
+    totals: _ProgressTotals,
+    node_id: str,
+) -> dict[str, int]:
+    result = dict(totals.current_inputs[node_id])
+    for name, quantity in totals.material_inputs[node_id].items():
+        result[name] = result.get(name, 0) + quantity
+    return result
+
+
+def _assembly_current_quantity(
+    context: OrderProductionReadContext,
+    totals: _ProgressTotals,
+    flow: dict,
+    nodes: dict[str, dict],
+    node_id: str,
+) -> int:
+    source_ids = {
+        edge["source_node_id"]
+        for edge in flow.get("edges", [])
+        if edge["target_node_id"] == node_id
+    }
+    source_groups: dict[str, list[str]] = defaultdict(list)
+    for source_id in source_ids:
+        material_key = assembly_material_key(flow, nodes, source_id)
+        if material_key is not None:
+            source_groups[material_key].append(source_id)
+    capacities = [
+        _assembly_source_capacity(
+            context,
+            [
+                repository
+                for source_id in source_group
+                for repository in totals.current_repository_sources[node_id].get(
+                    source_id, []
+                )
+            ],
+            nodes,
+        )
+        for source_group in source_groups.values()
+    ]
+    return min(capacities, default=0) + totals.pending_rework_by_node[node_id]
+
+
+def _assembly_source_capacity(
+    context: OrderProductionReadContext,
+    repositories: list[Repository],
+    nodes: dict[str, dict],
+) -> int:
+    if not repositories:
+        return 0
+    first_item = context.display.production_items.get(
+        repositories[0].production_item_id
+    )
+    bom_item = (
+        context.bom_items.get(first_item.product_bom_id)
+        if first_item and first_item.product_bom_id
+        else None
+    )
+    unit_quantity = (
+        bom_item.pcs
+        if bom_item
+        else int(
+            nodes.get(
+                first_item.origin_flow_node_id if first_item else "", {}
+            ).get("output_pcs", 1)
+        )
+    )
+    source_quantity = sum(repository.quantity for repository in repositories)
+    return source_quantity // unit_quantity if unit_quantity else 0
 def _supplier_progress_projections(
     *,
     work_orders,

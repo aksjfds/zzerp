@@ -12,6 +12,7 @@ export type StandardWorkbenchSource = {
   repository_id: number
   production_item_id: number
   source_work_order_id: number | null
+  processing_status: string
   on_hand_quantity: number
   reserved_quantity: number
   available_quantity: number
@@ -25,6 +26,7 @@ export type WorkbenchInventorySource = {
   repository_id: number
   production_item_id: number
   source_work_order_id: number | null
+  processing_status: string
   on_hand_quantity: number
   reserved_quantity: number
   available_quantity: number

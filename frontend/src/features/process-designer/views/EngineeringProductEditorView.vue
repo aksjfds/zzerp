@@ -25,7 +25,7 @@ const editorReady = ref(false)
 const customers = ref<Customer[]>([])
 const customerLoading = ref(false)
 const activeAction = ref<
-  'create' | 'base' | 'bom' | 'flow-draft' | 'flow' | 'version-create' | 'version-delete' | null
+  'create' | 'base' | 'bom' | 'flow-draft' | 'flow' | 'version-create' | null
 >(null)
 
 async function performAction(action: NonNullable<typeof activeAction.value>, callback: () => Promise<unknown>) {
@@ -175,7 +175,7 @@ function updateBom(items: BomItem[]) {
 
 useUnsavedChangesGuard(pageDirty)
 
-const { createVersion, deleteSelectedVersion, enterEditMode, returnViewMode } = useProductVersionActions({
+const { createVersion, enterEditMode, returnViewMode } = useProductVersionActions({
   form,
   loadProductVersion,
   productId,
@@ -246,14 +246,6 @@ onMounted(async () => {
             :loading="activeAction === 'version-create'"
             @click="performAction('version-create', createVersion)"
           >创建新版本</ElButton>
-          <ElButton
-            v-permission="PRODUCT_PERMISSIONS.delete"
-            type="danger"
-            plain
-            :disabled="store.saving"
-            :loading="activeAction === 'version-delete'"
-            @click="performAction('version-delete', deleteSelectedVersion)"
-          >删除此版本</ElButton>
         </div>
         <ElButton
           v-if="!productId"

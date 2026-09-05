@@ -15,7 +15,7 @@ from domain.identity import can_access_department
 from domain.workforce import WorkerReference
 from modules.organization.model_api import Department, Procedure
 from modules.production_core.context_api import WorkOrderContext
-from modules.production_core.persistence import ProductionItem, Repository, WorkOrder
+from modules.production_core.persistence import MaterialProcessingState, ProductionItem, Repository, WorkOrder
 from modules.errors import DomainError
 from modules.production_core.work_order_progress import order_has_submissions
 from modules.production_core.work_order_status import reserved_quantities
@@ -77,6 +77,7 @@ def create_order_record(
         {source.source_work_order_id},
         source.flow_node_id,
         procedure.id,
+        {source.processing_state_id},
     )
     repository_id = source.id if isinstance(source, Repository) else None
     reserved = reserved_quantities(session, [repository_id]).get(repository_id, 0)
@@ -85,6 +86,7 @@ def create_order_record(
     order = WorkOrder(
         repository_id=repository_id,
         production_item_id=production_item.id,
+        source_processing_state_id=source.processing_state_id,
         procedure_id=procedure.id,
         work_order_type=work_order_type,
         is_temporary=is_temporary,
@@ -107,7 +109,20 @@ def ensure_source_procedure_not_repeated(
     source_work_order_ids: Collection[int | None],
     flow_node_id: str,
     procedure_id: int,
+    source_processing_state_ids: Collection[int] = (),
 ) -> None:
+    for state_id in source_processing_state_ids:
+        state = session.get(MaterialProcessingState, state_id)
+        if state is not None and any(
+            history.get("procedure_id") == procedure_id
+            and history.get("flow_node_id") == flow_node_id
+            for history in (state.procedure_history or [])
+        ):
+            raise DomainError(
+                "work_order_procedure_repeated",
+                "该批物料已经完成所选工艺，请选择其他工艺",
+                status_code=409,
+            )
     source_ids = {
         order_id
         for order_id in source_work_order_ids

@@ -6,7 +6,6 @@ from modules.engineering.model_api import ProductBom, ProductProcessFlow
 from modules.production_core.persistence import ProductionItem
 from modules.sales.model_api import CustomerOrderItem
 from modules.errors import DomainError
-from modules.production_core.completion_status import material_completion_status
 
 
 @dataclass(frozen=True)
@@ -148,27 +147,6 @@ def assembly_material_key(
             return None
         current_id = sources[0]
     return None
-
-
-def completed_node_display_label(
-    flow: dict,
-    nodes: dict[str, dict],
-    origin_flow_node_id: str,
-    completed_flow_node_id: str,
-) -> str:
-    origin = nodes.get(origin_flow_node_id)
-    if (
-        origin is not None
-        and origin.get("type") == "finished_inbound"
-        and completed_flow_node_id == origin_flow_node_id
-    ):
-        return str(origin.get("label") or "成品")
-    return material_completion_status(
-        flow,
-        nodes,
-        origin_flow_node_id,
-        completed_flow_node_id,
-    ).completion_status
 
 
 def process_qc_node(

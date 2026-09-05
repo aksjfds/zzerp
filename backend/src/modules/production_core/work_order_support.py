@@ -21,6 +21,10 @@ from modules.production_core.flow import (
     load_production_flow,
     process_qc_node,
 )
+from modules.production_core.material_state_api import (
+    get_material_state,
+    validate_material_state_identity,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +105,7 @@ def move_to_node(
     node: dict | None,
     quantity: int,
     source_node_id: str,
+    processing_state_id: int | None,
     source_work_order_id: int | None = None,
 ) -> int | None:
     if quantity <= 0 or node is None:
@@ -109,10 +114,17 @@ def move_to_node(
     department_id = target_department_id(session, node)
     if node.get("type") == "finished_inbound":
         return department_id
+    if processing_state_id is None:
+        raise DomainError("material_processing_state_missing", "流转物料缺少加工状态")
+    validate_material_state_identity(
+        get_material_state(session, processing_state_id),
+        production_item,
+    )
     target = session.scalar(
         select(Repository)
         .where(
             Repository.production_item_id == production_item.id,
+            Repository.processing_state_id == processing_state_id,
             Repository.flow_node_id == node["id"],
             Repository.source_flow_node_id == source_node_id,
             Repository.department_id == department_id,
@@ -124,6 +136,7 @@ def move_to_node(
         session.add(
             Repository(
                 production_item_id=production_item.id,
+                processing_state_id=processing_state_id,
                 flow_node_id=node["id"],
                 source_flow_node_id=source_node_id,
                 department_id=department_id,

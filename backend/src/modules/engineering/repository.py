@@ -80,9 +80,6 @@ class EngineeringProductRepository:
     def add(self, product: Product) -> None:
         self.session.add(product)
 
-    def delete(self, product: Product) -> None:
-        self.session.delete(product)
-
     def flush(self) -> None:
         self.session.flush()
 
@@ -142,7 +139,7 @@ class EngineeringProductRepository:
         )
 
     def set_process_flow_draft(
-        self, product: Product, product_version: int, flow_json: dict
+        self, product: Product, product_version: int, flow_json: dict | None
     ) -> None:
         process_flow = self._process_flow_for_update(product, product_version)
         if process_flow is None:

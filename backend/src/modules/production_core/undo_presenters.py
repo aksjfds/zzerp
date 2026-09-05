@@ -30,10 +30,27 @@ def latest_undoable_operation(
         .where(
             ProductionOperationUndo.work_order_id == work_order_id,
             ProductionOperationUndo.status == "applied",
+            ProductionOperationUndo.operation_type.in_(("submission", "rework_submission")),
         )
         .order_by(ProductionOperationUndo.id.desc())
         .limit(1)
     )
 
 
-__all__ = ["latest_undoable_operation", "serialize_undo_operation"]
+def latest_applied_operation(session, work_order_id: int) -> ProductionOperationUndo | None:
+    return session.scalar(
+        select(ProductionOperationUndo)
+        .where(
+            ProductionOperationUndo.work_order_id == work_order_id,
+            ProductionOperationUndo.status == "applied",
+        )
+        .order_by(ProductionOperationUndo.id.desc())
+        .limit(1)
+    )
+
+
+__all__ = [
+    "latest_applied_operation",
+    "latest_undoable_operation",
+    "serialize_undo_operation",
+]

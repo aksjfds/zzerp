@@ -2,6 +2,7 @@ import { service } from '@/api/request'
 import type {
   ProcedurePriceListItem,
   ProcedurePriceScope,
+  ProcedurePriceRevision,
 } from '../domain/procedurePrices'
 
 export async function queryProcedurePrices(
@@ -10,6 +11,18 @@ export async function queryProcedurePrices(
   const response = await service.get<{ data: ProcedurePriceListItem[]; total: number }>(
     `/departments/${departmentCode}/procedure-prices`,
     { params: { page, page_size: pageSize, keyword: keyword.trim() || undefined } },
+  )
+  return response.data
+}
+
+export async function queryProcedurePriceRevisions(
+  departmentCode: string,
+  page = 1,
+  pageSize = 50,
+) {
+  const response = await service.get<{ data: ProcedurePriceRevision[]; total: number }>(
+    `/departments/${departmentCode}/procedure-price-revisions`,
+    { params: { page, page_size: pageSize } },
   )
   return response.data
 }

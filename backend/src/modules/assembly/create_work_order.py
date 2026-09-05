@@ -115,6 +115,7 @@ def create_assembly_work_order(
             {repository.source_work_order_id for repository in repositories},
             assembly_node["id"],
             procedure.id,
+            {repository.processing_state_id for repository in repositories},
         )
         continuation = (
             len(repositories) == 1
@@ -192,6 +193,9 @@ def create_assembly_work_order(
             remark=remark,
             is_temporary=is_temporary,
             repository_id=repositories[0].id if continuation else None,
+            source_processing_state_id=(
+                repositories[0].processing_state_id if continuation else None
+            ),
         )
         mark_order_planned(session, input_items[0].customer_order_item_id)
         assign_assembly_work_order_number(
@@ -216,6 +220,7 @@ def create_assembly_work_order(
                 work_order_id=order.id,
                 repository_id=None,
                 production_item_id=repository.production_item_id,
+                source_processing_state_id=repository.processing_state_id,
                 quantity=quantity,
                 source_flow_node_id=repository.flow_node_id,
                 source_previous_flow_node_id=repository.source_flow_node_id,
@@ -233,6 +238,7 @@ def create_assembly_work_order(
                     work_order_id=order.id,
                     repository_id=repository.id,
                     production_item_id=repository.production_item_id,
+                    source_processing_state_id=repository.processing_state_id,
                     quantity=material_quantity,
                     source_flow_node_id=repository.flow_node_id,
                     source_previous_flow_node_id=repository.source_flow_node_id,

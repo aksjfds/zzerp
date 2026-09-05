@@ -56,15 +56,8 @@ def create_product_version(product_id, expected_revision, source_version=None):
     )
 
 
-def delete_product_version(product_id, product_version, expected_revision):
-    return engineering.delete_product_version(
-        product_id, product_version, expected_revision, COLLABORATORS
-    )
-
-
 __all__ = [
     "create_product_version",
-    "delete_product_version",
     "get_product",
     "replace_product_bom",
     "save_product_process_flow_draft",

@@ -27,6 +27,8 @@ from departments.sales_orchestration import (
     get_order,
     list_orders,
     list_order_progress_details,
+    reopen_completed_production_plan,
+    unconfirm_production_plan,
     update_order,
 )
 from modules.planning.api import complete_order_plan, get_order_plan, update_order_plan
@@ -175,6 +177,40 @@ def customer_order_production_plan_complete(
         "data": complete_order_plan(
             order_id,
             expected_revision,
+            actor_username=user["username"],
+        )
+    }
+
+
+@router.post("/{order_id}/production-plan/unconfirm", response_model=CustomerOrderEnvelope)
+def customer_order_production_plan_unconfirm(
+    order_id: int,
+    expected_revision: int = Query(gt=0),
+    plan_expected_revision: int = Query(gt=0),
+    user: dict = Depends(require_any_permission(ORDER_CONFIRM, csrf=True)),
+):
+    return {
+        "data": unconfirm_production_plan(
+            order_id,
+            expected_revision,
+            plan_expected_revision,
+            actor_username=user["username"],
+        )
+    }
+
+
+@router.post("/{order_id}/production-plan/reopen", response_model=CustomerOrderEnvelope)
+def customer_order_production_plan_reopen(
+    order_id: int,
+    expected_revision: int = Query(gt=0),
+    plan_expected_revision: int = Query(gt=0),
+    user: dict = Depends(require_any_permission(ORDER_CONFIRM, csrf=True)),
+):
+    return {
+        "data": reopen_completed_production_plan(
+            order_id,
+            expected_revision,
+            plan_expected_revision,
             actor_username=user["username"],
         )
     }

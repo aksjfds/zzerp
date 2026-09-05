@@ -95,21 +95,3 @@ export async function saveProductProcessFlowDraft(
   )
   return response.data.data
 }
-
-export async function deleteProduct(productId: number, expectedRevision: number) {
-  await service.delete(`/products/${productId}`, {
-    params: { expected_revision: expectedRevision },
-  })
-}
-
-export async function deleteProductVersion(
-  productId: number,
-  productVersion: number,
-  expectedRevision: number,
-) {
-  const response = await service.delete<{ data: EngineeringProduct | null }>(
-    `/products/${productId}/versions/${productVersion}`,
-    { params: { expected_revision: expectedRevision } },
-  )
-  return response.data.data
-}

@@ -17,7 +17,6 @@ def build_progress_card(
     department,
     orders,
     batches_by_order,
-    workers,
     task_quantity,
     arrived_quantity,
     sort_order,
@@ -40,7 +39,6 @@ def build_progress_card(
             workshop=workshop,
             order=order,
             batches=batches,
-            workers=workers,
         )
         processing_quantity += progress.processing_quantity
         ready_for_qc_quantity += progress.ready_for_qc_quantity

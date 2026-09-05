@@ -9,7 +9,8 @@ from domain.production_inventory import FinishedStockLookup
 from domain.warehouse import WAREHOUSE_CODE_MAIN, WarehouseMaterialIdentity
 from modules.inventory.plan_stock_api import list_finished_plan_stocks
 from modules.inventory.warehouse_api import list_material_warehouse_stocks
-from modules.production_core.flow_api import load_product_flow, material_completion_steps
+from modules.errors import DomainError
+from modules.production_core.material_state_api import MaterialStateView, find_material_states
 
 
 @dataclass(frozen=True, slots=True)
@@ -20,6 +21,8 @@ class PlanStockRow:
     item_code: str
     item_name: str
     completion_status: str
+    processing_state_id: int | None
+    resume_flow_node_id: str | None
     warehouse_code: str
     warehouse_name: str
     stock_quantity: int
@@ -55,37 +58,60 @@ def plan_item_available_quantities(
 def completion_status_priority(
     session: Session,
     item,
-    flow_cache: dict | None = None,
+    _flow_cache: dict | None = None,
 ) -> tuple[str, ...]:
-    flow, nodes = load_product_flow(
-        session,
-        item.product_id,
-        item.product_version,
-        flow_cache,
-    )
-    return tuple(
-        step.completion_status
-        for step in reversed(
-            material_completion_steps(flow, nodes, item.flow_node_id)
-        )
-    )
+    return tuple(state.display_text for state in _material_states(session, item, _flow_cache))
 
 
-def completion_node_by_status(
+def processing_state_by_status(
     session: Session,
     item,
-    flow_cache: dict | None = None,
-) -> dict[str, str]:
-    flow, nodes = load_product_flow(
-        session,
+    _flow_cache: dict | None = None,
+) -> dict[str, MaterialStateView]:
+    states = _material_states(session, item, _flow_cache)
+    by_status = {state.display_text: state for state in states}
+    if len(by_status) != len(states):
+        raise DomainError(
+            "material_processing_state_display_conflict",
+            "同一物料存在无法区分的加工状态，请检查工艺命名",
+            status_code=409,
+        )
+    return by_status
+
+
+def _material_states(
+    session,
+    item,
+    request_cache: dict | None = None,
+) -> tuple[MaterialStateView, ...]:
+    cache_key = (
+        "material-processing-states",
         item.product_id,
         item.product_version,
-        flow_cache,
+        item.product_bom_id,
+        item.flow_node_id,
     )
-    return {
-        step.completion_status: step.flow_node_id
-        for step in material_completion_steps(flow, nodes, item.flow_node_id)
-    }
+    if request_cache is not None and cache_key in request_cache:
+        return request_cache[cache_key]
+    states = find_material_states(
+        session,
+        product_id=item.product_id,
+        product_version=item.product_version,
+        product_bom_id=item.product_bom_id,
+        origin_flow_node_id=item.flow_node_id,
+    )
+    result = tuple(sorted(
+        states,
+        key=lambda state: (
+            len(state.procedure_history),
+            state.qc_status in {"released", "stored"},
+            state.id,
+        ),
+        reverse=True,
+    ))
+    if request_cache is not None:
+        request_cache[cache_key] = result
+    return result
 
 
 def _load_non_finished_stocks(session, items, result, flow_cache: dict) -> None:
@@ -106,15 +132,18 @@ def _load_non_finished_stocks(session, items, result, flow_cache: dict) -> None:
         (item.item_code, item.product_version, item.item_type): item
         for item in material_items
     }
-    allowed_statuses = {
-        item.identity_key: set(completion_status_priority(session, item, flow_cache))
+    allowed_states = {
+        item.identity_key: processing_state_by_status(session, item, flow_cache)
         for item in material_items
     }
     for stock in stocks:
         if stock.warehouse_code != WAREHOUSE_CODE_MAIN:
             continue
         item = by_material.get((stock.item_code, stock.product_version, stock.item_type))
-        if item is None or stock.completion_status not in allowed_statuses[item.identity_key]:
+        if item is None:
+            continue
+        state = allowed_states[item.identity_key].get(stock.completion_status)
+        if state is None:
             continue
         result[item.identity_key].append(PlanStockRow(
             stock_id=stock.id,
@@ -123,6 +152,8 @@ def _load_non_finished_stocks(session, items, result, flow_cache: dict) -> None:
             item_code=stock.item_code,
             item_name=stock.item_name,
             completion_status=stock.completion_status,
+            processing_state_id=state.id,
+            resume_flow_node_id=state.resume_flow_node_id,
             warehouse_code=stock.warehouse_code,
             warehouse_name=stock.warehouse_name,
             stock_quantity=stock.quantity,
@@ -153,6 +184,8 @@ def _load_finished_stocks(session, items, result) -> None:
                 item_code=stock.item_code,
                 item_name=stock.item_name,
                 completion_status="成品",
+                processing_state_id=None,
+                resume_flow_node_id=None,
                 warehouse_code="—",
                 warehouse_name="成品仓",
                 stock_quantity=stock.quantity,
@@ -163,8 +196,8 @@ def _load_finished_stocks(session, items, result) -> None:
 
 __all__ = [
     "PlanStockRow",
-    "completion_node_by_status",
     "completion_status_priority",
+    "processing_state_by_status",
     "load_plan_item_stocks",
     "plan_item_available_quantities",
 ]

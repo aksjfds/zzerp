@@ -7,7 +7,10 @@ import ProductionPlanEditor from '../components/ProductionPlanEditor.vue'
 import {
   completeProductionPlan,
   confirmProductionPlan,
+  queryProductionPlan,
   queryProductionPlanOrders,
+  reopenProductionPlan,
+  unconfirmProductionPlan,
 } from '../api/customerOrders'
 import type { CustomerOrder, ProductionPlan } from '../domain/types'
 
@@ -25,9 +28,12 @@ const activeOrder = ref<CustomerOrder>()
 const activePlan = ref<ProductionPlan>()
 const editor = ref<PlanEditorApi>()
 const confirming = ref(false)
-const completing = ref(false)
 const savingDraft = ref(false)
 const planInvalid = ref(true)
+const planAction = ref<{
+  orderId: number
+  type: 'complete' | 'unconfirm' | 'reopen'
+} | null>(null)
 
 const statusLabels: Record<string, string> = {
   confirmed: '计划待确认',
@@ -89,7 +95,7 @@ async function confirmPlan() {
     const allocations = saved.inventory_items.filter(item => item.planned_allocation_quantity > 0)
     const allocationDetails = allocations.length
       ? allocations.map(item => (
-          `${item.item_code} / ${item.completed_node_label} / `
+          `${item.item_code} / ${item.processing_status} / `
           + `${item.item_type === 'finished_product'
             ? '成品仓'
             : `${item.warehouse_code} ${item.warehouse_name}`}：`
@@ -115,18 +121,21 @@ async function confirmPlan() {
   }
 }
 
-async function completePlan() {
-  const order = activeOrder.value
-  const plan = activePlan.value
-  if (!order || !plan || plan.status !== 'confirmed') return
+function planActionLoading(orderId: number, type: 'complete' | 'unconfirm' | 'reopen') {
+  return planAction.value?.orderId === orderId && planAction.value.type === type
+}
+
+async function completePlan(order: CustomerOrder) {
+  if (planAction.value) return
+  planAction.value = { orderId: order.id, type: 'complete' }
   try {
     await ElMessageBox.confirm(
       '完成仅更新生产计划的管理状态，现有工单和后续开单仍可继续，且计划不能取消。是否继续？',
       '完成生产计划',
       { type: 'warning', confirmButtonText: '确认完成' },
     )
-    completing.value = true
-    activePlan.value = await completeProductionPlan(order.id, plan.revision)
+    const plan = await queryProductionPlan(order.id)
+    await completeProductionPlan(order.id, plan.revision)
     ElMessage.success('生产计划已完成')
     await load()
   } catch (error) {
@@ -134,7 +143,51 @@ async function completePlan() {
       ElMessage.error(getApiErrorDetail(error)?.message || '生产计划完成失败')
     }
   } finally {
-    completing.value = false
+    planAction.value = null
+  }
+}
+
+async function unconfirmPlan(order: CustomerOrder) {
+  if (planAction.value) return
+  planAction.value = { orderId: order.id, type: 'unconfirm' }
+  try {
+    await ElMessageBox.confirm(
+      '仅尚未创建工单、送检、发货或发生后续流转的计划可以撤回。已占用成品会解除占用，已领用仓库物料会生成反向入库记录。',
+      '撤回计划确认',
+      { type: 'warning', confirmButtonText: '确认撤回' },
+    )
+    const plan = await queryProductionPlan(order.id)
+    await unconfirmProductionPlan(order.id, order.revision, plan.revision)
+    await load()
+    ElMessage.success('生产计划已恢复为草稿')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(getApiErrorDetail(error)?.message || '生产计划撤回失败')
+    }
+  } finally {
+    planAction.value = null
+  }
+}
+
+async function reopenPlan(order: CustomerOrder) {
+  if (planAction.value) return
+  planAction.value = { orderId: order.id, type: 'reopen' }
+  try {
+    await ElMessageBox.confirm(
+      '仅计划完成后尚未办理生产节点物料入库时可以恢复。恢复后计划继续显示为生产中。',
+      '恢复生产计划',
+      { type: 'warning', confirmButtonText: '确认恢复' },
+    )
+    const plan = await queryProductionPlan(order.id)
+    await reopenProductionPlan(order.id, order.revision, plan.revision)
+    await load()
+    ElMessage.success('生产计划已恢复为生产中')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(getApiErrorDetail(error)?.message || '生产计划恢复失败')
+    }
+  } finally {
+    planAction.value = null
   }
 }
 
@@ -169,11 +222,40 @@ defineExpose({ load })
         </template>
       </ElTableColumn>
       <ElTableColumn prop="updated_at" label="更新时间" width="170" />
-      <ElTableColumn label="操作" width="120" fixed="right">
+      <ElTableColumn label="操作" min-width="340" fixed="right">
         <template #default="{ row }">
-          <ElButton link type="primary" @click="openPlan(row)">
-            {{ row.status === 'confirmed' ? '填写计划' : '查看计划' }}
-          </ElButton>
+          <div class="row-actions">
+            <ElButton link type="primary" @click="openPlan(row)">
+              {{ row.status === 'confirmed' ? '填写计划' : '查看计划' }}
+            </ElButton>
+            <ElButton
+              v-if="row.production_plan_status === 'confirmed'"
+              v-permission="ORDER_PERMISSIONS.confirm"
+              link
+              type="success"
+              :loading="planActionLoading(row.id, 'complete')"
+              :disabled="planAction !== null"
+              @click="completePlan(row)"
+            >完成生产计划</ElButton>
+            <ElButton
+              v-if="row.production_plan_status === 'confirmed'"
+              v-permission="ORDER_PERMISSIONS.confirm"
+              link
+              type="danger"
+              :loading="planActionLoading(row.id, 'unconfirm')"
+              :disabled="planAction !== null"
+              @click="unconfirmPlan(row)"
+            >撤回确认</ElButton>
+            <ElButton
+              v-if="row.production_plan_status === 'completed'"
+              v-permission="ORDER_PERMISSIONS.confirm"
+              link
+              type="primary"
+              :loading="planActionLoading(row.id, 'reopen')"
+              :disabled="planAction !== null"
+              @click="reopenPlan(row)"
+            >恢复生产中</ElButton>
+          </div>
         </template>
       </ElTableColumn>
     </ElTable>
@@ -201,33 +283,26 @@ defineExpose({ load })
         @validity-change="planInvalid = $event"
       />
       <template #footer>
-        <div class="dialog-actions">
+        <div class="dialog-primary-actions">
           <ElButton
-            :disabled="savingDraft || confirming || completing"
+            :disabled="savingDraft || confirming"
             @click="dialogVisible = false"
           >关闭</ElButton>
-          <div v-if="activeOrder?.status === 'confirmed'" class="dialog-primary-actions">
-            <ElButton
-              v-permission="ORDER_PERMISSIONS.edit"
-              :loading="savingDraft"
-              :disabled="planInvalid || confirming"
-              @click="saveDraft"
-            >暂存计划</ElButton>
-            <ElButton
-              v-permission="ORDER_PERMISSIONS.confirm"
-              type="primary"
-              :loading="confirming"
-              :disabled="!activePlan || planInvalid || savingDraft"
-              @click="confirmPlan"
-            >保存并确认</ElButton>
-          </div>
           <ElButton
-            v-else-if="activePlan?.status === 'confirmed'"
+            v-if="activeOrder?.status === 'confirmed'"
+            v-permission="ORDER_PERMISSIONS.edit"
+            :loading="savingDraft"
+            :disabled="planInvalid || confirming"
+            @click="saveDraft"
+          >暂存计划</ElButton>
+          <ElButton
+            v-if="activeOrder?.status === 'confirmed'"
             v-permission="ORDER_PERMISSIONS.confirm"
-            type="success"
-            :loading="completing"
-            @click="completePlan"
-          >完成生产计划</ElButton>
+            type="primary"
+            :loading="confirming"
+            :disabled="!activePlan || planInvalid || savingDraft"
+            @click="confirmPlan"
+          >保存并确认</ElButton>
         </div>
       </template>
     </ElDialog>
@@ -239,14 +314,18 @@ defineExpose({ load })
 .plans-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
 .plans-heading h2 { margin: 0; font-size: 20px; }
 .plans-heading p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
-.dialog-actions { display: flex; justify-content: space-between; align-items: center; gap: 12px; width: 100%; }
-.dialog-primary-actions { display: flex; align-items: center; gap: 10px; }
-.dialog-actions :deep(.el-button) { margin-left: 0; }
+.row-actions, .dialog-primary-actions { display: flex; align-items: center; gap: 10px; }
+.row-actions { flex-wrap: nowrap; white-space: nowrap; }
+.dialog-primary-actions { justify-content: flex-end; width: 100%; }
+.row-actions :deep(.el-button), .dialog-primary-actions :deep(.el-button) { margin-left: 0; }
 .pagination { justify-content: flex-end; margin-top: 16px; }
 @media (max-width: 680px) {
   .plans-heading { align-items: stretch; flex-direction: column; }
-  .dialog-actions { align-items: stretch; flex-direction: column-reverse; }
-  .dialog-primary-actions { display: grid; grid-template-columns: 1fr 1fr; }
-  .dialog-actions :deep(.el-button) { width: 100%; }
+  .dialog-primary-actions {
+    display: grid;
+    width: 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .dialog-primary-actions :deep(.el-button) { width: 100%; }
 }
 </style>

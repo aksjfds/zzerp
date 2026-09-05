@@ -1,1 +1,1 @@
-"""PMC planning and reporting module."""
+"""Production planning and progress reporting module."""

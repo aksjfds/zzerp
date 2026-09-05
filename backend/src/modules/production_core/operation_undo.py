@@ -19,7 +19,7 @@ from modules.production_core.persistence import (
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.sales.transaction_api import restore_order_state
 from modules.errors import DomainError
-from modules.production_core.undo_presenters import latest_undoable_operation
+from modules.production_core.undo_presenters import latest_applied_operation
 from modules.production_core.work_order_presenters import serialize_work_order
 
 
@@ -31,6 +31,7 @@ def _inventory_row(row) -> dict:
     data = {
         "id": row.id,
         "production_item_id": row.production_item_id,
+        "processing_state_id": row.processing_state_id,
         "flow_node_id": row.flow_node_id,
         "source_flow_node_id": row.source_flow_node_id,
         "department_id": row.department_id,
@@ -134,6 +135,7 @@ def record_undoable_operation(
     operation_label: str,
     department_code: str,
     actor_username: str,
+    work_order_batch_id: int | None = None,
 ) -> ProductionOperationUndo:
     affected_ids = set(before["affected_item_ids"])
     affected_ids.add(order.production_item_id)
@@ -141,7 +143,11 @@ def record_undoable_operation(
     created_batches = sorted(set(after["batch_ids"]) - set(before["batch_ids"]))
     operation = ProductionOperationUndo(
         work_order_id=order.id,
-        work_order_batch_id=created_batches[-1] if created_batches else None,
+        work_order_batch_id=(
+            work_order_batch_id
+            if work_order_batch_id is not None
+            else created_batches[-1] if created_batches else None
+        ),
         operation_type=operation_type,
         operation_label=operation_label,
         department_code=department_code,
@@ -160,84 +166,100 @@ def undo_production_operation(
     username: str,
 ) -> dict:
     with SessionLocal.begin() as session:
-        operation = session.get(
-            ProductionOperationUndo,
+        return undo_production_operation_in_session(
+            session,
             operation_id,
-            with_for_update=True,
-        )
-        if operation is None:
-            raise DomainError("production_operation_not_found", "可撤回操作不存在", status_code=404)
-        if operation.status != "applied":
-            raise DomainError("production_operation_already_reversed", "该操作已经撤回")
-        if not can_access_department(
             user_department,
             user_is_system,
-            operation.department_code,
-        ):
-            raise DomainError("department_access_denied", "无权撤回该部门的生产操作", status_code=403)
-        latest = latest_undoable_operation(session, operation.work_order_id)
-        if latest is None or latest.id != operation.id:
-            raise DomainError("production_operation_not_latest", "请先撤回该工单更晚的操作")
-        before = operation.snapshot_json["before"]
-        after = operation.snapshot_json["after"]
-        order = session.get(WorkOrder, operation.work_order_id, with_for_update=True)
-        if order is None:
-            raise DomainError("work_order_not_found", "工单不存在", status_code=404)
-
-        _lock_operation_batches(session, after)
-        _lock_operation_state(session, after)
-        affected_ids = set(after["affected_item_ids"])
-        current = capture_operation_state(session, order, affected_ids)
-        if current != after:
-            raise DomainError(
-                "production_operation_has_downstream_changes",
-                "该操作之后已有 QC、库存或工单变化，不能撤回",
-            )
-
-        current_repository_ids = {item["id"] for item in after["repositories"]}
-        dependent_order = session.scalar(
-            select(WorkOrder.id).where(
-                WorkOrder.id != order.id,
-                WorkOrder.created_at > operation.created_at,
-                (
-                    WorkOrder.repository_id.in_(current_repository_ids)
-                    if current_repository_ids else WorkOrder.id < 0
-                ),
-            ).limit(1)
+            username,
         )
-        if dependent_order is not None:
-            raise DomainError(
-                "production_operation_inventory_reserved",
-                "该操作产生或使用的数量已被其他工单占用，不能撤回",
-            )
-        dependent_material = session.scalar(
-            select(WorkOrderMaterial.id)
-            .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
-            .where(
-                WorkOrderMaterial.work_order_id != order.id,
-                WorkOrderMaterial.repository_id.in_(current_repository_ids),
-                WorkOrder.created_at > operation.created_at,
-            ).limit(1)
-        ) if current_repository_ids else None
-        if dependent_material is not None:
-            raise DomainError(
-                "production_operation_inventory_reserved",
-                "该操作产生的数量已被装配工单占用，不能撤回",
-            )
 
-        session.scalar(
-            select(func.set_config(
-                "zzerp.undo_operation_id",
-                str(operation.id),
-                True,
-            ))
+
+def undo_production_operation_in_session(
+    session,
+    operation_id: int,
+    user_department: str | None,
+    user_is_system: bool,
+    username: str,
+) -> dict:
+    operation = session.get(
+        ProductionOperationUndo,
+        operation_id,
+        with_for_update=True,
+    )
+    if operation is None:
+        raise DomainError("production_operation_not_found", "可撤回操作不存在", status_code=404)
+    if operation.status != "applied":
+        raise DomainError("production_operation_already_reversed", "该操作已经撤回")
+    if not can_access_department(
+        user_department,
+        user_is_system,
+        operation.department_code,
+    ):
+        raise DomainError("department_access_denied", "无权撤回该部门的生产操作", status_code=403)
+    latest = latest_applied_operation(session, operation.work_order_id)
+    if latest is None or latest.id != operation.id:
+        raise DomainError("production_operation_not_latest", "请先撤回该工单更晚的操作")
+    before = operation.snapshot_json["before"]
+    after = operation.snapshot_json["after"]
+    order = session.get(WorkOrder, operation.work_order_id, with_for_update=True)
+    if order is None:
+        raise DomainError("work_order_not_found", "工单不存在", status_code=404)
+
+    _lock_operation_batches(session, after)
+    _lock_operation_state(session, after)
+    affected_ids = set(after["affected_item_ids"])
+    current = capture_operation_state(session, order, affected_ids)
+    if current != after:
+        raise DomainError(
+            "production_operation_has_downstream_changes",
+            "该操作之后已有 QC、库存或工单变化，不能撤回",
         )
-        _restore_state(session, order, before, after)
-        operation.status = "reversed"
-        operation.reversed_at = utc_now()
-        operation.reversed_by = username
-        session.flush()
-        return serialize_work_order(session, order)
+
+    current_repository_ids = {item["id"] for item in after["repositories"]}
+    dependent_order = session.scalar(
+        select(WorkOrder.id).where(
+            WorkOrder.id != order.id,
+            WorkOrder.created_at > operation.created_at,
+            (
+                WorkOrder.repository_id.in_(current_repository_ids)
+                if current_repository_ids else WorkOrder.id < 0
+            ),
+        ).limit(1)
+    )
+    if dependent_order is not None:
+        raise DomainError(
+            "production_operation_inventory_reserved",
+            "该操作产生或使用的数量已被其他工单占用，不能撤回",
+        )
+    dependent_material = session.scalar(
+        select(WorkOrderMaterial.id)
+        .join(WorkOrder, WorkOrder.id == WorkOrderMaterial.work_order_id)
+        .where(
+            WorkOrderMaterial.work_order_id != order.id,
+            WorkOrderMaterial.repository_id.in_(current_repository_ids),
+            WorkOrder.created_at > operation.created_at,
+        ).limit(1)
+    ) if current_repository_ids else None
+    if dependent_material is not None:
+        raise DomainError(
+            "production_operation_inventory_reserved",
+            "该操作产生的数量已被装配工单占用，不能撤回",
+        )
+
+    session.scalar(
+        select(func.set_config(
+            "zzerp.undo_operation_id",
+            str(operation.id),
+            True,
+        ))
+    )
+    _restore_state(session, order, before, after)
+    operation.status = "reversed"
+    operation.reversed_at = utc_now()
+    operation.reversed_by = username
+    session.flush()
+    return serialize_work_order(session, order)
 
 
 def _lock_operation_state(session, state: dict) -> None:
@@ -282,6 +304,8 @@ def _restore_state(session, order: WorkOrder, before: dict, after: dict) -> None
         select(WorkOrderBatch).where(WorkOrderBatch.id.in_(created_batch_ids))
     ).all():
         session.delete(batch)
+    _restore_batch_states(session, before["batches"])
+    session.flush()
 
     before_repository_ids = {item["id"] for item in before["repositories"]}
     if order.repository_id not in before_repository_ids:
@@ -326,6 +350,42 @@ def _restore_state(session, order: WorkOrder, before: dict, after: dict) -> None
             status=customer_state["status"],
             revision=customer_state["revision"],
         )
+
+
+def _restore_batch_states(session, states: list[dict]) -> None:
+    if not states:
+        return
+    batch_ids = [state["id"] for state in states]
+    batches = {
+        batch.id: batch
+        for batch in session.scalars(
+            select(WorkOrderBatch).where(WorkOrderBatch.id.in_(batch_ids))
+        ).all()
+    }
+    for state in states:
+        batch = batches.get(state["id"])
+        if batch is None:
+            raise DomainError(
+                "production_operation_batch_missing",
+                "撤回所需的质检批次不存在",
+            )
+        for field in (
+            "submitted_quantity",
+            "rework_source_batch_id",
+            "qualified_quantity",
+            "rework_quantity",
+            "scrap_quantity",
+            "lost_quantity",
+            "qc_worker_id",
+            "qc_worker_name",
+            "defect_reason",
+            "qualified_destination",
+            "destination_decided_by",
+        ):
+            setattr(batch, field, state[field])
+        for field in ("destination_decided_at", "recorded_at"):
+            value = state[field]
+            setattr(batch, field, datetime.fromisoformat(value) if value else None)
 
 
 def _restore_inventory_table(session, model, before_rows: list[dict], after_rows: list[dict]) -> None:

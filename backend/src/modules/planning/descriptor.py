@@ -10,6 +10,7 @@ MODULE = ModuleDescriptor(
         "production_route_task",
         "department_task_read_model",
         "order_production_read_model",
+        "sales_material_progress_read_model",
         "production_progress_detail_read_model",
         "production_workbench_read_model",
     ),

@@ -5,7 +5,8 @@ from modules.organization.model_api import Workshop
 from modules.production_core.persistence import ProductionItem, Repository
 from modules.sales.model_api import CustomerOrder
 from modules.errors import DomainError
-from modules.production_core.flow import load_product_flow
+from modules.production_core.flow import ProductionFlowContext, load_product_flow
+from modules.production_core.material_state_api import ensure_initial_material_state
 from modules.production_core.movements import record_movement
 from modules.production_core.work_order_support import target_department_id
 
@@ -102,8 +103,15 @@ def provision_order_repositories(
                 department_id = target_department_id(session, first_node)
             except DomainError:
                 _invalid_first_node(bom_item.part_name, "首节点没有有效生产部门")
+            processing_state = ensure_initial_material_state(
+                session,
+                production_item,
+                ProductionFlowContext(order_item, bom_item, flow, nodes),
+                first_node["id"],
+            )
             session.add(Repository(
                 production_item_id=production_item.id,
+                processing_state_id=processing_state.id,
                 flow_node_id=first_node["id"],
                 source_flow_node_id=part_node["id"],
                 department_id=department_id,

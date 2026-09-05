@@ -13,7 +13,6 @@ from modules.production_core.persistence import (
 )
 from modules.production_core.work_order_record import build_work_order_record
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
-from modules.workforce.model_api import Worker
 from modules.production_core.work_order_presenters import (
     WorkOrderPresenterContext,
     build_work_order_presenter_context,
@@ -22,7 +21,7 @@ from modules.production_core.work_order_presenters import (
     serialize_work_order,
     work_order_context,
 )
-from modules.production_core.flow_api import qc_qualified_destinations
+from modules.production_core.flow_api import qc_qualified_destinations, qc_release_target
 from modules.production_core.work_order_progress import rework_pending_quantities
 
 
@@ -146,10 +145,6 @@ def get_qc_work_order_detail(work_order_id: int) -> dict:
             session.get(Workshop, procedure.workshop_id)
             if procedure is not None else None
         )
-        worker = (
-            session.get(Worker, order.worker_id)
-            if order.worker_id is not None else None
-        )
         record, _progress = build_work_order_record(
             node=node,
             flow=flow_context.flow,
@@ -158,7 +153,6 @@ def get_qc_work_order_detail(work_order_id: int) -> dict:
             workshop=workshop,
             order=order,
             batches=context.batches.get(order.id, []),
-            workers={worker.id: worker} if worker else {},
         )
         record["work_order"] = serialize_work_order(session, order, context)
         return record
@@ -233,6 +227,29 @@ def _serialize_qc_inspection_batch(
         rework_pending_quantity=pending_rework.get(batch.id, 0),
         track_rework=True,
     )
+    can_decide_destination = (
+        batch.recorded_at is not None
+        and bool(batch.qualified_quantity)
+        and batch.destination_decided_at is None
+    )
+    allowed_destinations = (
+        list(qc_qualified_destinations(
+            flow_context.flow,
+            flow_context.nodes,
+            order.flow_node_id,
+        ))
+        if can_decide_destination
+        else []
+    )
+    release_target = (
+        qc_release_target(
+            flow_context.flow,
+            flow_context.nodes,
+            order.flow_node_id,
+        )
+        if "release" in allowed_destinations
+        else None
+    )
     data.update({
         "production_item_id": production_item.id,
         "customer_order_no": customer_order.customer_order_no,
@@ -254,18 +271,15 @@ def _serialize_qc_inspection_batch(
                 for child in context.batches.get(order.id, [])
             )
         ),
-        "allowed_destinations": list(
-            qc_qualified_destinations(
-                flow_context.flow,
-                flow_context.nodes,
-                order.flow_node_id,
+        "allowed_destinations": allowed_destinations,
+        "release_target_name": (
+            str(
+                release_target.get("label")
+                or release_target.get("output_name")
+                or release_target["id"]
             )
-        )
-        if (
-            batch.recorded_at is not None
-            and batch.qualified_quantity
-            and batch.destination_decided_at is None
-        )
-        else [],
+            if release_target is not None
+            else None
+        ),
     })
     return data

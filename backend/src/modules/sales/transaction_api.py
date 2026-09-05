@@ -28,6 +28,16 @@ def close_fully_shipped_order(session, order_id: int) -> None:
     order.updated_at = utc_now()
 
 
+def reopen_order_after_shipment_reversal(session, order_id: int) -> None:
+    order = session.get(CustomerOrder, order_id, with_for_update=True)
+    if order is None:
+        raise RuntimeError("customer order disappeared during shipment reversal")
+    if order.status == "closed":
+        order.status = "planned"
+        order.revision += 1
+        order.updated_at = utc_now()
+
+
 def restore_order_state(
     session,
     order_id: int,
@@ -45,5 +55,6 @@ def restore_order_state(
 __all__ = [
     "close_fully_shipped_order",
     "mark_order_planned",
+    "reopen_order_after_shipment_reversal",
     "restore_order_state",
 ]

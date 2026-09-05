@@ -11,10 +11,8 @@ const router = useRouter()
 
 const activeAccount = ref('')
 const accounts = [
-  { username: 'admin', name: '系统管理', description: '系统配置与全局管理' },
   { username: 'engineering', name: '工程部', description: '产品、BOM 与生产流程' },
   { username: 'business', name: '业务部', description: '客户订单与生产计划' },
-  { username: 'pmc', name: 'PMC部门', description: '生产进度查看' },
   { username: 'stamp', name: '冲压部', description: '冲压工艺生产' },
   { username: 'cnc', name: '机加部', description: '机加工艺生产' },
   { username: 'polish', name: '表面处理部', description: '表面处理工艺生产' },

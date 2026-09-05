@@ -15,7 +15,14 @@ from modules.production_core.persistence import (
     Repository,
     WorkOrder,
     WorkOrderMaterial,
+    WorkOrderBatch,
 )
+from modules.errors import DomainError
+from modules.production_core.material_state_api import (
+    get_material_state,
+    validate_material_state_identity,
+)
+from domain.time import utc_now
 
 
 def create_production_item(
@@ -45,6 +52,7 @@ def create_work_order_material(
     work_order_id: int,
     repository_id: int | None,
     production_item_id: int,
+    source_processing_state_id: int,
     quantity: int,
     source_flow_node_id: str,
     source_previous_flow_node_id: str,
@@ -55,6 +63,7 @@ def create_work_order_material(
         work_order_id=work_order_id,
         repository_id=repository_id,
         production_item_id=production_item_id,
+        source_processing_state_id=source_processing_state_id,
         quantity=quantity,
         source_flow_node_id=source_flow_node_id,
         source_previous_flow_node_id=source_previous_flow_node_id,
@@ -93,10 +102,12 @@ def create_assembly_work_order_record(
     remark: str | None,
     is_temporary: bool,
     repository_id: int | None = None,
+    source_processing_state_id: int | None = None,
 ) -> WorkOrder:
     order = WorkOrder(
         repository_id=repository_id,
         production_item_id=production_item_id,
+        source_processing_state_id=source_processing_state_id,
         procedure_id=procedure.id,
         work_order_type="assembly",
         is_temporary=is_temporary,
@@ -129,6 +140,7 @@ def create_supplier_processing_work_order_record(
     order = WorkOrder(
         repository_id=None,
         production_item_id=production_item_id,
+        source_processing_state_id=None,
         procedure_id=None,
         work_order_type=WORK_ORDER_SUPPLIER_PROCESSING,
         is_temporary=False,
@@ -150,10 +162,35 @@ def create_supplier_processing_work_order_record(
     return order
 
 
+def cancel_supplier_processing_work_order_record(
+    session,
+    *,
+    work_order_id: int,
+) -> WorkOrder:
+    order = session.get(WorkOrder, work_order_id, with_for_update=True)
+    if order is None or order.work_order_type != WORK_ORDER_SUPPLIER_PROCESSING:
+        raise DomainError("supplier_processing_work_order_not_found", "委外加工工单不存在", status_code=404)
+    if order.status != "open":
+        raise DomainError("supplier_processing_work_order_not_cancellable", "当前委外加工工单不能取消", status_code=409)
+    if session.scalar(select(WorkOrderBatch.id).where(
+        WorkOrderBatch.work_order_id == order.id
+    ).limit(1)) is not None:
+        raise DomainError(
+            "supplier_processing_work_order_inspected",
+            "委外加工工单已经录入质检结果，不能取消",
+            status_code=409,
+        )
+    order.status = "cancelled"
+    order.closed_at = utc_now()
+    session.flush()
+    return order
+
+
 def add_repository_quantity(
     session,
     *,
     production_item_id: int,
+    processing_state_id: int,
     flow_node_id: str,
     source_flow_node_id: str,
     department_id: int,
@@ -162,11 +199,18 @@ def add_repository_quantity(
 ) -> Repository | None:
     if quantity <= 0:
         return None
-    session.get(ProductionItem, production_item_id, with_for_update=True)
+    production_item = session.get(ProductionItem, production_item_id, with_for_update=True)
+    if production_item is None:
+        raise DomainError("production_context_missing", "生产项不存在", status_code=409)
+    validate_material_state_identity(
+        get_material_state(session, processing_state_id),
+        production_item,
+    )
     repository = session.scalar(
         select(Repository)
         .where(
             Repository.production_item_id == production_item_id,
+            Repository.processing_state_id == processing_state_id,
             Repository.flow_node_id == flow_node_id,
             Repository.source_flow_node_id == source_flow_node_id,
             Repository.department_id == department_id,
@@ -177,6 +221,7 @@ def add_repository_quantity(
     if repository is None:
         repository = Repository(
             production_item_id=production_item_id,
+            processing_state_id=processing_state_id,
             flow_node_id=flow_node_id,
             source_flow_node_id=source_flow_node_id,
             department_id=department_id,
@@ -196,5 +241,6 @@ __all__ = [
     "create_assembly_work_order_record",
     "create_production_item",
     "create_supplier_processing_work_order_record",
+    "cancel_supplier_processing_work_order_record",
     "create_work_order_material",
 ]

@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response, status
 
 from authorization import ensure_department_access, require_any_permission
 from departments.contracts import (
@@ -9,15 +9,16 @@ from departments.contracts import (
 from departments.registry import department_api
 from domain.permissions import PRODUCTION_MANAGE, PRODUCTION_VIEW, QC_INSPECT
 from departments.warehouse_orchestration import (
-    list_completed_plan_positions,
-    store_completed_plan_position,
+    list_department_materials,
+    store_production_position,
 )
 from schemas.production import (
+    DepartmentMaterialPositionListEnvelope,
     DepartmentProductionProgressEnvelope,
     ProductionPositionStorageInput,
-    ProductionPositionStorageListEnvelope,
     ProductionPositionStorageResponse,
     DepartmentWorkerCreate,
+    DepartmentWorkerUpdate,
     DepartmentWorkerEnvelope,
     DepartmentWorkerHistoryEnvelope,
     DepartmentWorkerOverviewEnvelope,
@@ -32,19 +33,19 @@ router = APIRouter(tags=["production"])
 
 
 @router.get(
-    "/departments/{department_code}/warehouse-candidates",
-    response_model=ProductionPositionStorageListEnvelope,
+    "/departments/{department_code}/materials",
+    response_model=DepartmentMaterialPositionListEnvelope,
 )
-def department_warehouse_candidates(
+def department_materials(
     department_code: str,
     user: dict = Depends(require_any_permission(PRODUCTION_VIEW)),
 ):
     ensure_department_access(user, department_code)
-    return {"data": list_completed_plan_positions(department_code)}
+    return {"data": list_department_materials(department_code)}
 
 
 @router.post(
-    "/departments/{department_code}/warehouse-candidates/storage",
+    "/departments/{department_code}/materials/storage",
     response_model=ProductionPositionStorageResponse,
 )
 def department_position_warehouse_storage(
@@ -53,9 +54,10 @@ def department_position_warehouse_storage(
     user: dict = Depends(require_any_permission(PRODUCTION_MANAGE, csrf=True)),
 ):
     ensure_department_access(user, department_code)
-    return store_completed_plan_position(
+    return store_production_position(
         department_code,
         payload.production_item_id,
+        payload.processing_state_id,
         payload.flow_node_id,
         payload.source_flow_node_id,
         payload.position_version,
@@ -228,3 +230,41 @@ def department_worker_create(
             payload.workshop_id,
         )
     }
+
+
+@router.put(
+    "/departments/{department_code}/workers/{worker_id}",
+    response_model=DepartmentWorkerEnvelope,
+)
+def department_worker_update(
+    department_code: str,
+    worker_id: int,
+    payload: DepartmentWorkerUpdate,
+    user: dict = Depends(
+        require_any_permission(PRODUCTION_MANAGE, QC_INSPECT, csrf=True)
+    ),
+):
+    ensure_department_access(user, department_code)
+    return {
+        "data": department_api(department_code, CAP_WORKERS).update_worker(
+            worker_id,
+            payload.worker_name,
+            payload.workshop_id,
+        )
+    }
+
+
+@router.delete(
+    "/departments/{department_code}/workers/{worker_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+def department_worker_delete(
+    department_code: str,
+    worker_id: int,
+    user: dict = Depends(
+        require_any_permission(PRODUCTION_MANAGE, QC_INSPECT, csrf=True)
+    ),
+):
+    ensure_department_access(user, department_code)
+    department_api(department_code, CAP_WORKERS).delete_worker(worker_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)

@@ -9,6 +9,11 @@ from modules.inventory.plan_stock_api import (
 )
 from modules.inventory.finished_shipment_api import order_item_shipped_quantities
 from modules.inventory.warehouse_api import withdraw_c01_stock
+from modules.inventory.plan_correction_api import (
+    ensure_no_completed_plan_storage,
+    ensure_order_has_no_shipments,
+    reverse_plan_warehouse_issues,
+)
 from modules.production_core import api as production_lifecycle
 from modules.production_core.inventory_api import (
     accept_issued_inventory as accept_inventory_into_production,
@@ -38,6 +43,12 @@ class PlanningExecutionAdapter:
     initialize_order_production = staticmethod(
         production_lifecycle.initialize_order_production
     )
+    rollback_unstarted_order_production = staticmethod(
+        production_lifecycle.rollback_unstarted_order_production
+    )
+    ensure_order_has_no_shipments = staticmethod(ensure_order_has_no_shipments)
+    reverse_plan_warehouse_issues = staticmethod(reverse_plan_warehouse_issues)
+    ensure_no_completed_plan_storage = staticmethod(ensure_no_completed_plan_storage)
 
     @staticmethod
     def accept_issued_inventory(session, plan_item, stock, actor_username):
@@ -55,7 +66,9 @@ plan_execution = PlanningExecutionAdapter()
 class SalesPlanningAdapter:
     order_plan_states = staticmethod(planning.order_plan_states)
     order_plan_state = staticmethod(planning.order_plan_state)
-    planned_product_quantities = staticmethod(planning.planned_product_quantities)
+    order_progress_by_order_item = staticmethod(
+        planning_progress.order_progress_by_order_item
+    )
     delete_order_plan = staticmethod(planning.delete_order_plan)
     rebuild_order_plan = staticmethod(planning.rebuild_order_plan)
 
@@ -72,6 +85,18 @@ class SalesPlanningAdapter:
             order,
             actor_username,
             collaborators=plan_execution,
+        )
+
+    @staticmethod
+    def unconfirm_order_plan(session, order, **kwargs):
+        return planning_commands.unconfirm_order_plan(
+            session, order, collaborators=plan_execution, **kwargs
+        )
+
+    @staticmethod
+    def reopen_completed_order_plan(session, order, **kwargs):
+        return planning_commands.reopen_completed_order_plan(
+            session, order, collaborators=plan_execution, **kwargs
         )
 
 
@@ -135,6 +160,24 @@ def confirm_production_plan(*args, **kwargs) -> dict:
     )
 
 
+def unconfirm_production_plan(*args, **kwargs) -> dict:
+    return sales.unconfirm_production_plan(
+        *args,
+        planning=planning_port,
+        engineering=engineering,
+        **kwargs,
+    )
+
+
+def reopen_completed_production_plan(*args, **kwargs) -> dict:
+    return sales.reopen_completed_production_plan(
+        *args,
+        planning=planning_port,
+        engineering=engineering,
+        **kwargs,
+    )
+
+
 def create_order(payload) -> dict:
     return sales.create_order(payload, engineering)
 
@@ -152,5 +195,7 @@ __all__ = [
     "get_customer_order_production",
     "list_order_progress_details",
     "list_orders",
+    "reopen_completed_production_plan",
+    "unconfirm_production_plan",
     "update_order",
 ]

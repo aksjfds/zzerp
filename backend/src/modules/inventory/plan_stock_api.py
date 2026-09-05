@@ -73,19 +73,6 @@ def reserve_finished_plan_stock(
             status_code=409,
             path="items",
         )
-    existing = session.scalar(
-        select(FinishedStockReservation.id).where(
-            FinishedStockReservation.production_plan_item_id == plan_item.id,
-            FinishedStockReservation.finished_stock_id == stock.id,
-        )
-    )
-    if existing is not None:
-        raise DomainError(
-            "production_plan_finished_stock_already_reserved",
-            "该生产计划明细已经占用成品库存",
-            status_code=409,
-        )
-
     stock.reserved_quantity += requested_quantity
     stock.revision += 1
     stock.updated_at = utc_now()

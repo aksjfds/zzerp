@@ -5,6 +5,8 @@ from modules.planning.plan_commands import (
     complete_order_plan,
     confirm_order_plan,
     get_order_plan,
+    reopen_completed_order_plan,
+    unconfirm_order_plan,
     update_order_plan,
 )
 from modules.planning.plan_mapper import serialize_plan
@@ -15,6 +17,8 @@ __all__ = [
     "complete_order_plan",
     "confirm_order_plan",
     "get_order_plan",
+    "reopen_completed_order_plan",
     "serialize_plan",
     "update_order_plan",
+    "unconfirm_order_plan",
 ]

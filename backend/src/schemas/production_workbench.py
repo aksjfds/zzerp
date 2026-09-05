@@ -20,6 +20,7 @@ class WorkbenchInventorySourceResponse(ProductionModel):
     repository_id: int
     production_item_id: int
     source_work_order_id: int | None
+    processing_status: str
     on_hand_quantity: int = Field(gt=0)
     reserved_quantity: int = Field(ge=0)
     available_quantity: int = Field(ge=0)

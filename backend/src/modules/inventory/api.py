@@ -8,9 +8,11 @@ from domain.warehouse import WarehouseOperationSnapshot, WarehouseOperationStatu
 from modules.inventory.finished_receipt_api import (
     confirm_finished_receipt,
     list_finished_receipts,
+    reverse_finished_receipt,
 )
 from modules.inventory.finished_shipment_api import (
     list_finished_shipment_candidates,
+    reverse_finished_shipment,
     ship_finished_order_item,
 )
 from modules.inventory.finished_stock_query_api import (
@@ -86,6 +88,7 @@ def _serialize_warehouse_operations(
 __all__ = [
     "confirm_finished_receipt",
     "list_finished_receipts",
+    "reverse_finished_receipt",
     "list_finished_shipment_candidates",
     "list_project_warehouse_operations",
     "list_finished_stock_reservations",
@@ -93,5 +96,6 @@ __all__ = [
     "list_finished_stocks",
     "list_temporary_warehouse_stocks",
     "review_project_warehouse_operation",
+    "reverse_finished_shipment",
     "ship_finished_order_item",
 ]

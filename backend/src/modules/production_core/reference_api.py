@@ -275,6 +275,7 @@ def supplier_processing_work_order_references(
                 list(positions)
             ),
             WorkOrder.work_order_type == WORK_ORDER_SUPPLIER_PROCESSING,
+            WorkOrder.status != "cancelled",
         )
     )
     return {
@@ -294,12 +295,19 @@ def supplier_processing_work_order_references(
 def supplier_processing_qc_order_references(
     session: Session,
     work_order_ids: Collection[int] | None = None,
+    *,
+    history: bool = False,
 ) -> dict[int, SupplierProcessingQcOrderReference]:
     if work_order_ids is not None and not work_order_ids:
         return {}
+    status_condition = (
+        WorkOrder.status == "closed"
+        if history
+        else WorkOrder.status == WORK_ORDER_STATUS_OPEN
+    )
     statement = select(WorkOrder).where(
         WorkOrder.work_order_type == WORK_ORDER_SUPPLIER_PROCESSING,
-        WorkOrder.status == WORK_ORDER_STATUS_OPEN,
+        status_condition,
     )
     if work_order_ids is not None:
         statement = statement.where(WorkOrder.id.in_(list(work_order_ids)))

@@ -119,6 +119,32 @@ export async function completeProductionPlan(
   return response.data.data
 }
 
+export async function unconfirmProductionPlan(
+  orderId: number,
+  expectedRevision: number,
+  planExpectedRevision: number,
+) {
+  const response = await service.post<{ data: CustomerOrder }>(
+    `/customer-orders/${orderId}/production-plan/unconfirm`,
+    null,
+    { params: { expected_revision: expectedRevision, plan_expected_revision: planExpectedRevision } },
+  )
+  return response.data.data
+}
+
+export async function reopenProductionPlan(
+  orderId: number,
+  expectedRevision: number,
+  planExpectedRevision: number,
+) {
+  const response = await service.post<{ data: CustomerOrder }>(
+    `/customer-orders/${orderId}/production-plan/reopen`,
+    null,
+    { params: { expected_revision: expectedRevision, plan_expected_revision: planExpectedRevision } },
+  )
+  return response.data.data
+}
+
 export async function cancelCustomerOrder(orderId: number, expectedRevision: number) {
   const response = await service.post<{ data: CustomerOrder }>(`/customer-orders/${orderId}/cancel`, null, {
     params: { expected_revision: expectedRevision },

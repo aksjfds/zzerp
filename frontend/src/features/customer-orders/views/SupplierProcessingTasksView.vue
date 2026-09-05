@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { SUPPLIER_PROCESSING_PERMISSIONS } from '@/permission/constants'
 import SupplierProcessingWorkOrderDialog from '../components/SupplierProcessingWorkOrderDialog.vue'
 import {
   createSupplierProcessingWorkOrder,
+  cancelSupplierProcessingWorkOrder,
   querySupplierProcessingTasks,
 } from '../api/supplierProcessing'
 import type {
@@ -70,6 +71,24 @@ async function submit(payload: SupplierProcessingWorkOrderInput) {
   }
 }
 
+async function cancelWorkOrder(task: SupplierProcessingTask) {
+  if (!task.work_order_id) return
+  try {
+    await ElMessageBox.confirm(
+      '仅尚未录入任何质检结果的委外工单可以取消。取消后可重新创建，是否继续？',
+      '取消委外工单',
+      { type: 'warning', confirmButtonText: '确认取消' },
+    )
+    await cancelSupplierProcessingWorkOrder(task.work_order_id)
+    await load()
+    ElMessage.success('委外加工工单已取消')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error(getApiErrorDetail(error)?.message || '委外加工工单取消失败')
+    }
+  }
+}
+
 onMounted(load)
 defineExpose({ load })
 </script>
@@ -112,6 +131,13 @@ defineExpose({ load })
             type="primary"
             @click="openCreateDialog(row)"
           >创建工单</ElButton>
+          <ElButton
+            v-else-if="row.work_order_status === 'open'"
+            v-permission="SUPPLIER_PROCESSING_PERMISSIONS.create"
+            link
+            type="danger"
+            @click="cancelWorkOrder(row)"
+          >取消工单</ElButton>
           <span v-else class="operation-hint">{{ row.work_order_id ? '已创建' : '不可开单' }}</span>
         </template>
       </ElTableColumn>

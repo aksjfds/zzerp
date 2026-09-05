@@ -272,14 +272,18 @@ def sql_schema() -> tuple[dict[str, dict], set[str]]:
             "columns": columns,
             "constraints": set(re.findall(r"\bCONSTRAINT\s+([a-z_][a-z0-9_]*)", block, re.I)),
         }
-    alter_constraints = re.findall(
-        r"ALTER TABLE\s+([a-z_][a-z0-9_]*)\s+"
-        r"ADD CONSTRAINT\s+([a-z_][a-z0-9_]*)",
+    for alter in re.finditer(
+        r"ALTER TABLE\s+([a-z_][a-z0-9_]*)\s+(.*?);",
         sql,
-        re.I,
-    )
-    for table_name, constraint in alter_constraints:
-        result[table_name]["constraints"].add(constraint)
+        re.I | re.S,
+    ):
+        table_name, statements = alter.groups()
+        for constraint in re.findall(
+            r"ADD CONSTRAINT\s+([a-z_][a-z0-9_]*)",
+            statements,
+            re.I,
+        ):
+            result[table_name]["constraints"].add(constraint)
     indexes = set(re.findall(r"CREATE\s+(?:UNIQUE\s+)?INDEX\s+([a-z_][a-z0-9_]*)", sql, re.I))
     return result, indexes
 

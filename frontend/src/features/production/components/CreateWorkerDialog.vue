@@ -7,6 +7,7 @@ const props = defineProps<{
   modelValue: boolean
   workshops: WorkerWorkshop[]
   submitting: boolean
+  worker?: { worker_name: string; workshop_id: number | null }
 }>()
 const emit = defineEmits<{
   'update:modelValue': [value: boolean]
@@ -19,10 +20,10 @@ const form = reactive({
 
 watch(() => props.modelValue, (visible) => {
   if (!visible) return
-  form.workerName = ''
-  form.workshopId = props.workshops.length === 1
+  form.workerName = props.worker?.worker_name || ''
+  form.workshopId = props.worker?.workshop_id ?? (props.workshops.length === 1
     ? (props.workshops[0]?.id ?? null)
-    : null
+    : null)
 })
 
 function submit() {
@@ -42,7 +43,7 @@ function submit() {
 <template>
   <ElDialog
     :model-value="modelValue"
-    title="录入工人"
+    :title="worker ? '更正工人资料' : '录入工人'"
     width="440px"
     @update:model-value="emit('update:modelValue', $event)"
   >
@@ -70,7 +71,9 @@ function submit() {
     </ElForm>
     <template #footer>
       <ElButton @click="emit('update:modelValue', false)">取消</ElButton>
-      <ElButton type="primary" :loading="submitting" @click="submit">确认录入</ElButton>
+      <ElButton type="primary" :loading="submitting" @click="submit">
+        {{ worker ? '保存更正' : '确认录入' }}
+      </ElButton>
     </template>
   </ElDialog>
 </template>

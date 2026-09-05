@@ -88,7 +88,9 @@ class Product(Base):
     )
 class ProductVersion(Base):
     __tablename__ = "product_version"
-    __table_args__ = (CheckConstraint("version > 0", name="ck_product_version_number"),)
+    __table_args__ = (
+        CheckConstraint("version > 0", name="ck_product_version_number"),
+    )
 
     product_id: Mapped[int] = mapped_column(
         BigInteger,

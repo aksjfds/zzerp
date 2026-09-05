@@ -20,9 +20,11 @@ withDefaults(defineProps<{
   payLoading?: boolean
   showDepartmentFilter?: boolean
   allowCreate?: boolean
+  allowManage?: boolean
 }>(), {
   showDepartmentFilter: true,
   allowCreate: false,
+  allowManage: false,
   payLoading: false,
 })
 const detailView = ref<'history' | 'pay'>('history')
@@ -33,6 +35,8 @@ defineEmits<{
   select: [worker: WorkerOverviewItem]
   monthChange: []
   create: []
+  edit: [worker: WorkerOverviewItem]
+  delete: [worker: WorkerOverviewItem]
 }>()
 
 function money(value: MoneyValue | null | undefined) {
@@ -81,6 +85,10 @@ function money(value: MoneyValue | null | undefined) {
         <div>
           <span>工人工作情况</span>
           <h2>{{ selectedWorkerTitle }}</h2>
+        </div>
+        <div v-if="allowManage && selectedWorker" class="worker-actions">
+          <ElButton @click="$emit('edit', selectedWorker)">更正资料</ElButton>
+          <ElButton type="danger" plain @click="$emit('delete', selectedWorker)">删除</ElButton>
         </div>
         <ElDatePicker
           v-model="selectedMonth"
@@ -187,6 +195,7 @@ function money(value: MoneyValue | null | undefined) {
 .worker-card.selected { background: var(--md-primary-container); box-shadow: none; }
 .worker-card span { color: var(--el-text-color-secondary); font-size: 13px; }
 .history-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.worker-actions { display: flex; gap: 8px; margin-left: auto; }
 .history-heading span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
 .history-heading h2 { margin: 5px 0 0; }
 .worker-detail-tabs :deep(.el-tabs__header) { margin-bottom: 14px; }

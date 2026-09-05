@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, Query, status
 
 from authorization import require_any_permission
-from domain.permissions import PRODUCT_ADD, PRODUCT_DELETE, PRODUCT_EDIT, PRODUCT_VIEW
+from domain.permissions import PRODUCT_ADD, PRODUCT_EDIT, PRODUCT_VIEW
 from schemas.engineering import (
     CreateProductPayload,
     ProductDetailEnvelope,
@@ -13,12 +13,11 @@ from schemas.engineering import (
 )
 from modules.engineering.api import (
     create_product,
-    delete_product,
     list_product_versions,
     list_products,
 )
 from departments.engineering_orchestration import (
-    create_product_version, delete_product_version, get_product, replace_product_bom,
+    create_product_version, get_product, replace_product_bom,
     save_product_process_flow_draft, update_product_info,
     update_product_process_flow,
 )
@@ -64,20 +63,6 @@ def product_version_create(
     _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
 ):
     return {"data": create_product_version(product_id, expected_revision, source_version)}
-
-
-@router.delete(
-    "/{product_id}/versions/{product_version}",
-    response_model=ProductDetailEnvelope,
-)
-def product_version_delete(
-    product_id: int,
-    product_version: int,
-    expected_revision: int = Query(gt=0),
-    _user: dict = Depends(require_any_permission(PRODUCT_DELETE, csrf=True)),
-):
-    product = delete_product_version(product_id, product_version, expected_revision)
-    return {"data": product}
 
 
 @router.post(
@@ -147,13 +132,3 @@ def product_process_flow_draft_save(
             payload.process_flow,
         )
     }
-
-
-@router.delete("/{product_id}", status_code=status.HTTP_204_NO_CONTENT)
-def product_delete(
-    product_id: int,
-    expected_revision: int = Query(gt=0),
-    _user: dict = Depends(require_any_permission(PRODUCT_DELETE, csrf=True)),
-):
-    delete_product(product_id, expected_revision)
-    return Response(status_code=status.HTTP_204_NO_CONTENT)

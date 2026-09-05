@@ -56,9 +56,14 @@ export async function decideQcDestination(batchId: number, destination: QcDestin
   return response.data.data
 }
 
-export async function querySupplierProcessingQcTasks() {
+export async function undoQcDestination(batchId: number) {
+  await service.post(`/qc/work-order-batches/${batchId}/destination/undo`)
+}
+
+export async function querySupplierProcessingQcTasks(history = false) {
   const response = await service.get<{ data: SupplierProcessingQcTask[]; total: number }>(
     '/qc/supplier-processing-work-orders',
+    { params: { history } },
   )
   return { items: response.data.data, total: response.data.total }
 }

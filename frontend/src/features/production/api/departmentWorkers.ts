@@ -59,3 +59,20 @@ export async function createDepartmentWorker(
   )
   return response.data.data
 }
+
+export async function updateDepartmentWorker(
+  departmentCode: string,
+  workerId: number,
+  workerName: string,
+  workshopId: number | null,
+) {
+  const response = await service.put<{ data: WorkerOverviewItem }>(
+    `/departments/${departmentCode}/workers/${workerId}`,
+    { worker_name: workerName, workshop_id: workshopId },
+  )
+  return response.data.data
+}
+
+export async function deleteDepartmentWorker(departmentCode: string, workerId: number) {
+  await service.delete(`/departments/${departmentCode}/workers/${workerId}`)
+}

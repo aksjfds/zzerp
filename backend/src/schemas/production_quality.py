@@ -45,6 +45,7 @@ class QcBatchRowResponse(WorkOrderBatchResponse):
     batch_sequence: int
     rework_source_batch_sequence: int | None
     allowed_destinations: list[QcQualifiedDestination]
+    release_target_name: str | None
     can_undo_inspection: bool
 
 

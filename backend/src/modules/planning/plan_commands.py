@@ -174,3 +174,62 @@ def complete_order_plan(
         plan.revision += 1
         session.flush()
         return serialize_plan(session, plan)
+
+
+def unconfirm_order_plan(
+    session: Session,
+    order,
+    *,
+    expected_revision: int,
+    actor_username: str,
+    collaborators: PlanExecutionCollaborators,
+) -> ProductionPlan:
+    plan = _load_plan(session, order.id, for_update=True)
+    if plan is None:
+        raise DomainError("production_plan_not_found", "生产计划不存在", status_code=404)
+    if plan.status != "confirmed":
+        raise DomainError("production_plan_not_unconfirmable", "只有生产中的计划可以撤回确认", status_code=409)
+    _ensure_revision(plan, expected_revision)
+    collaborators.ensure_order_has_no_shipments(session, order.id)
+    collaborators.rollback_unstarted_order_production(session, order)
+    collaborators.reverse_plan_warehouse_issues(
+        session,
+        production_plan_id=plan.id,
+        actor_username=actor_username,
+    )
+    collaborators.release_finished_plan_stock(session, plan.id)
+    for item in plan.items:
+        item.allocated_inventory_quantity = 0
+    plan.status = "draft"
+    plan.confirmed_at = None
+    plan.confirmed_by = None
+    plan.updated_at = utc_now()
+    plan.revision += 1
+    return plan
+
+
+def reopen_completed_order_plan(
+    session: Session,
+    order,
+    *,
+    expected_revision: int,
+    actor_username: str,
+    collaborators: PlanExecutionCollaborators,
+) -> ProductionPlan:
+    plan = _load_plan(session, order.id, for_update=True)
+    if plan is None:
+        raise DomainError("production_plan_not_found", "生产计划不存在", status_code=404)
+    if plan.status != "completed":
+        raise DomainError("production_plan_not_reopenable", "只有已完成计划可以恢复", status_code=409)
+    _ensure_revision(plan, expected_revision)
+    collaborators.ensure_no_completed_plan_storage(
+        session,
+        customer_order_id=order.id,
+        completed_at=plan.completed_at,
+    )
+    plan.status = "confirmed"
+    plan.completed_at = None
+    plan.completed_by = None
+    plan.updated_at = utc_now()
+    plan.revision += 1
+    return plan

@@ -59,14 +59,18 @@ onMounted(controller.loadWorkers)
       :pay-loading="controller.payLoading.value"
       :show-department-filter="false"
       allow-create
+      allow-manage
       @select="controller.selectWorker"
       @month-change="controller.loadWorkerDetails"
-      @create="controller.dialogVisible.value = true"
+      @create="controller.createWorker"
+      @edit="controller.editWorker"
+      @delete="controller.removeWorker"
     />
     <CreateWorkerDialog
       v-model="controller.dialogVisible.value"
       :workshops="controller.overview.value?.workshops || []"
       :submitting="controller.submitting.value"
+      :worker="controller.editingWorker.value"
       @submit="controller.saveWorker"
     />
   </component>

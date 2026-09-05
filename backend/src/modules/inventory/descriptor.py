@@ -15,6 +15,7 @@ MODULE = ModuleDescriptor(
     collaborates_with=("engineering", "organization", "production_core", "sales"),
     collaboration_apis=(
         "modules.inventory.identity_api",
+        "modules.inventory.plan_correction_api",
         "modules.inventory.plan_stock_api",
         "modules.inventory.reference_api",
         "modules.inventory.finished_receipt_api",

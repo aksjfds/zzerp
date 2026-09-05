@@ -25,6 +25,10 @@ from modules.production_core.operational_api import (
     serialize_work_order,
 )
 from modules.production_core.ownership_api import add_repository_quantity
+from modules.production_core.material_state_api import (
+    QC_NONE,
+    transition_work_order_material_state,
+)
 from modules.production_core.transaction_api import (
     load_production_item_context,
     load_work_order_context,
@@ -104,7 +108,7 @@ def submit_standard_order(
             raise DomainError("department_not_found", "QC部门不存在")
         batch = create_inspection_batch(
             session,
-            work_order_id=order.id,
+            order=order,
             submitted_quantity=quantity,
             execution_flow_node_id=node["id"],
         )
@@ -119,6 +123,7 @@ def submit_standard_order(
                 direct_target,
                 quantity,
                 node["id"],
+                processing_state_id=None,
                 source_work_order_id=order.id,
             )
             if target_department_id is None:
@@ -133,9 +138,19 @@ def submit_standard_order(
             )
             target_flow_node_id = direct_target["id"]
         else:
+            processing_state = transition_work_order_material_state(
+                session,
+                production_item=production_item,
+                context=context,
+                order=order,
+                completed_flow_node_id=node["id"],
+                resume_flow_node_id=node["id"],
+                qc_status=QC_NONE,
+            )
             add_repository_quantity(
                 session,
                 production_item_id=production_item.id,
+                processing_state_id=processing_state.id,
                 flow_node_id=node["id"],
                 source_flow_node_id=node["id"],
                 department_id=department_id,
@@ -212,7 +227,7 @@ def resubmit_standard_rework_batch(
             raise DomainError("work_order_qc_not_configured", "当前车间节点后未配置QC节点")
         batch = create_inspection_batch(
             session,
-            work_order_id=order.id,
+            order=order,
             submitted_quantity=quantity,
             execution_flow_node_id=node["id"],
             rework_source_batch_id=source_batch.id,

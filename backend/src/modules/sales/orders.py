@@ -95,7 +95,7 @@ def list_order_progress_details(
             session,
             {item.product_id for item, _order in rows},
         )
-        planned_quantity_by_item = planning.planned_product_quantities(
+        production_progress_by_item = planning.order_progress_by_order_item(
             session,
             order_item_ids,
         )
@@ -110,6 +110,7 @@ def list_order_progress_details(
                 int(shipped_quantity_by_item.get(item.id, 0)),
                 item.quantity,
             )
+            production_progress = production_progress_by_item.get(item.id, {})
             data.append({
                 "customer_order_id": order.id,
                 "customer_order_item_id": item.id,
@@ -119,11 +120,12 @@ def list_order_progress_details(
                 "customer_order_no": order.customer_order_no,
                 "customer_code": product.customer_code,
                 "order_quantity": item.quantity,
-                "task_quantity": int(planned_quantity_by_item.get(item.id, 0)),
+                "task_quantity": int(production_progress.get("task_quantity", 0)),
                 "shipped_quantity": shipped_quantity,
                 "outstanding_quantity": max(item.quantity - shipped_quantity, 0),
                 "delivery_date": item.delivery_date,
                 "remark": item.remark or order.remark or "",
+                "materials": production_progress.get("materials", []),
             })
         return data, total
 
@@ -316,6 +318,71 @@ def confirm_production_plan(
                 session,
                 {item.product_id for item in order.items},
             ),
+        )
+
+
+def unconfirm_production_plan(
+    order_id: int,
+    expected_revision: int,
+    plan_expected_revision: int,
+    *,
+    actor_username: str,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+) -> dict:
+    with SessionLocal.begin() as session:
+        repository = CustomerOrderRepository(session)
+        order = repository.get_for_update(order_id)
+        if order is None:
+            raise order_not_found()
+        ensure_expected_revision(order, expected_revision)
+        if order.status != "planned":
+            raise DomainError("production_plan_order_not_unconfirmable", "当前订单不能撤回生产计划确认")
+        planning.unconfirm_order_plan(
+            session,
+            order,
+            expected_revision=plan_expected_revision,
+            actor_username=actor_username,
+        )
+        order.status = "confirmed"
+        order.updated_at = utc_now()
+        order.revision += 1
+        session.flush()
+        return serialize_order(
+            session,
+            order,
+            engineering.get_product_references(session, {item.product_id for item in order.items}),
+        )
+
+
+def reopen_completed_production_plan(
+    order_id: int,
+    expected_revision: int,
+    plan_expected_revision: int,
+    *,
+    actor_username: str,
+    planning: SalesPlanningPort,
+    engineering: SalesEngineeringPort,
+) -> dict:
+    with SessionLocal.begin() as session:
+        repository = CustomerOrderRepository(session)
+        order = repository.get_for_update(order_id)
+        if order is None:
+            raise order_not_found()
+        ensure_expected_revision(order, expected_revision)
+        if order.status not in {"planned", "closed"}:
+            raise DomainError("production_plan_order_not_reopenable", "当前订单的生产计划不能恢复")
+        planning.reopen_completed_order_plan(
+            session,
+            order,
+            expected_revision=plan_expected_revision,
+            actor_username=actor_username,
+        )
+        session.flush()
+        return serialize_order(
+            session,
+            order,
+            engineering.get_product_references(session, {item.product_id for item in order.items}),
         )
 
 

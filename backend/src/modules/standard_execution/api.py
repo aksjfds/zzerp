@@ -4,6 +4,7 @@ from modules.standard_execution.price_configs import (
     cancel_procedure_configuration,
     confirm_procedure_configuration,
     list_procedure_prices,
+    list_procedure_price_revisions,
     update_temporary_work_order_price,
     update_procedure_price,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "cancel_procedure_configuration",
     "confirm_procedure_configuration",
     "list_procedure_prices",
+    "list_procedure_price_revisions",
     "procedure_department_id",
     "resubmit_standard_rework_batch",
     "submit_standard_order",

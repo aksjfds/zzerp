@@ -1,8 +1,9 @@
 """Customer shipment operations backed by the unified finished stock."""
 
 from collections.abc import Collection
+from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from database import SessionLocal
@@ -16,6 +17,7 @@ from modules.inventory.persistence import (
 )
 from modules.sales.model_api import CustomerOrder, CustomerOrderItem
 from modules.sales.transaction_api import close_fully_shipped_order
+from modules.sales.transaction_api import reopen_order_after_shipment_reversal
 
 
 def list_finished_shipment_candidates() -> list[dict]:
@@ -167,6 +169,7 @@ def ship_finished_order_item(
         stock.revision += 1
         stock.updated_at = utc_now()
         direct_shipment = quantity - reserved_shipment
+        operation_group_no = f"shipment:{order_item.id}:{uuid4().hex}"
         running_quantity = quantity_before
         if reserved_shipment:
             running_quantity = _record_shipment_transaction(
@@ -178,6 +181,7 @@ def ship_finished_order_item(
                 quantity=reserved_shipment,
                 quantity_before=running_quantity,
                 actor_username=actor,
+                operation_group_no=operation_group_no,
             )
         if direct_shipment:
             running_quantity = _record_shipment_transaction(
@@ -189,6 +193,7 @@ def ship_finished_order_item(
                 quantity=direct_shipment,
                 quantity_before=running_quantity,
                 actor_username=actor,
+                operation_group_no=operation_group_no,
             )
         if running_quantity != stock.quantity:
             raise DomainError(
@@ -228,13 +233,15 @@ def order_item_shipped_quantities(
         for order_item_id, quantity in session.execute(
             select(
                 FinishedStockTransaction.customer_order_item_id,
-                func.coalesce(func.sum(FinishedStockTransaction.quantity), 0),
+                func.coalesce(func.sum(_shipment_signed_quantity()), 0),
             )
             .where(
                 FinishedStockTransaction.customer_order_item_id.in_(
                     customer_order_item_ids
                 ),
-                FinishedStockTransaction.transaction_type == "customer_shipment",
+                FinishedStockTransaction.transaction_type.in_((
+                    "customer_shipment", "customer_shipment_reversal"
+                )),
             )
             .group_by(FinishedStockTransaction.customer_order_item_id)
         )
@@ -251,6 +258,7 @@ def _record_shipment_transaction(
     quantity: int,
     quantity_before: int,
     actor_username: str,
+    operation_group_no: str,
 ) -> int:
     quantity_after = quantity_before - quantity
     session.add(FinishedStockTransaction(
@@ -259,6 +267,8 @@ def _record_shipment_transaction(
         customer_order_id=order.id,
         customer_order_item_id=order_item.id,
         finished_stock_reservation_id=(reservation.id if reservation else None),
+        operation_group_no=operation_group_no,
+        reversal_of_transaction_id=None,
         transaction_type="customer_shipment",
         quantity=quantity,
         quantity_before=quantity_before,
@@ -267,6 +277,143 @@ def _record_shipment_transaction(
         reason=f"订单 {order.customer_order_no} 发货",
     ))
     return quantity_after
+
+
+def reverse_finished_shipment(
+    transaction_id: int,
+    actor_username: str,
+    reason: str | None = None,
+) -> dict:
+    actor = actor_username.strip()
+    if not actor:
+        raise DomainError("finished_shipment_actor_required", "发货冲销操作人不能为空")
+    with SessionLocal.begin() as session:
+        selected = session.get(FinishedStockTransaction, transaction_id)
+        if selected is None or selected.transaction_type != "customer_shipment":
+            raise DomainError("finished_shipment_not_found", "发货流水不存在", status_code=404)
+        originals = list(session.scalars(
+            select(FinishedStockTransaction)
+            .where(
+                FinishedStockTransaction.operation_group_no == selected.operation_group_no,
+                FinishedStockTransaction.transaction_type == "customer_shipment",
+            )
+            .order_by(FinishedStockTransaction.id)
+            .with_for_update()
+        ))
+        original_ids = [item.id for item in originals]
+        if session.scalar(select(FinishedStockTransaction.id).where(
+            FinishedStockTransaction.reversal_of_transaction_id.in_(original_ids)
+        ).limit(1)) is not None:
+            raise DomainError("finished_shipment_already_reversed", "该次发货已经冲销", status_code=409)
+        item_transactions = list(session.scalars(
+            select(FinishedStockTransaction)
+            .where(
+                FinishedStockTransaction.customer_order_item_id
+                == selected.customer_order_item_id,
+                FinishedStockTransaction.transaction_type.in_((
+                    "customer_shipment",
+                    "customer_shipment_reversal",
+                )),
+            )
+            .order_by(FinishedStockTransaction.id)
+            .with_for_update()
+        ))
+        reversed_original_ids = {
+            item.reversal_of_transaction_id
+            for item in item_transactions
+            if item.reversal_of_transaction_id is not None
+        }
+        latest_id = max(
+            (
+                item.id
+                for item in item_transactions
+                if item.transaction_type == "customer_shipment"
+                and item.id not in reversed_original_ids
+            ),
+            default=None,
+        )
+        if latest_id not in original_ids:
+            raise DomainError(
+                "finished_shipment_not_latest",
+                "请先冲销该订单产品更晚的发货记录",
+                status_code=409,
+            )
+        stock = session.get(FinishedStock, selected.finished_stock_id, with_for_update=True)
+        order = session.get(CustomerOrder, selected.customer_order_id, with_for_update=True)
+        order_item = session.get(CustomerOrderItem, selected.customer_order_item_id)
+        if stock is None or order is None or order_item is None:
+            raise DomainError("finished_shipment_context_missing", "发货业务资料不完整", status_code=409)
+
+        reservation_ids = {
+            item.finished_stock_reservation_id
+            for item in originals
+            if item.finished_stock_reservation_id is not None
+        }
+        reservations = list(session.scalars(
+            select(FinishedStockReservation)
+            .where(FinishedStockReservation.id.in_(reservation_ids))
+            .order_by(FinishedStockReservation.id)
+            .with_for_update()
+        )) if reservation_ids else []
+        restored_reserved = 0
+        for reservation in reservations:
+            shipped = sum(
+                item.quantity
+                for item in originals
+                if item.finished_stock_reservation_id == reservation.id
+            )
+            if reservation.shipped_quantity < shipped:
+                raise DomainError("finished_reservation_balance_invalid", "成品占用账实不一致", status_code=409)
+            restored_reserved += shipped + reservation.released_quantity
+            session.scalar(select(func.set_config(
+                "zzerp.finished_shipment_reversal_reservation_id",
+                str(reservation.id),
+                True,
+            )))
+            reservation.shipped_quantity -= shipped
+            reservation.released_quantity = 0
+            reservation.updated_at = utc_now()
+            session.flush([reservation])
+
+        total = sum(item.quantity for item in originals)
+        running = stock.quantity
+        stock.quantity += total
+        stock.reserved_quantity += restored_reserved
+        stock.revision += 1
+        stock.updated_at = utc_now()
+        reversal_group = f"shipment-reversal:{selected.operation_group_no}"
+        correction_reason = (reason or "").strip() or "客户发货冲销"
+        for original in originals:
+            after = running + original.quantity
+            session.add(FinishedStockTransaction(
+                finished_stock_id=stock.id,
+                finished_receipt_id=None,
+                customer_order_id=order.id,
+                customer_order_item_id=order_item.id,
+                finished_stock_reservation_id=original.finished_stock_reservation_id,
+                operation_group_no=reversal_group,
+                reversal_of_transaction_id=original.id,
+                transaction_type="customer_shipment_reversal",
+                quantity=original.quantity,
+                quantity_before=running,
+                quantity_after=after,
+                actor_username=actor,
+                reason=correction_reason,
+            ))
+            running = after
+        reopen_order_after_shipment_reversal(session, order.id)
+        session.flush()
+        product = session.get(Product, order_item.product_id)
+        if product is None:
+            raise DomainError("product_not_found", "产品不存在", status_code=409)
+        return _serialize_candidate(
+            order_item,
+            order,
+            product,
+            stock,
+            _item_shipped_quantity(session, order_item.id),
+            _item_open_reservation_quantity(session, order_item.id),
+        )
 
 
 def _serialize_candidate(
@@ -331,9 +478,11 @@ def _release_open_reservation(
 
 def _item_shipped_quantity(session: Session, customer_order_item_id: int) -> int:
     return int(session.scalar(
-        select(func.coalesce(func.sum(FinishedStockTransaction.quantity), 0)).where(
+        select(func.coalesce(func.sum(_shipment_signed_quantity()), 0)).where(
             FinishedStockTransaction.customer_order_item_id == customer_order_item_id,
-            FinishedStockTransaction.transaction_type == "customer_shipment",
+            FinishedStockTransaction.transaction_type.in_((
+                "customer_shipment", "customer_shipment_reversal"
+            )),
         )
     ) or 0)
 
@@ -371,11 +520,20 @@ def _shipped_totals_subquery():
     return (
         select(
             FinishedStockTransaction.customer_order_item_id.label("customer_order_item_id"),
-            func.sum(FinishedStockTransaction.quantity).label("quantity"),
+            func.sum(_shipment_signed_quantity()).label("quantity"),
         )
-        .where(FinishedStockTransaction.transaction_type == "customer_shipment")
+        .where(FinishedStockTransaction.transaction_type.in_((
+            "customer_shipment", "customer_shipment_reversal"
+        )))
         .group_by(FinishedStockTransaction.customer_order_item_id)
         .subquery()
+    )
+
+
+def _shipment_signed_quantity():
+    return case(
+        (FinishedStockTransaction.transaction_type == "customer_shipment", FinishedStockTransaction.quantity),
+        else_=-FinishedStockTransaction.quantity,
     )
 
 
@@ -397,5 +555,6 @@ def _open_reservation_totals_subquery():
 __all__ = [
     "list_finished_shipment_candidates",
     "order_item_shipped_quantities",
+    "reverse_finished_shipment",
     "ship_finished_order_item",
 ]

@@ -14,7 +14,6 @@ not read the department registry in reverse.
 - `src/features/production`: production tasks, workbench, work orders and QC progress views.
 - `src/features/process-designer`: engineering product, BOM and process-flow editor.
 - `src/features/customer-orders`: sales orders and production progress.
-- `src/features/admin`: administration and PMC projections.
 - `src/permission`: permission constants, route guard and default-route selection.
 - `src/shared`: reusable layout, table and read-only process-flow capabilities.
 

@@ -15,6 +15,7 @@ const emit = defineEmits<{
   view: [batch: QcInspectionBatchRow]
   decide: [batch: QcInspectionBatchRow, destination: QcDestination]
   undoInspection: [batch: QcInspectionBatchRow]
+  undoDestination: [batch: QcInspectionBatchRow]
 }>()
 
 const destinationLabels: Record<QcDestination, string> = {
@@ -32,6 +33,10 @@ function batchStatus(batch: QcInspectionBatchRow) {
     return { label: destinationLabels[batch.qualified_destination], type: 'success' as const }
   }
   return { label: '质检完成', type: 'success' as const }
+}
+
+function destinationLabel(destination: QcDestination) {
+  return destinationLabels[destination]
 }
 </script>
 
@@ -85,7 +90,7 @@ function batchStatus(batch: QcInspectionBatchRow) {
             :loading="decidingBatchId === row.id"
             :disabled="decidingBatchId !== null && decidingBatchId !== row.id"
             @click="emit('decide', row, destination)"
-          >{{ destinationLabels[destination] }}</ElButton>
+          >{{ destinationLabel(destination) }}</ElButton>
           <ElButton
             v-if="row.can_undo_inspection"
             type="danger"
@@ -94,6 +99,14 @@ function batchStatus(batch: QcInspectionBatchRow) {
             :disabled="undoingBatchId !== null && undoingBatchId !== row.id"
             @click="emit('undoInspection', row)"
           >撤回质检</ElButton>
+          <ElButton
+            v-if="row.qualified_destination"
+            type="danger"
+            link
+            :loading="undoingBatchId === row.id"
+            :disabled="undoingBatchId !== null && undoingBatchId !== row.id"
+            @click="emit('undoDestination', row)"
+          >撤回去向</ElButton>
         </div>
       </template>
     </ElTableColumn>

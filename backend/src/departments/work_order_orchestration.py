@@ -18,12 +18,13 @@ from modules.assembly.api import (
 from modules.errors import DomainError
 from modules.organization.model_api import Department, Procedure
 from modules.planning.execution_api import ensure_production_plan_active
-from modules.production_core.model_api import WorkOrder, WorkOrderBatch
+from modules.production_core.model_api import ProductionOperationUndo, WorkOrder, WorkOrderBatch
 from modules.production_core.operational_api import (
     capture_operation_state,
     node_context,
     record_undoable_operation,
     serialize_work_order,
+    undo_production_operation_in_session,
 )
 from modules.production_core.transaction_api import (
     cancel_open_order,
@@ -43,6 +44,7 @@ from modules.standard_execution.api import (
 from modules.standard_execution.configuration_api import resolve_work_order_procedure
 from modules.standard_execution.procedure_api import material_key
 from modules.workforce.reference_api import get_worker_reference
+from modules.inventory.finished_receipt_api import cancel_pending_packaging_receipt
 
 
 def create_work_order(
@@ -210,21 +212,44 @@ def submit_work_order(
             "completion_action": completion_action,
         }
         submit_standard_order(**common)
-        if not completes_packaging:
-            record_undoable_operation(
-                session,
-                order,
-                before,
-                operation_type="submission",
-                operation_label=(
-                    "撤回送检"
-                    if completion_action == COMPLETION_QC
-                    else "撤回加工结果"
-                ),
-                department_code=department.department_code,
-                actor_username=actor_username,
-            )
+        record_undoable_operation(
+            session,
+            order,
+            before,
+            operation_type="submission",
+            operation_label=(
+                "撤回送检"
+                if completion_action == COMPLETION_QC
+                else "撤回装包结果" if completes_packaging else "撤回加工结果"
+            ),
+            department_code=department.department_code,
+            actor_username=actor_username,
+        )
         return serialize_work_order(session, order)
+
+
+def undo_work_order_operation(
+    operation_id: int,
+    user_department: str | None,
+    user_is_system: bool,
+    actor_username: str,
+) -> dict:
+    with SessionLocal.begin() as session:
+        operation = session.get(ProductionOperationUndo, operation_id, with_for_update=True)
+        if operation is None:
+            raise DomainError("production_operation_not_found", "可撤回操作不存在", status_code=404)
+        cancel_pending_packaging_receipt(
+            session,
+            work_order_id=operation.work_order_id,
+            actor_username=actor_username,
+        )
+        return undo_production_operation_in_session(
+            session,
+            operation_id,
+            user_department,
+            user_is_system,
+            actor_username,
+        )
 
 
 def resubmit_work_order_rework_batch(

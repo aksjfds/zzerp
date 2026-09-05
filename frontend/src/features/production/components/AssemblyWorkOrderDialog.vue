@@ -2,7 +2,10 @@
 import { computed, reactive, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { WorkerItem } from '../domain/types'
-import type { AssemblyWorkOrderCreationTarget } from '../domain/workOrderCreation'
+import type {
+  AssemblyWorkOrderCreationMaterial,
+  AssemblyWorkOrderCreationTarget,
+} from '../domain/workOrderCreation'
 
 const props = defineProps<{
   modelValue: boolean
@@ -32,18 +35,27 @@ const form = reactive({
   remark: '',
 })
 const materialGroups = computed(() => {
-  return props.item?.materials.map(material => ({
-    key: material.material_key,
-    name: material.item_name,
-    requiredUnit: material.unit_quantity,
-    sources: material.sources,
-  })) || []
+  return props.item?.materials || []
 })
+
+function requiredQuantity(group: AssemblyWorkOrderCreationMaterial) {
+  return form.quantity * group.unit_quantity
+}
+
+function allocatedQuantity(group: AssemblyWorkOrderCreationMaterial) {
+  return group.sources.reduce((sum, source) => (
+    sum + (form.materialQuantities[source.repository_id] || 0)
+  ), 0)
+}
+
+function availableQuantity(group: AssemblyWorkOrderCreationMaterial) {
+  return group.sources.reduce((sum, source) => sum + source.available_quantity, 0)
+}
 
 function allocateDefault() {
   const allocations: Record<number, number> = {}
   materialGroups.value.forEach((group) => {
-    let remaining = form.quantity * group.requiredUnit
+    let remaining = requiredQuantity(group)
     group.sources.forEach((source) => {
       const allocated = Math.min(source.available_quantity, remaining)
       allocations[source.repository_id] = allocated
@@ -89,12 +101,10 @@ function submit() {
     return
   }
   for (const group of materialGroups.value) {
-    const required = form.quantity * group.requiredUnit
-    const allocated = group.sources.reduce((sum, source) => (
-      sum + (form.materialQuantities[source.repository_id] || 0)
-    ), 0)
+    const required = requiredQuantity(group)
+    const allocated = allocatedQuantity(group)
     if (allocated !== required) {
-      ElMessage.warning(`${group.name}的各来源合计必须为 ${required}`)
+      ElMessage.warning(`${group.item_name}的各来源合计必须为 ${required}`)
       return
     }
   }
@@ -119,7 +129,7 @@ function submit() {
   <ElDialog
     :model-value="modelValue"
     :title="`开${item?.workshop_name || '多路车间'}工单`"
-    width="600px"
+    width="min(720px, 94vw)"
     @update:model-value="emit('update:modelValue', $event)"
   >
     <p class="target">
@@ -142,23 +152,18 @@ function submit() {
       </ElFormItem>
       <ElFormItem label="来源分配" required>
         <div class="material-groups">
-          <section v-for="group in materialGroups" :key="group.key" class="material-group">
+          <section v-for="group in materialGroups" :key="group.material_key" class="material-group">
             <div class="material-heading">
-              <strong>{{ group.name }}</strong>
-              <span>需要 {{ form.quantity * group.requiredUnit }}</span>
+              <div class="material-identity">
+                <strong>{{ group.item_code }} {{ group.item_name }}</strong>
+                <small>每件用量 {{ group.unit_quantity }}</small>
+              </div>
+              <ElTag
+                :type="allocatedQuantity(group) === requiredQuantity(group) ? 'success' : 'danger'"
+                effect="plain"
+              >可用 {{ availableQuantity(group) }} / 分配 {{ allocatedQuantity(group) }}</ElTag>
             </div>
-            <div v-for="source in group.sources" :key="source.repository_id" class="source-row">
-              <span>{{ source.source_label }}</span>
-              <small>可用 {{ source.available_quantity }}</small>
-              <ElInputNumber
-                v-if="group.sources.length > 1"
-                v-model="form.materialQuantities[source.repository_id]"
-                :min="0"
-                :max="source.available_quantity"
-              />
-              <span v-else class="fixed-quantity">
-                使用 {{ form.materialQuantities[source.repository_id] || 0 }}
-              </span>
+            <div class="source-list">
             </div>
           </section>
         </div>
@@ -197,12 +202,21 @@ function submit() {
 .target { margin: 0 0 18px; color: var(--el-text-color-secondary); }
 .el-select { width: 100%; }
 .material-groups { display: grid; gap: 12px; width: 100%; }
-.material-group { padding: 12px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); }
-.material-heading, .source-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px; align-items: center; }
-.material-heading { margin-bottom: 8px; color: var(--md-on-surface); }
-.material-heading span, .source-row small { color: var(--el-text-color-secondary); }
-.source-row + .source-row { margin-top: 8px; }
-.source-row :deep(.el-input-number) { width: 140px; }
-.fixed-quantity { width: 140px; text-align: right; color: var(--md-on-surface); }
+.material-group { overflow: hidden; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); }
+.material-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; background: var(--md-surface-container-low); }
+.material-identity, .source-identity, .source-quantity, .source-allocation { display: flex; flex-direction: column; gap: 4px; }
+.material-identity small, .source-identity span, .source-quantity span, .source-allocation > span { color: var(--el-text-color-secondary); font-size: 12px; }
+.source-list { padding: 0 14px; }
+.source-row { display: grid; grid-template-columns: minmax(0, 1fr) 72px 140px; gap: 16px; align-items: center; padding: 12px 0; }
+.source-row + .source-row { border-top: 1px solid var(--md-outline-variant); }
+.source-quantity { align-items: flex-end; }
+.source-allocation { align-items: flex-end; }
+.source-allocation :deep(.el-input-number) { width: 140px; }
 .dialog-footer { display: flex; justify-content: space-between; gap: 12px; width: 100%; }
+@media (max-width: 640px) {
+  .material-heading { align-items: flex-start; flex-direction: column; }
+  .source-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .source-allocation { grid-column: 1 / -1; align-items: stretch; }
+  .source-allocation :deep(.el-input-number) { width: 100%; }
+}
 </style>

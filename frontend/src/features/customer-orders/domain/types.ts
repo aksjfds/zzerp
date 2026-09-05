@@ -47,6 +47,42 @@ export type CustomerOrderProgressDetail = {
   outstanding_quantity: number
   delivery_date: string
   remark: string
+  materials: CustomerOrderMaterialProgress[]
+}
+
+export type CustomerOrderMaterialStatus =
+  | 'plan_unconfirmed'
+  | 'plan_cancelled'
+  | 'not_arrived'
+  | 'not_started'
+  | 'processing'
+  | 'submitted_qc'
+  | 'rework'
+  | 'completed'
+  | 'exception'
+  | 'department_completed'
+  | 'assembly_consumed'
+  | 'stored'
+  | 'transferred'
+
+export type CustomerOrderMaterialPosition = {
+  flow_node_id: string
+  route_order: number
+  position_name: string
+  department_name: string
+  status: CustomerOrderMaterialStatus
+  status_label: string
+  quantity: number
+  procedure_names: string[]
+}
+
+export type CustomerOrderMaterialProgress = {
+  production_plan_item_id: number
+  item_type: 'part' | 'assembly'
+  item_code: string
+  item_name: string
+  task_quantity: number
+  positions: CustomerOrderMaterialPosition[]
 }
 
 export type CustomerOrderPayload = {
@@ -100,7 +136,7 @@ export type ProductionPlan = {
     flow_node_id: string
     item_code: string
     item_name: string
-    completed_node_label: string
+    processing_status: string
     warehouse_code: string
     warehouse_name: string
     stock_quantity: number

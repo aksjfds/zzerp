@@ -18,6 +18,9 @@ class InventorySourceContext(Protocol):
     def production_item_id(self) -> int: ...
 
     @property
+    def processing_state_id(self) -> int: ...
+
+    @property
     def flow_node_id(self) -> str: ...
 
     @property
@@ -54,12 +57,14 @@ class WorkOrderContext(Protocol):
     id: int
     production_item_id: int
     procedure_id: int | None
+    source_processing_state_id: int | None
     source_flow_node_id: str | None
     flow_node_id: str
     work_order_type: WorkOrderType
     is_temporary: bool
     supplier_name: str | None
     supplier_process_name: str | None
+    work_order_name: str
     created_by: str
     worker_name: str | None
     completed_quantity: int

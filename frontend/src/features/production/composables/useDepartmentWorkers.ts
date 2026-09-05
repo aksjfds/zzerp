@@ -1,5 +1,5 @@
 import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import type {
   DepartmentWorkerOverview,
@@ -9,9 +9,11 @@ import type {
 } from '@/features/workers'
 import {
   createDepartmentWorker,
+  deleteDepartmentWorker,
   queryDepartmentWorkerHistory,
   queryDepartmentWorkerOverview,
   queryDepartmentWorkerPay,
+  updateDepartmentWorker,
 } from '../api/departmentWorkers'
 
 function currentLocalMonth() {
@@ -27,6 +29,7 @@ export function useDepartmentWorkers(departmentCode: string) {
   const submitting = ref(false)
   const dialogVisible = ref(false)
   const selectedWorker = ref<WorkerOverviewItem>()
+  const editingWorker = ref<WorkerOverviewItem>()
   const selectedMonth = ref(currentLocalMonth())
   const workerKeyword = ref('')
   const departmentFilter = ref<number | ''>('')
@@ -110,18 +113,53 @@ export function useDepartmentWorkers(departmentCode: string) {
   async function saveWorker(payload: { workerName: string; workshopId: number | null }) {
     submitting.value = true
     try {
-      const worker = await createDepartmentWorker(
-        departmentCode,
-        payload.workerName,
-        payload.workshopId,
-      )
+      const worker = editingWorker.value
+        ? await updateDepartmentWorker(
+            departmentCode,
+            editingWorker.value.id,
+            payload.workerName,
+            payload.workshopId,
+          )
+        : await createDepartmentWorker(
+            departmentCode,
+            payload.workerName,
+            payload.workshopId,
+          )
       dialogVisible.value = false
+      editingWorker.value = undefined
       await loadWorkers(worker.id)
-      ElMessage.success('工人录入成功')
+      ElMessage.success('工人资料已保存')
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '工人录入失败')
     } finally {
       submitting.value = false
+    }
+  }
+
+  function createWorker() {
+    editingWorker.value = undefined
+    dialogVisible.value = true
+  }
+
+  function editWorker(worker: WorkerOverviewItem) {
+    editingWorker.value = worker
+    dialogVisible.value = true
+  }
+
+  async function removeWorker(worker: WorkerOverviewItem) {
+    try {
+      await ElMessageBox.confirm(
+        '只有未被工单或质检记录引用的工人可以删除。',
+        '删除工人',
+        { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' },
+      )
+      await deleteDepartmentWorker(departmentCode, worker.id)
+      await loadWorkers()
+      ElMessage.success('工人已删除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') {
+        ElMessage.error(getApiErrorDetail(error)?.message || '工人删除失败')
+      }
     }
   }
 
@@ -136,6 +174,7 @@ export function useDepartmentWorkers(departmentCode: string) {
     departmentFilter,
     departments,
     dialogVisible,
+    editingWorker,
     filteredWorkers,
     history,
     historyLoading,
@@ -144,6 +183,9 @@ export function useDepartmentWorkers(departmentCode: string) {
     loadWorkers,
     overview,
     saveWorker,
+    createWorker,
+    editWorker,
+    removeWorker,
     selectedMonth,
     selectedWorker,
     selectedWorkerTitle,

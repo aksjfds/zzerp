@@ -12,7 +12,6 @@ from config import get_settings
 from database import engine
 from domain.errors import DomainViolation
 from routers import (
-    admin,
     auth,
     customer_orders,
     customers,
@@ -53,13 +52,24 @@ async def handle_domain_violation(_request: Request, exc: DomainViolation):
 
 
 @app.exception_handler(IntegrityError)
-async def handle_integrity_error(_request: Request, _exc: IntegrityError):
+async def handle_integrity_error(request: Request, exc: IntegrityError):
+    error_id = uuid4().hex[:12]
+    logger.error(
+        "Database integrity error [%s] %s %s",
+        error_id,
+        request.method,
+        request.url.path,
+        exc_info=(type(exc), exc, exc.__traceback__),
+    )
     return JSONResponse(
         status_code=409,
         content={
             "detail": {
                 "code": "data_conflict",
-                "message": "数据已发生变化或违反关联约束，请刷新后重试",
+                "message": (
+                    "数据已发生变化或违反关联约束，请刷新后重试；"
+                    f"如果问题持续，请提供错误编号：{error_id}"
+                ),
             }
         },
     )
@@ -184,7 +194,6 @@ async def validate_request_origin(request: Request, call_next):
 
 
 app.include_router(auth.router)
-app.include_router(admin.router)
 app.include_router(products.router)
 app.include_router(organization.router)
 app.include_router(customers.router)

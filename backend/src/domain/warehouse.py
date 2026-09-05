@@ -22,6 +22,7 @@ WAREHOUSE_OPERATION_UNCERTAIN = "uncertain"
 WAREHOUSE_SOURCE_PLAN_CONFIRMATION = "plan_confirmation"
 WAREHOUSE_SOURCE_QC_INVENTORY = "qc_inventory"
 WAREHOUSE_SOURCE_PRODUCTION_POSITION = "production_position"
+WAREHOUSE_SOURCE_REVERSAL = "reversal"
 
 WarehouseItemType: TypeAlias = Literal["part", "assembly"]
 WarehouseCode: TypeAlias = Literal["C01", "C02"]
@@ -38,6 +39,7 @@ WarehouseOperationSourceType: TypeAlias = Literal[
     "plan_confirmation",
     "qc_inventory",
     "production_position",
+    "reversal",
 ]
 
 
@@ -98,6 +100,8 @@ class WarehouseOperationSnapshot:
     work_order_id: int | None
     work_order_batch_id: int | None
     production_item_id: int | None
+    processing_state_id: int
+    reversal_of_operation_id: int | None
     warehouse_stock_id: int | None
     item_code: str
     item_name: str
@@ -145,6 +149,7 @@ __all__ = [
     "WAREHOUSE_SOURCE_PLAN_CONFIRMATION",
     "WAREHOUSE_SOURCE_PRODUCTION_POSITION",
     "WAREHOUSE_SOURCE_QC_INVENTORY",
+    "WAREHOUSE_SOURCE_REVERSAL",
     "WAREHOUSE_UNIT_PCS",
     "WarehouseCode",
     "WarehouseItemType",

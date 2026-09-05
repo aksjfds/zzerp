@@ -34,3 +34,21 @@ class WorkforceCapability:
             worker_name,
             workshop_id,
         )
+
+    def update_worker(
+        self,
+        worker_id: int,
+        worker_name: str,
+        workshop_id: int | None,
+    ) -> dict:
+        self.require_capability(CAP_WORKERS)
+        return workforce.update_department_worker(
+            self.descriptor.code,
+            worker_id,
+            worker_name,
+            workshop_id,
+        )
+
+    def delete_worker(self, worker_id: int) -> None:
+        self.require_capability(CAP_WORKERS)
+        workforce.delete_department_worker(self.descriptor.code, worker_id)

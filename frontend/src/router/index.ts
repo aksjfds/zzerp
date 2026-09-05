@@ -1,7 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { departmentRoutes, departmentSupportRoutes } from '@/features/departments'
 import { setupRouterGuard } from '@/permission/guard'
-import { ORDER_PERMISSIONS, PRODUCT_PERMISSIONS, PRODUCTION_PERMISSIONS } from '@/permission/constants'
+import { ORDER_PERMISSIONS, PRODUCT_PERMISSIONS } from '@/permission/constants'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -20,19 +20,6 @@ const router = createRouter({
     },
     ...departmentRoutes,
     ...departmentSupportRoutes,
-    {
-      path: '/admin',
-      name: 'admin-dashboard',
-      component: () => import('@/features/admin/views/AdminDashboardView.vue'),
-      meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view, PRODUCTION_PERMISSIONS.view] },
-    },
-    {
-      path: '/pmc',
-      name: 'pmc-dashboard',
-      component: () => import('@/features/admin/views/AdminDashboardView.vue'),
-      props: { mode: 'pmc' },
-      meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view, PRODUCTION_PERMISSIONS.view] },
-    },
     {
       path: '/business/orders',
       name: 'customer-orders',

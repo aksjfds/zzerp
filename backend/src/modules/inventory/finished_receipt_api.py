@@ -97,7 +97,7 @@ def _register_pending_finished_receipt(
     )
     existing = session.scalar(
         select(FinishedReceipt)
-        .where(source_condition)
+        .where(source_condition, FinishedReceipt.status.in_(("pending", "received")))
         .with_for_update()
     )
     if existing is not None:
@@ -188,6 +188,8 @@ def confirm_finished_receipt(receipt_id: int, actor_username: str) -> dict:
             FinishedStockTransaction(
                 finished_stock_id=stock.id,
                 finished_receipt_id=receipt.id,
+                operation_group_no=f"receipt:{receipt.id}",
+                reversal_of_transaction_id=None,
                 transaction_type="receipt",
                 quantity=receipt.quantity,
                 quantity_before=quantity_before,
@@ -204,6 +206,143 @@ def confirm_finished_receipt(receipt_id: int, actor_username: str) -> dict:
         return _serialize_receipt(receipt, product)
 
 
+def cancel_pending_finished_receipt(
+    session: Session,
+    *,
+    receipt: FinishedReceipt,
+    actor_username: str,
+    reason: str,
+) -> None:
+    if receipt.status != "pending":
+        raise DomainError(
+            "finished_receipt_already_received",
+            "成品已经确认入库，不能撤回上游操作",
+            status_code=409,
+        )
+    receipt.status = "cancelled"
+    receipt.corrected_at = utc_now()
+    receipt.corrected_by = actor_username
+    receipt.correction_reason = reason
+    receipt.revision += 1
+
+
+def cancel_pending_packaging_receipt(
+    session: Session,
+    *,
+    work_order_id: int,
+    actor_username: str,
+) -> None:
+    receipt = session.scalar(
+        select(FinishedReceipt)
+        .where(FinishedReceipt.work_order_id == work_order_id)
+        .where(FinishedReceipt.status == "pending")
+        .with_for_update()
+    )
+    if receipt is None:
+        return
+    cancel_pending_finished_receipt(
+        session,
+        receipt=receipt,
+        actor_username=actor_username,
+        reason="撤回装包工单结果",
+    )
+
+
+def cancel_pending_qc_receipt(
+    session: Session,
+    *,
+    work_order_batch_id: int,
+    actor_username: str,
+) -> None:
+    receipt = session.scalar(
+        select(FinishedReceipt)
+        .where(FinishedReceipt.work_order_batch_id == work_order_batch_id)
+        .where(FinishedReceipt.status == "pending")
+        .with_for_update()
+    )
+    if receipt is None:
+        return
+    cancel_pending_finished_receipt(
+        session,
+        receipt=receipt,
+        actor_username=actor_username,
+        reason="撤回 QC 放行",
+    )
+
+
+def reverse_finished_receipt(
+    receipt_id: int,
+    actor_username: str,
+    reason: str | None = None,
+) -> dict:
+    actor = actor_username.strip()
+    if not actor:
+        raise DomainError("finished_receipt_actor_invalid", "入库操作人不能为空")
+    with SessionLocal.begin() as session:
+        receipt = session.get(FinishedReceipt, receipt_id, with_for_update=True)
+        if receipt is None:
+            raise DomainError("finished_receipt_not_found", "成品入库记录不存在", status_code=404)
+        if receipt.status != "received":
+            raise DomainError("finished_receipt_not_reversible", "只有已入库批次可以冲销", status_code=409)
+        original = session.scalar(
+            select(FinishedStockTransaction)
+            .where(
+                FinishedStockTransaction.finished_receipt_id == receipt.id,
+                FinishedStockTransaction.transaction_type == "receipt",
+            )
+            .with_for_update()
+        )
+        if original is None:
+            raise DomainError("finished_receipt_transaction_missing", "成品入库流水不存在", status_code=409)
+        if session.scalar(select(FinishedStockTransaction.id).where(
+            FinishedStockTransaction.reversal_of_transaction_id == original.id
+        )) is not None:
+            raise DomainError("finished_receipt_already_reversed", "该批入库已经冲销", status_code=409)
+        stock = session.get(FinishedStock, original.finished_stock_id, with_for_update=True)
+        if stock is None or stock.quantity - stock.reserved_quantity < receipt.quantity:
+            raise DomainError(
+                "finished_receipt_stock_used",
+                "该批入库对应的可用成品已被占用或发货，不能冲销",
+                status_code=409,
+            )
+        quantity_before = stock.quantity
+        stock.quantity -= receipt.quantity
+        stock.revision += 1
+        stock.updated_at = utc_now()
+        receipt.status = "reversed"
+        receipt.corrected_at = utc_now()
+        receipt.corrected_by = actor
+        receipt.correction_reason = (reason or "").strip() or "成品入库冲销"
+        receipt.revision += 1
+        session.flush([receipt])
+        session.add(FinishedReceipt(
+            work_order_batch_id=receipt.work_order_batch_id,
+            work_order_id=receipt.work_order_id,
+            replacement_for_receipt_id=receipt.id,
+            product_id=receipt.product_id,
+            product_version=receipt.product_version,
+            quantity=receipt.quantity,
+            status="pending",
+        ))
+        session.add(FinishedStockTransaction(
+            finished_stock_id=stock.id,
+            finished_receipt_id=receipt.id,
+            operation_group_no=f"receipt-reversal:{receipt.id}",
+            reversal_of_transaction_id=original.id,
+            transaction_type="receipt_reversal",
+            quantity=receipt.quantity,
+            quantity_before=quantity_before,
+            quantity_after=stock.quantity,
+            actor_username=actor,
+            reason=receipt.correction_reason,
+        ))
+        session.flush()
+        product = session.get(Product, receipt.product_id)
+        if product is None:
+            raise DomainError("finished_receipt_product_missing", "入库批次的产品不存在", status_code=409)
+        return _serialize_receipt(receipt, product)
+
+
 def _serialize_receipt(receipt: FinishedReceipt, product: Product) -> dict:
     return {
         "id": receipt.id,
@@ -217,6 +356,9 @@ def _serialize_receipt(receipt: FinishedReceipt, product: Product) -> dict:
         "status": receipt.status,
         "received_at": receipt.received_at,
         "received_by": receipt.received_by,
+        "corrected_at": receipt.corrected_at,
+        "corrected_by": receipt.corrected_by,
+        "correction_reason": receipt.correction_reason,
         "created_at": receipt.created_at,
         "revision": receipt.revision,
     }
@@ -224,7 +366,11 @@ def _serialize_receipt(receipt: FinishedReceipt, product: Product) -> dict:
 
 __all__ = [
     "confirm_finished_receipt",
+    "cancel_pending_finished_receipt",
+    "cancel_pending_packaging_receipt",
+    "cancel_pending_qc_receipt",
     "list_finished_receipts",
     "register_pending_packaging_receipt",
     "register_pending_finished_receipt",
+    "reverse_finished_receipt",
 ]

@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, aliased
 
 from domain.time import utc_now
 from domain.warehouse import (
@@ -21,6 +21,7 @@ from domain.warehouse import (
     WAREHOUSE_SOURCE_PLAN_CONFIRMATION,
     WAREHOUSE_SOURCE_PRODUCTION_POSITION,
     WAREHOUSE_SOURCE_QC_INVENTORY,
+    WAREHOUSE_SOURCE_REVERSAL,
     WAREHOUSE_UNIT_PCS,
     WarehouseItemType,
     WarehouseMaterialIdentity,
@@ -53,6 +54,7 @@ class WarehouseInboundRequest:
     product_version: int
     item_type: WarehouseItemType
     completion_status: str
+    processing_state_id: int
     quantity: int
     actor_username: str
     specification: str = ""
@@ -67,6 +69,7 @@ class WarehouseOutboundRequest:
     product_version: int
     item_type: WarehouseItemType
     completion_status_priority: tuple[str, ...]
+    processing_state_ids: tuple[tuple[str, int], ...]
     quantity: int
     actor_username: str
 
@@ -157,6 +160,48 @@ def list_material_warehouse_stocks(
     )
 
 
+def replayable_operation_group(session: Session, base_group_no: str) -> str:
+    groups = list(session.scalars(
+        select(WarehouseOperation.operation_group_no)
+        .where(
+            (WarehouseOperation.operation_group_no == base_group_no)
+            | WarehouseOperation.operation_group_no.startswith(
+                f"{base_group_no}:attempt:"
+            )
+        )
+        .distinct()
+    ))
+    if not groups:
+        return base_group_no
+
+    def attempt_number(group_no: str) -> int:
+        if group_no == base_group_no:
+            return 1
+        suffix = group_no.removeprefix(f"{base_group_no}:attempt:")
+        return int(suffix) if suffix.isdigit() else 1
+
+    latest_group = max(groups, key=attempt_number)
+    original_ids = list(session.scalars(
+        select(WarehouseOperation.id).where(
+            WarehouseOperation.operation_group_no == latest_group
+        )
+    ))
+    reversed_count = session.scalar(
+        select(func.count(WarehouseOperation.id)).where(
+            WarehouseOperation.reversal_of_operation_id.in_(original_ids)
+        )
+    ) or 0
+    if reversed_count == 0:
+        return latest_group
+    if reversed_count != len(original_ids):
+        raise DomainError(
+            "warehouse_operation_reversal_incomplete",
+            "仓库操作仅部分冲销，不能继续办理",
+            status_code=409,
+        )
+    return f"{base_group_no}:attempt:{attempt_number(latest_group) + 1}"
+
+
 def review_uncertain_warehouse_operation(
     session: Session,
     *,
@@ -219,6 +264,7 @@ def receive_c01_stock(
         product_version=request.product_version,
         item_type=request.item_type,
         completion_status=request.completion_status,
+        processing_state_id=request.processing_state_id,
         quantity=request.quantity,
         actor_username=request.actor_username,
         specification=request.specification,
@@ -233,6 +279,7 @@ def receive_c01_stock(
             product_version=request.product_version,
             item_type=request.item_type,
             completion_status=request.completion_status,
+            processing_state_id=request.processing_state_id,
             specification=request.specification,
         )
         return _existing_result(session, operation, request.quantity)
@@ -296,6 +343,7 @@ def withdraw_c01_stock(
         product_version=request.product_version,
         item_type=request.item_type,
         completion_status=request.completion_status_priority[0],
+        processing_state_id=dict(request.processing_state_ids)[request.completion_status_priority[0]],
         quantity=request.quantity,
         actor_username=request.actor_username,
         specification="",
@@ -310,6 +358,7 @@ def withdraw_c01_stock(
             product_version=request.product_version,
             item_type=request.item_type,
             completion_status=None,
+            processing_state_id=None,
             specification=None,
         )
         return _existing_result(session, operation, request.quantity)
@@ -366,6 +415,7 @@ def withdraw_c01_stock(
     ):
         target = operation if index == 0 else _new_operation_line(operation, index)
         before = candidate_by_id[allocation.stock_id]
+        target.processing_state_id = dict(request.processing_state_ids)[before.completion_status]
         _finish_succeeded_operation(
             target,
             stock=changed_stock,
@@ -376,6 +426,197 @@ def withdraw_c01_stock(
             session.add(target)
     session.flush()
     return _group_result(session, request.operation_group_no)
+
+
+def reverse_warehouse_operation_group(
+    session: Session,
+    *,
+    original_group_no: str,
+    reversal_group_no: str,
+    actor_username: str,
+    gateway_factory: WarehouseGatewayFactory = PostgreSQLWarehouseGateway,
+) -> WarehouseMutationResult:
+    """Reverse one successful project-owned warehouse operation group exactly once."""
+    actor = actor_username.strip()
+    if not actor or actor != actor_username:
+        raise DomainError("warehouse_actor_invalid", "仓库操作人不能为空或包含首尾空格")
+    originals = list(session.scalars(
+        select(WarehouseOperation)
+        .where(WarehouseOperation.operation_group_no == original_group_no)
+        .order_by(WarehouseOperation.id)
+        .with_for_update()
+    ))
+    if not originals:
+        raise DomainError("warehouse_operation_not_found", "原仓库操作不存在", status_code=404)
+    if any(operation.status != WAREHOUSE_OPERATION_SUCCEEDED for operation in originals):
+        raise DomainError(
+            "warehouse_operation_not_reversible",
+            "只有全部成功的仓库操作才能冲销",
+            status_code=409,
+        )
+    existing = list(session.scalars(
+        select(WarehouseOperation)
+        .where(WarehouseOperation.reversal_of_operation_id.in_([item.id for item in originals]))
+        .order_by(WarehouseOperation.id)
+    ))
+    if existing:
+        if len(existing) != len(originals) or any(
+            item.operation_group_no != reversal_group_no for item in existing
+        ):
+            raise DomainError(
+                "warehouse_operation_already_reversed",
+                "原仓库操作已经冲销",
+                status_code=409,
+            )
+        return _group_result(session, reversal_group_no)
+
+    gateway = gateway_factory(session)
+    for index, original in enumerate(originals):
+        reversal = _new_reversal_operation(
+            original,
+            reversal_group_no=reversal_group_no,
+            index=index,
+            actor_username=actor,
+        )
+        session.add(reversal)
+        session.flush()
+        try:
+            if original.operation_type == WAREHOUSE_OPERATION_OUTBOUND:
+                changed = gateway.increase_stock(
+                    identity=WarehouseStockIdentity(
+                        item_code=original.item_code,
+                        product_version=original.product_version,
+                        item_type=original.item_type,
+                        completion_status=original.completion_status,
+                        warehouse_code=original.warehouse_code,
+                    ),
+                    item_name=original.item_name,
+                    specification=original.specification,
+                    warehouse_name=original.warehouse_name,
+                    quantity=original.quantity,
+                )
+                quantity_before = changed.quantity - original.quantity
+            else:
+                if original.warehouse_stock_id is None:
+                    raise WarehouseWriteRejected("原入库操作缺少库存记录")
+                before_rows = gateway.lock_outbound_candidates(
+                    item_code=original.item_code,
+                    product_version=original.product_version,
+                    item_type=original.item_type,
+                    warehouse_code=original.warehouse_code,
+                    completion_status_priority=(original.completion_status,),
+                )
+                before = next(
+                    (row for row in before_rows if row.id == original.warehouse_stock_id),
+                    None,
+                )
+                if before is None or before.quantity < original.quantity:
+                    raise WarehouseWriteRejected("该批入库数量已被使用，不能冲销")
+                changed = gateway.decrease_stocks((
+                    WarehouseStockDeduction(original.warehouse_stock_id, original.quantity),
+                ))[0]
+                quantity_before = before.quantity
+        except WarehouseWriteUncertain as error:
+            return _finish_failed_operation(
+                session, reversal, WAREHOUSE_OPERATION_UNCERTAIN, str(error)
+            )
+        except WarehouseWriteRejected as error:
+            return _finish_failed_operation(
+                session, reversal, WAREHOUSE_OPERATION_FAILED, str(error)
+            )
+        _finish_succeeded_operation(
+            reversal,
+            stock=changed,
+            quantity=original.quantity,
+            quantity_before=quantity_before,
+        )
+    session.flush()
+    return _group_result(session, reversal_group_no)
+
+
+def next_qc_inventory_operation_group(
+    session: Session,
+    *,
+    work_order_batch_id: int,
+) -> str:
+    attempt = (
+        session.scalar(
+            select(func.count(WarehouseOperation.id)).where(
+                WarehouseOperation.work_order_batch_id == work_order_batch_id,
+                WarehouseOperation.source_type == WAREHOUSE_SOURCE_QC_INVENTORY,
+            )
+        )
+        or 0
+    ) + 1
+    return f"qc:{work_order_batch_id}:inventory:{attempt}"
+
+
+def reverse_latest_qc_inventory_operation(
+    session: Session,
+    *,
+    work_order_batch_id: int,
+    actor_username: str,
+) -> WarehouseMutationResult:
+    reversal = aliased(WarehouseOperation)
+    original = session.scalar(
+        select(WarehouseOperation)
+        .where(
+            WarehouseOperation.work_order_batch_id == work_order_batch_id,
+            WarehouseOperation.source_type == WAREHOUSE_SOURCE_QC_INVENTORY,
+            WarehouseOperation.status == WAREHOUSE_OPERATION_SUCCEEDED,
+            ~select(reversal.id)
+            .where(reversal.reversal_of_operation_id == WarehouseOperation.id)
+            .exists(),
+        )
+        .order_by(WarehouseOperation.id.desc())
+        .with_for_update()
+    )
+    if original is None:
+        raise DomainError(
+            "qc_inventory_operation_not_found",
+            "质检入仓操作不存在或已经冲销",
+            status_code=409,
+        )
+    return reverse_warehouse_operation_group(
+        session,
+        original_group_no=original.operation_group_no,
+        reversal_group_no=f"{original.operation_group_no}:reversal",
+        actor_username=actor_username,
+    )
+
+
+def _new_reversal_operation(
+    original: WarehouseOperation,
+    *,
+    reversal_group_no: str,
+    index: int,
+    actor_username: str,
+) -> WarehouseOperation:
+    return WarehouseOperation(
+        operation_group_no=reversal_group_no,
+        operation_no=f"{reversal_group_no}:{index}",
+        operation_type=(
+            WAREHOUSE_OPERATION_INBOUND
+            if original.operation_type == WAREHOUSE_OPERATION_OUTBOUND
+            else WAREHOUSE_OPERATION_OUTBOUND
+        ),
+        source_type=WAREHOUSE_SOURCE_REVERSAL,
+        reversal_of_operation_id=original.id,
+        processing_state_id=original.processing_state_id,
+        warehouse_stock_id=None,
+        item_code=original.item_code,
+        item_name=original.item_name,
+        product_version=original.product_version,
+        item_type=original.item_type,
+        specification=original.specification,
+        inventory_unit=original.inventory_unit,
+        warehouse_code=original.warehouse_code,
+        warehouse_name=original.warehouse_name,
+        completion_status=original.completion_status,
+        quantity=original.quantity,
+        status=WAREHOUSE_OPERATION_PENDING,
+        actor_username=actor_username,
+    )
 
 
 def _allocate_quantity(
@@ -438,6 +679,7 @@ def _claim_operation(
     product_version: int,
     item_type: str,
     completion_status: str,
+    processing_state_id: int,
     quantity: int,
     actor_username: str,
     specification: str,
@@ -455,6 +697,7 @@ def _claim_operation(
             work_order_id=context.work_order_id,
             work_order_batch_id=context.work_order_batch_id,
             production_item_id=context.production_item_id,
+            processing_state_id=processing_state_id,
             warehouse_stock_id=None,
             item_code=item_code,
             item_name=item_name,
@@ -556,6 +799,7 @@ def _new_operation_line(first: WarehouseOperation, index: int) -> WarehouseOpera
         work_order_id=first.work_order_id,
         work_order_batch_id=first.work_order_batch_id,
         production_item_id=first.production_item_id,
+        processing_state_id=first.processing_state_id,
         item_code=first.item_code,
         item_name=first.item_name,
         product_version=first.product_version,
@@ -624,6 +868,7 @@ def _ensure_same_request(
     product_version: int,
     item_type: str,
     completion_status: str | None,
+    processing_state_id: int | None,
     specification: str | None,
 ) -> None:
     same_context = (
@@ -640,6 +885,10 @@ def _ensure_same_request(
         and operation.item_name == item_name
         and operation.product_version == product_version
         and operation.item_type == item_type
+        and (
+            processing_state_id is None
+            or operation.processing_state_id == processing_state_id
+        )
         and (specification is None or operation.specification == specification)
         and (
             completion_status is None
@@ -666,6 +915,8 @@ def _operation_snapshot(operation: WarehouseOperation) -> WarehouseOperationSnap
         work_order_id=operation.work_order_id,
         work_order_batch_id=operation.work_order_batch_id,
         production_item_id=operation.production_item_id,
+        processing_state_id=operation.processing_state_id,
+        reversal_of_operation_id=operation.reversal_of_operation_id,
         warehouse_stock_id=operation.warehouse_stock_id,
         item_code=operation.item_code,
         item_name=operation.item_name,
@@ -692,11 +943,13 @@ def _operation_snapshot(operation: WarehouseOperation) -> WarehouseOperationSnap
 
 def _validate_inbound_request(request: WarehouseInboundRequest) -> None:
     _validate_request_fields(request)
+    if request.processing_state_id <= 0:
+        raise DomainError("warehouse_processing_state_invalid", "物料加工状态无效")
     if (
         not request.completion_status
         or request.completion_status.strip() != request.completion_status
     ):
-        raise DomainError("warehouse_completion_status_invalid", "完成状态不能为空或包含首尾空格")
+        raise DomainError("warehouse_completion_status_invalid", "加工状态不能为空或包含首尾空格")
     if request.specification != "":
         raise DomainError("warehouse_specification_invalid", "当前仓库规格必须为空")
     if request.context.source_type not in {
@@ -715,11 +968,18 @@ def _validate_outbound_request(request: WarehouseOutboundRequest) -> None:
         not status or status.strip() != status
         for status in request.completion_status_priority
     ):
-        raise DomainError("warehouse_status_priority_invalid", "库存完成状态顺序不能为空")
+        raise DomainError("warehouse_status_priority_invalid", "库存加工状态顺序不能为空")
     if len(set(request.completion_status_priority)) != len(
         request.completion_status_priority
     ):
-        raise DomainError("warehouse_status_priority_duplicate", "库存完成状态顺序不能重复")
+        raise DomainError("warehouse_status_priority_duplicate", "库存加工状态顺序不能重复")
+    state_ids = dict(request.processing_state_ids)
+    if (
+        len(state_ids) != len(request.processing_state_ids)
+        or set(state_ids) != set(request.completion_status_priority)
+        or any(state_id <= 0 for state_id in state_ids.values())
+    ):
+        raise DomainError("warehouse_processing_state_invalid", "库存加工状态映射不完整")
     _validate_context(request.context)
 
 

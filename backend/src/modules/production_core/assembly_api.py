@@ -101,6 +101,7 @@ def record_assembly_output(
     close_order: bool,
 ) -> None:
     order.completed_quantity += completed_quantity
+    order.processed_quantity = order.completed_quantity
     if close_order:
         order.status = WORK_ORDER_STATUS_CLOSED
         order.closed_at = utc_now()

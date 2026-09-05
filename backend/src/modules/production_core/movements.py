@@ -28,7 +28,7 @@ def record_movement(
 ) -> ProductionMovement | None:
     if quantity <= 0:
         return None
-    if (movement_type == "production_inventory") != (
+    if (movement_type in {"production_inventory", "production_inventory_restore"}) != (
         warehouse_operation_id is not None
     ):
         raise DomainError(
