@@ -3750,3 +3750,4 @@ JOIN workshop ON workshop.department_id = department.id
 WHERE department.department_code = 'assembly' AND workshop.workshop_name = '焊接车间';
 
 COMMIT;
+
