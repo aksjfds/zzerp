@@ -430,6 +430,7 @@ def _assembly_task_row(
     return {
         "production_plan_item_id": plan_item.id,
         "customer_order_item_id": plan_item.customer_order_item_id,
+        "customer_order_no": task.order.customer_order_no,
         "production_item_id": output_item.id if output_item else None,
         "flow_node_id": task_node_id,
         "plan_status": task.plan.status,

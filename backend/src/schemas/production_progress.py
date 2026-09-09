@@ -49,6 +49,7 @@ class ProductionTaskProcessingStatusResponse(ProductionModel):
 class DepartmentProductionProgressResponse(ProductionModel):
     production_plan_item_id: int
     customer_order_item_id: int
+    customer_order_no: str
     production_item_id: int | None
     flow_node_id: str
     plan_status: Literal["draft", "confirmed", "cancelled", "completed"]

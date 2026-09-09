@@ -80,6 +80,11 @@ function materialArrivalType(
     table-layout="auto"
     empty-text="暂无生产任务"
   >
+    <ElTableColumn label="订单号" min-width="140">
+      <template #default="{ row }">
+        {{ isTask(row) ? row.task.customer_order_no : '—' }}
+      </template>
+    </ElTableColumn>
     <ElTableColumn label="生产任务 / 加工状态" min-width="230">
       <template #default="{ row }">
         <div v-if="isTask(row)" class="task-cell">

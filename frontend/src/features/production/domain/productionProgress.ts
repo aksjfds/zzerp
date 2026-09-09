@@ -12,6 +12,7 @@ export type ProductionProgressCardStatus =
 export type DepartmentProductionProgressItem = {
   production_plan_item_id: number
   customer_order_item_id: number
+  customer_order_no: string
   production_item_id: number | null
   flow_node_id: string
   plan_status: ProductionPlanStatus

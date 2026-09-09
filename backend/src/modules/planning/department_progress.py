@@ -276,6 +276,7 @@ def _standard_task_row(task: _StandardTask, state: _StandardTaskState) -> dict:
     return {
         "production_plan_item_id": plan_item.id,
         "customer_order_item_id": plan_item.customer_order_item_id,
+        "customer_order_no": order.customer_order_no,
         "production_item_id": production_item.id if production_item is not None else None,
         "flow_node_id": route_nodes[0]["id"],
         "plan_status": plan.status,
