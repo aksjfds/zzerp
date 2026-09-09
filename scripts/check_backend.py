@@ -203,7 +203,7 @@ def named_calls(node: ast.AST | None, kinds: set[str]) -> set[str]:
 
 def orm_schema() -> dict[str, dict]:
     result = {}
-    for path in sorted(MODULES.glob("*/persistence.py")):
+    for path in sorted(MODULES.glob("*/persistence*.py")):
         for cls in (node for node in tree(path).body if isinstance(node, ast.ClassDef)):
             table_name, table_args, columns = None, None, set()
             for node in cls.body:
