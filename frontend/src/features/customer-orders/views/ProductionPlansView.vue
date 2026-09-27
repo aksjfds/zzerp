@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
 import ProductionPlanEditor from '../components/ProductionPlanEditor.vue'
 import {
@@ -19,6 +20,8 @@ type PlanEditorApi = {
 }
 
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const orders = ref<CustomerOrder[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -57,15 +60,19 @@ function orderPlanStatusType(order: CustomerOrder) {
 }
 
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  orders.value = []
   try {
     const result = await queryProductionPlanOrders(page.value, pageSize)
+    if (revision !== loadRevision) return
     orders.value = result.items
     total.value = result.total
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '生产计划列表加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '生产计划列表加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -204,13 +211,15 @@ defineExpose({ load })
       </div>
       <ElButton :loading="loading" @click="load">刷新</ElButton>
     </div>
-    <ElTable v-table-column-widths="'sales.production-plans'" v-loading="loading" :data="orders" border stripe table-layout="auto">
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
+    <ElTable v-else v-table-column-widths="'sales.production-plans'" v-loading="loading" :data="orders" border stripe table-layout="auto" empty-text="暂无生产计划">
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="150" />
       <ElTableColumn prop="customer_name" label="客户名称" min-width="150" />
       <ElTableColumn label="产品" min-width="260">
         <template #default="{ row }">
-          <div v-for="item in row.items" :key="item.id">
-            {{ item.factory_code }} · {{ item.product_name }} · {{ item.quantity }}个
+          <div v-for="item in row.items" :key="item.id" class="product-summary">
+            <strong>{{ item.factory_code }} · {{ item.product_name }}</strong>
+            <span>版本 {{ item.product_version ?? '—' }} · 订单 {{ item.quantity }} 个</span>
           </div>
         </template>
       </ElTableColumn>
@@ -222,7 +231,7 @@ defineExpose({ load })
         </template>
       </ElTableColumn>
       <ElTableColumn prop="updated_at" label="更新时间" width="170" />
-      <ElTableColumn label="操作" min-width="340" fixed="right">
+      <ElTableColumn label="操作" min-width="260">
         <template #default="{ row }">
           <div class="row-actions">
             <ElButton link type="primary" @click="openPlan(row)">
@@ -260,6 +269,7 @@ defineExpose({ load })
       </ElTableColumn>
     </ElTable>
     <ElPagination
+      v-if="!loadError"
       v-model:current-page="page"
       class="pagination"
       layout="prev, pager, next, total"
@@ -315,7 +325,10 @@ defineExpose({ load })
 .plans-heading h2 { margin: 0; font-size: 20px; }
 .plans-heading p { margin: 5px 0 0; color: var(--el-text-color-secondary); font-size: 13px; }
 .row-actions, .dialog-primary-actions { display: flex; align-items: center; gap: 10px; }
-.row-actions { flex-wrap: nowrap; white-space: nowrap; }
+.row-actions { flex-wrap: wrap; }
+.product-summary { display: grid; gap: 2px; }
+.product-summary + .product-summary { margin-top: 8px; }
+.product-summary span { color: var(--erp-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 .dialog-primary-actions { justify-content: flex-end; width: 100%; }
 .row-actions :deep(.el-button), .dialog-primary-actions :deep(.el-button) { margin-left: 0; }
 .pagination { justify-content: flex-end; margin-top: 16px; }

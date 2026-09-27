@@ -42,6 +42,7 @@ onMounted(controller.loadWorkers)
       :department-name="departmentName"
       :page-title="`${departmentName}工人管理`"
       description="查看本部门工人及其工作情况，并录入新工人。"
+      :loading="controller.workersLoading.value"
       @refresh="controller.loadWorkers"
     />
     <WorkerOverview
@@ -57,6 +58,9 @@ onMounted(controller.loadWorkers)
       :history-loading="controller.historyLoading.value"
       :pay-summary="controller.paySummary.value"
       :pay-loading="controller.payLoading.value"
+      :workers-error="controller.workersError.value"
+      :history-error="controller.historyError.value"
+      :pay-error="controller.payError.value"
       :show-department-filter="false"
       allow-create
       allow-manage
@@ -65,6 +69,9 @@ onMounted(controller.loadWorkers)
       @create="controller.createWorker"
       @edit="controller.editWorker"
       @delete="controller.removeWorker"
+      @retry-workers="controller.loadWorkers"
+      @retry-history="controller.loadHistory"
+      @retry-pay="controller.loadPay"
     />
     <CreateWorkerDialog
       v-model="controller.dialogVisible.value"

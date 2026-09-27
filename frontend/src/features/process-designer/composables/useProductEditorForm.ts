@@ -7,8 +7,8 @@ import {
   type ProductForm,
 } from '../domain/types'
 
-export function useProductEditorForm() {
-  const form = reactive<ProductForm>({
+function emptyProductForm(): ProductForm {
+  return {
     version: null,
     revision: null,
     customer_id: null,
@@ -19,7 +19,11 @@ export function useProductEditorForm() {
     bom_items: [{ part_name: '', part_no: '', pcs: 1, remark: '' }],
     process_flow: EMPTY_FLOW(),
     process_flow_is_draft: false,
-  })
+  }
+}
+
+export function useProductEditorForm() {
+  const form = reactive<ProductForm>(emptyProductForm())
   const baseSnapshot = ref('')
   const bomSnapshot = ref('')
   const flowSnapshot = ref('')
@@ -99,6 +103,10 @@ export function useProductEditorForm() {
     })
   }
 
+  function resetForm() {
+    Object.assign(form, emptyProductForm())
+  }
+
   return {
     applyProduct,
     baseDirty,
@@ -112,6 +120,7 @@ export function useProductEditorForm() {
     markSaved,
     normalizedBom,
     normalizedFields,
+    resetForm,
     validateBom,
     versionDirty,
   }

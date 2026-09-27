@@ -15,8 +15,10 @@ export function useProductionFlowPopover(
   const selectedNodeType = ref<FlowNodeType>()
   const selectedNodeStat = ref<ProductionNodeStat | null>(null)
   const selectedNodeId = ref<string>()
+  let openRequest = 0
 
   function closeNodeProgress() {
+    openRequest++
     popoverVisible.value = false
     selectedNodeId.value = undefined
     getInstance()?.clearSelectElements()
@@ -31,6 +33,7 @@ export function useProductionFlowPopover(
     const node = getFlow().nodes.find(item => item.id === nodeId)
     if (!node || !anchor.value) return
     closeNodeProgress()
+    const request = openRequest
     selectedNodeLabel.value = node.label
     selectedNodeType.value = node.type
     selectedNodeId.value = nodeId
@@ -40,6 +43,7 @@ export function useProductionFlowPopover(
     anchor.value.style.left = `${event?.clientX ?? (rect ? rect.left + rect.width / 2 : 0)}px`
     anchor.value.style.top = `${event?.clientY ?? (rect ? rect.top + rect.height / 2 : 0)}px`
     void nextTick(() => {
+      if (request !== openRequest || !getInstance()) return
       getInstance()?.selectElementById(nodeId)
       popoverVisible.value = true
     })

@@ -1,5 +1,6 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { getApiErrorDetail } from '@/api/request'
 import {
   createProduct as createProductApi,
   createProductVersion as createProductVersionApi,
@@ -23,27 +24,41 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
   const products = ref<ProductSummary[]>([])
   const productTotal = ref(0)
   const activeProduct = ref<EngineeringProduct | null>(null)
-  const loading = ref(false)
+  const productsLoading = ref(false)
+  const productLoading = ref(false)
+  const loading = computed(() => productsLoading.value || productLoading.value)
+  const productsError = ref('')
+  let productsRequest = 0
+  let productRequest = 0
   const saving = ref(false)
 
   async function loadProducts(page = 1, pageSize = 50) {
-    loading.value = true
+    const request = ++productsRequest
+    productsLoading.value = true
+    productsError.value = ''
+    products.value = []
     try {
       const result = await queryProducts(page, pageSize)
+      if (request !== productsRequest) return
       products.value = result.items
       productTotal.value = result.total
+    } catch (error) {
+      if (request !== productsRequest) return
+      productsError.value = getApiErrorDetail(error)?.message || '产品列表加载失败'
     } finally {
-      loading.value = false
+      if (request === productsRequest) productsLoading.value = false
     }
   }
 
   async function loadProduct(productId: number, version?: number) {
-    loading.value = true
+    const request = ++productRequest
+    productLoading.value = true
     try {
-      activeProduct.value = await queryProduct(productId, version)
-      return activeProduct.value
+      const product = await queryProduct(productId, version)
+      if (request === productRequest) activeProduct.value = product
+      return product
     } finally {
-      loading.value = false
+      if (request === productRequest) productLoading.value = false
     }
   }
 
@@ -171,6 +186,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     loadProduct,
     loadProducts,
     loading,
+    productsError,
     products,
     productTotal,
     saveProcessFlow,

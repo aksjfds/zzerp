@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FlowDisplayControls from './FlowDisplayControls.vue'
 import '@logicflow/core/es/index.css'
 import '@logicflow/extension/lib/style/index.css'
 import { ref } from 'vue'
@@ -41,6 +42,7 @@ const {
       <span><i class="legend-line done" />已流转</span>
     </div>
     <div class="production-flow-canvas-shell">
+      <FlowDisplayControls show-edge-width @font-size="changeFontSize" @node-size="changeNodeSize" @edge-width="changeEdgeWidth" />
       <div ref="container" class="production-flow-viewer" />
       <el-popover
         :visible="popoverVisible"
@@ -48,6 +50,7 @@ const {
         :width="320"
         trigger="click"
         popper-class="production-node-progress-popover"
+        :popper-style="{ maxWidth: 'calc(100vw - 24px)' }"
         :fallback-placements="['top', 'right', 'bottom', 'left']"
         @update:visible="handlePopoverVisibleChange"
       >
@@ -60,23 +63,6 @@ const {
           :stat="selectedNodeStat"
         />
       </el-popover>
-      <div class="display-controls" aria-label="节点显示大小">
-        <div class="display-control-group">
-          <span>字体</span>
-          <button type="button" aria-label="缩小字体" title="缩小字体" @click="changeFontSize(-1)">−</button>
-          <button type="button" aria-label="放大字体" title="放大字体" @click="changeFontSize(1)">＋</button>
-        </div>
-        <div class="display-control-group">
-          <span>节点</span>
-          <button type="button" aria-label="缩小节点" title="缩小节点" @click="changeNodeSize(-0.1)">−</button>
-          <button type="button" aria-label="放大节点" title="放大节点" @click="changeNodeSize(0.1)">＋</button>
-        </div>
-        <div class="display-control-group">
-          <span>连线</span>
-          <button type="button" aria-label="变细连线" title="变细连线" @click="changeEdgeWidth(-1)">−</button>
-          <button type="button" aria-label="加粗连线" title="加粗连线" @click="changeEdgeWidth(1)">＋</button>
-        </div>
-      </div>
     </div>
   </div>
 </template>
@@ -89,6 +75,9 @@ const {
 .production-flow-canvas-shell {
   position: relative;
   min-width: 0;
+  border: 1px solid var(--erp-border);
+  border-radius: var(--erp-radius);
+  overflow: hidden;
 }
 
 .node-popover-anchor {
@@ -123,7 +112,7 @@ const {
 }
 
 .legend-line.pending {
-  border-color: var(--md-outline-variant);
+  border-color: var(--erp-border-strong);
   border-style: dashed;
 }
 
@@ -139,9 +128,7 @@ const {
 .production-flow-viewer {
   width: 100%;
   height: clamp(560px, 70vh, 840px);
-  border: 1px solid var(--md-outline-variant);
-  border-radius: var(--erp-radius);
-  background: var(--md-surface-container-lowest);
+  background: var(--erp-surface);
   cursor: grab;
 }
 .production-flow-viewer :deep(.lf-node-content text) { pointer-events: none; user-select: none; cursor: inherit; font-size: var(--process-node-font-size, 13px); font-weight: 700; text-rendering: geometricPrecision; }
@@ -153,11 +140,6 @@ const {
 .production-flow-viewer :deep(.lf-anchor) { pointer-events: all; transform: scale(var(--process-node-anchor-scale, 1)); transform-box: fill-box; transform-origin: center; }
 .production-flow-viewer :deep(.lf-node) { cursor: pointer; }
 .production-flow-viewer.is-canvas-panning { cursor: grabbing; }
-.display-controls { position: absolute; z-index: 10; top: 78px; right: 15px; display: flex; gap: 6px; padding: 6px; border-radius: 8px; background: color-mix(in srgb, var(--md-surface-container-lowest) 88%, transparent); box-shadow: 0 1px 8px rgb(0 0 0 / 12%); }
-.display-control-group { display: flex; align-items: center; gap: 4px; padding-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
-.display-control-group + .display-control-group { margin-left: 2px; padding-left: 8px; border-left: 1px solid var(--md-outline-variant); }
-.display-controls button { width: 32px; height: 32px; padding: 0; border: 1px solid var(--md-outline-variant); border-radius: 7px; color: var(--el-text-color-primary); background: var(--md-surface-container-lowest); cursor: pointer; font-size: 16px; }
-.display-controls button:hover { color: var(--el-color-primary); border-color: var(--el-color-primary); }
 @media (max-width: 760px) {
   .production-flow-legend { gap: 8px 12px; }
   .production-flow-viewer { height: clamp(420px, 65vh, 560px); }

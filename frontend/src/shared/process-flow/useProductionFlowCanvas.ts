@@ -1,5 +1,6 @@
 import { nextTick, onBeforeUnmount, onMounted, watch, type Ref } from 'vue'
 import type LogicFlow from '@logicflow/core'
+import { readFlowColors } from '@/shared/theme/flowColors'
 import { toLogicFlowData } from './adapter'
 import { updateProcessCanvasScale } from './nodeTextScale'
 import { installProductionFlowPan } from './productionFlowInteractions'
@@ -30,7 +31,9 @@ export function useProductionFlowCanvas(
   let resizeObserver: ResizeObserver | null = null
   let resizeFrame: number | null = null
   let fitFrame: number | null = null
+  let renderFrame: number | null = null
   let removePanListeners: (() => void) | null = null
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
 
   const popover = useProductionFlowPopover(
     container,
@@ -85,12 +88,13 @@ export function useProductionFlowCanvas(
       flow,
       progress.nodes,
       progress.edges,
+      readFlowColors(),
     )
     styledData.edges?.forEach((edge) => {
       if (edge.id && edge.properties) instance?.setProperties(edge.id, edge.properties)
     })
     flow.edges.forEach((edge) => {
-      if (shouldAnimateEdge(edge, progress.nodes, progress.edges)) {
+      if (!reducedMotion.matches && !document.hidden && shouldAnimateEdge(edge, progress.nodes, progress.edges)) {
         instance?.openEdgeAnimation(edge.id)
       } else {
         instance?.closeEdgeAnimation(edge.id)
@@ -100,6 +104,7 @@ export function useProductionFlowCanvas(
 
   function renderTopology() {
     if (!instance) return
+    popover.closeNodeProgress()
     const flow = source.flow()
     const progress = progressMaps()
     instance.renderRawData(withProductionEdgeStyle(
@@ -109,9 +114,12 @@ export function useProductionFlowCanvas(
       flow,
       progress.nodes,
       progress.edges,
+      readFlowColors(),
     ))
     display.applyDisplaySettings()
-    requestAnimationFrame(() => {
+    if (renderFrame !== null) cancelAnimationFrame(renderFrame)
+    renderFrame = requestAnimationFrame(() => {
+      renderFrame = null
       updateProgressStyles()
       fitFlowToView()
     })
@@ -130,6 +138,8 @@ export function useProductionFlowCanvas(
     await nextTick()
     if (!container.value) return
     instance = createProductionFlowInstance(container.value)
+    reducedMotion.addEventListener('change', updateProgressStyles)
+    document.addEventListener('visibilitychange', updateProgressStyles)
     display.applyDisplaySettings()
     removePanListeners = installProductionFlowPan(
       container,
@@ -162,11 +172,15 @@ export function useProductionFlowCanvas(
   )
 
   onBeforeUnmount(() => {
+    reducedMotion.removeEventListener('change', updateProgressStyles)
+    document.removeEventListener('visibilitychange', updateProgressStyles)
+    popover.closeNodeProgress()
     container.value?.removeEventListener('click', handleOverviewClick, true)
     removePanListeners?.()
     resizeObserver?.disconnect()
     if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
     if (fitFrame !== null) cancelAnimationFrame(fitFrame)
+    if (renderFrame !== null) cancelAnimationFrame(renderFrame)
     instance?.destroy()
     instance = null
   })

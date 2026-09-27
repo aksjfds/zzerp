@@ -6,6 +6,7 @@ import { getApiErrorDetail } from '@/api/request'
 import { PRODUCTION_PERMISSIONS } from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import {
   cancelProcedurePriceConfirmation,
   confirmProcedurePrices,
@@ -70,6 +71,8 @@ const departmentName = computed(() => authStore.department || departmentCode.val
 const canManage = computed(() => authStore.hasPermission(PRODUCTION_PERMISSIONS.manage))
 const items = ref<ProcedurePriceListItem[]>([])
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const keyword = ref('')
 const page = ref(1)
 const pageSize = 20
@@ -82,6 +85,8 @@ const confirming = ref(false)
 const cancellingConfirmation = ref(false)
 const historyVisible = ref(false)
 const historyLoading = ref(false)
+const historyError = ref('')
+let historyRevision = 0
 const historyItems = ref<ProcedurePriceRevision[]>([])
 const historyTotal = ref(0)
 const historyPage = ref(1)
@@ -172,11 +177,15 @@ function removeProcedure(index: number) {
   if (!activeScope.value?.confirmed && !draft.value[index]?.referenced) draft.value.splice(index, 1)
 }
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  items.value = []
   try {
     const result = await queryProcedurePrices(
       departmentCode.value, page.value, pageSize, keyword.value,
     )
+    if (revision !== loadRevision) return
     items.value = result.data
     total.value = result.total
     temporaryPriceDrafts.value = Object.fromEntries(
@@ -186,9 +195,9 @@ async function load() {
       ]),
     )
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '工艺与单价配置加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '工艺与单价配置加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 async function search() {
@@ -199,17 +208,21 @@ async function refreshAll() {
   await load()
 }
 async function openHistory(pageNumber = 1) {
+  const revision = ++historyRevision
   historyPage.value = pageNumber
   historyVisible.value = true
   historyLoading.value = true
+  historyError.value = ''
+  historyItems.value = []
   try {
     const result = await queryProcedurePriceRevisions(departmentCode.value, pageNumber)
+    if (revision !== historyRevision) return
     historyItems.value = result.data
     historyTotal.value = result.total
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '单价变更记录加载失败')
+    if (revision === historyRevision) historyError.value = getApiErrorDetail(error)?.message || '单价变更记录加载失败'
   } finally {
-    historyLoading.value = false
+    if (revision === historyRevision) historyLoading.value = false
   }
 }
 function priceValue(value: number | string | null) {
@@ -352,7 +365,9 @@ watch(
       <ElButton type="primary" @click="search">查询</ElButton>
       <ElButton @click="openHistory()">单价记录</ElButton>
     </section>
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
     <ElTable
+      v-else
       v-table-column-widths="'production.procedure-prices'"
       v-loading="loading"
       :data="treeRows"
@@ -376,7 +391,7 @@ watch(
               <span class="directory-icon file-icon" aria-hidden="true" />
               <ElPopover v-if="isTemporaryProcess(row)" placement="bottom-start" trigger="click" :width="300">
                 <template #reference>
-                  <ElLink type="primary" :underline="false">{{ row.item.procedure_name }}</ElLink>
+                  <ElLink type="primary" underline="never">{{ row.item.procedure_name }}</ElLink>
                 </template>
                 <div class="temporary-work-order-popover">
                   <strong>工单 {{ row.item.work_order_no }}</strong>
@@ -415,7 +430,7 @@ watch(
         </template>
       </ElTableColumn>
     </ElTable>
-    <ElPagination v-model:current-page="page" layout="prev, pager, next, total" :page-size="pageSize" :total="total" @current-change="load" />
+    <ElPagination v-if="!loadError" v-model:current-page="page" layout="prev, pager, next, total" :page-size="pageSize" :total="total" @current-change="load" />
     <ElDialog v-model="dialogVisible" append-to-body width="min(680px, 92vw)" title="配置工艺与单价">
       <div v-if="activeScope" class="dialog-title">
         <span>{{ title(activeScope) }} · {{ activeScope.workshop_name }}</span>
@@ -445,7 +460,8 @@ watch(
       </template>
     </ElDialog>
     <ElDrawer v-model="historyVisible" title="单价变更记录" size="min(760px, 92vw)" append-to-body>
-      <ElTable v-loading="historyLoading" :data="historyItems" border table-layout="auto">
+      <LoadErrorAlert v-if="historyError" :message="historyError" :loading="historyLoading" @retry="openHistory(historyPage)" />
+      <ElTable v-else v-loading="historyLoading" :data="historyItems" border table-layout="auto">
         <ElTableColumn prop="target_label" label="工艺" min-width="260" />
         <ElTableColumn label="变更" min-width="170">
           <template #default="{ row }">{{ priceValue(row.previous_unit_price) }} → {{ priceValue(row.new_unit_price) }}</template>
@@ -453,13 +469,13 @@ watch(
         <ElTableColumn prop="actor_username" label="操作人" min-width="100" />
         <ElTableColumn prop="created_at" label="时间" min-width="160" />
       </ElTable>
-      <ElPagination v-model:current-page="historyPage" layout="prev, pager, next, total" :page-size="50" :total="historyTotal" @current-change="openHistory" />
+      <ElPagination v-if="!historyError" v-model:current-page="historyPage" layout="prev, pager, next, total" :page-size="50" :total="historyTotal" @current-change="openHistory" />
     </ElDrawer>
   </component>
 </template>
 
 <style scoped>
-.filter-bar { display: flex; gap: 10px; margin-bottom: 14px; }
+.filter-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
 .filter-bar .el-input { max-width: 360px; }
 .tree-name { display: inline-flex; align-items: center; gap: 8px; }
 .material-cell { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
@@ -477,4 +493,12 @@ watch(
 .procedure-list { display: grid; gap: 10px; margin: 16px 0; }
 .procedure-row { display: grid; grid-template-columns: minmax(0, 1fr) 150px auto; gap: 10px; align-items: center; }
 .dialog-title { display: flex; justify-content: space-between; gap: 12px; align-items: center; color: var(--el-text-color-secondary); }
+@media (max-width: 640px) {
+  .filter-bar .el-input { width: 100%; max-width: none; }
+  .filter-bar :deep(.el-button) { margin: 0; }
+  .procedure-row { grid-template-columns: minmax(0, 1fr) auto; padding-bottom: 12px; border-bottom: 1px solid var(--erp-border); }
+  .procedure-row > :first-child { grid-column: 1 / -1; }
+  .procedure-row :deep(.el-input-number) { width: 100%; }
+  .dialog-title { align-items: flex-start; flex-wrap: wrap; }
+}
 </style>

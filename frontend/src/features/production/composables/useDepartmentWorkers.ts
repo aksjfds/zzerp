@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import type {
@@ -35,6 +35,13 @@ export function useDepartmentWorkers(departmentCode: string) {
   const departmentFilter = ref<number | ''>('')
   const history = ref<WorkerHistoryItem[]>([])
   const paySummary = ref<WorkerPaySummary>()
+  const workersError = ref('')
+  const historyError = ref('')
+  const payError = ref('')
+  let workersRequest = 0
+  let historyRequest = 0
+  let payRequest = 0
+  let disposed = false
 
   const departments = computed(() => overview.value ? [overview.value] : [])
   const filteredWorkers = computed(() => {
@@ -48,40 +55,48 @@ export function useDepartmentWorkers(departmentCode: string) {
     : '请选择工人')
 
   async function loadHistory() {
-    if (!selectedWorker.value) {
-      history.value = []
-      return
-    }
+    if (disposed) return
+    const request = ++historyRequest
+    const workerId = selectedWorker.value?.id
+    const month = selectedMonth.value
+    history.value = []
+    historyError.value = ''
+    historyLoading.value = false
+    if (!workerId) return
     historyLoading.value = true
     try {
-      history.value = await queryDepartmentWorkerHistory(
-        departmentCode,
-        selectedWorker.value.id,
-        selectedMonth.value,
-      )
+      const result = await queryDepartmentWorkerHistory(departmentCode, workerId, month)
+      if (request !== historyRequest || workerId !== selectedWorker.value?.id || month !== selectedMonth.value) return
+      history.value = result
     } catch (error) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '工人工作情况加载失败')
+      if (request === historyRequest && workerId === selectedWorker.value?.id && month === selectedMonth.value) {
+        historyError.value = getApiErrorDetail(error)?.message || '工人工作情况加载失败'
+      }
     } finally {
-      historyLoading.value = false
+      if (request === historyRequest) historyLoading.value = false
     }
   }
 
   async function loadPay() {
-    if (!selectedWorker.value) {
-      paySummary.value = undefined
-      return
-    }
+    if (disposed) return
+    const request = ++payRequest
+    const workerId = selectedWorker.value?.id
+    const month = selectedMonth.value
+    paySummary.value = undefined
+    payError.value = ''
+    payLoading.value = false
+    if (!workerId) return
     payLoading.value = true
     try {
-      paySummary.value = await queryDepartmentWorkerPay(
-        departmentCode,
-        selectedWorker.value.id,
-        selectedMonth.value,
-      )
+      const result = await queryDepartmentWorkerPay(departmentCode, workerId, month)
+      if (request !== payRequest || workerId !== selectedWorker.value?.id || month !== selectedMonth.value) return
+      paySummary.value = result
     } catch (error) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '工人工资加载失败')
+      if (request === payRequest && workerId === selectedWorker.value?.id && month === selectedMonth.value) {
+        payError.value = getApiErrorDetail(error)?.message || '工人工资加载失败'
+      }
     } finally {
-      payLoading.value = false
+      if (request === payRequest) payLoading.value = false
     }
   }
 
@@ -90,18 +105,27 @@ export function useDepartmentWorkers(departmentCode: string) {
   }
 
   async function loadWorkers(preferredWorkerId?: number) {
+    if (disposed) return
+    const request = ++workersRequest
+    workersError.value = ''
     workersLoading.value = true
     try {
-      overview.value = await queryDepartmentWorkerOverview(departmentCode)
+      const result = await queryDepartmentWorkerOverview(departmentCode)
+      if (request !== workersRequest) return
+      overview.value = result
       departmentFilter.value = overview.value.department_id
       selectedWorker.value = overview.value.workers.find(
         worker => worker.id === (preferredWorkerId ?? selectedWorker.value?.id),
       ) || overview.value.workers[0]
       await loadWorkerDetails()
     } catch (error) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '工人总览加载失败')
+      if (request !== workersRequest) return
+      workersError.value = getApiErrorDetail(error)?.message || '工人总览加载失败'
+      overview.value = undefined
+      selectedWorker.value = undefined
+      await loadWorkerDetails()
     } finally {
-      workersLoading.value = false
+      if (request === workersRequest) workersLoading.value = false
     }
   }
 
@@ -170,6 +194,13 @@ export function useDepartmentWorkers(departmentCode: string) {
     }
   })
 
+  onScopeDispose(() => {
+    disposed = true
+    workersRequest++
+    historyRequest++
+    payRequest++
+  })
+
   return {
     departmentFilter,
     departments,
@@ -193,7 +224,11 @@ export function useDepartmentWorkers(departmentCode: string) {
     submitting,
     workerKeyword,
     workersLoading,
+    workersError,
+    historyError,
+    payError,
     payLoading,
+    loadPay,
     paySummary,
   }
 }

@@ -5,11 +5,12 @@ import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { PRODUCT_PERMISSIONS } from '@/permission/constants'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
 const store = useEngineeringProductsStore()
-const { loading, products, productTotal } = storeToRefs(store)
+const { loading, products, productTotal, productsError } = storeToRefs(store)
 const keyword = ref('')
 const page = ref(1)
 const pageSize = 50
@@ -29,7 +30,11 @@ async function logout() {
   router.replace('/login')
 }
 
-onMounted(() => store.loadProducts(page.value, pageSize))
+function loadProducts() {
+  return store.loadProducts(page.value, pageSize)
+}
+
+onMounted(loadProducts)
 </script>
 
 <template>
@@ -41,6 +46,7 @@ onMounted(() => store.loadProducts(page.value, pageSize))
         <p>统一维护产品基础信息、BOM 和图形化工艺路线。</p>
       </div>
       <div class="header-actions">
+        <ElButton :loading="loading" @click="loadProducts">刷新</ElButton>
         <ElButton
           v-permission="PRODUCT_PERMISSIONS.add"
           type="primary"
@@ -51,10 +57,11 @@ onMounted(() => store.loadProducts(page.value, pageSize))
     </header>
     <section class="content-card">
       <div class="toolbar">
-        <ElInput v-model="keyword" clearable placeholder="搜索当前页的客户、产品或型号" />
-        <span>当前页 {{ filteredProducts.length }} 个，共 {{ productTotal }} 个产品</span>
+        <ElInput v-model="keyword" clearable placeholder="搜索当前页的客户、产品或型号" aria-label="搜索当前页产品" />
+        <span v-if="!loading && !productsError">当前页 {{ filteredProducts.length }} 个，共 {{ productTotal }} 个产品</span>
       </div>
-      <ElTable v-table-column-widths="'engineering.products'" v-loading="loading" :data="filteredProducts" border table-layout="auto">
+      <LoadErrorAlert :message="productsError" :loading="loading" @retry="loadProducts" />
+      <ElTable v-if="!productsError" v-table-column-widths="'engineering.products'" v-loading="loading" :data="filteredProducts" border table-layout="auto" :empty-text="loading ? '正在加载产品…' : keyword.trim() ? '当前页没有匹配的产品' : '暂无产品'">
         <ElTableColumn prop="customer_name" label="客户" min-width="150" />
         <ElTableColumn prop="product_name" label="名称" min-width="190" />
         <ElTableColumn prop="factory_code" label="厂编" min-width="140" />
@@ -90,12 +97,13 @@ onMounted(() => store.loadProducts(page.value, pageSize))
         </ElTableColumn>
       </ElTable>
       <ElPagination
+        v-if="!productsError"
         v-model:current-page="page"
         class="pagination"
         layout="prev, pager, next, total"
         :page-size="pageSize"
         :total="productTotal"
-        @current-change="store.loadProducts($event, pageSize)"
+        @current-change="loadProducts"
       />
     </section>
   </main>
@@ -108,9 +116,9 @@ onMounted(() => store.loadProducts(page.value, pageSize))
 .page-header h1 { margin: 5px 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 .page-header p { margin: 0; color: var(--el-text-color-secondary); }
 .page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-.header-actions, .row-actions { display: flex; align-items: center; gap: 8px; }
+.header-actions, .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .readiness-cell { display: flex; align-items: flex-start; flex-direction: column; gap: 5px; }
-.readiness-cell span { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.35; }
+.readiness-cell > span:not(.el-tag) { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
 .header-actions :deep(.el-button + .el-button), .row-actions :deep(.el-button + .el-button) { margin-left: 0; }
 .content-card { padding: 20px; }
 .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 13px; }

@@ -53,13 +53,26 @@ function destinationLabel(destination: QcDestination) {
   >
     <ElTableColumn label="物料" min-width="190">
       <template #default="{ row }">
-        <strong>{{ row.part_no }} {{ row.part_name }}</strong>
+        <strong>
+          <template v-if="row.part_no && row.part_no !== row.part_name">{{ row.part_no }} · </template>{{ row.part_name }}
+        </strong>
       </template>
     </ElTableColumn>
     <ElTableColumn label="工单号" min-width="170">
       <template #default="{ row }">
         <strong>工单{{ row.work_order_no }}</strong>
+        <div class="batch-context">订单 {{ row.customer_order_no }}</div>
       </template>
+    </ElTableColumn>
+    <ElTableColumn label="质检批次" min-width="110">
+      <template #default="{ row }">
+        第 {{ row.batch_sequence }} 批
+        <div v-if="row.rework_source_batch_sequence" class="batch-context">第 {{ row.rework_source_batch_sequence }} 批返工</div>
+      </template>
+    </ElTableColumn>
+    <ElTableColumn prop="submitted_quantity" label="送检数" min-width="85" align="right" />
+    <ElTableColumn label="合格数" min-width="85" align="right">
+      <template #default="{ row }">{{ row.qualified_quantity ?? '—' }}</template>
     </ElTableColumn>
     <ElTableColumn prop="work_order_name" label="工艺" min-width="120" />
     <ElTableColumn prop="worker_name" label="加工工人" min-width="110">
@@ -114,6 +127,7 @@ function destinationLabel(destination: QcDestination) {
 </template>
 
 <style scoped>
+.batch-context { color: var(--erp-text-secondary); font-size: 12px; }
 .batch-actions {
   display: flex;
   flex-wrap: wrap;

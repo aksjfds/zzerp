@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import {
   confirmFinishedShipment,
   queryFinishedShipmentCandidates,
@@ -16,19 +17,25 @@ const props = withDefaults(defineProps<{
 })
 const emit = defineEmits<{ updated: [] }>()
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const rows = ref<FinishedShipmentCandidate[]>([])
 const visibleRows = computed(() => rows.value.filter((row) => (
   row.order_status === 'planned' && row.available_quantity > 0 && row.outstanding_quantity > 0
 )))
 
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  rows.value = []
   try {
-    rows.value = await queryFinishedShipmentCandidates()
+    const result = await queryFinishedShipmentCandidates()
+    if (revision === loadRevision) rows.value = result
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '可发货订单加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '可发货订单加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -80,7 +87,9 @@ defineExpose({ load })
       </div>
       <ElButton @click="load">刷新</ElButton>
     </div>
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
     <ElTable
+      v-else
       v-table-column-widths="'finished.order-operations'"
       v-loading="loading"
       :data="visibleRows"

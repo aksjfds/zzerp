@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import {
   queryCustomerOrderProduction,
   queryCustomerOrderProgressDetails,
@@ -22,6 +23,12 @@ import { useWorkshopDepartmentCodes } from '@/features/departments'
 import ProductionFlowViewer from '@/shared/process-flow/ProductionFlowViewer.vue'
 
 const loading = ref(false)
+const loadError = ref('')
+const customerError = ref('')
+const flowError = ref('')
+let loadRevision = 0
+let customerRevision = 0
+let flowRevision = 0
 const rows = ref<CustomerOrderProgressDetail[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -33,7 +40,7 @@ const flowVisible = ref(false)
 const flowLoading = ref(false)
 const flowRow = ref<CustomerOrderProgressDetail>()
 const flowProduct = ref<CustomerOrderProduction['products'][number]>()
-const { workshopDepartmentCodes } = useWorkshopDepartmentCodes()
+const { workshopDepartmentCodes, workshopLoading, workshopError, reloadWorkshops } = useWorkshopDepartmentCodes()
 const treeRows = computed(() => buildOrderProgressRows(rows.value))
 
 function isProduct(row: OrderProgressTreeRow): row is OrderProgressProductRow {
@@ -49,29 +56,36 @@ function isPosition(row: OrderProgressTreeRow): row is OrderProgressPositionRow 
 }
 
 async function viewProductionFlow(row: CustomerOrderProgressDetail) {
+  const revision = ++flowRevision
+  flowError.value = ''
   flowRow.value = row
   flowProduct.value = undefined
   flowVisible.value = true
   flowLoading.value = true
   try {
     const production = await queryCustomerOrderProduction(row.customer_order_id)
+    if (revision !== flowRevision) return
     flowProduct.value = production.products.find(
       item => item.customer_order_item_id === row.customer_order_item_id,
     )
-    if (!flowProduct.value) ElMessage.warning('该产品尚未生成生产流程')
-  } catch {
-    ElMessage.error('生产进度加载失败')
+  } catch (error) {
+    if (revision === flowRevision) flowError.value = getApiErrorDetail(error)?.message || '生产进度加载失败'
   } finally {
-    flowLoading.value = false
+    if (revision === flowRevision) flowLoading.value = false
   }
 }
 
 async function loadCustomers() {
+  const revision = ++customerRevision
   customerLoading.value = true
+  customerError.value = ''
   try {
-    customers.value = await queryCustomers()
+    const result = await queryCustomers()
+    if (revision === customerRevision) customers.value = result
+  } catch (error) {
+    if (revision === customerRevision) customerError.value = getApiErrorDetail(error)?.message || '客户筛选列表加载失败'
   } finally {
-    customerLoading.value = false
+    if (revision === customerRevision) customerLoading.value = false
   }
 }
 
@@ -81,19 +95,23 @@ async function changeCustomer() {
 }
 
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  rows.value = []
   try {
     const result = await queryCustomerOrderProgressDetails(
       page.value,
       pageSize,
       customerId.value,
     )
+    if (revision !== loadRevision) return
     rows.value = result.items
     total.value = result.total
-  } catch {
-    ElMessage.error('进度明细加载失败')
+  } catch (error) {
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '进度明细加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -124,7 +142,10 @@ defineExpose({ load })
         />
       </ElSelect>
     </div>
+    <LoadErrorAlert v-if="customerError" :message="customerError" :loading="customerLoading" @retry="loadCustomers" />
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
     <ElTable
+      v-else
       v-table-column-widths="'sales.progress-details'"
       v-loading="loading"
       :data="treeRows"
@@ -224,6 +245,7 @@ defineExpose({ load })
       </ElTableColumn>
     </ElTable>
     <ElPagination
+      v-if="!loadError"
       v-model:current-page="page"
       class="pagination"
       layout="prev, pager, next, total"
@@ -236,16 +258,19 @@ defineExpose({ load })
       :title="flowRow ? `${flowRow.factory_code} · ${flowRow.product_name} 生产进度` : '生产进度'"
       width="min(1400px, 96vw)"
       destroy-on-close
+      @close="flowRevision += 1"
     >
-      <div v-loading="flowLoading" class="flow-dialog-content">
+      <LoadErrorAlert v-if="flowError" :message="flowError" :loading="flowLoading" @retry="flowRow && viewProductionFlow(flowRow)" />
+      <LoadErrorAlert v-else-if="workshopError" :message="workshopError" :loading="workshopLoading" @retry="reloadWorkshops" />
+      <div v-else v-loading="flowLoading || workshopLoading" class="flow-dialog-content">
         <ProductionFlowViewer
-          v-if="flowProduct"
+          v-if="flowProduct && !workshopLoading"
           :flow="flowProduct.process_flow"
           :stats="flowProduct.node_stats"
           :edge-stats="flowProduct.edge_stats"
           :workshop-department-codes="workshopDepartmentCodes"
         />
-        <ElEmpty v-else-if="!flowLoading" description="该产品尚未生成生产流程" />
+        <ElEmpty v-else-if="!flowLoading && !workshopLoading" description="该产品尚未生成生产流程" />
       </div>
       <template #footer><ElButton @click="flowVisible = false">关闭</ElButton></template>
     </ElDialog>
@@ -307,9 +332,9 @@ defineExpose({ load })
   background: linear-gradient(var(--md-outline-variant), var(--md-outline-variant)) 8px 0 / 1px 100% no-repeat;
 }
 .progress-status-submitted_qc {
-  --el-tag-bg-color: #f3e8ff;
-  --el-tag-border-color: #c084fc;
-  --el-tag-text-color: #7e22ce;
+  --el-tag-bg-color: color-mix(in srgb, var(--erp-status-submitted) 9%, var(--erp-surface));
+  --el-tag-border-color: color-mix(in srgb, var(--erp-status-submitted) 25%, var(--erp-surface));
+  --el-tag-text-color: var(--erp-status-submitted);
 }
 .directory-icon { position: relative; display: inline-block; flex: 0 0 auto; box-sizing: border-box; color: var(--el-color-primary); }
 .folder-icon { width: 17px; height: 13px; margin-top: 2px; border: 1.5px solid currentcolor; border-radius: 2px; }

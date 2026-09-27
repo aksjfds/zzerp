@@ -1,5 +1,4 @@
-import { computed, ref, shallowRef } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onScopeDispose, ref, shallowRef } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
 import { queryProductionWorkbenchPositions } from '../api/productionWorkbench'
 import type { ProductionWorkbenchPosition } from '../domain/productionWorkbench'
@@ -12,6 +11,7 @@ export function useProductionWorkbenchReader<Position extends ProductionWorkbenc
 ) {
   const positions = shallowRef<Position[]>([])
   const positionsLoading = ref(false)
+  const positionsError = ref('')
   const workshopId = ref<number>()
   const taskCustomerOrderItemId = ref<number>()
   const taskProductionItemId = ref<number>()
@@ -25,6 +25,13 @@ export function useProductionWorkbenchReader<Position extends ProductionWorkbenc
   ))
 
   async function loadPositions(preserveSelection = true) {
+    const sequence = ++positionSequence
+    positionController?.abort()
+    positionController = undefined
+    positionsLoading.value = false
+    positionsError.value = ''
+    const previousSelection = preserveSelection ? selectedPositionKey.value : undefined
+    positions.value = []
     const customerOrderItemId = taskCustomerOrderItemId.value
     const scopedWorkshopId = workshopId.value
     const flowNodeId = taskFlowNodeId.value
@@ -32,11 +39,6 @@ export function useProductionWorkbenchReader<Position extends ProductionWorkbenc
       positions.value = []
       clearSelection()
       return
-    }
-    const sequence = ++positionSequence
-    positionController?.abort()
-    if (!preserveSelection) {
-      positions.value = []
     }
     const controller = new AbortController()
     positionController = controller
@@ -54,11 +56,14 @@ export function useProductionWorkbenchReader<Position extends ProductionWorkbenc
       positions.value = positionType
         ? result.items.filter(item => item.position_type === positionType) as Position[]
         : result.items
-      if (preserveSelection && selectedPosition.value) return
-      clearSelection()
+      selectedPositionKey.value = positions.value.some(item => item.position_key === previousSelection)
+        ? previousSelection
+        : undefined
+      return true
     } catch (error) {
       if (sequence === positionSequence && !controller.signal.aborted) {
-        ElMessage.error(getApiErrorDetail(error)?.message || '在位物料加载失败')
+        positionsError.value = getApiErrorDetail(error)?.message || '在位物料加载失败'
+        clearSelection()
       }
     } finally {
       if (sequence === positionSequence) {
@@ -87,7 +92,7 @@ export function useProductionWorkbenchReader<Position extends ProductionWorkbenc
     taskFlowNodeId.value = next.flowNodeId
     workshopId.value = next.workshopId
     clearSelection()
-    await loadPositions(false)
+    if (!await loadPositions(false)) return
     const first = positions.value[0]
     if (positions.value.length === 1 && first) selectPositionForCreation(first)
   }
@@ -96,9 +101,15 @@ export function useProductionWorkbenchReader<Position extends ProductionWorkbenc
     await loadPositions(true)
   }
 
+  onScopeDispose(() => {
+    positionSequence += 1
+    positionController?.abort()
+  })
+
   return {
     focusTask,
     positions,
+    positionsError,
     positionsLoading,
     reload,
     selectPositionForCreation,

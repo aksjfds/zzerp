@@ -1,11 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, reactive, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { useRoute, useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import { queryOrderProduct, queryOrderProducts, type OrderProduct } from '../api/orderProducts'
 import { createCustomerOrder, queryCustomerOrder, updateCustomerOrder } from '../api/customerOrders'
-import type { CustomerOrderItem, CustomerOrderPayload } from '../domain/types'
+import type { CustomerOrderItem, CustomerOrderPayload, CustomerOrderStatus } from '../domain/types'
+import { customerOrderStatusLabel, customerOrderStatusTagType } from '../domain/orderStatus'
 import { queryCustomers, type Customer } from '@/features/customers'
 import { useAuthStore } from '@/stores/auth'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
@@ -22,8 +25,14 @@ const customers = ref<Customer[]>([])
 const customerLoading = ref(false)
 const productLoading = ref(false)
 const saving = ref(false)
+const loading = ref(false)
+const loadError = ref('')
+const productError = ref('')
+const productKeyword = ref('')
+let loadRevision = 0
 let productSearchSequence = 0
-const status = ref('draft')
+const status = ref<CustomerOrderStatus>('draft')
+const customerName = ref('')
 const orderEditable = ref(true)
 const revision = ref<number | null>(null)
 const form = reactive({
@@ -53,12 +62,16 @@ function productLabel(productId: number) {
 }
 
 async function searchProducts(keyword = '') {
+  const sequence = ++productSearchSequence
+  productKeyword.value = keyword
+  productError.value = ''
   if (!form.customer_id) {
     products.value = []
+    productLoading.value = false
     return
   }
-  const sequence = ++productSearchSequence
   productLoading.value = true
+  products.value = products.value.filter(item => form.items.some(row => row.product_id === item.id))
   try {
     const result = await queryOrderProducts(form.customer_id, keyword)
     if (sequence !== productSearchSequence) return
@@ -69,20 +82,28 @@ async function searchProducts(keyword = '') {
       ...selected,
       ...result.filter(item => !selected.some(selectedItem => selectedItem.id === item.id)),
     ]
+    return true
+  } catch (error) {
+    if (sequence === productSearchSequence) productError.value = getApiErrorDetail(error)?.message || '客户产品列表加载失败'
   } finally {
     if (sequence === productSearchSequence) productLoading.value = false
   }
 }
 
 async function changeCustomer() {
+  productSearchSequence += 1
+  productError.value = ''
+  productLoading.value = false
   form.items = []
   products.value = []
   if (!form.customer_id) return
-  await searchProducts()
-  addItem()
+  const customerId = form.customer_id
+  const loaded = await searchProducts()
+  if (loaded && form.customer_id === customerId) addItem()
 }
 
 async function save() {
+  if (loading.value || loadError.value || productLoading.value || productError.value) return
   if (!form.customer_order_no.trim() || !form.customer_id || !form.items.length
     || form.items.some((item) => !item.product_id || item.quantity < 1 || !item.delivery_date)) {
     return ElMessage.warning('请完整填写订单和产品明细')
@@ -121,16 +142,32 @@ async function save() {
   }
 }
 
-onMounted(async () => {
+async function load() {
+  const requestRevision = ++loadRevision
+  const orderId = effectiveOrderId.value
+  productSearchSequence += 1
+  productLoading.value = false
+  loading.value = true
+  loadError.value = ''
+  productError.value = ''
+  products.value = []
+  customers.value = []
+  orderEditable.value = true
+  status.value = 'draft'
+  customerName.value = ''
+  revision.value = null
+  Object.assign(form, { customer_order_no: '', customer_id: null, remark: '', items: [] })
   customerLoading.value = true
   try {
-    customers.value = await queryCustomers()
-  } finally {
-    customerLoading.value = false
-  }
-  if (effectiveOrderId.value) {
-    const order = await queryCustomerOrder(effectiveOrderId.value)
+    const [nextCustomers, order] = await Promise.all([
+      queryCustomers(),
+      orderId ? queryCustomerOrder(orderId) : Promise.resolve(undefined),
+    ])
+    if (requestRevision !== loadRevision) return
+    customers.value = nextCustomers
+    if (!order) return
     status.value = order.status
+    customerName.value = order.customer_name
     orderEditable.value = order.can_edit
     revision.value = order.revision
     Object.assign(form, {
@@ -140,20 +177,47 @@ onMounted(async () => {
       items: order.items.map((item): CustomerOrderItem => ({ ...item })),
     })
     await searchProducts()
+    if (requestRevision !== loadRevision) return
     const missingIds = [...new Set(
       order.items.map(item => item.product_id).filter(id => !product(id)),
     )]
     if (missingIds.length) {
       const missing = await Promise.all(missingIds.map(id => queryOrderProduct(id)))
+      if (requestRevision !== loadRevision) return
       products.value.push(...missing)
     }
+  } catch (error) {
+    if (requestRevision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '客户订单及基础资料加载失败'
+  } finally {
+    if (requestRevision === loadRevision) {
+      customerLoading.value = false
+      loading.value = false
+    }
   }
-})
+}
+watch(effectiveOrderId, load, { immediate: true })
 </script>
 
 <template>
   <main class="editor-page" :class="{ embedded: props.embedded }">
-    <header v-if="!props.embedded"><div><span>业务部</span><h1>{{ effectiveOrderId ? readOnly ? '客户订单详情' : '编辑客户订单' : '创建客户订单' }}</h1></div><div class="header-actions"><ElButton :disabled="saving" @click="router.push('/business/orders')">返回列表</ElButton><ElButton v-if="!readOnly" type="primary" :loading="saving" @click="save">保存草稿</ElButton></div></header>
+    <DepartmentPageHeader v-if="!props.embedded" department-name="业务部" :page-title="effectiveOrderId ? readOnly ? '客户订单详情' : '编辑客户订单' : '创建客户订单'">
+      <template #actions>
+        <ElButton :disabled="saving" @click="router.push('/business/orders')">返回列表</ElButton>
+        <ElButton v-if="!readOnly" type="primary" :loading="saving" :disabled="loading || !!loadError || productLoading || !!productError" @click="save">保存草稿</ElButton>
+      </template>
+    </DepartmentPageHeader>
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
+    <div v-else v-loading="loading" :inert="loading">
+    <section v-if="props.embedded && !loading" class="order-summary">
+      <div class="order-summary-heading">
+        <div><span class="summary-label">客户订单</span><strong>{{ form.customer_order_no }}</strong></div>
+        <ElTag :type="customerOrderStatusTagType(status)">{{ customerOrderStatusLabel(status) }}</ElTag>
+      </div>
+      <dl>
+        <div><dt>客户</dt><dd>{{ customerName }}</dd></div>
+        <div v-if="form.remark"><dt>备注</dt><dd>{{ form.remark }}</dd></div>
+      </dl>
+    </section>
     <section v-if="!props.embedded" class="card">
       <ElForm :model="form" :disabled="readOnly" label-position="top">
         <div class="grid">
@@ -177,6 +241,7 @@ onMounted(async () => {
       </ElForm>
     </section>
     <section class="card" :class="{ readonly: readOnly }">
+      <LoadErrorAlert v-if="productError" :message="productError" :loading="productLoading" @retry="searchProducts(productKeyword)" />
       <div class="heading"><h2>产品明细</h2><ElButton v-if="!readOnly" :disabled="!form.customer_id" @click="addItem">新增产品</ElButton></div>
       <ElTable v-table-column-widths="'sales.order-editor-items'" :data="form.items" border table-layout="auto">
         <ElTableColumn label="产品" min-width="220">
@@ -200,6 +265,7 @@ onMounted(async () => {
         <ElTableColumn v-if="!readOnly" label="操作" width="80"><template #default="{ $index }"><ElButton link type="danger" @click="form.items.splice($index, 1)">删除</ElButton></template></ElTableColumn>
       </ElTable>
     </section>
+    </div>
   </main>
 </template>
 
@@ -207,21 +273,23 @@ onMounted(async () => {
 .editor-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .editor-page.embedded { min-height: 0; padding: 0; background: transparent; }
 .editor-page.embedded .card { box-shadow: none; }
-header, .card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 18px 22px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-header span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+.card { border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); }
 .card { margin-bottom: 18px; padding: 20px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .heading { display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; }
 .heading h2 { margin: 0; font-size: 18px; }
 .readonly-value { color: var(--md-on-surface); line-height: 1.5; overflow-wrap: anywhere; }
 .readonly-number { font-variant-numeric: tabular-nums; }
+.order-summary { margin-bottom: 16px; padding: 16px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius); background: var(--erp-surface-muted); }
+.order-summary-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.order-summary-heading > div { display: grid; gap: 4px; min-width: 0; }
+.order-summary-heading strong { font-size: 18px; overflow-wrap: anywhere; }
+.summary-label, .order-summary dt { color: var(--erp-text-muted); font-size: 12px; }
+.order-summary dl { display: grid; gap: 10px; margin: 12px 0 0; }
+.order-summary dl > div { display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 8px; }
+.order-summary dd { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; }
 @media (max-width: 760px) {
   .editor-page:not(.embedded) { padding: 16px; }
-  header { align-items: flex-start; flex-direction: column; gap: 16px; padding: 16px; }
-  header > div:last-child { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  header :deep(.el-button) { width: 100%; margin: 0; }
   .card { padding: 16px; }
   .grid { grid-template-columns: 1fr; gap: 0; }
   .heading { align-items: flex-start; flex-direction: column; gap: 10px; }
@@ -230,6 +298,5 @@ header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: 
 @media (max-width: 480px) {
   .editor-page:not(.embedded) { padding: 12px; }
   .card { padding: 12px; }
-  header > div:last-child { grid-template-columns: 1fr; }
 }
 </style>

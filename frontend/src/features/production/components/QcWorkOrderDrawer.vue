@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
-import { ElMessage } from 'element-plus'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
+import { useClosingSnapshot } from '@/shared/motion/useClosingSnapshot'
 import { queryQcWorkOrderDetail } from '../api/qc'
 import type { ProductionProgressWorkOrder } from '../domain/productionProgress'
 import WorkOrderRecordCard from './WorkOrderRecordCard.vue'
@@ -20,20 +21,30 @@ const visible = computed({
 })
 const drawerRef = ref<{ handleClose: () => void } | null>(null)
 const loading = ref(false)
+const loadError = ref('')
 const record = ref<ProductionProgressWorkOrder | null>(null)
+const { display, closing, beginClose, finishClose } = useClosingSnapshot(visible, () => ({
+  record: record.value,
+  loading: loading.value,
+  error: loadError.value,
+}), () => { visible.value = false })
 let requestRevision = 0
 
 async function load() {
-  if (!props.workOrderId) return
   const revision = ++requestRevision
-  loading.value = true
+  loadError.value = ''
   record.value = null
+  if (!props.modelValue || !props.workOrderId) {
+    loading.value = false
+    return
+  }
+  loading.value = true
   try {
     const result = await queryQcWorkOrderDetail(props.workOrderId)
     if (revision === requestRevision) record.value = result
   } catch (error) {
     if (revision === requestRevision) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '工单记录加载失败')
+      loadError.value = getApiErrorDetail(error)?.message || '工单记录加载失败'
     }
   } finally {
     if (revision === requestRevision) loading.value = false
@@ -51,10 +62,13 @@ watch(
     else {
       requestRevision += 1
       loading.value = false
+      loadError.value = ''
       record.value = null
     }
   },
+  { immediate: true },
 )
+onScopeDispose(() => { requestRevision += 1 })
 </script>
 
 <template>
@@ -64,23 +78,20 @@ watch(
     title="工单和质检记录"
     size="76%"
     destroy-on-close
-    modal-class="production-progress-overlay"
     class="production-progress-drawer"
     @contextmenu.prevent="closeByContextMenu"
+    @close="beginClose"
+    @closed="finishClose"
   >
-    <div v-loading="loading" class="drawer-body">
-      <WorkOrderRecordCard v-if="record" :record="record" />
-      <ElEmpty v-else-if="!loading" description="工单记录未加载" />
+    <div v-loading="display.loading" class="drawer-body" :inert="closing || !visible">
+      <LoadErrorAlert v-if="display.error" :message="display.error" :loading="loading" @retry="load" />
+      <WorkOrderRecordCard v-else-if="display.record" :record="display.record" />
+      <ElEmpty v-else-if="!display.loading" description="请选择工单查看质检记录" />
     </div>
   </ElDrawer>
 </template>
 
 <style scoped>
-:global(.el-overlay.is-drawer.production-progress-overlay) {
-  --erp-drawer-transition-duration: 300ms;
-  background-color: transparent !important;
-}
-
 .drawer-body {
   min-height: 360px;
 }

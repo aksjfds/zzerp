@@ -55,7 +55,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
     <div class="section-heading">
       <div>
         <h2>BOM 明细</h2>
-        <p>配件名称、配件编号和用量必填；保存后可拖入流程图。</p>
+        <p>{{ readonly ? '当前产品版本的配件、用量与备注。' : '配件名称、配件编号和用量必填；保存后可拖入流程图。' }}</p>
       </div>
       <div v-if="!readonly" class="heading-actions">
         <ElButton plain :disabled="saving" @click="addRow">新增配件</ElButton>
@@ -68,15 +68,17 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
         >保存 BOM</ElButton>
       </div>
     </div>
-    <ElTable v-table-column-widths="'engineering.bom-editor'" :data="modelValue" border table-layout="auto" empty-text="请新增至少一条 BOM 明细">
+    <ElTable v-table-column-widths="'engineering.bom-editor'" :data="modelValue" border table-layout="auto" :empty-text="readonly ? '当前版本暂无 BOM 明细' : '请新增至少一条 BOM 明细'">
       <ElTableColumn type="index" label="#" width="54" />
       <ElTableColumn label="配件名称" min-width="170">
         <template #default="{ row, $index }">
-          <ElFormItem :error="fieldError($index, 'part_name')">
+          <span v-if="readonly" class="readonly-value">{{ row.part_name }}</span>
+          <ElFormItem v-else :error="fieldError($index, 'part_name')">
             <ElInput
               :model-value="row.part_name"
               :disabled="readonly"
               placeholder="例如：主体"
+              :aria-label="`第 ${$index + 1} 行配件名称`"
               @update:model-value="update($index, 'part_name', $event)"
             />
           </ElFormItem>
@@ -84,19 +86,22 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
       </ElTableColumn>
       <ElTableColumn label="配件编号" min-width="170">
         <template #default="{ row, $index }">
-          <ElFormItem :error="fieldError($index, 'part_no')">
+          <span v-if="readonly" class="readonly-value">{{ row.part_no }}</span>
+          <ElFormItem v-else :error="fieldError($index, 'part_no')">
             <ElInput
               :model-value="row.part_no"
               :disabled="readonly"
               placeholder="例如：Z8412-01"
+              :aria-label="`第 ${$index + 1} 行配件编号`"
               @update:model-value="update($index, 'part_no', $event)"
             />
           </ElFormItem>
         </template>
       </ElTableColumn>
-      <ElTableColumn label="用量" width="140">
+      <ElTableColumn label="用量" width="140" align="right">
         <template #default="{ row, $index }">
-          <ElFormItem :error="fieldError($index, 'pcs')">
+          <span v-if="readonly" class="readonly-value numeric">{{ row.pcs }}</span>
+          <ElFormItem v-else :error="fieldError($index, 'pcs')">
             <ElInputNumber
               :model-value="row.pcs"
               :disabled="readonly"
@@ -104,6 +109,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
               :step="1"
               :precision="0"
               controls-position="right"
+              :aria-label="`第 ${$index + 1} 行用量`"
               @update:model-value="update($index, 'pcs', $event)"
             />
           </ElFormItem>
@@ -111,10 +117,13 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
       </ElTableColumn>
       <ElTableColumn label="备注" min-width="180">
         <template #default="{ row, $index }">
+          <span v-if="readonly" class="readonly-value">{{ row.remark || '—' }}</span>
           <ElInput
+            v-else
             :model-value="row.remark"
             :disabled="readonly"
             placeholder="可为空"
+            :aria-label="`第 ${$index + 1} 行备注`"
             @update:model-value="update($index, 'remark', $event)"
           />
         </template>
@@ -137,6 +146,9 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
 h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; }
 .bom-editor :deep(.el-form-item) { margin-bottom: 14px; }
+.bom-editor :deep(.el-input-number) { width: 100%; }
+.readonly-value { color: var(--erp-text); overflow-wrap: anywhere; }
+.numeric { font-variant-numeric: tabular-nums; }
 @media (max-width: 600px) {
   .section-heading { align-items: flex-start; flex-direction: column; gap: 10px; }
   .heading-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }

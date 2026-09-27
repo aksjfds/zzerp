@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import {
   queryDepartmentMaterials,
   storeProductionPosition,
@@ -10,18 +11,24 @@ import type { DepartmentMaterialPosition } from '../domain/types'
 
 const props = defineProps<{ departmentCode: string }>()
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const submittingKey = ref<string | null>(null)
 const items = ref<DepartmentMaterialPosition[]>([])
 const itemTypeLabels = { part: '普通配件', assembly: '装配体' } as const
 
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  items.value = []
   try {
-    items.value = await queryDepartmentMaterials(props.departmentCode)
+    const result = await queryDepartmentMaterials(props.departmentCode)
+    if (revision === loadRevision) items.value = result
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '物料加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '物料加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -62,7 +69,7 @@ onMounted(load)
 </script>
 
 <template>
-  <section v-loading="loading" class="position-storage">
+  <section class="position-storage">
     <div class="position-storage-heading">
       <div>
         <h2>当前物料</h2>
@@ -70,7 +77,8 @@ onMounted(load)
       </div>
       <ElButton @click="load">刷新</ElButton>
     </div>
-    <ElTable v-table-column-widths="'production.position-storage'" :data="items" border stripe table-layout="auto" empty-text="当前部门暂无物料">
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
+    <ElTable v-else v-table-column-widths="'production.position-storage'" v-loading="loading" :data="items" border stripe table-layout="auto" empty-text="当前部门暂无物料">
       <ElTableColumn prop="customer_order_no" label="订单编号" min-width="140" />
       <ElTableColumn label="产品" min-width="190">
         <template #default="{ row }">

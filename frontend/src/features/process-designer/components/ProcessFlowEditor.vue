@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onScopeDispose, ref } from 'vue'
 import '@logicflow/core/es/index.css'
 import '@logicflow/extension/lib/style/index.css'
 import ProcessFlowCanvas from './ProcessFlowCanvas.vue'
@@ -12,6 +12,8 @@ import type {
   ProcessFlow,
 } from '../domain/types'
 import { queryWorkshopRoutes, type WorkshopRouteOption } from '@/api/organization'
+import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 
 type NodeProperty = {
   key: 'outputName' | 'outputPcs' | 'workshopId' | 'departmentCode'
@@ -44,6 +46,9 @@ const canvas = ref<CanvasApi>()
 const selectedNode = ref<FlowNode | null>(null)
 const selectedEdge = ref<FlowEdge | null>(null)
 const workshops = ref<WorkshopRouteOption[]>([])
+const workshopsLoading = ref(true)
+const workshopsError = ref('')
+let workshopRequest = 0
 const placedBomIds = computed(() => props.modelValue.nodes.flatMap(node => (
   node.type === 'part' ? [node.bom_item_id] : []
 )))
@@ -86,7 +91,21 @@ function reload(flow: ProcessFlow) {
 }
 
 defineExpose({ focusElement, getGraphData: graphData, reload })
-onMounted(async () => { workshops.value = await queryWorkshopRoutes() })
+async function loadWorkshops() {
+  const request = ++workshopRequest
+  workshopsLoading.value = true
+  workshopsError.value = ''
+  try {
+    const result = await queryWorkshopRoutes()
+    if (request === workshopRequest) workshops.value = result
+  } catch (error) {
+    if (request === workshopRequest) workshopsError.value = getApiErrorDetail(error)?.message || '车间节点加载失败'
+  } finally {
+    if (request === workshopRequest) workshopsLoading.value = false
+  }
+}
+onMounted(loadWorkshops)
+onScopeDispose(() => { workshopRequest++ })
 </script>
 
 <template>
@@ -96,9 +115,11 @@ onMounted(async () => { workshops.value = await queryWorkshopRoutes() })
         <h2>工序流程配置</h2>
         <p>工程部只配置配件经过的车间、委外加工和 QC 节点；具体加工工艺不在流程图中配置。</p>
       </div>
-      <div class="heading-actions"><slot name="actions" /></div>
+      <div class="heading-actions"><slot name="actions" :disabled="workshopsLoading || Boolean(workshopsError)" /></div>
     </div>
-    <div class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge, 'is-readonly': readonly }">
+    <LoadErrorAlert :message="workshopsError" :loading="workshopsLoading" @retry="loadWorkshops" />
+    <div v-if="workshopsLoading" class="designer-loading" role="status">正在加载车间节点…</div>
+    <div v-else-if="!workshopsError" class="designer-shell" :class="{ 'has-property': selectedNode || selectedEdge, 'is-readonly': readonly }">
       <ProcessNodePalette
         v-if="!readonly"
         :bom-items="bomItems"
@@ -137,6 +158,7 @@ onMounted(async () => { workshops.value = await queryWorkshopRoutes() })
 .heading-actions { display: flex; align-items: center; flex: none; gap: 8px; }
 .heading-actions:empty { display: none; }
 .heading-actions :deep(.el-button + .el-button) { margin-left: 0; }
+.designer-loading { min-height: 280px; display: grid; place-items: center; border: 1px solid var(--erp-border); border-radius: var(--erp-radius); color: var(--erp-text-secondary); background: var(--erp-surface-muted); }
 h2 { margin: 0 0 5px; font-size: 18px; }
 p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
 .designer-shell { position: relative; display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 620px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); overflow: hidden; }

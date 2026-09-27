@@ -1,0 +1,131 @@
+:root .el-button,
+:root .el-input__wrapper,
+:root .el-select__wrapper,
+:root .el-textarea__inner,
+:root .el-checkbox__inner,
+:root .el-radio__inner,
+:root .el-switch__core {
+  transition-property: background-color, border-color, box-shadow, color;
+  transition-duration: var(--erp-motion-control);
+  transition-timing-function: var(--erp-motion-ease-enter);
+}
+
+:root .el-checkbox__inner::after,
+:root .el-radio__inner::after,
+:root .el-switch__action,
+:root .el-tabs__active-bar {
+  transition-duration: var(--erp-motion-control);
+  transition-timing-function: var(--erp-motion-ease-enter);
+}
+
+/* Native overlay transitions keep ownership of focus, ESC and unmount timing. */
+.el-overlay.is-drawer,
+.el-overlay.dialog-fade-enter-active,
+.el-overlay.dialog-fade-leave-active {
+  opacity: 1;
+  animation: none;
+  transition-property: opacity;
+}
+
+.el-overlay.is-drawer .el-drawer {
+  animation: none;
+  transform: translate(0);
+  transition: none;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-active,
+.el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer {
+  transition-duration: var(--erp-motion-enter);
+  transition-timing-function: var(--erp-motion-ease-enter);
+}
+
+.el-overlay.is-drawer.el-drawer-fade-leave-active,
+.el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer {
+  transition-duration: var(--erp-motion-exit);
+  transition-timing-function: var(--erp-motion-ease-exit);
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer,
+.el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer {
+  transition-property: transform;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-from,
+.el-overlay.is-drawer.el-drawer-fade-leave-to {
+  background-color: var(--el-overlay-color-lighter) !important;
+  opacity: 0;
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-from .el-drawer.rtl,
+.el-overlay.is-drawer.el-drawer-fade-leave-to .el-drawer.rtl {
+  transform: translateX(24px);
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-from .el-drawer.ltr,
+.el-overlay.is-drawer.el-drawer-fade-leave-to .el-drawer.ltr {
+  transform: translateX(-24px);
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-from .el-drawer.ttb,
+.el-overlay.is-drawer.el-drawer-fade-leave-to .el-drawer.ttb {
+  transform: translateY(-24px);
+}
+
+.el-overlay.is-drawer.el-drawer-fade-enter-from .el-drawer.btt,
+.el-overlay.is-drawer.el-drawer-fade-leave-to .el-drawer.btt {
+  transform: translateY(24px);
+}
+
+.el-overlay.dialog-fade-enter-active .el-overlay-dialog,
+.el-overlay.dialog-fade-leave-active .el-overlay-dialog {
+  animation: none;
+}
+
+.el-overlay.dialog-fade-enter-active,
+.el-overlay.dialog-fade-enter-active .el-dialog {
+  transition-duration: var(--erp-motion-dialog-enter);
+  transition-timing-function: var(--erp-motion-ease-enter);
+}
+
+.el-overlay.dialog-fade-leave-active,
+.el-overlay.dialog-fade-leave-active .el-dialog {
+  transition-duration: var(--erp-motion-dialog-exit);
+  transition-timing-function: var(--erp-motion-ease-exit);
+}
+
+.el-overlay.dialog-fade-enter-active .el-dialog,
+.el-overlay.dialog-fade-leave-active .el-dialog {
+  transition-property: transform;
+}
+
+.el-overlay.dialog-fade-enter-from,
+.el-overlay.dialog-fade-leave-to {
+  opacity: 0;
+}
+
+.el-overlay.dialog-fade-enter-from .el-dialog,
+.el-overlay.dialog-fade-leave-to .el-dialog {
+  transform: translateY(8px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+
+  .el-overlay.is-drawer.el-drawer-fade-enter-active,
+  .el-overlay.is-drawer.el-drawer-fade-leave-active,
+  .el-overlay.is-drawer.el-drawer-fade-enter-active .el-drawer,
+  .el-overlay.is-drawer.el-drawer-fade-leave-active .el-drawer,
+  .el-overlay.dialog-fade-enter-active,
+  .el-overlay.dialog-fade-leave-active,
+  .el-overlay.dialog-fade-enter-active .el-dialog,
+  .el-overlay.dialog-fade-leave-active .el-dialog {
+    transition-duration: 0.01ms !important;
+  }
+}

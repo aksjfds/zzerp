@@ -21,7 +21,12 @@ export function useProductionWorkbench(departmentCode: string) {
   const workers = ref<WorkerItem[]>([])
   const dialogVisible = ref(false)
   const submitting = ref(false)
+  const referenceError = ref('')
+  const referenceLoading = ref(false)
   let referenceDataLoaded = false
+  let referenceRequest: Promise<void> | undefined
+  const loadError = computed(() => reader.positionsError.value || referenceError.value)
+  const loading = computed(() => reader.positionsLoading.value || referenceLoading.value)
 
   const selectedSource = computed(() => reader.selectedPosition.value?.sources.find(
     item => item.repository_id === selectedSourceId.value,
@@ -111,12 +116,22 @@ export function useProductionWorkbench(departmentCode: string) {
 
   async function loadReferenceData() {
     if (referenceDataLoaded) return
-    try {
-      workers.value = await queryDepartmentWorkers(departmentCode)
-      referenceDataLoaded = true
-    } catch {
-      ElMessage.warning('工人列表加载失败')
-    }
+    if (referenceRequest) return referenceRequest
+    referenceError.value = ''
+    referenceLoading.value = true
+    referenceRequest = queryDepartmentWorkers(departmentCode)
+      .then(result => {
+        workers.value = result
+        referenceDataLoaded = true
+      })
+      .catch(error => {
+        referenceError.value = getApiErrorDetail(error)?.message || '工人列表加载失败'
+      })
+      .finally(() => {
+        referenceLoading.value = false
+        referenceRequest = undefined
+      })
+    return referenceRequest
   }
 
   async function focusTask(task: DepartmentProductionProgressItem) {
@@ -138,6 +153,8 @@ export function useProductionWorkbench(departmentCode: string) {
     creationTarget,
     dialogVisible,
     focusTask,
+    loadError,
+    loading,
     openWorkOrder,
     refresh: reloadWorkspace,
     reloadWorkspace,

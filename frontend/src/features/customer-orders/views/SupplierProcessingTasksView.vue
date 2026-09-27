@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { SUPPLIER_PROCESSING_PERMISSIONS } from '@/permission/constants'
 import SupplierProcessingWorkOrderDialog from '../components/SupplierProcessingWorkOrderDialog.vue'
 import {
@@ -17,6 +18,8 @@ import type {
 const tasks = ref<SupplierProcessingTask[]>([])
 const total = ref(0)
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const submitting = ref(false)
 const dialogVisible = ref(false)
 const activeTask = ref<SupplierProcessingTask>()
@@ -38,16 +41,19 @@ function workOrderStatusType(task: SupplierProcessingTask) {
 }
 
 async function load() {
-  if (loading.value) return
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  tasks.value = []
   try {
     const result = await querySupplierProcessingTasks()
+    if (revision !== loadRevision) return
     tasks.value = result.items
     total.value = result.total
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '委外加工任务加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '委外加工任务加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -101,11 +107,13 @@ defineExpose({ load })
         <p>生产计划确认后可创建一次委外工单；任务数量由生产计划确定。</p>
       </div>
       <div class="heading-actions">
-        <span>共 {{ total }} 项</span>
+        <span v-if="!loading && !loadError">共 {{ total }} 项</span>
         <ElButton :loading="loading" @click="load">刷新</ElButton>
       </div>
     </div>
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
     <ElTable
+      v-else
       v-table-column-widths="'sales.supplier-processing-tasks'"
       v-loading="loading"
       :data="tasks"
@@ -113,10 +121,13 @@ defineExpose({ load })
       stripe
       table-layout="auto"
     >
+      <ElTableColumn label="生产计划" min-width="100">
+        <template #default="{ row }">计划 #{{ row.production_plan_id }}</template>
+      </ElTableColumn>
       <ElTableColumn prop="item_code" label="物料编号" min-width="150" />
       <ElTableColumn prop="item_name" label="配件名称" min-width="180" />
       <ElTableColumn prop="product_version" label="产品版本" min-width="100" />
-      <ElTableColumn prop="task_quantity" label="任务数量" min-width="110" />
+      <ElTableColumn prop="task_quantity" label="任务数量" min-width="110" align="right" />
       <ElTableColumn label="工单状态" min-width="120">
         <template #default="{ row }">
           <ElTag :type="workOrderStatusType(row)">{{ workOrderStatusLabel(row) }}</ElTag>

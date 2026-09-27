@@ -27,7 +27,12 @@ export function useAssemblyWorkbench() {
   const standardDialogVisible = ref(false)
   const assemblyDialogVisible = ref(false)
   const submitting = ref(false)
+  const referenceError = ref('')
+  const referenceLoading = ref(false)
   let referenceDataLoaded = false
+  let referenceRequest: Promise<void> | undefined
+  const loadError = computed(() => reader.positionsError.value || referenceError.value)
+  const loading = computed(() => reader.positionsLoading.value || referenceLoading.value)
 
   const selectedStandardSource = computed(() => {
     const position = reader.selectedPosition.value
@@ -262,12 +267,22 @@ export function useAssemblyWorkbench() {
 
   async function loadReferenceData() {
     if (referenceDataLoaded) return
-    try {
-      workers.value = await queryDepartmentWorkers('assembly')
-      referenceDataLoaded = true
-    } catch {
-      ElMessage.warning('工人列表加载失败')
-    }
+    if (referenceRequest) return referenceRequest
+    referenceError.value = ''
+    referenceLoading.value = true
+    referenceRequest = queryDepartmentWorkers('assembly')
+      .then(result => {
+        workers.value = result
+        referenceDataLoaded = true
+      })
+      .catch(error => {
+        referenceError.value = getApiErrorDetail(error)?.message || '工人列表加载失败'
+      })
+      .finally(() => {
+        referenceLoading.value = false
+        referenceRequest = undefined
+      })
+    return referenceRequest
   }
 
   async function focusTask(task: DepartmentProductionProgressItem) {
@@ -289,6 +304,8 @@ export function useAssemblyWorkbench() {
     activeAssemblyTarget,
     assemblyDialogVisible,
     focusTask,
+    loadError,
+    loading,
     openContinuationWorkOrder,
     openInitialAssemblyWorkOrder,
     openStandardWorkOrder,

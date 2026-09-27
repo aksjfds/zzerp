@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import FinishedOrderOperations from '../components/FinishedOrderOperations.vue'
 import FinishedInboundOperations from '../components/FinishedInboundOperations.vue'
 import {
@@ -17,6 +18,8 @@ import type {
 } from '../domain/types'
 
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const stocks = ref<FinishedStock[]>([])
 const transactions = ref<FinishedStockTransaction[]>([])
 const finishedInboundOperations = ref<InstanceType<typeof FinishedInboundOperations>>()
@@ -65,18 +68,23 @@ async function reverseTransaction(row: FinishedStockTransaction) {
 }
 
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  stocks.value = []
+  transactions.value = []
   try {
     const [nextStocks, nextTransactions] = await Promise.all([
       queryFinishedStocks(),
       queryFinishedStockTransactions(),
     ])
+    if (revision !== loadRevision) return
     stocks.value = nextStocks
     transactions.value = nextTransactions
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '成品部数据加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '成品库存及流水加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -100,10 +108,11 @@ defineExpose({ load })
 </script>
 
 <template>
-  <section v-loading="loading" class="inventory-page">
+  <section class="inventory-page">
     <DepartmentPageHeader
       department-name="成品部"
       description="确认待入库成品、管理统一成品库存，并按客户订单办理发货。"
+      :loading="loading"
       @refresh="refreshFinishedOperations"
     />
     <ElTabs>
@@ -114,7 +123,10 @@ defineExpose({ load })
         />
       </ElTabPane>
       <ElTabPane label="成品库存">
+        <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
         <ElTable
+          v-else
+          v-loading="loading"
           v-table-column-widths="'finished.stocks'"
           :data="stocks"
           border
@@ -138,7 +150,10 @@ defineExpose({ load })
         />
       </ElTabPane>
       <ElTabPane label="库存流水">
+        <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
         <ElTable
+          v-else
+          v-loading="loading"
           v-table-column-widths="'finished.transactions'"
           :data="transactions"
           border

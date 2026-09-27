@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
 import BomEditor from '../components/BomEditor.vue'
@@ -14,6 +14,8 @@ import { useUnsavedChangesGuard } from '../composables/useUnsavedChangesGuard'
 import { useProductVersionLoader } from '../composables/useProductVersionLoader'
 import { useProductVersionActions } from '../composables/useProductVersionActions'
 import { queryCustomers, type Customer } from '@/features/customers'
+import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -24,12 +26,17 @@ const flowEditor = ref<FlowEditorApi>()
 const editorReady = ref(false)
 const customers = ref<Customer[]>([])
 const customerLoading = ref(false)
+const customerError = ref('')
+const initializationError = ref('')
+const initializing = ref(false)
+let customerRequest = 0
+let initializationRequest = 0
 const activeAction = ref<
   'create' | 'base' | 'bom' | 'flow-draft' | 'flow' | 'version-create' | null
 >(null)
 
 async function performAction(action: NonNullable<typeof activeAction.value>, callback: () => Promise<unknown>) {
-  if (activeAction.value) return
+  if (activeAction.value || !contentReady.value) return
   activeAction.value = action
   try {
     await callback()
@@ -49,6 +56,7 @@ const {
   markSaved,
   normalizedBom,
   normalizedFields,
+  resetForm,
   validateBom,
 } = useProductEditorForm()
 
@@ -81,11 +89,16 @@ function selectCustomer(value: number | string) {
 }
 
 async function loadCustomers() {
+  const request = ++customerRequest
   customerLoading.value = true
+  customerError.value = ''
   try {
-    customers.value = await queryCustomers()
+    const result = await queryCustomers()
+    if (request === customerRequest) customers.value = result
+  } catch (error) {
+    if (request === customerRequest) customerError.value = getApiErrorDetail(error)?.message || '客户列表加载失败'
   } finally {
-    customerLoading.value = false
+    if (request === customerRequest) customerLoading.value = false
   }
 }
 
@@ -129,6 +142,9 @@ const {
   currentVersion,
   loadProductVersion,
   loadingProduct,
+  productError,
+  requestedVersion,
+  retryProductVersion,
   reloadVersions,
   switchVersion,
   versionEditable,
@@ -144,17 +160,20 @@ const {
   versionDirty: editableDirty,
 })
 const selectedVersion = computed(() => form.version || currentVersion.value)
-const pageDirty = computed(() => !loadingProduct.value && editableDirty.value)
+const contentReady = computed(() => !productId.value || (editorReady.value && !initializing.value && !loadingProduct.value && !initializationError.value))
+const pageDirty = computed(() => contentReady.value && editableDirty.value)
 const baseReadOnly = computed(() => Boolean(
   mode.value === 'view'
   || !canEditProduct.value
-  || !baseInfoEditable.value
+  || (productId.value && !baseInfoEditable.value)
+  || !contentReady.value
   || store.saving,
 ))
 const versionReadOnly = computed(() => Boolean(
   mode.value === 'view'
   || !canEditProduct.value
-  || !versionEditable.value,
+  || (productId.value && !versionEditable.value)
+  || !contentReady.value,
 ))
 
 function updateBom(items: BomItem[]) {
@@ -186,22 +205,39 @@ const { createVersion, enterEditMode, returnViewMode } = useProductVersionAction
   versionDirty: pageDirty,
 })
 
-onMounted(async () => {
-  await loadCustomers()
+async function initializeProduct() {
+  const request = ++initializationRequest
+  initializationError.value = ''
   if (!productId.value) {
+    initializing.value = false
+    resetForm()
     markSaved(['base', 'bom', 'flow'])
     return
   }
+  initializing.value = true
+  editorReady.value = false
   try {
     await reloadVersions()
+    if (request !== initializationRequest) return
     const requestedVersion = Number(route.query.version)
     await loadProductVersion(Number.isInteger(requestedVersion) && requestedVersion > 0
       ? requestedVersion
       : undefined)
-  } catch {
-    ElMessage.error('产品不存在或加载失败')
-    router.replace('/products')
+  } catch (error) {
+    if (request === initializationRequest) initializationError.value = getApiErrorDetail(error)?.message || '产品版本列表加载失败'
+  } finally {
+    if (request === initializationRequest) initializing.value = false
   }
+}
+
+onMounted(() => {
+  void loadCustomers()
+  void initializeProduct()
+})
+watch(productId, () => { void initializeProduct() })
+onScopeDispose(() => {
+  customerRequest++
+  initializationRequest++
 })
 </script>
 
@@ -210,14 +246,15 @@ onMounted(async () => {
     <header class="editor-header">
       <div>
         <div class="page-kicker">工程部 / {{ productId ? mode === 'view' ? '查看产品' : '编辑产品' : '录入产品' }}</div>
-        <h1>{{ productId ? form.product_name || (mode === 'view' ? '查看产品' : '编辑产品') : '录入新产品' }}</h1>
+        <h1>{{ productId ? contentReady ? form.product_name || '产品工程资料' : '产品工程资料' : '录入新产品' }}</h1>
       </div>
       <div class="editor-actions">
         <div v-if="productId" class="version-selector">
           <span>当前版本</span>
           <ElSelect
-            :model-value="form.version"
-            :disabled="store.saving"
+            :model-value="requestedVersion ?? form.version"
+            :disabled="store.saving || initializing || loadingProduct"
+            :loading="initializing || loadingProduct"
             placement="top-start"
             :fallback-placements="['top-start', 'top-end']"
             @change="switchVersion"
@@ -230,11 +267,12 @@ onMounted(async () => {
           <ElButton
             v-if="productId && mode === 'view' && canEditProduct"
             type="primary"
+            :disabled="!contentReady"
             @click="enterEditMode"
           >进入编辑</ElButton>
           <ElButton
             v-if="productId && mode === 'edit'"
-            :disabled="store.saving"
+            :disabled="store.saving || !contentReady"
             @click="returnViewMode"
           >退出编辑</ElButton>
         </div>
@@ -242,7 +280,7 @@ onMounted(async () => {
           <ElButton
             type="primary"
             plain
-            :disabled="store.saving"
+            :disabled="store.saving || !contentReady"
             :loading="activeAction === 'version-create'"
             @click="performAction('version-create', createVersion)"
           >创建新版本</ElButton>
@@ -257,124 +295,142 @@ onMounted(async () => {
       </div>
     </header>
 
-    <section class="editor-card basic-section">
-      <div class="section-heading">
-        <div>
-          <h2>产品基础信息</h2>
-          <span>产品级资料，所有版本共享；创建订单后不可修改。</span>
+    <LoadErrorAlert :message="initializationError" :loading="initializing" @retry="initializeProduct" />
+    <LoadErrorAlert :message="productError" :loading="loadingProduct" @retry="retryProductVersion" />
+    <div v-if="productId && (initializing || loadingProduct)" class="editor-loading" role="status">
+      <ElSkeleton :rows="6" animated />
+      <p>正在加载产品资料与版本…</p>
+    </div>
+    <template v-if="contentReady">
+      <section class="editor-card basic-section">
+        <div class="section-heading">
+          <div>
+            <h2>产品基础信息</h2>
+            <span>产品级资料，所有版本共享；创建订单后不可修改。</span>
+          </div>
+          <ElButton
+            v-if="productId && mode === 'edit' && canEditProduct && baseInfoEditable"
+            type="primary"
+            :disabled="!baseDirty || store.saving"
+            :loading="activeAction === 'base'"
+            @click="performAction('base', saveProductInfo)"
+          >保存基础信息</ElButton>
         </div>
-        <ElButton
-          v-if="productId && mode === 'edit' && canEditProduct && baseInfoEditable"
-          type="primary"
-          :disabled="!baseDirty || store.saving"
-          :loading="activeAction === 'base'"
-          @click="performAction('base', saveProductInfo)"
-        >保存基础信息</ElButton>
-      </div>
-      <ElAlert
-        v-if="productId && !baseInfoEditable"
-        class="section-alert"
-        title="产品基础信息为共享资料，已有订单引用后固定为只读。"
-        type="info"
-        :closable="false"
-      />
-      <ElForm ref="baseFormRef" :model="form" :rules="baseRules" :disabled="baseReadOnly" label-position="top">
-        <div class="form-grid">
-          <ElFormItem prop="factory_code" label="厂编"><ElInput v-model="form.factory_code" /></ElFormItem>
-          <ElFormItem prop="product_name" label="产品名称"><ElInput v-model="form.product_name" /></ElFormItem>
-          <ElFormItem prop="customer_name" label="客户名称">
-            <ElSelect
-              :model-value="customerSelection"
-              placement="top-start"
-              :fallback-placements="['top-start', 'top-end']"
-              filterable
-              allow-create
-              default-first-option
-              :loading="customerLoading"
-              placeholder="选择已有客户或输入新客户"
-              style="width: 100%"
-              @change="selectCustomer"
-            >
-              <ElOption
-                v-for="customer in customers"
-                :key="customer.id"
-                :label="customer.customer_name"
-                :value="customer.id"
-              />
-            </ElSelect>
-          </ElFormItem>
-          <ElFormItem prop="customer_code" label="客编"><ElInput v-model="form.customer_code" /></ElFormItem>
-        </div>
-      </ElForm>
-    </section>
-
-    <section class="editor-card">
-      <ElAlert
-        v-if="productId && mode === 'edit' && !versionEditable"
-        class="section-alert"
-        title="当前版本已被订单或生产记录引用，BOM 不可修改。请基于此版本创建新版后修改。"
-        type="warning"
-        :closable="false"
-      />
-      <BomEditor
-        :model-value="form.bom_items"
-        :readonly="versionReadOnly"
-        :can-save="Boolean(productId && !versionReadOnly)"
-        :dirty="bomDirty"
-        :saving="activeAction === 'bom'"
-        @update:model-value="updateBom"
-        @save="performAction('bom', saveBom)"
-      />
-    </section>
-
-    <section class="editor-card">
-      <ElAlert v-if="!productId" title="请先保存产品基础信息和 BOM，再配置工序流程" type="info" :closable="false" show-icon />
-      <template v-else-if="editorReady">
-        <ElAlert v-if="mode === 'view'" title="查看模式为只读" type="info" :closable="false" />
         <ElAlert
-          v-else-if="!versionEditable"
-          title="当前版本已被订单或生产记录引用，工序流程不可修改。请基于此版本创建新版后修改。"
+          v-if="productId && !baseInfoEditable"
+          class="section-alert"
+          title="产品基础信息为共享资料，已有订单引用后固定为只读。"
+          type="info"
+          :closable="false"
+        />
+        <LoadErrorAlert :message="customerError" :loading="customerLoading" @retry="loadCustomers" />
+        <dl v-if="mode === 'view' || (productId && !baseInfoEditable)" class="base-details">
+          <div><dt>厂编</dt><dd>{{ form.factory_code }}</dd></div>
+          <div><dt>产品名称</dt><dd>{{ form.product_name }}</dd></div>
+          <div><dt>客户名称</dt><dd>{{ form.customer_name }}</dd></div>
+          <div><dt>客编</dt><dd>{{ form.customer_code }}</dd></div>
+        </dl>
+        <ElForm v-else ref="baseFormRef" :model="form" :rules="baseRules" :disabled="baseReadOnly" label-position="top">
+          <div class="form-grid">
+            <ElFormItem prop="factory_code" label="厂编"><ElInput v-model="form.factory_code" /></ElFormItem>
+            <ElFormItem prop="product_name" label="产品名称"><ElInput v-model="form.product_name" /></ElFormItem>
+            <ElFormItem prop="customer_name" label="客户名称">
+              <ElSelect
+                :model-value="customerSelection"
+                placement="top-start"
+                :fallback-placements="['top-start', 'top-end']"
+                filterable
+                allow-create
+                default-first-option
+                :loading="customerLoading"
+                :disabled="customerLoading || Boolean(customerError)"
+                placeholder="选择已有客户或输入新客户"
+                style="width: 100%"
+                @change="selectCustomer"
+              >
+                <ElOption
+                  v-for="customer in customers"
+                  :key="customer.id"
+                  :label="customer.customer_name"
+                  :value="customer.id"
+                />
+              </ElSelect>
+            </ElFormItem>
+            <ElFormItem prop="customer_code" label="客编"><ElInput v-model="form.customer_code" /></ElFormItem>
+          </div>
+        </ElForm>
+      </section>
+
+      <section class="editor-card">
+        <ElAlert
+          v-if="productId && mode === 'edit' && !versionEditable"
+          class="section-alert"
+          title="当前版本已被订单或生产记录引用，BOM 不可修改。请基于此版本创建新版后修改。"
           type="warning"
           :closable="false"
         />
-        <ElAlert
-          v-if="flowSaveError"
-          class="flow-error"
-          :title="flowSaveError.message"
-          type="error"
-          :closable="false"
-          show-icon
-        />
-        <ProcessFlowEditor
-          ref="flowEditor"
-          v-model="form.process_flow"
-          :bom-items="form.bom_items"
+        <BomEditor
+          :model-value="form.bom_items"
           :readonly="versionReadOnly"
-          @update:model-value="clearFlowSaveError"
-        >
-          <template v-if="!versionReadOnly" #actions>
-            <ElButton
-              plain
-              :disabled="!flowDirty || store.saving"
-              :loading="activeAction === 'flow-draft'"
-              @click="performAction('flow-draft', saveFlowDraft)"
-            >保存草稿</ElButton>
-            <ElButton
-              type="primary"
-              :disabled="(!flowDirty && !form.process_flow_is_draft) || store.saving"
-              :loading="activeAction === 'flow'"
-              @click="performAction('flow', saveFlow)"
-            >确认并保存流程</ElButton>
-          </template>
-        </ProcessFlowEditor>
-      </template>
-      <div v-else v-loading="true" class="flow-loading">正在加载流程图</div>
-    </section>
+          :can-save="Boolean(productId && !versionReadOnly)"
+          :dirty="bomDirty"
+          :saving="activeAction === 'bom'"
+          @update:model-value="updateBom"
+          @save="performAction('bom', saveBom)"
+        />
+      </section>
+
+      <section class="editor-card">
+        <ElAlert v-if="!productId" title="请先保存产品基础信息和 BOM，再配置工序流程" type="info" :closable="false" show-icon />
+        <template v-else-if="editorReady">
+          <ElAlert v-if="mode === 'view'" title="查看模式为只读" type="info" :closable="false" />
+          <ElAlert
+            v-else-if="!versionEditable"
+            title="当前版本已被订单或生产记录引用，工序流程不可修改。请基于此版本创建新版后修改。"
+            type="warning"
+            :closable="false"
+          />
+          <ElAlert
+            v-if="flowSaveError"
+            class="flow-error"
+            :title="flowSaveError.message"
+            type="error"
+            :closable="false"
+            show-icon
+          />
+          <ProcessFlowEditor
+            ref="flowEditor"
+            v-model="form.process_flow"
+            :bom-items="form.bom_items"
+            :readonly="versionReadOnly"
+            @update:model-value="clearFlowSaveError"
+          >
+            <template v-if="!versionReadOnly" #actions="{ disabled }">
+              <ElButton
+                plain
+                :disabled="disabled || !flowDirty || store.saving"
+                :loading="activeAction === 'flow-draft'"
+                @click="performAction('flow-draft', saveFlowDraft)"
+              >保存草稿</ElButton>
+              <ElButton
+                type="primary"
+                :disabled="disabled || (!flowDirty && !form.process_flow_is_draft) || store.saving"
+                :loading="activeAction === 'flow'"
+                @click="performAction('flow', saveFlow)"
+              >确认并保存流程</ElButton>
+            </template>
+          </ProcessFlowEditor>
+        </template>
+        <div v-else v-loading="true" class="flow-loading">正在加载流程图</div>
+      </section>
+    </template>
   </main>
 </template>
 
 <style scoped>
 .editor-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
+.editor-loading { padding: 28px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); }
+.editor-loading p { margin: 16px 0 0; color: var(--erp-text-secondary); }
 .editor-header, .editor-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
 .editor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 18px 22px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
 .editor-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
@@ -392,9 +448,12 @@ onMounted(async () => {
 .section-heading span { color: var(--el-text-color-secondary); font-size: 12px; }
 .flow-error { margin-bottom: 12px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+.base-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; margin: 0; }
+.base-details div { min-width: 0; }
+.base-details dt { margin-bottom: 4px; color: var(--erp-text-secondary); font-size: 12px; }
+.base-details dd { margin: 0; color: var(--erp-text); overflow-wrap: anywhere; }
 .basic-section :deep(.el-form-item) { margin-bottom: 12px; }
 .flow-loading { display: grid; min-height: 260px; place-items: center; color: var(--el-text-color-secondary); }
-.read-only-content { pointer-events: none; opacity: .82; }
 @media (max-width: 680px) {
   .editor-page { padding: 16px; }
   .editor-header { align-items: flex-start; flex-direction: column; padding: 16px; }
@@ -406,6 +465,7 @@ onMounted(async () => {
   .editor-actions > :deep(.el-button), .action-group :deep(.el-button) { width: 100%; margin: 0; }
   .editor-card { padding: 16px; }
   .form-grid { grid-template-columns: 1fr; }
+  .base-details { grid-template-columns: 1fr; }
   .section-heading { align-items: flex-start; flex-direction: column; }
   .section-heading > div { align-items: flex-start; flex-direction: column; gap: 4px; }
 }

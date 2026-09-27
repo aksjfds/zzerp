@@ -12,7 +12,7 @@ type Options = {
   versionDirty: ComputedRef<boolean>
   router: Router
   store: ReturnType<typeof useEngineeringProductsStore>
-  loadProductVersion: (version?: number) => Promise<void>
+  loadProductVersion: (version?: number) => Promise<boolean>
   reloadVersions: () => Promise<void>
 }
 
@@ -53,7 +53,7 @@ export function useProductVersionActions(options: Options) {
       } catch {
         return
       }
-      if (form.version) await loadProductVersion(form.version)
+      if (form.version && !await loadProductVersion(form.version)) return
     }
     await replaceMode('view')
   }
@@ -71,7 +71,7 @@ export function useProductVersionActions(options: Options) {
         selectedVersion.value,
       )
       await reloadVersions()
-      await loadProductVersion(product.version)
+      if (!await loadProductVersion(product.version)) return
       ElMessage.success(`已创建 V${product.version}`)
     } catch (error) {
       ElMessage.error(getApiErrorDetail(error)?.message || '创建新版本失败')

@@ -1,24 +1,10 @@
 import type LogicFlow from '@logicflow/core'
-import { materialColors } from '@/shared/material/tokens'
+import type { FlowColors } from '@/shared/theme/flowColors'
 import type { FlowEdge, FlowNodeType, ProcessFlow } from './types'
 import type { ProductionEdgeStat, ProductionNodeStat } from './productionProgress'
 
 type ProductionEdgeState = 'pending' | 'active' | 'done'
 export type ProgressField = { label: string; value: number; danger?: boolean }
-
-const EDGE_STYLE: Record<ProductionEdgeState, Record<string, unknown>> = {
-  pending: { stroke: materialColors.outlineVariant, strokeWidth: 3, strokeDasharray: '6 4' },
-  active: { stroke: materialColors.warning, strokeWidth: 4, strokeDasharray: '10 5' },
-  done: { stroke: materialColors.success, strokeWidth: 4 },
-}
-
-const EDGE_ANIMATION_STYLE: Record<string, unknown> = {
-  stroke: materialColors.warning,
-  strokeDasharray: '14,6',
-  strokeDashoffset: '100%',
-  animationDuration: '12s',
-  animationDirection: 'normal',
-}
 
 function edgeState(
   edge: FlowEdge,
@@ -50,7 +36,20 @@ export function withProductionEdgeStyle(
   flow: ProcessFlow,
   status: Map<string, ProductionNodeStat>,
   edgeStatus: Map<string, ProductionEdgeStat>,
+  colors: FlowColors,
 ): LogicFlow.GraphConfigData {
+  const edgeStyles: Record<ProductionEdgeState, Record<string, unknown>> = {
+    pending: { stroke: colors.outlineVariant, strokeWidth: 3, strokeDasharray: '6 4' },
+    active: { stroke: colors.warning, strokeWidth: 4, strokeDasharray: '10 5' },
+    done: { stroke: colors.success, strokeWidth: 4 },
+  }
+  const animationStyle = {
+    stroke: colors.warning,
+    strokeDasharray: '14,6',
+    strokeDashoffset: '100%',
+    animationDuration: '12s',
+    animationDirection: 'normal',
+  }
   const businessEdges = new Map(flow.edges.map(edge => [edge.id, edge]))
   return {
     ...data,
@@ -63,8 +62,8 @@ export function withProductionEdgeStyle(
         properties: {
           ...edge.properties,
           productionState: state,
-          style: EDGE_STYLE[state],
-          productionAnimationStyle: animated ? EDGE_ANIMATION_STYLE : undefined,
+          style: edgeStyles[state],
+          productionAnimationStyle: animated ? animationStyle : undefined,
         },
       }
     }),

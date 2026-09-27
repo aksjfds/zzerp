@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
+import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
 import { ORDER_PERMISSIONS } from '@/permission/constants'
 import { useAuthStore } from '@/stores/auth'
 import CustomerOrderEditorView from './CustomerOrderEditorView.vue'
@@ -26,6 +28,8 @@ const props = withDefaults(defineProps<{
 const router = useRouter()
 const authStore = useAuthStore()
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const keyword = ref('')
 const orders = ref<CustomerOrder[]>([])
 const total = ref(0)
@@ -41,14 +45,20 @@ const filteredOrders = computed(() => {
 })
 
 async function loadOrders() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  orders.value = []
   try {
     const result = await queryCustomerOrders(page.value, pageSize)
+    if (revision !== loadRevision) return
     orders.value = result.items
     total.value = result.total
   }
-  catch { ElMessage.error('客户订单加载失败') }
-  finally { loading.value = false }
+  catch (error) {
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '客户订单加载失败'
+  }
+  finally { if (revision === loadRevision) loading.value = false }
 }
 
 async function act(order: CustomerOrder, action: 'confirm' | 'cancel' | 'delete') {
@@ -124,20 +134,20 @@ defineExpose({ load: loadOrders })
 
 <template>
   <main class="page-shell" :class="{ embedded: props.embedded }">
-    <header v-if="!props.embedded" class="page-header">
-      <div><span>业务部</span><h1>客户订单</h1></div>
-      <div>
+    <DepartmentPageHeader v-if="!props.embedded" department-name="业务部" page-title="客户订单">
+      <template #actions>
         <ElButton @click="logout">退出登录</ElButton>
         <ElButton v-permission="ORDER_PERMISSIONS.add" type="primary" @click="router.push('/business/orders/new')">创建客户订单</ElButton>
-      </div>
-    </header>
+      </template>
+    </DepartmentPageHeader>
     <section class="content-card" :class="{ embedded: props.embedded }">
       <ElInput v-model="keyword" clearable placeholder="搜索当前页的订单编号或客户" class="search" />
-      <ElTable v-table-column-widths="'sales.customer-orders'" v-loading="loading" :data="filteredOrders" border table-layout="auto">
+      <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="loadOrders" />
+      <ElTable v-else v-table-column-widths="'sales.customer-orders'" v-loading="loading" :data="filteredOrders" border table-layout="auto" empty-text="暂无符合条件的客户订单">
         <ElTableColumn prop="customer_name" label="客户名称" min-width="150" />
         <ElTableColumn prop="customer_order_no" label="订单编号" min-width="160" />
         <ElTableColumn label="产品明细" min-width="260">
-          <template #default="{ row }"><div v-for="item in row.items" :key="item.id">{{ item.factory_code }}-{{ item.product_name }}-{{ item.quantity }}个</div></template>
+          <template #default="{ row }"><div v-for="item in row.items" :key="item.id" class="product-summary"><strong>{{ item.factory_code }} · {{ item.product_name }}</strong><span>版本 {{ item.product_version ?? '—' }} · {{ item.quantity }} 个</span></div></template>
         </ElTableColumn>
         <ElTableColumn label="状态" width="100">
           <template #default="{ row }">
@@ -147,7 +157,7 @@ defineExpose({ load: loadOrders })
           </template>
         </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" width="170" />
-        <ElTableColumn label="操作" width="250" fixed="right">
+        <ElTableColumn label="操作" min-width="250">
           <template #default="{ row }">
             <div class="row-actions">
               <ElButton link @click="viewOrder(row)">查看</ElButton>
@@ -174,13 +184,11 @@ defineExpose({ load: loadOrders })
                 <template #dropdown>
                   <ElDropdownMenu>
                     <ElDropdownItem
-                      v-if="['draft', 'confirmed', 'planned'].includes(row.status)"
-                      v-permission="ORDER_PERMISSIONS.cancel"
+                      v-if="['draft', 'confirmed', 'planned'].includes(row.status) && authStore.hasPermission(ORDER_PERMISSIONS.cancel)"
                       command="cancel"
                     >取消订单</ElDropdownItem>
                     <ElDropdownItem
-                      v-if="row.status === 'draft'"
-                      v-permission="ORDER_PERMISSIONS.edit"
+                      v-if="row.status === 'draft' && authStore.hasPermission(ORDER_PERMISSIONS.edit)"
                       command="delete"
                       divided
                     >删除草稿</ElDropdownItem>
@@ -192,6 +200,7 @@ defineExpose({ load: loadOrders })
         </ElTableColumn>
       </ElTable>
       <ElPagination
+        v-if="!loadError"
         v-model:current-page="page"
         class="pagination"
         layout="prev, pager, next, total"
@@ -210,27 +219,23 @@ defineExpose({ load: loadOrders })
 <style scoped>
 .page-shell { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
 .page-shell.embedded { min-height: auto; padding: 0; background: transparent; }
-.page-header, .content-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 18px; padding: 20px 24px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.page-header span { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-.page-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+.content-card { border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); }
 .content-card { padding: 20px; }
 .content-card.embedded { border: 0; box-shadow: none; padding: 0; }
 .search { width: min(384px, 100%); margin-bottom: 16px; }
 .row-actions { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .row-actions :deep(.el-button) { margin-left: 0; }
 .pagination { justify-content: flex-end; margin-top: 16px; }
+.product-summary { display: grid; gap: 2px; }
+.product-summary + .product-summary { margin-top: 8px; }
+.product-summary span { color: var(--erp-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   .page-shell:not(.embedded) { padding: 16px; }
-  .page-header { align-items: flex-start; flex-direction: column; gap: 16px; padding: 16px; }
-  .page-header > div:last-child { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .page-header :deep(.el-button) { width: 100%; margin: 0; }
   .content-card { padding: 16px; }
   .search { width: 100%; }
 }
 @media (max-width: 480px) {
   .page-shell:not(.embedded) { padding: 12px; }
   .content-card { padding: 12px; }
-  .page-header > div:last-child { grid-template-columns: 1fr; }
 }
 </style>

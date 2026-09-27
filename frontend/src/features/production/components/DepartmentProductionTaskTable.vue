@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { useMotion } from '@/shared/motion/useMotion'
 import type {
   AssemblyMaterialArrival,
   DepartmentProductionProgressItem,
@@ -32,6 +33,31 @@ const emit = defineEmits<{
 }>()
 
 const rows = computed(() => buildProductionTaskRows(props.items))
+const tableSurface = ref<HTMLElement | null>(null)
+const { play, finishAll, cancelAll } = useMotion()
+let hasRevealed = false
+
+function revealTable() {
+  if (hasRevealed || props.loading || !props.items.length || !tableSurface.value) return
+
+  cancelAll()
+  hasRevealed = true
+  play(tableSurface.value, [
+    { opacity: 0.85 },
+    { opacity: 1 },
+  ])
+}
+
+watch([() => props.items, () => props.loading], () => {
+  if (props.loading) cancelAll()
+  else revealTable()
+}, { flush: 'post' })
+
+onMounted(() => {
+  void nextTick(() => {
+    if (!hasRevealed) revealTable()
+  })
+})
 
 function isTask(row: ProductionTaskTreeRow): row is ProductionTaskParentRow {
   return row.row_type === 'task'
@@ -70,174 +96,189 @@ function materialArrivalType(
 </script>
 
 <template>
-  <ElTable
-    v-table-column-widths="'production.department-tasks'"
-    v-loading="loading"
-    :data="rows"
-    row-key="row_key"
-    border
-    stripe
-    table-layout="auto"
-    empty-text="暂无生产任务"
+  <div
+    ref="tableSurface"
+    class="task-table-surface"
+    @pointerdown.capture="finishAll"
+    @focusin.capture="finishAll"
   >
-    <ElTableColumn label="订单号" min-width="140">
-      <template #default="{ row }">
-        {{ isTask(row) ? row.task.customer_order_no : '—' }}
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="生产任务 / 加工状态" min-width="230">
-      <template #default="{ row }">
-        <div v-if="isTask(row)" class="task-cell">
-          <ElLink
-            class="tree-name task-name"
-            type="primary"
-            :underline="false"
-            @click="emit('select', row.task)"
-          >
-            <span class="directory-icon folder-icon" aria-hidden="true" />
-            <span>{{ row.task.part_name }}</span>
-          </ElLink>
-          <div class="task-overview-statuses">
-            <ElTag
-              v-for="status in row.overview_statuses"
-              :key="status.key"
-              :type="status.type"
-              effect="light"
-              size="small"
-            >
-              {{ status.label }}<template v-if="status.quantity !== null"> · {{ status.quantity }}</template>
-            </ElTag>
-          </div>
-        </div>
-        <div v-else class="status-cell" :class="{ 'has-next': !row.is_last_child }">
-          <span
-            class="tree-name status-branch"
-            :class="{ 'is-last': row.is_last_child }"
-          >
-            <span class="directory-icon file-icon" aria-hidden="true" />
-            <ElTag
-              :type="statusType(row.status)"
-              effect="light"
-              size="small"
-            >
-              {{ statusLabel(row) }} · {{ row.status.quantity }}
-            </ElTag>
-          </span>
-          <div v-if="showsMaterialArrivals(row)" class="material-arrival-list">
-            <ElTag
-              v-for="material in row.task.material_arrivals"
-              :key="`${material.material_type}:${material.material_no}`"
-              :type="materialArrivalType(material)"
-              effect="plain"
-              size="small"
-            >
-              {{ material.material_name }} · {{ material.arrived_quantity }}/{{ material.task_quantity }}
-            </ElTag>
-          </div>
-        </div>
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="物料编号" min-width="145">
-      <template #default="{ row }">
-        {{ isTask(row) ? row.task.part_no : '—' }}
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="车间" min-width="120">
-      <template #default="{ row }">
-        {{ isTask(row) ? displayWorkshopName(row.task.processing_workshop) : '—' }}
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="加工工艺" min-width="160">
-      <template #default="{ row }">
-        <span v-if="isTask(row)">—</span>
-        <span v-else>{{ row.status.procedure_names.join('、') || '—' }}</span>
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="任务数" min-width="85" align="right">
-      <template #default="{ row }">
-        {{ isTask(row) ? row.task.task_quantity : '—' }}
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="到货数" min-width="90" align="right">
-      <template #default="{ row }">
-        <template v-if="isTask(row)">
-          <ElPopover
-            v-if="row.task.material_arrivals.length"
-            placement="bottom"
-            trigger="click"
-            :width="430"
-          >
-            <template #reference>
-              <ElButton link type="primary">{{ row.task.arrived_quantity }}</ElButton>
-            </template>
-            <ElTable :data="row.task.material_arrivals" size="small" table-layout="auto">
-              <ElTableColumn prop="material_no" label="物料编号" min-width="120" />
-              <ElTableColumn prop="material_name" label="物料" min-width="130" />
-              <ElTableColumn prop="task_quantity" label="任务数" min-width="70" align="right" />
-              <ElTableColumn prop="arrived_quantity" label="到货数" min-width="70" align="right" />
-            </ElTable>
-          </ElPopover>
-          <span v-else>{{ row.task.arrived_quantity }}</span>
+    <ElTable
+      v-table-column-widths="'production.department-tasks'"
+      v-loading="loading"
+      :data="rows"
+      row-key="row_key"
+      border
+      stripe
+      table-layout="auto"
+      empty-text="暂无生产任务"
+    >
+      <ElTableColumn label="订单号" min-width="140">
+        <template #default="{ row }">
+          {{ isTask(row) ? row.task.customer_order_no : '—' }}
         </template>
-        <span v-else>—</span>
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="完成数" min-width="90" align="right">
-      <template #default="{ row }">
-        <span v-if="isTask(row)" class="completed">{{ row.task.completed_quantity }}</span>
-        <span v-else>—</span>
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="备注" min-width="180" show-overflow-tooltip>
-      <template #default="{ row }">
-        {{ isTask(row) ? (row.task.remark || '—') : '—' }}
-      </template>
-    </ElTableColumn>
-    <ElTableColumn label="操作" min-width="110" align="center">
-      <template #default="{ row }">
-        <ElButton
-          v-if="isTask(row)"
-          link
-          @click="emit('viewAllWorkOrders', row.task)"
-        >查看全部工单</ElButton>
-        <div v-else class="task-actions">
-          <ElButton
-            v-if="row.status.status === 'exception'"
-            link
-            type="danger"
-            @click="emit('viewWorkOrders', row.task, row.status)"
-          >查看情况</ElButton>
-          <ElTooltip
-            v-else-if="row.status.action === 'create_work_order'"
-            :disabled="row.task.plan_status !== 'draft'"
-            content="生产计划确认后可开工单"
-            placement="top"
-          >
-            <span>
-              <ElButton
-                type="primary"
-                link
-                :disabled="row.task.plan_status === 'draft'"
-                @click="emit('createWorkOrder', row.task, row.status)"
+      </ElTableColumn>
+      <ElTableColumn label="生产任务 / 加工状态" min-width="230">
+        <template #default="{ row }">
+          <div v-if="isTask(row)" class="task-cell">
+            <ElLink
+              class="tree-name task-name"
+              type="primary"
+              underline="never"
+              @click="emit('select', row.task)"
+            >
+              <span class="directory-icon folder-icon" aria-hidden="true" />
+              <span>{{ row.task.part_name }}</span>
+            </ElLink>
+            <div class="task-overview-statuses">
+              <ElTag
+                v-for="status in row.overview_statuses"
+                :key="status.key"
+                :type="status.type"
+                effect="light"
+                size="small"
               >
-                开工单
-              </ElButton>
+                {{ status.label }}<template v-if="status.quantity !== null"> · {{ status.quantity }}</template>
+              </ElTag>
+            </div>
+          </div>
+          <div v-else class="status-cell" :class="{ 'has-next': !row.is_last_child }">
+            <span
+              class="tree-name status-branch"
+              :class="{ 'is-last': row.is_last_child }"
+            >
+              <span class="directory-icon file-icon" aria-hidden="true" />
+              <ElTag
+                :type="statusType(row.status)"
+                effect="light"
+                size="small"
+              >
+                {{ statusLabel(row) }} · {{ row.status.quantity }}
+              </ElTag>
             </span>
-          </ElTooltip>
+            <div v-if="showsMaterialArrivals(row)" class="material-arrival-list">
+              <ElTag
+                v-for="material in row.task.material_arrivals"
+                :key="`${material.material_type}:${material.material_no}`"
+                :type="materialArrivalType(material)"
+                effect="plain"
+                size="small"
+              >
+                {{ material.material_name }} · {{ material.arrived_quantity }}/{{ material.task_quantity }}
+              </ElTag>
+            </div>
+          </div>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="物料编号" min-width="145">
+        <template #default="{ row }">
+          {{ isTask(row) ? row.task.part_no : '—' }}
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="车间" min-width="120">
+        <template #default="{ row }">
+          {{ isTask(row) ? displayWorkshopName(row.task.processing_workshop) : '—' }}
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="加工工艺" min-width="160">
+        <template #default="{ row }">
+          <span v-if="isTask(row)">—</span>
+          <span v-else>{{ row.status.procedure_names.join('、') || '—' }}</span>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="任务数" min-width="85" align="right">
+        <template #default="{ row }">
+          {{ isTask(row) ? row.task.task_quantity : '—' }}
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="到货数" min-width="90" align="right">
+        <template #default="{ row }">
+          <template v-if="isTask(row)">
+            <ElPopover
+              v-if="row.task.material_arrivals.length"
+              placement="bottom"
+              trigger="click"
+              :width="430"
+              popper-class="erp-arrivals-popover"
+            >
+              <template #reference>
+                <ElButton link type="primary">{{ row.task.arrived_quantity }}</ElButton>
+              </template>
+              <ElTable :data="row.task.material_arrivals" size="small" table-layout="auto">
+                <ElTableColumn prop="material_no" label="物料编号" min-width="120" />
+                <ElTableColumn prop="material_name" label="物料" min-width="130" />
+                <ElTableColumn prop="task_quantity" label="任务数" min-width="70" align="right" />
+                <ElTableColumn prop="arrived_quantity" label="到货数" min-width="70" align="right" />
+              </ElTable>
+            </ElPopover>
+            <span v-else>{{ row.task.arrived_quantity }}</span>
+          </template>
+          <span v-else>—</span>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="完成数" min-width="90" align="right">
+        <template #default="{ row }">
+          <span v-if="isTask(row)" class="completed">{{ row.task.completed_quantity }}</span>
+          <span v-else>—</span>
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="备注" min-width="180" show-overflow-tooltip>
+        <template #default="{ row }">
+          {{ isTask(row) ? (row.task.remark || '—') : '—' }}
+        </template>
+      </ElTableColumn>
+      <ElTableColumn label="操作" min-width="110" align="center">
+        <template #default="{ row }">
           <ElButton
-            v-else-if="row.status.action === 'view_work_orders'"
+            v-if="isTask(row)"
             link
-            @click="emit('viewWorkOrders', row.task, row.status)"
-          >查看工单</ElButton>
-        </div>
-      </template>
-    </ElTableColumn>
-  </ElTable>
+            @click="emit('viewAllWorkOrders', row.task)"
+          >查看全部工单</ElButton>
+          <div v-else class="task-actions">
+            <ElButton
+              v-if="row.status.status === 'exception'"
+              link
+              type="danger"
+              @click="emit('viewWorkOrders', row.task, row.status)"
+            >查看情况</ElButton>
+            <ElTooltip
+              v-else-if="row.status.action === 'create_work_order'"
+              :disabled="row.task.plan_status !== 'draft'"
+              content="生产计划确认后可开工单"
+              placement="top"
+            >
+              <span>
+                <ElButton
+                  type="primary"
+                  link
+                  :disabled="row.task.plan_status === 'draft'"
+                  @click="emit('createWorkOrder', row.task, row.status)"
+                >
+                  开工单
+                </ElButton>
+              </span>
+            </ElTooltip>
+            <ElButton
+              v-else-if="row.status.action === 'view_work_orders'"
+              link
+              @click="emit('viewWorkOrders', row.task, row.status)"
+            >查看工单</ElButton>
+          </div>
+        </template>
+      </ElTableColumn>
+    </ElTable>
+  </div>
 </template>
 
 <style scoped>
+.task-table-surface {
+  position: relative;
+  min-width: 0;
+  color: var(--erp-text);
+  font-variant-numeric: tabular-nums;
+}
+
 .completed {
-  color: #22c55e;
+  color: var(--erp-success);
   font-weight: 700;
 }
 
@@ -259,6 +300,18 @@ function materialArrivalType(
   flex-direction: column;
   align-items: flex-start;
   gap: 6px;
+  padding-block: 2px;
+}
+
+.task-name {
+  --el-link-text-color: var(--erp-text);
+  --el-link-hover-text-color: var(--erp-primary);
+  font-weight: 650;
+}
+
+.task-name:focus-visible {
+  outline: 2px solid var(--erp-primary);
+  outline-offset: 3px;
 }
 
 .task-overview-statuses {
@@ -288,24 +341,24 @@ function materialArrivalType(
   display: inline-block;
   flex: 0 0 auto;
   box-sizing: border-box;
-  color: var(--el-color-primary);
+  color: var(--erp-primary);
 }
 
 .folder-icon {
   width: 17px;
   height: 13px;
   margin-top: 2px;
-  border: 1.5px solid currentcolor;
+  border: 1px solid currentcolor;
   border-radius: 2px;
 }
 
 .folder-icon::before {
   position: absolute;
   top: -5px;
-  left: -1.5px;
+  left: -1px;
   width: 8px;
   height: 5px;
-  border: 1.5px solid currentcolor;
+  border: 1px solid currentcolor;
   border-bottom: 0;
   border-radius: 2px 2px 0 0;
   content: '';
@@ -314,7 +367,7 @@ function materialArrivalType(
 .file-icon {
   width: 13px;
   height: 16px;
-  border: 1.5px solid var(--md-outline);
+  border: 1px solid var(--erp-text-secondary);
   border-radius: 2px;
 }
 
@@ -324,8 +377,8 @@ function materialArrivalType(
   right: 2px;
   width: 4px;
   height: 4px;
-  border-top: 1px solid var(--md-outline);
-  border-right: 1px solid var(--md-outline);
+  border-top: 1px solid var(--erp-text-secondary);
+  border-right: 1px solid var(--erp-text-secondary);
   content: '';
 }
 
@@ -341,8 +394,8 @@ function materialArrivalType(
   bottom: 50%;
   left: 8px;
   width: 15px;
-  border-bottom: 1px solid var(--md-outline-variant);
-  border-left: 1px solid var(--md-outline-variant);
+  border-bottom: 1px solid var(--erp-border);
+  border-left: 1px solid var(--erp-border);
   content: '';
 }
 
@@ -351,7 +404,7 @@ function materialArrivalType(
   top: 14px;
   bottom: -24px;
   left: 8px;
-  border-left: 1px solid var(--md-outline-variant);
+  border-left: 1px solid var(--erp-border);
   content: '';
 }
 </style>

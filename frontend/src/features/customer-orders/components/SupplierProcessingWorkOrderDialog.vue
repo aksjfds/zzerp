@@ -64,6 +64,7 @@ function submit() {
   >
     <div v-if="task" class="task-summary">
       <strong>{{ task.item_code }} · {{ task.item_name }}</strong>
+      <span>计划 #{{ task.production_plan_id }} · 产品版本 {{ task.product_version }}</span>
       <span>任务数量：{{ task.task_quantity }}</span>
     </div>
     <ElForm label-position="top">
@@ -86,13 +87,13 @@ function submit() {
 
 <style scoped>
 .task-summary {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  gap: 6px;
   margin-bottom: 18px;
   padding: 12px 14px;
   border-radius: var(--erp-radius);
   background: var(--md-surface-container-low);
 }
 .task-summary span { color: var(--el-text-color-secondary); }
+.task-summary strong { overflow-wrap: anywhere; }
 </style>

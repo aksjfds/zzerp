@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import QcInspectionBatchTable from './QcInspectionBatchTable.vue'
 import QcInspectionDialog from './QcInspectionDialog.vue'
 import QcWorkOrderDrawer from './QcWorkOrderDrawer.vue'
@@ -18,6 +19,7 @@ const {
   dialogVisible,
   load,
   loading,
+  loadError,
   batches,
   openInspection,
   page,
@@ -76,7 +78,9 @@ defineExpose({ refresh })
     </div>
 
     <section class="qc-workspace">
+      <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
       <QcInspectionBatchTable
+        v-else
         :items="batches"
         :loading="loading"
         :deciding-batch-id="decidingBatchId"
@@ -88,6 +92,7 @@ defineExpose({ refresh })
         @undo-destination="undoDestination"
       />
       <ElPagination
+        v-if="!loadError"
         v-model:current-page="page"
         class="production-pagination"
         layout="prev, pager, next, total"

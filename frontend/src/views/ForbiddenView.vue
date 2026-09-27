@@ -22,5 +22,5 @@ async function logout() {
 
 <style scoped>
 .forbidden-page { display: grid; min-height: 100vh; padding: 24px; place-items: center; background: var(--md-surface); }
-.forbidden-page section { max-width: 480px; padding: 32px; border-radius: 28px; background: var(--md-error-container); color: var(--md-on-error-container); text-align: center; }
+.forbidden-page section { width: min(480px, 100%); padding: 32px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); color: var(--erp-text); text-align: center; }
 </style>

@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import AssemblyWorkOrderDialog from '../components/AssemblyWorkOrderDialog.vue'
 import CreateWorkOrderDialog from '../components/CreateWorkOrderDialog.vue'
 import DepartmentSectionTabs from '../components/DepartmentSectionTabs.vue'
@@ -19,6 +20,7 @@ const workbench = useAssemblyWorkbench()
 const taskView = ref<InstanceType<typeof DepartmentProductionProgressView>>()
 const choices = ref<TaskWorkOrderChoice[]>([])
 const choiceVisible = ref(false)
+const requestedTask = ref<{ item: DepartmentProductionProgressItem; status: ProductionTaskProcessingStatus }>()
 let openRevision = 0
 
 function availableChoices(status: ProductionTaskProcessingStatus): TaskWorkOrderChoice[] {
@@ -113,8 +115,9 @@ async function openTaskWorkOrder(
   const revision = ++openRevision
   choiceVisible.value = false
   choices.value = []
+  requestedTask.value = { item, status }
   await workbench.focusTask(item)
-  if (revision !== openRevision) return
+  if (revision !== openRevision || workbench.loadError.value) return
   choices.value = availableChoices(status)
   if (!choices.value.length) {
     ElMessage.warning(
@@ -129,6 +132,10 @@ async function openTaskWorkOrder(
     return
   }
   choiceVisible.value = true
+}
+
+function retryTask() {
+  if (requestedTask.value) return openTaskWorkOrder(requestedTask.value.item, requestedTask.value.status)
 }
 
 async function refresh() {
@@ -162,6 +169,7 @@ async function saveAssemblyWorkOrder(
       show-workers
       show-procedure-prices
     >
+      <LoadErrorAlert v-if="workbench.loadError.value" :message="workbench.loadError.value" :loading="workbench.loading.value" @retry="retryTask" />
       <DepartmentProductionProgressView
         ref="taskView"
         embedded

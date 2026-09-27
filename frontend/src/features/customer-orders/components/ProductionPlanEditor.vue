@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { queryProductionPlan, updateProductionPlan } from '../api/customerOrders'
 import type { ProductionPlan, ProductionPlanItem } from '../domain/types'
 
@@ -12,6 +13,8 @@ const emit = defineEmits<{
 }>()
 const plan = ref<ProductionPlan>()
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const saving = ref(false)
 const inventoryTypeLabels = {
   part: '普通配件',
@@ -87,14 +90,19 @@ const invalid = computed(() => !plan.value || groups.value.some(group => !groupS
 watch(invalid, value => emit('validityChange', value), { immediate: true })
 
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  plan.value = undefined
   try {
-    plan.value = await queryProductionPlan(props.orderId)
+    const result = await queryProductionPlan(props.orderId)
+    if (revision !== loadRevision) return
+    plan.value = result
     emit('updated', plan.value)
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '生产计划加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '生产计划加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -118,11 +126,13 @@ async function save(options?: { silent?: boolean }) {
 }
 
 defineExpose({ load, plan, save })
-onMounted(load)
+watch(() => props.orderId, load, { immediate: true })
 </script>
 
 <template>
-  <div v-loading="loading" class="plan-editor">
+  <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
+  <div v-else v-loading="loading" class="plan-editor">
+    <div v-if="plan" class="plan-identity">生产计划 #{{ plan.id }}</div>
     <section class="inventory-panel">
       <div class="inventory-panel-heading">
         <h2>库存参考</h2>
@@ -223,6 +233,7 @@ onMounted(load)
 
 <style scoped>
 .plan-editor { display: grid; gap: 18px; }
+.plan-identity { color: var(--erp-text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
 .plan-card, .inventory-panel { padding: 18px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); }
 .inventory-panel-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .inventory-products { display: grid; gap: 14px; }

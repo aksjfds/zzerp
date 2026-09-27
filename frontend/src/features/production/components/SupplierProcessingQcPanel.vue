@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import {
   inspectSupplierProcessingWorkOrder,
   querySupplierProcessingQcTasks,
@@ -23,6 +24,7 @@ defineProps<{ workers: WorkerItem[] }>()
 const tasks = ref<SupplierProcessingQcTask[]>([])
 const activeView = ref<'active' | 'history'>('active')
 const loading = ref(false)
+const loadError = ref('')
 const submitting = ref(false)
 const releasingBatchId = ref<number | null>(null)
 const undoingBatchId = ref<number | null>(null)
@@ -46,6 +48,8 @@ async function load() {
   const revision = ++loadRevision
   const history = activeView.value === 'history'
   loading.value = true
+  loadError.value = ''
+  tasks.value = []
   try {
     const result = await querySupplierProcessingQcTasks(history)
     if (revision !== loadRevision) return
@@ -58,7 +62,9 @@ async function load() {
     }
   } catch (error) {
     if (revision === loadRevision) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '委外加工质检任务加载失败')
+      loadError.value = getApiErrorDetail(error)?.message || '委外加工质检任务加载失败'
+      detailVisible.value = false
+      detailTask.value = undefined
     }
   } finally {
     if (revision === loadRevision) loading.value = false
@@ -190,7 +196,7 @@ defineExpose({ refresh })
 </script>
 
 <template>
-  <section v-loading="loading" class="supplier-qc-panel">
+  <section class="supplier-qc-panel">
     <div class="qc-filter-bar">
       <ElSegmented
         :model-value="activeView"
@@ -202,7 +208,10 @@ defineExpose({ refresh })
         @update:model-value="selectView"
       />
     </div>
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
     <ElTable
+      v-else
+      v-loading="loading"
       v-table-column-widths="'production.supplier-processing-qc'"
       :data="tasks"
       row-key="work_order_id"
@@ -221,6 +230,10 @@ defineExpose({ refresh })
       </ElTableColumn>
       <ElTableColumn prop="supplier_name" label="供应商" min-width="130" />
       <ElTableColumn prop="supplier_process_name" label="工艺" min-width="130" />
+      <ElTableColumn prop="task_quantity" label="任务数" min-width="90" align="right" />
+      <ElTableColumn prop="inspected_quantity" label="累计质检" min-width="100" align="right" />
+      <ElTableColumn prop="qualified_quantity" label="累计合格" min-width="100" align="right" />
+      <ElTableColumn prop="pending_destination_quantity" label="待放行" min-width="90" align="right" />
       <ElTableColumn label="状态" min-width="110">
         <template #default="{ row }">
           <ElTag :type="taskStatus(row).type" effect="light" size="small">

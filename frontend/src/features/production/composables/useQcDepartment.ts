@@ -20,6 +20,7 @@ export function useQcDepartment() {
   const batches = ref<QcInspectionBatchRow[]>([])
   const activeBatch = ref<QcBatchRow>()
   const loading = ref(false)
+  const loadError = ref('')
   const page = ref(1)
   const total = ref(0)
   const pageSize = 50
@@ -34,6 +35,8 @@ export function useQcDepartment() {
     const sequence = ++loadSequence
     const requestedPage = page.value
     loading.value = true
+    loadError.value = ''
+    batches.value = []
     try {
       let result = await queryQcInspectionBatches(
         requestedPage,
@@ -55,8 +58,8 @@ export function useQcDepartment() {
       }
       batches.value = result.items
       total.value = result.total
-    } catch {
-      if (sequence === loadSequence) ElMessage.warning('QC 质检列表加载失败')
+    } catch (error) {
+      if (sequence === loadSequence) loadError.value = getApiErrorDetail(error)?.message || 'QC 质检列表加载失败'
     } finally {
       if (sequence === loadSequence) loading.value = false
     }
@@ -190,6 +193,7 @@ export function useQcDepartment() {
     dialogVisible,
     load,
     loading,
+    loadError,
     batches,
     openInspection,
     page,

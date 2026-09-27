@@ -39,7 +39,7 @@ const inputDetails = computed(() => buildInputDetails(props.stat))
       <details v-if="inputDetails.length" class="node-input-details">
         <summary>来源明细（{{ inputDetails.length }}）</summary>
         <div class="node-input-list">
-          <template v-for="item in inputDetails" :key="item.name"><span>{{ item.name }}</span><strong>{{ formatQuantity(item.quantity) }}</strong></template>
+          <template v-for="item in inputDetails" :key="item.name"><span :title="item.name">{{ item.name }}</span><strong>{{ formatQuantity(item.quantity) }}</strong></template>
         </div>
       </details>
     </template>
@@ -49,17 +49,18 @@ const inputDetails = computed(() => buildInputDetails(props.stat))
 
 <style scoped>
 .node-progress-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
-.node-progress-title { color: var(--el-text-color-primary); font-size: 16px; font-weight: 700; line-height: 1.35; }
+.node-progress-header > div { min-width: 0; }
+.node-progress-title { color: var(--erp-text); font-size: 16px; font-weight: 650; line-height: 1.5; overflow-wrap: anywhere; }
 .node-progress-type { margin-top: 3px; color: var(--el-text-color-secondary); font-size: 12px; }
-.node-progress-status { flex: none; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.node-progress-status { flex: none; padding: 3px 8px; border-radius: var(--erp-radius-sm); font-size: 12px; font-weight: 600; }
 .node-progress-status.is-pending { color: var(--el-text-color-secondary); background: var(--md-surface-container); }
 .node-progress-status.is-active { color: var(--erp-warning); background: color-mix(in srgb, var(--erp-warning) 12%, transparent); }
 .node-progress-status.is-done { color: var(--erp-success); background: color-mix(in srgb, var(--erp-success) 12%, transparent); }
 .node-progress-status.is-danger { color: var(--el-color-danger); background: color-mix(in srgb, var(--el-color-danger) 12%, transparent); }
-.node-progress-primary { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 14px; padding: 12px 14px; border-radius: 10px; background: var(--md-surface-container-low); }
+.node-progress-primary { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-top: 14px; padding: 12px 14px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius); background: var(--erp-surface-muted); }
 .node-progress-primary span { color: var(--el-text-color-secondary); font-size: 13px; }
 .node-progress-primary strong { color: var(--el-color-primary); font-size: 24px; font-variant-numeric: tabular-nums; line-height: 1; }
-.node-progress-grid { display: grid; grid-template-columns: 1fr auto; gap: 9px 20px; margin-top: 14px; padding: 0 2px; }
+.node-progress-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 9px 20px; margin-top: 14px; padding: 0 2px; }
 .node-progress-grid span { color: var(--el-text-color-secondary); }
 .node-progress-grid strong { color: var(--el-text-color-primary); font-variant-numeric: tabular-nums; text-align: right; }
 .node-progress-grid strong.is-zero { color: var(--el-text-color-placeholder); font-weight: 500; }
@@ -67,7 +68,7 @@ const inputDetails = computed(() => buildInputDetails(props.stat))
 .node-input-details { margin-top: 14px; padding-top: 10px; border-top: 1px solid var(--md-outline-variant); }
 .node-input-details summary { color: var(--el-text-color-regular); cursor: pointer; font-size: 13px; font-weight: 600; }
 .node-input-list { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 7px 16px; margin-top: 10px; }
-.node-input-list span { overflow: hidden; color: var(--el-text-color-secondary); text-overflow: ellipsis; white-space: nowrap; }
+.node-input-list span { color: var(--erp-text-secondary); overflow-wrap: anywhere; }
 .node-input-list strong { font-variant-numeric: tabular-nums; text-align: right; }
-.node-progress-empty { margin-top: 14px; padding: 18px 12px; border-radius: 10px; color: var(--el-text-color-secondary); background: var(--md-surface-container-low); text-align: center; }
+.node-progress-empty { margin-top: 14px; padding: 18px 12px; border-radius: var(--erp-radius); color: var(--erp-text-secondary); background: var(--erp-surface-muted); text-align: center; }
 </style>

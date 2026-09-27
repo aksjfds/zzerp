@@ -4,6 +4,8 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { PRODUCTION_PERMISSIONS } from '@/permission/constants'
 import DepartmentPageHeader from '@/shared/layout/DepartmentPageHeader.vue'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
+import { formatBusinessDateTime } from '@/shared/format/dateTime'
 import {
   queryWarehouseOperations,
   queryWarehouseStocks,
@@ -17,6 +19,8 @@ import type {
 } from '../domain/types'
 
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const reviewingGroupNo = ref<string | null>(null)
 const stocks = ref<WarehouseStock[]>([])
 const operations = ref<WarehouseOperation[]>([])
@@ -71,18 +75,23 @@ const operationStatusTypes = {
   uncertain: 'warning',
 } as const
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  stocks.value = []
+  operations.value = []
   try {
     const [nextStocks, nextOperations] = await Promise.all([
       queryWarehouseStocks(),
       queryWarehouseOperations(operationStatus.value || undefined),
     ])
+    if (revision !== loadRevision) return
     stocks.value = nextStocks
     operations.value = nextOperations
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '仓库数据加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '仓库数据加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -116,15 +125,19 @@ onMounted(load)
 </script>
 
 <template>
-  <section v-loading="loading" class="warehouse-page">
+  <section class="warehouse-page">
     <DepartmentPageHeader
       department-name="仓库"
       description="查看临时仓库当前库存及本项目发起的仓库操作。"
+      :loading="loading"
       @refresh="load"
     />
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
     <ElTabs>
       <ElTabPane label="当前库存">
         <ElTable
+          v-if="!loadError"
+          v-loading="loading"
           v-table-column-widths="'warehouse.temporary-stocks'"
           :data="stocks"
           border
@@ -171,6 +184,8 @@ onMounted(load)
           </ElSelect>
         </div>
         <ElTable
+          v-if="!loadError"
+          v-loading="loading"
           v-table-column-widths="'warehouse.project-operations'"
           :data="operations"
           border
@@ -178,7 +193,9 @@ onMounted(load)
           table-layout="auto"
           empty-text="暂无本项目仓库操作"
         >
-          <ElTableColumn prop="created_at" label="创建时间" min-width="175" />
+          <ElTableColumn prop="created_at" label="创建时间" min-width="175">
+            <template #default="{ row }">{{ formatBusinessDateTime(row.created_at) }}</template>
+          </ElTableColumn>
           <ElTableColumn prop="operation_no" label="本地操作号" min-width="220" show-overflow-tooltip />
           <ElTableColumn label="操作" width="80">
             <template #default="{ row }">{{ operationTypeLabels[row.operation_type as keyof typeof operationTypeLabels] }}</template>

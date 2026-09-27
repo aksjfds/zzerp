@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import FlowDisplayControls from '@/shared/process-flow/FlowDisplayControls.vue'
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import type { WorkshopRouteOption } from '@/api/organization'
@@ -131,19 +132,8 @@ defineExpose({
 
 <template>
   <div class="flow-canvas-shell">
+    <FlowDisplayControls @font-size="changeFontSize" @node-size="changeNodeSize" />
     <div ref="containerRef" class="flow-canvas" :class="{ 'is-readonly': readonly }" />
-    <div class="display-controls" aria-label="节点显示大小">
-      <div class="display-control-group">
-        <span>字体</span>
-        <button type="button" aria-label="缩小字体" title="缩小字体" @click="changeFontSize(-1)">−</button>
-        <button type="button" aria-label="放大字体" title="放大字体" @click="changeFontSize(1)">＋</button>
-      </div>
-      <div class="display-control-group">
-        <span>节点</span>
-        <button type="button" aria-label="缩小节点" title="缩小节点" @click="changeNodeSize(-0.1)">−</button>
-        <button type="button" aria-label="放大节点" title="放大节点" @click="changeNodeSize(0.1)">＋</button>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -161,10 +151,5 @@ defineExpose({
 .flow-canvas.is-readonly:active { cursor: grabbing; }
 .flow-canvas.is-middle-panning { cursor: grabbing; }
 .flow-canvas :deep(.process-selection-box) { position: absolute; z-index: 20; pointer-events: none; border: 1px solid var(--el-color-primary); background: color-mix(in srgb, var(--el-color-primary) 12%, transparent); }
-.display-controls { position: absolute; z-index: 10; top: 78px; right: 15px; display: flex; gap: 6px; padding: 6px; border-radius: 8px; background: color-mix(in srgb, var(--md-surface-container-lowest) 88%, transparent); box-shadow: 0 1px 8px rgb(0 0 0 / 12%); }
-.display-control-group { display: flex; align-items: center; gap: 4px; padding-left: 6px; color: var(--el-text-color-secondary); font-size: 12px; }
-.display-control-group + .display-control-group { margin-left: 2px; padding-left: 8px; border-left: 1px solid var(--md-outline-variant); }
-.display-controls button { width: 32px; height: 32px; padding: 0; border: 1px solid var(--md-outline-variant); border-radius: 7px; color: var(--el-text-color-primary); background: var(--md-surface-container-lowest); cursor: pointer; font-size: 16px; }
-.display-controls button:hover { color: var(--el-color-primary); border-color: var(--el-color-primary); }
 @media (max-width: 600px) { .flow-canvas { height: 480px; } }
 </style>

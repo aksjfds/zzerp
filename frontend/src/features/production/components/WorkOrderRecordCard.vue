@@ -127,7 +127,7 @@ const destinationLabels = {
             <slot name="batchTag" :batch="batch" />
           </header>
           <dl class="qc-batch-metrics">
-            <div><dt>送检</dt><dd>{{ batch.submitted_quantity }}</dd></div>
+            <div><dt>{{ record.work_order_type === 'supplier_processing' ? '质检' : '送检' }}</dt><dd>{{ batch.submitted_quantity }}</dd></div>
             <template v-if="batch.recorded_at">
               <div><dt>合格</dt><dd class="success">{{ batch.qualified_quantity || 0 }}</dd></div>
               <div><dt>返工</dt><dd>{{ batch.rework_quantity || 0 }}</dd></div>
@@ -174,6 +174,7 @@ const destinationLabels = {
 .work-order-card { width: 100%; min-width: 0; box-sizing: border-box; padding: 16px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
 .work-order-heading, .qc-batches > header, .qc-batch > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
 .work-order-heading h3, .work-order-heading > div > span { margin: 0; }
+.work-order-heading > div { min-width: 0; }
 .work-order-heading h3 { margin-top: 4px; font-size: 17px; overflow-wrap: anywhere; }
 .work-order-heading > div > span, .qc-batches > header > span, .qc-batch-detail { color: var(--md-on-surface-variant); font-size: 12px; }
 .work-order-context, .work-order-metrics { display: grid; margin: 14px 0 0; }
@@ -181,20 +182,23 @@ const destinationLabels = {
 .work-order-context div, .work-order-metrics div { min-width: 0; padding: 9px 10px; border-radius: var(--erp-radius-sm); background: var(--md-surface-container-low); }
 .work-order-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; }
 .work-order-card dt { color: var(--md-on-surface-variant); font-size: 12px; }
-.work-order-card dd { margin: 4px 0 0; font-weight: 700; overflow-wrap: anywhere; }
+.work-order-card dd { margin: 4px 0 0; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .work-order-time { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; margin-top: 12px; color: var(--md-on-surface-variant); font-size: 12px; }
 .qc-batches { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--md-outline-variant); }
 .qc-batches > header { align-items: center; }
 .qc-batches h4 { margin: 0; font-size: 14px; }
 .qc-batch-list { display: grid; gap: 8px; margin-top: 10px; }
 .qc-batch { padding: 12px; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-sm); background: var(--md-surface-container-low); }
+.qc-batch > header { flex-wrap: wrap; }
+.qc-batch > header strong { min-width: 0; overflow-wrap: anywhere; }
 .qc-batch.is-related { border-color: var(--el-color-primary-light-5); background: var(--el-color-primary-light-9); }
 .qc-batch.is-exception { border-color: var(--el-color-danger-light-5); background: var(--el-color-danger-light-9); }
 .qc-batch-metrics { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px; margin: 10px 0 0; }
 .qc-batch-metrics div { padding: 7px 8px; border-radius: var(--erp-radius-sm); background: var(--md-surface-container-lowest); }
 .qc-batch-detail { display: flex; flex-wrap: wrap; gap: 5px 18px; margin-top: 10px; }
+.qc-batch-detail span { overflow-wrap: anywhere; }
 .qc-defect { flex-basis: 100%; color: var(--el-color-danger); }
-.success { color: #22c55e; }
+.success { color: var(--erp-success); }
 .danger { color: var(--el-color-danger); font-weight: 700; }
 @media (max-width: 680px) {
   .work-order-context { grid-template-columns: 1fr; }

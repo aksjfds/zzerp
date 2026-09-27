@@ -2,35 +2,39 @@
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { queryFinishedInboundItems, receiveFinishedReceipt } from '../api/inventory'
 import type { FinishedInboundItem, PendingFinishedReceipt } from '../domain/types'
 
 const emit = defineEmits<{ updated: [] }>()
 const loading = ref(false)
+const loadError = ref('')
+let loadRevision = 0
 const rows = ref<FinishedInboundItem[]>([])
 const page = ref(1)
 const pageSize = 50
 const total = ref(0)
 
-async function loadPage(targetPage: number) {
-  const result = await queryFinishedInboundItems(targetPage, pageSize)
-  rows.value = result.data
-  total.value = result.total
-}
-
 async function load() {
+  const revision = ++loadRevision
   loading.value = true
+  loadError.value = ''
+  rows.value = []
   try {
-    await loadPage(page.value)
-    const lastPage = Math.max(Math.ceil(total.value / pageSize), 1)
+    let result = await queryFinishedInboundItems(page.value, pageSize)
+    if (revision !== loadRevision) return
+    const lastPage = Math.max(Math.ceil(result.total / pageSize), 1)
     if (page.value > lastPage) {
       page.value = lastPage
-      await loadPage(page.value)
+      result = await queryFinishedInboundItems(lastPage, pageSize)
     }
+    if (revision !== loadRevision) return
+    rows.value = result.data
+    total.value = result.total
   } catch (error) {
-    ElMessage.error(getApiErrorDetail(error)?.message || '成品入库数据加载失败')
+    if (revision === loadRevision) loadError.value = getApiErrorDetail(error)?.message || '成品入库数据加载失败'
   } finally {
-    loading.value = false
+    if (revision === loadRevision) loading.value = false
   }
 }
 
@@ -89,7 +93,9 @@ defineExpose({ load })
 
 <template>
   <section>
+    <LoadErrorAlert v-if="loadError" :message="loadError" :loading="loading" @retry="load" />
     <ElTable
+      v-else
       v-table-column-widths="'finished.inbound'"
       v-loading="loading"
       :data="rows"
@@ -100,7 +106,7 @@ defineExpose({ load })
       empty-text="暂无成品入库信息"
     >
       <ElTableColumn label="成品" min-width="260">
-        <template #default="{ row }">{{ row.item_code }} · {{ row.item_name }}</template>
+        <template #default="{ row }"><div>{{ row.item_code }} · {{ row.item_name }}</div><small class="product-version">版本 {{ row.product_version }}</small></template>
       </ElTableColumn>
       <ElTableColumn label="状态" min-width="160">
         <template #default="{ row }">
@@ -151,7 +157,7 @@ defineExpose({ load })
       </ElTableColumn>
     </ElTable>
     <ElPagination
-      v-if="total > pageSize"
+      v-if="!loadError && total > pageSize"
       class="pagination"
       background
       layout="prev, pager, next, total"
@@ -165,6 +171,7 @@ defineExpose({ load })
 
 <style scoped>
 .pagination { justify-content: flex-end; margin-top: 16px; }
+.product-version { color: var(--erp-text-secondary); font-variant-numeric: tabular-nums; }
 .receipt-list { display: grid; gap: 10px; }
 .receipt-item { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .receipt-item div { min-width: 0; }

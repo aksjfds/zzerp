@@ -1,5 +1,4 @@
-import { ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
-import { ElMessage } from 'element-plus'
+import { onScopeDispose, ref, toValue, watch, type MaybeRefOrGetter } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
 import { queryProductionProgressItemDetail } from '../api/productionProgress'
 import type {
@@ -13,16 +12,21 @@ export function useProductionProgressDetail(
   item: MaybeRefOrGetter<DepartmentProductionProgressItem | null>,
 ) {
   const loading = ref(false)
+  const loadError = ref('')
   const detail = ref<ProductionProgressItemDetail | null>(null)
   let requestRevision = 0
 
   async function load() {
+    const revision = ++requestRevision
     const currentItem = toValue(item)
     const currentDepartmentCode = toValue(departmentCode)
-    if (!currentItem || !currentDepartmentCode) return
-    const revision = ++requestRevision
-    loading.value = true
+    loadError.value = ''
     detail.value = null
+    if (!toValue(visible) || !currentItem || !currentDepartmentCode) {
+      loading.value = false
+      return
+    }
+    loading.value = true
     try {
       const result = await queryProductionProgressItemDetail(
         currentDepartmentCode,
@@ -33,7 +37,7 @@ export function useProductionProgressDetail(
       if (revision === requestRevision) detail.value = result
     } catch (error) {
       if (revision === requestRevision) {
-        ElMessage.error(getApiErrorDetail(error)?.message || '生产情况加载失败')
+        loadError.value = getApiErrorDetail(error)?.message || '生产情况加载失败'
       }
     } finally {
       if (revision === requestRevision) loading.value = false
@@ -43,6 +47,7 @@ export function useProductionProgressDetail(
   watch(
     () => [
       toValue(visible),
+      toValue(departmentCode),
       toValue(item)?.production_plan_item_id,
       toValue(item)?.processing_workshop_id,
       toValue(item)?.flow_node_id,
@@ -52,10 +57,14 @@ export function useProductionProgressDetail(
       else {
         requestRevision += 1
         loading.value = false
+        loadError.value = ''
         detail.value = null
       }
     },
+    { immediate: true },
   )
 
-  return { detail, loading, reload: load }
+  onScopeDispose(() => { requestRevision += 1 })
+
+  return { detail, loading, loadError, reload: load }
 }

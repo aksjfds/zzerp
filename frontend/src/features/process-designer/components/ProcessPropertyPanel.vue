@@ -32,12 +32,12 @@ function workshopName(node: FlowNode | null) {
     </template>
     <template v-else-if="node?.type === 'supplier_processing'">
       <h3>委外加工节点</h3>
-      <p>由业务部在生产计划确认后填写供应商和加工工艺并创建委外工单。</p>
+      <p>由业务部在生产计划确认或完成后填写供应商和加工工艺并创建委外工单。</p>
       <p>该节点必须直接连接在配件之后，并直接连接到 QC。</p>
     </template>
     <template v-else-if="node?.type === 'finished_inbound'">
       <h3>入库节点</h3>
-      <p>流程终点。产品经 QC 放行后进入成品部待入库，由成品部确认入库。</p>
+      <p>流程终点。QC 放行或装包工单直接完成后形成待入库记录，由成品部确认入库。</p>
     </template>
     <template v-else-if="node?.type === 'assembly'">
       <h3>装配节点</h3>
@@ -63,8 +63,10 @@ function workshopName(node: FlowNode | null) {
 </template>
 
 <style scoped>
-.property-panel { padding: 16px; border-left: 1px solid var(--md-outline-variant); background: var(--md-surface-container-low); }
+.property-panel { min-width: 0; padding: 16px; border-left: 1px solid var(--md-outline-variant); background: var(--md-surface-container-low); }
 h3 { margin: 0 0 12px; font-size: 14px; }
 label { display: block; margin: 13px 0 5px; color: var(--el-text-color-secondary); font-size: 12px; }
 p { margin: 0 0 12px; color: var(--el-text-color-secondary); font-size: 13px; line-height: 1.5; }
+.property-panel p { overflow-wrap: anywhere; }
+.property-panel :deep(.el-input-number) { width: 100%; }
 </style>

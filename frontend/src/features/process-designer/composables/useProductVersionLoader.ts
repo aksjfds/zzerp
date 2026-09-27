@@ -1,6 +1,7 @@
-import { ref, type ComputedRef, type Ref } from 'vue'
+import { onScopeDispose, ref, watch, type ComputedRef, type Ref } from 'vue'
 import type { Router } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
+import { getApiErrorDetail } from '@/api/request'
 import type { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { queryProductVersions } from '../api/engineeringProducts'
 import type { EngineeringProduct } from '../domain/types'
@@ -27,18 +28,42 @@ export function useProductVersionLoader(options: Options) {
     store,
     versionDirty,
   } = options
-  const baseInfoEditable = ref(true)
+  const baseInfoEditable = ref(false)
   const currentVersion = ref<number>()
   const loadingProduct = ref(false)
-  const versionEditable = ref(true)
+  const versionEditable = ref(false)
   const versions = ref<number[]>([])
+  const productError = ref('')
+  const requestedVersion = ref<number>()
+  let productRequest = 0
+  let versionsRequest = 0
+
+  watch(productId, () => {
+    productRequest++
+    versionsRequest++
+    loadingProduct.value = false
+    productError.value = ''
+    requestedVersion.value = undefined
+    currentVersion.value = undefined
+    versions.value = []
+    baseInfoEditable.value = false
+    versionEditable.value = false
+    editorReady.value = false
+  }, { flush: 'sync' })
 
   async function loadProductVersion(version?: number) {
-    if (!productId.value) return
+    const id = productId.value
+    if (!id) return false
+    const request = ++productRequest
+    requestedVersion.value = version
+    productError.value = ''
     loadingProduct.value = true
+    editorReady.value = false
     try {
-      const product = await store.loadProduct(productId.value, version)
+      const product = await store.loadProduct(id, version)
+      if (request !== productRequest || id !== productId.value) return false
       applyProduct(product)
+      requestedVersion.value = product.version
       currentVersion.value = product.current_version
       baseInfoEditable.value = product.base_info_editable
       versionEditable.value = product.version_editable
@@ -50,14 +75,24 @@ export function useProductVersionLoader(options: Options) {
           ...(version ? { version: String(version) } : {}),
         },
       })
+      return request === productRequest
+    } catch (error) {
+      if (request === productRequest && id === productId.value) {
+        productError.value = getApiErrorDetail(error)?.message || '产品版本加载失败'
+        editorReady.value = false
+      }
+      return false
     } finally {
-      loadingProduct.value = false
+      if (request === productRequest) loadingProduct.value = false
     }
   }
 
   async function reloadVersions() {
-    if (!productId.value) return
-    versions.value = await queryProductVersions(productId.value)
+    const id = productId.value
+    if (!id) return
+    const request = ++versionsRequest
+    const result = await queryProductVersions(id)
+    if (request === versionsRequest && id === productId.value) versions.value = result
   }
 
   async function switchVersion(version?: number) {
@@ -80,10 +115,22 @@ export function useProductVersionLoader(options: Options) {
     await loadProductVersion(version)
   }
 
+  function retryProductVersion() {
+    return loadProductVersion(requestedVersion.value)
+  }
+
+  onScopeDispose(() => {
+    productRequest++
+    versionsRequest++
+  })
+
   return {
     baseInfoEditable,
     currentVersion,
     loadingProduct,
+    productError,
+    requestedVersion,
+    retryProductVersion,
     loadProductVersion,
     reloadVersions,
     switchVersion,

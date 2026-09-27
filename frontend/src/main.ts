@@ -9,6 +9,12 @@ import { setupPermission } from './permission'
 import router from './router'
 import { setupTableColumnWidthPersistence } from './shared/table/columnWidthPersistence'
 import { useAuthStore } from './stores/auth'
+import { erpMotionStyles } from './shared/motion/tokens'
+import './shared/motion/motion.css'
+
+for (const [property, value] of Object.entries(erpMotionStyles)) {
+  document.documentElement.style.setProperty(property, value)
+}
 
 const app = createApp(App)
 const pinia = createPinia()

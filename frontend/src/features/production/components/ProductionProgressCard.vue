@@ -68,22 +68,25 @@ defineProps<{
 .tag-progress-card.focused { border-color: var(--md-primary); box-shadow: 0 0 0 2px color-mix(in srgb, var(--md-primary) 18%, transparent); }
 .card-header, .card-title-row { display: flex; align-items: center; gap: 8px; }
 .card-header { align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+.card-header > div { min-width: 0; }
+.card-title-row { flex-wrap: wrap; }
+.card-header h3, .card-header p { overflow-wrap: anywhere; }
 .card-header h3, .card-header p { margin: 0; }
 .card-header h3 { font-size: 18px; }
 .card-header p { margin-top: 5px; color: var(--md-on-surface-variant); font-size: 13px; }
 .quantity-progress-track { display: flex; width: 100%; height: 12px; overflow: hidden; border-radius: 999px; background: var(--md-surface-container-high); }
 .quantity-progress-segment { flex: 0 0 auto; height: 100%; }
-.quantity-progress-segment.completed, .quantity-progress-legend .completed::before { background: var(--el-color-success); }
-.quantity-progress-segment.exception, .quantity-progress-legend .exception::before { background: var(--el-color-danger); }
-.quantity-progress-segment.processing, .quantity-progress-legend .processing::before { background: #f4b400; }
-.quantity-progress-segment.submitted, .quantity-progress-legend .submitted::before { background: #7e57c2; }
+.quantity-progress-segment.completed, .quantity-progress-legend .completed::before { background: var(--erp-success); }
+.quantity-progress-segment.exception, .quantity-progress-legend .exception::before { background: var(--erp-danger); }
+.quantity-progress-segment.processing, .quantity-progress-legend .processing::before { background: var(--erp-status-processing); }
+.quantity-progress-segment.submitted, .quantity-progress-legend .submitted::before { background: var(--erp-status-submitted); }
 .quantity-progress-legend { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 8px; color: var(--md-on-surface-variant); font-size: 12px; }
 .quantity-progress-legend span::before { display: inline-block; width: 8px; height: 8px; margin-right: 6px; border-radius: 50%; content: ''; }
-.card-metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 16px 0 0; }
-.card-metrics div { padding: 10px; border-radius: var(--erp-radius-md); background: var(--md-surface-container-low); }
+.card-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; margin: 16px 0 0; }
+.card-metrics div { padding: 10px; border-radius: var(--erp-radius); background: var(--md-surface-container-low); }
 .card-metrics dt { color: var(--md-on-surface-variant); font-size: 12px; }
-.card-metrics dd { margin: 4px 0 0; font-size: 17px; font-weight: 700; }
+.card-metrics dd { margin: 4px 0 0; font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .danger { color: var(--erp-danger); }
-.exception-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--el-color-danger) 45%, transparent); border-radius: var(--erp-radius-md); color: var(--el-color-danger); background: color-mix(in srgb, var(--el-color-danger) 8%, transparent); font-size: 13px; }
+.exception-summary { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; margin-top: 12px; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--erp-danger) 45%, transparent); border-radius: var(--erp-radius); color: var(--erp-danger); background: color-mix(in srgb, var(--erp-danger) 8%, transparent); font-size: 13px; }
 @media (max-width: 680px) { .card-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>
