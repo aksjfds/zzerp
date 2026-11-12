@@ -2,23 +2,13 @@
 import FlowDisplayControls from '@/shared/process-flow/FlowDisplayControls.vue'
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { WorkshopRouteOption } from '@/api/organization'
+import type LogicFlow from '@logicflow/core'
+import type { ProductionDepartment } from '@/features/production-departments'
 import type { BomItem, FlowEdge, FlowNode, ProcessFlow } from '../domain/types'
 import { useLogicFlowInstance } from '../composables/useLogicFlowInstance'
-import {
-  startPartDrag,
-  startProcessDrag,
-  startQcDrag,
-  startSupplierProcessingDrag,
-  startFinishedInboundDrag,
-  updateNodeDefinition,
-} from '../logicflow/commands'
+import { PROCESS_FLOW_GRID_X } from '@/shared/process-flow/adapter'
 
-const props = defineProps<{
-  modelValue: ProcessFlow
-  workshops: WorkshopRouteOption[]
-  readonly?: boolean
-}>()
+const props = defineProps<{ modelValue: ProcessFlow; readonly?: boolean }>()
 const emit = defineEmits<{
   'update:modelValue': [flow: ProcessFlow]
   selectEdge: [edge: FlowEdge | null]
@@ -26,108 +16,55 @@ const emit = defineEmits<{
 }>()
 const containerRef = ref<HTMLDivElement>()
 const {
-  changeFontSize,
-  changeNodeSize,
-  currentFlow,
-  emitChange,
-  instance,
-  renderFlow,
-  setReadonly,
+  changeFontSize, changeNodeSize, currentFlow, instance, renderFlow, setReadonly,
 } = useLogicFlowInstance(containerRef, {
-  initialFlow: () => props.modelValue,
-  readonly: () => Boolean(props.readonly),
-  onChange: (flow) => emit('update:modelValue', flow),
-  onConnectionError: (message) => ElMessage.error(message),
-  onSelectEdge: (edge) => emit('selectEdge', edge),
-  onSelectNode: (node) => emit('selectNode', node),
-  workshopDepartmentCode: (workshopId) => props.workshops.find(
-    workshop => workshop.id === workshopId,
-  )?.department_code,
-  workshopDirectInbound: (workshopId) => {
-    const workshop = props.workshops.find(item => item.id === workshopId)
-    return workshop?.department_code === 'assembly' && workshop.input_mode === 'single'
-  },
+  initialFlow: () => props.modelValue, readonly: () => Boolean(props.readonly),
+  onChange: flow => emit('update:modelValue', flow),
+  onConnectionError: message => ElMessage.error(message),
+  onSelectEdge: edge => emit('selectEdge', edge), onSelectNode: node => emit('selectNode', node),
 })
-
 watch(() => props.readonly, value => setReadonly(Boolean(value)))
-watch(() => props.workshops, () => renderFlow(props.modelValue))
+watch(() => props.modelValue, (flow) => {
+  if (!instance.value || JSON.stringify(currentFlow()) === JSON.stringify(flow)) return
+  emit('selectNode', null); emit('selectEdge', null); renderFlow(flow)
+}, { deep: true })
 
-watch(
-  () => props.modelValue,
-  (flow) => {
-    if (!instance.value || JSON.stringify(currentFlow()) === JSON.stringify(flow)) return
-    emit('selectNode', null)
-    emit('selectEdge', null)
-    renderFlow(flow)
-  },
-  { deep: true },
-)
-
-function withInstance(action: (lf: NonNullable<typeof instance.value>) => void) {
-  if (instance.value) action(instance.value)
+function partConfig(part: BomItem): LogicFlow.NodeConfig | undefined {
+  if (!part.id || props.readonly) return
+  if (currentFlow().nodes.some(node => node.type === 'part' && node.bom_item_id === part.id)) {
+    ElMessage.warning('该配件已放入流程图')
+    return
+  }
+  return { type: 'part', x: 0, y: 0, text: `${part.part_no} · ${part.part_name}`, properties: { bomItemId: part.id } }
 }
-
-function dragPart(item: BomItem) {
-  if (props.readonly) return
-  try {
-    withInstance((lf) => startPartDrag(lf, item))
-  } catch (error) {
-    ElMessage.warning(error instanceof Error ? error.message : '无法添加配件节点')
+function departmentConfig(department: ProductionDepartment): LogicFlow.NodeConfig {
+  return { type: 'department', x: 0, y: 0, text: department.name, properties: { departmentCode: department.code } }
+}
+function dragPart(part: BomItem) {
+  const config = partConfig(part)
+  if (config) instance.value?.dnd.startDrag(config)
+}
+function dragDepartment(department: ProductionDepartment) {
+  if (!props.readonly) instance.value?.dnd.startDrag(departmentConfig(department))
+}
+function add(config?: LogicFlow.NodeConfig) {
+  const lf = instance.value
+  if (!lf || props.readonly || !config) return
+  const nodes = currentFlow().nodes
+  const x = nodes.length ? Math.max(...nodes.map(node => node.x)) + PROCESS_FLOW_GRID_X : 0
+  const node = lf.addNode({ ...config, x, y: 0 })
+  lf.selectElementById(node.id)
+  lf.focusOn({ id: node.id })
+}
+function addPart(part: BomItem) { add(partConfig(part)) }
+function addDepartment(department: ProductionDepartment) { add(departmentConfig(department)) }
+function focusElement(id?: string) {
+  if (id && instance.value?.getModelById(id)) {
+    instance.value.selectElementById(id)
+    instance.value.focusOn({ id })
   }
 }
-
-function dragProcess(
-  workshopId: number,
-  workshopName: string,
-  multiple: boolean,
-  departmentCode: string,
-) {
-  if (props.readonly) return
-  withInstance((lf) => startProcessDrag(
-    lf,
-    workshopId,
-    workshopName,
-    multiple,
-    departmentCode,
-  ))
-}
-
-function dragQc() {
-  if (props.readonly) return
-  withInstance(startQcDrag)
-}
-
-function dragSupplierProcessing() {
-  if (props.readonly) return
-  withInstance(startSupplierProcessingDrag)
-}
-
-function dragFinishedInbound() {
-  if (props.readonly) return
-  withInstance(startFinishedInboundDrag)
-}
-
-function updateNode(nodeId: string, label: string, property: Parameters<typeof updateNodeDefinition>[3]) {
-  if (props.readonly) return
-  withInstance((lf) => { updateNodeDefinition(lf, nodeId, label, property); emitChange() })
-}
-
-function focusElement(elementId?: string) {
-  if (!instance.value || !elementId || !instance.value.getModelById(elementId)) return
-  instance.value.selectElementById(elementId)
-}
-
-defineExpose({
-  dragPart,
-  dragProcess,
-  dragQc,
-  dragSupplierProcessing,
-  dragFinishedInbound,
-  focusElement,
-  getGraphData: currentFlow,
-  renderFlow,
-  updateNode,
-})
+defineExpose({ dragPart, addPart, dragDepartment, addDepartment, focusElement, getGraphData: currentFlow, renderFlow })
 </script>
 
 <template>

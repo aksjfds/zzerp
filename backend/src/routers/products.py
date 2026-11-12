@@ -16,7 +16,7 @@ from modules.engineering.api import (
     list_product_versions,
     list_products,
 )
-from departments.engineering_orchestration import (
+from application.engineering import (
     create_product_version, get_product, replace_product_bom,
     save_product_process_flow_draft, update_product_info,
     update_product_process_flow,

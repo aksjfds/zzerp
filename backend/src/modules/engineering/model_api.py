@@ -5,13 +5,11 @@ from modules.engineering.persistence import (
     ProductBom,
     ProductProcessFlow,
     ProductVersion,
-    ProductRouteTask,
 )
 
 __all__ = [
     "Product",
     "ProductBom",
     "ProductProcessFlow",
-    "ProductRouteTask",
     "ProductVersion",
 ]

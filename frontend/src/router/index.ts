@@ -1,7 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { departmentRoutes, departmentSupportRoutes } from '@/features/departments'
 import { setupRouterGuard } from '@/permission/guard'
-import { ORDER_PERMISSIONS, PRODUCT_PERMISSIONS } from '@/permission/constants'
+import { DEPARTMENT_WORK_ORDER_VIEW, PLAN_PERMISSIONS, PRODUCT_PERMISSIONS } from '@/permission/constants'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -18,25 +17,23 @@ const router = createRouter({
       component: () => import('@/views/ForbiddenView.vue'),
       meta: { requiresAuth: true },
     },
-    ...departmentRoutes,
-    ...departmentSupportRoutes,
     {
-      path: '/business/orders',
-      name: 'customer-orders',
-      component: () => import('@/features/customer-orders/views/BusinessDepartmentView.vue'),
-      meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view] },
+      path: '/production-plans',
+      name: 'production-plans',
+      component: () => import('@/features/production-plans/views/ProductionPlansView.vue'),
+      meta: { requiresAuth: true, permissions: [PLAN_PERMISSIONS.view] },
     },
     {
-      path: '/business/orders/new',
-      name: 'customer-order-create',
-      component: () => import('@/features/customer-orders/views/CustomerOrderEditorView.vue'),
-      meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.add] },
+      path: '/department-work-orders',
+      name: 'department-work-orders',
+      component: () => import('@/features/production-plans/views/DepartmentWorkOrdersView.vue'),
+      meta: { requiresAuth: true, permissions: [PLAN_PERMISSIONS.view] },
     },
     {
-      path: '/business/orders/:orderId(\\d+)',
-      name: 'customer-order-edit',
-      component: () => import('@/features/customer-orders/views/CustomerOrderEditorView.vue'),
-      meta: { requiresAuth: true, permissions: [ORDER_PERMISSIONS.view] },
+      path: '/departments/:departmentCode/work-orders',
+      name: 'department-production',
+      component: () => import('@/features/production-plans/views/DepartmentWorkOrdersView.vue'),
+      meta: { requiresAuth: true, permissions: [PLAN_PERMISSIONS.view, DEPARTMENT_WORK_ORDER_VIEW] },
     },
     {
       path: '/products',

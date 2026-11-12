@@ -11,14 +11,12 @@ from domain.errors import DomainViolation
 from domain.product import ProductReference
 from domain.process_flow import validate_process_flow
 from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
-from modules.engineering.support import packaging_workshop_ids
 from modules.errors import DomainError
-from modules.organization.read_api import get_workshop_routes
 from schemas.engineering import ProcessFlowPayload
 
 
 @dataclass(frozen=True, slots=True)
-class ProductOrderReadiness:
+class ProductDesignReadiness:
     ready: bool
     reason: str
 
@@ -58,55 +56,26 @@ def get_product_references(
     }
 
 
-def resolve_order_product_references(
-    session: Session,
-    product_ids: Collection[int],
-    customer_id: int,
-) -> dict[int, ProductReference]:
-    ids = set(product_ids)
-    if not ids:
-        return {}
-    products = {
-        product.id: product
-        for product in session.scalars(
-            select(Product)
-            .where(Product.id.in_(ids))
-            .order_by(Product.id)
-            .with_for_update()
-        )
-    }
-    if len(products) != len(ids):
+def resolve_plan_product(
+    session: Session, product_id: int, customer_id: int,
+) -> ProductReference:
+    product = session.scalar(
+        select(Product).where(Product.id == product_id).with_for_update()
+    )
+    if product is None:
+        raise DomainError("product_not_found", "所选产品不存在", path="product_id", status_code=404)
+    if product.customer_id != customer_id:
         raise DomainError(
-            "invalid_order_product",
-            "订单包含不存在的产品",
-            path="items",
+            "plan_product_customer_mismatch", "所选产品必须属于所选客户",
+            path="product_id",
         )
-    for product in products.values():
-        if product.customer_id != customer_id:
-            raise DomainError(
-                "order_product_customer_mismatch",
-                "订单产品必须属于所选客户",
-                path="items",
-            )
-    readiness = get_product_order_readinesses(session, products.values())
-    for product in products.values():
-        status = readiness[product.id]
-        if not status.ready:
-            raise DomainError(
-                "product_engineering_data_missing",
-                f"产品 {product.factory_code} 不可用",
-                path="items",
-            )
-    return {
-        product_id: _product_reference(product)
-        for product_id, product in products.items()
-    }
+    return _product_reference(product)
 
 
-def get_product_order_readinesses(
+def get_product_design_readinesses(
     session: Session,
     products: Collection[Product],
-) -> dict[int, ProductOrderReadiness]:
+) -> dict[int, ProductDesignReadiness]:
     product_list = list(products)
     if not product_list:
         return {}
@@ -133,62 +102,38 @@ def get_product_order_readinesses(
             )
         )
     }
-    validated_flows: dict[int, ProcessFlowPayload] = {}
-    result: dict[int, ProductOrderReadiness] = {}
-    workshop_ids: set[int] = set()
+    result: dict[int, ProductDesignReadiness] = {}
     for product in product_list:
         key = (product.id, product.version)
-        current_bom_ids = bom_ids[key]
+        if not bom_ids[key]:
+            result[product.id] = ProductDesignReadiness(False, "当前版本缺少 BOM")
+            continue
         flow = flows.get(key)
-        if not current_bom_ids:
-            result[product.id] = ProductOrderReadiness(False, "当前版本缺少 BOM")
-            continue
         if not flow or not flow.get("nodes"):
-            result[product.id] = ProductOrderReadiness(False, "当前版本缺少正式流程图")
+            result[product.id] = ProductDesignReadiness(False, "当前版本缺少正式流程图")
             continue
         try:
-            validated = ProcessFlowPayload.model_validate(flow)
-        except ValidationError:
-            result[product.id] = ProductOrderReadiness(False, "当前版本正式流程图不完整")
+            validate_process_flow(ProcessFlowPayload.model_validate(flow))
+        except (ValidationError, DomainViolation):
+            result[product.id] = ProductDesignReadiness(False, "当前版本正式流程图不完整")
             continue
-        validated_flows[product.id] = validated
-        workshop_ids.update(
-            node.workshop_id
-            for node in validated.nodes
-            if node.type in {"process", "assembly"}
-        )
-    workshops = get_workshop_routes(session, workshop_ids)
-    direct_inbound_workshop_ids = packaging_workshop_ids(workshops)
-    for product in product_list:
-        validated = validated_flows.get(product.id)
-        if validated is None:
-            continue
-        flow_workshop_ids = {
-            node.workshop_id
-            for node in validated.nodes
-            if node.type in {"process", "assembly"}
-        }
-        if not flow_workshop_ids.issubset(workshops):
-            result[product.id] = ProductOrderReadiness(False, "流程图包含已失效车间")
-            continue
-        try:
-            validate_process_flow(
-                validated,
-                bom_ids[(product.id, product.version)],
-                direct_inbound_workshop_ids,
-            )
-        except DomainViolation:
-            result[product.id] = ProductOrderReadiness(False, "当前版本正式流程图不完整")
-            continue
-        result[product.id] = ProductOrderReadiness(True, "")
+        result[product.id] = ProductDesignReadiness(True, "")
     return result
 
 
 __all__ = [
     "ProductReference",
-    "ProductOrderReadiness",
-    "get_product_order_readinesses",
+    "ProductDesignReadiness",
+    "get_product_design_readinesses",
     "get_product_reference",
     "get_product_references",
-    "resolve_order_product_references",
+    "resolve_plan_product",
+    "matching_product_ids",
 ]
+
+
+def matching_product_ids(session, keyword: str) -> set[int]:
+    pattern = f"%{keyword.strip()}%"
+    return set(session.scalars(select(Product.id).where(
+        Product.factory_code.ilike(pattern) | Product.product_name.ilike(pattern),
+    )))

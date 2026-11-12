@@ -334,15 +334,9 @@ def frontend_checks() -> list[str]:
                 errors.append(f"{path.relative_to(ROOT)}: shared -> feature")
             if relative.parts[0] == "features" and parts[0] == "features":
                 source, destination = relative.parts[1], parts[1]
-                department_composition_root = (
-                    source == "departments"
-                    and path.name == "index.ts"
-                    and len(relative.parts) == 4
-                )
                 if (
                     source != destination
                     and len(parts) > 2
-                    and not department_composition_root
                 ):
                     errors.append(f"{path.relative_to(ROOT)}: bypasses {destination}/index.ts")
     return errors

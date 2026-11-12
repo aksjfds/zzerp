@@ -20,6 +20,7 @@ class Product(Base):
     __tablename__ = "product"
     __table_args__ = (
         UniqueConstraint("factory_code", name="uq_product_factory_code"),
+        UniqueConstraint("id", "customer_id", name="uq_product_customer_context"),
         CheckConstraint("version > 0", name="ck_product_version"),
         CheckConstraint("revision > 0", name="ck_product_revision"),
         ForeignKeyConstraint(
@@ -117,6 +118,7 @@ class ProductBom(Base):
             name="fk_product_bom_version",
             ondelete="CASCADE",
         ),
+        UniqueConstraint("id", "product_id", name="uq_product_bom_product"),
         UniqueConstraint(
             "id",
             "product_id",
@@ -201,7 +203,7 @@ class ProductProcessFlow(Base):
             name="ck_process_flow_schema_version_type",
         ),
         CheckConstraint(
-            "flow_json->>'schema_version' = '5'",
+            "flow_json->>'schema_version' = '8'",
             name="ck_process_flow_schema_version",
         ),
         CheckConstraint("flow_json ? 'nodes'", name="ck_process_flow_nodes_present"),
@@ -219,7 +221,7 @@ class ProductProcessFlow(Base):
             name="ck_process_flow_draft_object",
         ),
         CheckConstraint(
-            "draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '5'",
+            "draft_flow_json IS NULL OR draft_flow_json->>'schema_version' = '8'",
             name="ck_process_flow_draft_schema_version",
         ),
         CheckConstraint(
@@ -242,8 +244,8 @@ class ProductProcessFlow(Base):
     flow_json: Mapped[dict[str, Any]] = mapped_column(
         JSON_TYPE,
         nullable=False,
-        default=lambda: {"schema_version": 5, "nodes": [], "edges": []},
-        server_default=text("'{\"schema_version\": 5, \"nodes\": [], \"edges\": []}'"),
+        default=lambda: {"schema_version": 8, "nodes": [], "edges": []},
+        server_default=text("'{\"schema_version\": 8, \"nodes\": [], \"edges\": []}'"),
     )
     draft_flow_json: Mapped[dict[str, Any] | None] = mapped_column(
         JSON_TYPE,
@@ -260,85 +262,35 @@ class ProductProcessFlow(Base):
     product: Mapped[Product] = relationship(back_populates="process_flows")
 
 
-class ProductRouteTask(Base):
-    __tablename__ = "product_route_task"
+class ProductDepartmentRoute(Base):
+    __tablename__ = "product_department_route"
     __table_args__ = (
-        ForeignKeyConstraint(
-            ["product_id", "product_version"],
-            ["product_version.product_id", "product_version.version"],
-            name="fk_product_route_task_version",
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["product_bom_id", "product_id", "product_version"],
-            ["product_bom.id", "product_bom.product_id", "product_bom.product_version"],
-            name="fk_product_route_task_bom_version",
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["workshop_id", "department_id"],
-            ["workshop.id", "workshop.department_id"],
-            name="fk_product_route_task_workshop_department",
-        ),
-        CheckConstraint(
-            "origin_node_type IN ('part', 'assembly')",
-            name="ck_product_route_task_origin_type",
-        ),
-        CheckConstraint(
-            "(origin_node_type = 'part' AND product_bom_id IS NOT NULL) OR "
-            "(origin_node_type = 'assembly' AND product_bom_id IS NULL)",
-            name="ck_product_route_task_origin_scope",
-        ),
-        CheckConstraint(
-            "route_node_type IN ('process', 'assembly', 'supplier_processing')",
-            name="ck_product_route_task_node_type",
-        ),
-        CheckConstraint(
-            "(route_node_type IN ('process', 'assembly') "
-            "AND workshop_id IS NOT NULL) OR "
-            "(route_node_type = 'supplier_processing' "
-            "AND workshop_id IS NULL AND origin_node_type = 'part')",
-            name="ck_product_route_task_execution_scope",
-        ),
-        CheckConstraint("route_order >= 0", name="ck_product_route_task_order"),
-        UniqueConstraint(
-            "product_id", "product_version", "origin_flow_node_id", "route_flow_node_id",
-            name="uq_product_route_task_origin_node",
-        ),
-        Index(
-            "idx_product_route_task_department_page",
-            "department_id", "product_id", "product_version", "origin_flow_node_id", "route_order",
-        ),
-        Index(
-            "idx_product_route_task_workshop",
-            "workshop_id", "product_id", "product_version",
-        ),
-        Index(
-            "idx_product_route_task_item_code_trgm",
-            "origin_item_code",
-            postgresql_using="gin",
-            postgresql_ops={"origin_item_code": "gin_trgm_ops"},
-        ),
-        Index(
-            "idx_product_route_task_item_name_trgm",
-            "origin_item_name",
-            postgresql_using="gin",
-            postgresql_ops={"origin_item_name": "gin_trgm_ops"},
-        ),
+        Index("idx_product_department_route_department", "department_code", "product_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    product_bom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    origin_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    origin_node_type: Mapped[str] = mapped_column(Text, nullable=False)
-    origin_item_code: Mapped[str] = mapped_column(Text, nullable=False)
-    origin_item_name: Mapped[str] = mapped_column(Text, nullable=False)
-    route_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    route_node_type: Mapped[str] = mapped_column(Text, nullable=False)
-    workshop_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    department_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("department.id"), nullable=False
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("product.id", ondelete="CASCADE"), primary_key=True)
+    material_node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    department_node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    department_code: Mapped[str] = mapped_column(Text, ForeignKey("production_department.code"), nullable=False)
+
+
+class ProductRouteComponent(Base):
+    __tablename__ = "product_route_component"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["product_id", "material_node_id", "department_node_id"],
+            ["product_department_route.product_id", "product_department_route.material_node_id",
+             "product_department_route.department_node_id"],
+            name="fk_product_route_component_route", ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["product_bom_id", "product_id"], ["product_bom.id", "product_bom.product_id"],
+            name="fk_product_route_component_bom",
+        ),
+        Index("idx_product_route_component_bom", "product_bom_id"),
     )
-    route_order: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    product_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    material_node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    department_node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    product_bom_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

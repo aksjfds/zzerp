@@ -2,9 +2,6 @@ import type LogicFlow from '@logicflow/core'
 
 export const PROCESS_FLOW_FONT_SIZE_STORAGE_KEY = 'zzerp.processFlow.fontSize'
 export const PROCESS_FLOW_NODE_SCALE_STORAGE_KEY = 'zzerp.processFlow.nodeScale'
-export const PRODUCTION_FLOW_FONT_SIZE_STORAGE_KEY = 'zzerp.productionFlow.fontSize'
-export const PRODUCTION_FLOW_NODE_SCALE_STORAGE_KEY = 'zzerp.productionFlow.nodeScale'
-export const PRODUCTION_FLOW_EDGE_WIDTH_STORAGE_KEY = 'zzerp.productionFlow.edgeWidth'
 export const PROCESS_FLOW_MIN_CANVAS_SCALE = 0.02
 
 export function storedProcessFlowNumber(

@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { watch } from 'vue'
+import { nextPartNumber } from '../domain/bomNumbers'
 import type { BomItem } from '../domain/types'
 
 const props = defineProps<{
   modelValue: BomItem[]
+  factoryCode: string
   readonly?: boolean
   canSave?: boolean
   dirty?: boolean
@@ -12,21 +15,25 @@ const emit = defineEmits<{
   'update:modelValue': [value: BomItem[]]
   save: []
 }>()
+const generatedNumbers = new Set<string>()
 
 function update(index: number, field: keyof BomItem, value: string | number | undefined) {
   if (props.readonly) return
   const rows = props.modelValue.map((item) => ({ ...item }))
   const row = rows[index]
   if (!row) return
+  if (field === 'part_no') generatedNumbers.delete(row.part_no)
   Object.assign(row, { [field]: field === 'pcs' ? (value ?? 1) : value })
   emit('update:modelValue', rows)
 }
 
 function addRow() {
   if (props.readonly) return
+  const partNo = nextPartNumber(props.factoryCode, props.modelValue)
+  if (partNo) generatedNumbers.add(partNo)
   emit('update:modelValue', [
     ...props.modelValue,
-    { part_name: '', part_no: '', pcs: 1, remark: '' },
+    { part_name: '', part_no: partNo, pcs: 1, remark: '' },
   ])
 }
 
@@ -34,6 +41,19 @@ function removeRow(index: number) {
   if (props.readonly) return
   emit('update:modelValue', props.modelValue.filter((_, itemIndex) => itemIndex !== index))
 }
+
+watch(() => props.factoryCode, () => {
+  if (props.readonly || !props.factoryCode.trim()) return
+  const rows = props.modelValue.map(item => ({ ...item }))
+  const automatic = rows.filter(row => row.id === undefined
+    && (!row.part_no.trim() || generatedNumbers.has(row.part_no)))
+  for (const row of automatic) row.part_no = ''
+  for (const row of automatic) {
+    row.part_no = nextPartNumber(props.factoryCode, rows)
+    generatedNumbers.add(row.part_no)
+  }
+  if (automatic.length) emit('update:modelValue', rows)
+}, { immediate: true })
 
 function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
   const item = props.modelValue[index]

@@ -1,27 +1,8 @@
-"""Public API for production planning and progress reporting."""
+"""Public API for the unified production plan."""
 
-from modules.planning.assembly_department_progress import (
-    list_department_production_progress,
-)
-from modules.planning.production_progress_detail import (
-    get_department_production_progress_item,
-)
-from modules.planning.production_workbench import list_production_workbench_positions
-from modules.planning.plan_api import (
-    complete_order_plan,
-    get_order_plan,
-    update_order_plan,
-)
-from modules.planning.plan_builder import planned_product_quantity, rebuild_order_plan
+from modules.planning.commands import create_plan, update_plan, delete_plan, change_plan_status
+from modules.planning.queries import get_plan, list_plans
+from modules.planning.work_orders import list_work_orders
+from modules.planning.material_movements import list_movements, record_movement
 
-
-__all__ = [
-    "complete_order_plan",
-    "get_order_plan",
-    "get_department_production_progress_item",
-    "list_department_production_progress",
-    "list_production_workbench_positions",
-    "planned_product_quantity",
-    "rebuild_order_plan",
-    "update_order_plan",
-]
+__all__ = ["create_plan", "update_plan", "delete_plan", "change_plan_status", "get_plan", "list_plans", "list_work_orders", "list_movements", "record_movement"]

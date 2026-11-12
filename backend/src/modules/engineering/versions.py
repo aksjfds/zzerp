@@ -1,6 +1,5 @@
 from copy import deepcopy
 
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
@@ -8,16 +7,15 @@ from domain.engineering_products import validate_expected_revision
 from domain.models import BomItemCommand
 from domain.time import utc_now
 from modules.engineering.persistence import ProductVersion
-from modules.engineering.collaboration_contract import EngineeringCollaborators
 from modules.engineering.command_support import command_result, product_versions
+from modules.engineering.collaboration_contract import EngineeringCollaborators
+from modules.engineering.routing import ensure_referenced_routes_preserved, synchronize_routes, validate_nodes
 from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import (
     empty_process_flow,
     raise_integrity_error,
-    raise_stale_data_error,
 )
-from modules.engineering.flow_mapping import synchronize_part_metadata
-from modules.errors import DomainError, product_not_found
+from modules.errors import product_not_found
 from schemas.engineering import ProcessFlowPayload
 
 
@@ -63,11 +61,6 @@ def create_product_version(
                 ],
             )
             repository.flush()
-            copied_by_part_no = {item.part_no: item for item in copied_items}
-            id_map = {
-                source.id: copied_by_part_no[source.part_no].id
-                for source in source_items
-            }
             source_flow = next(
                 (
                     item.flow_json
@@ -76,34 +69,21 @@ def create_product_version(
                 ),
                 empty_process_flow(),
             )
-            copied_flow = deepcopy(source_flow)
-            for node in copied_flow.get("nodes", []):
-                if node.get("type") == "part":
-                    source_bom_id = node.get("bom_item_id")
-                    if source_bom_id not in id_map:
-                        raise DomainError(
-                            "source_flow_bom_invalid",
-                            "源版本流程中的配件节点未引用有效 BOM 行，请先修复源版本流程",
-                            element_id=node.get("id"),
-                        )
-                    node["bom_item_id"] = id_map[source_bom_id]
-            copied_flow = synchronize_part_metadata(
-                ProcessFlowPayload.model_validate(copied_flow),
-                {
-                    item.id: (item.part_name, item.part_no)
-                    for item in copied_items
-                },
-                product.factory_code,
-            ).model_dump(exclude_none=True)
-            repository.set_process_flow(product, next_version, copied_flow)
-            collaborators.copy_product_version_prices(
-                session,
-                product_id=product.id,
-                source_version=copy_from_version,
-                target_version=next_version,
-                bom_id_map=id_map,
+            copied_flow = ProcessFlowPayload.model_validate(deepcopy(source_flow))
+            copied_by_number = {item.part_no: item.id for item in copied_items}
+            bom_id_map = {item.id: copied_by_number[item.part_no] for item in source_items}
+            for node in copied_flow.nodes:
+                if node.type == "part":
+                    node.bom_item_id = bom_id_map[node.bom_item_id]
+            copied_flow = validate_nodes(session, product.id, next_version, copied_flow)
+            ensure_referenced_routes_preserved(
+                session, product, copied_flow,
+                collaborators.referenced_route_pairs(session, product.id),
             )
+            copied_flow = copied_flow.model_dump(exclude_none=True)
+            repository.set_process_flow(product, next_version, copied_flow)
             product.version = next_version
+            synchronize_routes(session, product.id, ProcessFlowPayload.model_validate(copied_flow))
             product.revision += 1
             product.updated_at = utc_now()
             return command_result(repository, product)

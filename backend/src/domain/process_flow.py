@@ -1,311 +1,103 @@
-from collections import defaultdict, deque
-from collections.abc import Collection
-from typing import Protocol
+"""Graph integrity and department reachability from explicit part origins."""
+
+from dataclasses import dataclass
 
 from domain.errors import DomainViolation
 
 
-class FlowNodeLike(Protocol):
-    id: str
-    type: str
-    label: str
-    bom_item_id: int
-    workshop_id: int
-
-
-class FlowEdgeLike(Protocol):
-    id: str
-    source_node_id: str
-    target_node_id: str
-
-
-class ProcessFlowLike(Protocol):
-    nodes: list
-    edges: list
-
-
-def validate_process_flow_draft(
-    flow: ProcessFlowLike,
-    bom_ids: set[int],
-) -> ProcessFlowLike:
-    node_map = {}
-    part_node_by_bom: dict[int, list[str]] = defaultdict(list)
-    for index, node in enumerate(flow.nodes):
-        if node.id in node_map:
-            _fail(
-                "duplicate_node_id",
-                f"流程节点 ID 重复：{node.id}",
-                f"process_flow.nodes.{index}.id",
-                node.id,
-            )
-        node_map[node.id] = node
+def validate_process_flow(flow):
+    node_ids = set()
+    part_ids = set()
+    for node in flow.nodes:
+        if node.id in node_ids:
+            raise DomainViolation("duplicate_flow_node", "节点 ID 不能重复", "process_flow.nodes", node.id)
+        node_ids.add(node.id)
         if node.type == "part":
-            if node.bom_item_id not in bom_ids:
-                _fail(
-                    "invalid_bom_reference",
-                    "配件节点未引用当前产品的有效 BOM 行",
-                    f"process_flow.nodes.{index}.bom_item_id",
-                    node.id,
-                )
-            part_node_by_bom[node.bom_item_id].append(node.id)
-
-    edge_ids: set[str] = set()
-    edge_keys: set[tuple[str, str]] = set()
-    adjacency: dict[str, list[str]] = defaultdict(list)
-    indegree = {node_id: 0 for node_id in node_map}
-    for index, edge in enumerate(flow.edges):
-        path = f"process_flow.edges.{index}"
-        if edge.id in edge_ids:
-            _fail("duplicate_edge_id", f"流程连线 ID 重复：{edge.id}", f"{path}.id", edge.id)
+            if node.bom_item_id in part_ids:
+                raise DomainViolation("duplicate_part_node", "同一配件只能有一个起点节点", "process_flow.nodes", node.id)
+            part_ids.add(node.bom_item_id)
+    nodes = {node.id: node for node in flow.nodes}
+    edge_ids = set()
+    for edge in flow.edges:
+        if edge.id in edge_ids or edge.id in node_ids:
+            raise DomainViolation("duplicate_flow_edge", "连线 ID 不能重复", "process_flow.edges", edge.id)
         edge_ids.add(edge.id)
-        source = node_map.get(edge.source_node_id)
-        target = node_map.get(edge.target_node_id)
-        if source is None or target is None:
-            _fail("edge_endpoint_missing", "连线引用了不存在的节点", path, edge.id)
-        if source.id == target.id:
-            _fail("self_loop_not_allowed", "不允许节点连接自身", path, edge.id)
-        edge_key = (source.id, target.id)
-        if edge_key in edge_keys:
-            _fail("duplicate_edge", "相同业务含义的连线不能重复", path, edge.id)
-        edge_keys.add(edge_key)
-        adjacency[source.id].append(target.id)
-        indegree[target.id] += 1
-    if node_map:
-        _validate_normal_dag(node_map, adjacency, indegree)
+        if edge.source_node_id not in nodes or edge.target_node_id not in nodes:
+            raise DomainViolation("flow_endpoint_missing", "连线必须引用存在的节点", "process_flow.edges", edge.id)
+        if nodes[edge.target_node_id].type == "part":
+            raise DomainViolation("part_node_is_origin", "配件节点是路线起点，不能连接输入线", "process_flow.edges", edge.id)
     return flow
 
 
-def validate_process_flow(
-    flow: ProcessFlowLike,
-    bom_ids: set[int],
-    direct_inbound_workshop_ids: Collection[int] = (),
-) -> ProcessFlowLike:
-    direct_inbound_workshops = set(direct_inbound_workshop_ids)
-    if not flow.nodes and not flow.edges:
-        _fail(
-            "finished_inbound_node_count",
-            "流程图必须且只能配置一个入库节点",
-            "process_flow.nodes",
-        )
-    if not flow.nodes:
-        _fail("flow_nodes_missing", "流程图存在连线但没有节点", "process_flow.nodes")
-
-    node_map = {}
-    part_node_by_bom: dict[int, list[str]] = defaultdict(list)
-    for index, node in enumerate(flow.nodes):
-        if node.id in node_map:
-            _fail(
-                "duplicate_node_id",
-                f"流程节点 ID 重复：{node.id}",
-                f"process_flow.nodes.{index}.id",
-                node.id,
-            )
-        node_map[node.id] = node
-        if node.type == "part":
-            if node.bom_item_id not in bom_ids:
-                _fail(
-                    "invalid_bom_reference",
-                    "配件节点未引用当前产品的有效 BOM 行",
-                    f"process_flow.nodes.{index}.bom_item_id",
-                    node.id,
-                )
-            part_node_by_bom[node.bom_item_id].append(node.id)
-
-    missing_bom_ids = bom_ids - set(part_node_by_bom)
-    if missing_bom_ids:
-        _fail(
-            "missing_bom_part_nodes",
-            "每条 BOM 明细都必须在流程图中有对应配件节点",
-            "process_flow.nodes",
-        )
-    duplicate_bom_ids = {
-        bom_id for bom_id, node_ids in part_node_by_bom.items() if len(node_ids) > 1
-    }
-    if duplicate_bom_ids:
-        duplicate_id = next(iter(duplicate_bom_ids))
-        _fail(
-            "duplicate_bom_part_node",
-            "同一 BOM 配件在流程图中只能出现一次",
-            "process_flow.nodes",
-            part_node_by_bom[duplicate_id][0],
-        )
-
-    inbound_nodes = [node for node in flow.nodes if node.type == "finished_inbound"]
-    if len(inbound_nodes) != 1:
-        _fail(
-            "finished_inbound_node_count",
-            "流程图必须且只能配置一个入库节点",
-            "process_flow.nodes",
-            inbound_nodes[0].id if inbound_nodes else None,
-        )
-
-    edge_ids: set[str] = set()
-    edge_keys: set[tuple[str, str]] = set()
-    normal_incoming: dict[str, int] = defaultdict(int)
-    normal_outgoing: dict[str, int] = defaultdict(int)
-    normal_adjacency: dict[str, list[str]] = defaultdict(list)
-    normal_targets: dict[str, list[str]] = defaultdict(list)
-    normal_sources: dict[str, list[str]] = defaultdict(list)
-    normal_indegree = {node_id: 0 for node_id in node_map}
-    undirected: dict[str, set[str]] = defaultdict(set)
-    for index, edge in enumerate(flow.edges):
-        path = f"process_flow.edges.{index}"
-        if edge.id in edge_ids:
-            _fail("duplicate_edge_id", f"流程连线 ID 重复：{edge.id}", f"{path}.id", edge.id)
-        edge_ids.add(edge.id)
-        source = node_map.get(edge.source_node_id)
-        target = node_map.get(edge.target_node_id)
-        if source is None or target is None:
-            _fail("edge_endpoint_missing", "连线引用了不存在的节点", path, edge.id)
-        if source.id == target.id:
-            _fail("self_loop_not_allowed", "不允许节点连接自身", path, edge.id)
-        edge_key = (source.id, target.id)
-        if edge_key in edge_keys:
-            _fail("duplicate_edge", "相同业务含义的连线不能重复", path, edge.id)
-        edge_keys.add(edge_key)
-        undirected[source.id].add(target.id)
-        undirected[target.id].add(source.id)
-
-        normal_incoming[target.id] += 1
-        normal_outgoing[source.id] += 1
-        normal_adjacency[source.id].append(target.id)
-        normal_targets[source.id].append(target.id)
-        normal_sources[target.id].append(source.id)
-        normal_indegree[target.id] += 1
-
-    for index, node in enumerate(flow.nodes):
-        path = f"process_flow.nodes.{index}"
-        if node.type == "part":
-            if normal_incoming[node.id] != 0:
-                _fail("part_has_incoming_edge", f"配件“{node.label}”不能有输入连线", path, node.id)
-            if normal_outgoing[node.id] != 1:
-                _fail("part_output_count", f"配件“{node.label}”必须且只能连接一个首节点", path, node.id)
-            if node_map[normal_targets[node.id][0]].type not in {
-                "process",
-                "assembly",
-                "supplier_processing",
-            }:
-                _fail(
-                    "part_first_node_invalid",
-                    "配件节点的第一个执行节点必须是工艺、装配或委外加工节点",
-                    path,
-                    node.id,
-                )
-        elif node.type == "supplier_processing":
-            if normal_incoming[node.id] != 1:
-                _fail(
-                    "supplier_processing_input_count",
-                    f"委外加工节点“{node.label}”必须且只能连接一个上游配件",
-                    path,
-                    node.id,
-                )
-            source = node_map[normal_sources[node.id][0]]
-            if source.type != "part":
-                _fail(
-                    "supplier_processing_source_invalid",
-                    f"委外加工节点“{node.label}”的上游必须是配件节点",
-                    path,
-                    node.id,
-                )
-            if normal_outgoing[node.id] != 1:
-                _fail(
-                    "supplier_processing_output_count",
-                    f"委外加工节点“{node.label}”必须且只能连接一个QC节点",
-                    path,
-                    node.id,
-                )
-            target = node_map[normal_targets[node.id][0]]
-            if target.type != "qc":
-                _fail(
-                    "supplier_processing_qc_required",
-                    f"委外加工节点“{node.label}”的后续必须是QC节点",
-                    path,
-                    node.id,
-                )
-        elif node.type == "qc":
-            if normal_incoming[node.id] != 1:
-                _fail("qc_input_count", f"QC节点“{node.label}”必须且只能连接一个上游执行节点", path, node.id)
-            source = node_map[normal_sources[node.id][0]]
-            if source.type not in {"process", "assembly", "supplier_processing"}:
-                _fail("qc_source_invalid", f"QC节点“{node.label}”的上游必须是工艺、装配或委外加工节点", path, node.id)
-            if normal_outgoing[node.id] != 1:
-                _fail("qc_output_count", f"QC节点“{node.label}”必须且只能连接一个后续节点", path, node.id)
-            target = node_map[normal_targets[node.id][0]]
-            if target.type not in {"process", "assembly", "finished_inbound"}:
-                _fail("qc_target_invalid", f"QC节点“{node.label}”后只能连接工艺、装配或入库节点", path, node.id)
-        elif node.type == "finished_inbound":
-            if normal_incoming[node.id] != 1:
-                _fail("finished_inbound_input_count", f"入库节点“{node.label}”必须且只能连接一个上游节点", path, node.id)
-            if normal_outgoing[node.id] != 0:
-                _fail("finished_inbound_has_output", f"入库节点“{node.label}”必须是流程终点，不能再连接后续节点", path, node.id)
-        else:
-            minimum = 2 if node.type == "assembly" else 1
-            if normal_incoming[node.id] < minimum:
-                message = (
-                    f"装配节点“{node.label}”至少需要两条输入连线"
-                    if minimum == 2
-                    else f"工艺节点“{node.label}”缺少输入连线"
-                )
-                _fail("insufficient_normal_inputs", message, path, node.id)
-            if node.type == "process" and normal_incoming[node.id] != 1:
-                _fail(
-                    "process_input_count",
-                    f"工艺节点“{node.label}”只能有一个上游；多路配件合并必须使用装配节点",
-                    path,
-                    node.id,
-                )
-            if normal_outgoing[node.id] != 1:
-                _fail("execution_output_count", f"节点“{node.label}”必须且只能连接一个后续节点", path, node.id)
-            target = node_map[normal_targets[node.id][0]]
-            direct_inbound = (
-                node.type == "process"
-                and node.workshop_id in direct_inbound_workshops
-                and target.type == "finished_inbound"
-            )
-            if target.type != "qc" and not direct_inbound:
-                _fail(
-                    "execution_qc_required",
-                    f"节点“{node.label}”的后续必须是QC节点；只有装包节点可以直接连接入库",
-                    path,
-                    node.id,
-                )
-
-    _validate_normal_dag(node_map, normal_adjacency, normal_indegree)
-    _validate_connected(node_map, undirected)
-    return flow
+def reachable_department_pairs(flow) -> list[tuple[str, str]]:
+    validate_process_flow(flow)
+    nodes = {node.id: node for node in flow.nodes}
+    outgoing = {}
+    for edge in flow.edges:
+        outgoing.setdefault(edge.source_node_id, []).append(edge.target_node_id)
+    pairs = set()
+    for part in flow.nodes:
+        if part.type != "part":
+            continue
+        pending = list(outgoing.get(part.id, []))
+        visited = set()
+        while pending:
+            node_id = pending.pop()
+            if node_id in visited:
+                continue
+            visited.add(node_id)
+            if nodes[node_id].type == "department":
+                pairs.add((part.id, node_id))
+            pending.extend(outgoing.get(node_id, []))
+    return sorted(pairs)
 
 
-def _validate_normal_dag(node_map, adjacency, indegree) -> None:
-    queue = deque(node_id for node_id, degree in indegree.items() if degree == 0)
-    visited = 0
-    while queue:
-        current = queue.popleft()
-        visited += 1
-        for target in adjacency[current]:
-            indegree[target] -= 1
-            if indegree[target] == 0:
-                queue.append(target)
-    if visited != len(node_map):
-        _fail(
-            "normal_flow_cycle",
-            "宏观工艺路线不能形成环",
-            "process_flow.edges",
-        )
+@dataclass(frozen=True)
+class MaterialRoute:
+    material_node_id: str
+    department_node_id: str
+    part_node_ids: tuple[str, ...]
 
 
-def _validate_connected(node_map, undirected) -> None:
-    first = next(iter(node_map))
-    visited = {first}
-    queue = deque([first])
-    while queue:
-        current = queue.popleft()
-        for neighbor in undirected[current]:
-            if neighbor not in visited:
-                visited.add(neighbor)
-                queue.append(neighbor)
-    if len(visited) != len(node_map):
-        _fail("disconnected_flow", "流程图中存在孤立或不连通的节点", "process_flow.nodes")
-
-
-def _fail(code: str, message: str, path: str, element_id: str | None = None):
-    raise DomainViolation(code, message, path, element_id)
+def material_routes(flow) -> list[MaterialRoute]:
+    pairs = reachable_department_pairs(flow)
+    nodes = {node.id: node for node in flow.nodes}
+    incoming = {key: set() for key in nodes}
+    outgoing = {key: set() for key in nodes}
+    for edge in flow.edges:
+        incoming[edge.target_node_id].add(edge.source_node_id)
+        outgoing[edge.source_node_id].add(edge.target_node_id)
+    indegrees = {key: len(value) for key, value in incoming.items()}
+    pending = sorted(key for key, degree in indegrees.items() if not degree)
+    ordered = []
+    while pending:
+        key = pending.pop()
+        ordered.append(key)
+        for target in sorted(outgoing[key]):
+            indegrees[target] -= 1
+            if not indegrees[target]:
+                pending.append(target)
+    if len(ordered) != len(nodes):
+        merge_nodes = {node.id for node in flow.nodes if node.type == 'department'
+                       and node.department_code in {'laser', 'assembly'}}
+        if any(sum(department == key for part, department in pairs) > 1 for key in merge_nodes):
+            raise DomainViolation('assembly_cycle', '包含多配件汇合的流程不能有循环，请明确装配先后顺序', 'process_flow.edges')
+        return [MaterialRoute(part, department, (part,)) for part, department in pairs]
+    outputs = {}
+    routes = []
+    for key in ordered:
+        node = nodes[key]
+        if node.type == 'part':
+            outputs[key] = {key: (key,)}
+            continue
+        materials = {}
+        for source in sorted(incoming[key]):
+            materials.update(outputs[source])
+        if node.department_code in {'laser', 'assembly'} and len(materials) > 1:
+            parts = [part for members in materials.values() for part in members]
+            if len(parts) != len(set(parts)):
+                raise DomainViolation('assembly_overlapping_inputs', '汇合物料重复包含同一配件，请调整路线', 'process_flow.nodes', key)
+            materials = {key: tuple(sorted(parts))}
+        outputs[key] = materials
+        routes.extend(MaterialRoute(origin, key, members) for origin, members in sorted(materials.items()))
+    return routes

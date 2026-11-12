@@ -30,6 +30,13 @@ export function setupRouterGuard(router: Router) {
       return getDefaultDashboardPath(authStore.user)
     }
 
+    if (authStore.user?.department_code && to.meta.requiresAuth
+      && (to.name !== 'department-production'
+        || to.params.departmentCode !== authStore.user.department_code)
+      && to.path !== '/forbidden') {
+      return getDefaultDashboardPath(authStore.user)
+    }
+
     const permissions = to.meta.permissions as string[] | undefined
     if (permissions?.length && !authStore.hasPermission(permissions)) {
       return to.path === '/forbidden' ? true : '/forbidden'

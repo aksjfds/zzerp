@@ -1,22 +1,15 @@
-from collections.abc import Mapping
-from typing import Protocol
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import StaleDataError
 
 from domain.models import BomItemCommand
-from domain.process_flow import validate_process_flow, validate_process_flow_draft
+from domain.process_flow import validate_process_flow
 from schemas.engineering import BomItemPayload, ProcessFlowPayload
 from modules.errors import DomainError
 
 
-class WorkshopRouteLike(Protocol):
-    department_code: str
-    input_mode: str
-
-
 def empty_process_flow() -> dict:
-    return {"schema_version": 5, "nodes": [], "edges": []}
+    return {"schema_version": 8, "nodes": [], "edges": []}
 
 
 def bom_commands(items: list[BomItemPayload]) -> list[BomItemCommand]:
@@ -32,31 +25,8 @@ def bom_commands(items: list[BomItemPayload]) -> list[BomItemCommand]:
     ]
 
 
-def packaging_workshop_ids(
-    workshops: Mapping[int, WorkshopRouteLike],
-) -> set[int]:
-    return {
-        workshop_id
-        for workshop_id, workshop in workshops.items()
-        if workshop.department_code == "assembly"
-        and workshop.input_mode == "single"
-    }
-
-
-def validated_flow(
-    flow: ProcessFlowPayload,
-    bom_ids: set[int],
-    direct_inbound_workshop_ids: set[int],
-) -> dict:
-    return validate_process_flow(
-        flow,
-        bom_ids,
-        direct_inbound_workshop_ids,
-    ).model_dump(exclude_none=True)
-
-
-def validated_draft_flow(flow: ProcessFlowPayload, bom_ids: set[int]) -> dict:
-    return validate_process_flow_draft(flow, bom_ids).model_dump(exclude_none=True)
+def validated_flow(flow: ProcessFlowPayload) -> dict:
+    return validate_process_flow(flow).model_dump(exclude_none=True)
 
 
 def raise_integrity_error(exc: IntegrityError) -> None:

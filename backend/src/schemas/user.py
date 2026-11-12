@@ -1,8 +1,5 @@
 from pydantic import BaseModel, ConfigDict, Field
 
-from schemas.common import UserDepartmentCode
-
-
 class UserModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -16,9 +13,9 @@ class UserResponse(UserModel):
     id: int
     username: str
     name: str
-    department: UserDepartmentCode | None
     is_system: bool
     role: str
+    department_code: str | None
     permissions: list[str]
 
 

@@ -1,34 +1,20 @@
-export const PROCESS_FLOW_SCHEMA_VERSION = 5 as const
-export type FlowNodeType =
-  | 'part'
-  | 'process'
-  | 'qc'
-  | 'assembly'
-  | 'finished_inbound'
-  | 'supplier_processing'
+export const PROCESS_FLOW_SCHEMA_VERSION = 8 as const
+export type FlowNodeType = 'part' | 'department'
 export type FlowPoint = { x: number; y: number }
-type FlowNodeBase = FlowPoint & { id: string; label: string; label_position?: FlowPoint; z_index?: number; rotation?: number }
-export type FlowNode =
-  | (FlowNodeBase & { type: 'part'; bom_item_id: number; part_no: string })
-  | (FlowNodeBase & {
-      type: 'process'
-      workshop_id: number
-    })
-  | (FlowNodeBase & { type: 'qc' })
-  | (FlowNodeBase & { type: 'supplier_processing' })
-  | (FlowNodeBase & { type: 'finished_inbound' })
-  | (FlowNodeBase & {
-      type: 'assembly'
-      workshop_id: number
-      output_name: string
-      output_pcs: number
-      assembly_sequence?: number
-      assembly_code?: string
-      assembly_name?: string
-    })
+type FlowNodeBase = FlowPoint & {
+  id: string
+  label: string
+  label_position?: FlowPoint
+  z_index?: number
+  rotation?: number
+}
+export type FlowNode = FlowNodeBase & (
+  | { type: 'part'; bom_item_id: number }
+  | { type: 'department'; department_code: string }
+)
 export type FlowEdge = {
   id: string
-  edge_type: string
+  edge_type: 'polyline'
   source_node_id: string
   target_node_id: string
   source_anchor_id?: string

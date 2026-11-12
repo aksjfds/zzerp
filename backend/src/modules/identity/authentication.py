@@ -9,9 +9,9 @@ def serialize_user(user: User) -> dict:
         "id": user.id,
         "username": user.username,
         "name": user.username,
-        "department": user.department,
         "is_system": user.is_system,
         "role": user.role,
+        "department_code": user.department_code,
         "permissions": parse_permissions(user.permissions),
     }
 

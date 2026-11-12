@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { queryLoginProductionDepartments, type ProductionDepartment } from '@/features/production-departments'
+import { getApiErrorDetail } from '@/api/request'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -16,20 +18,37 @@ const { play, finishAll } = useMotion()
 const activeAccount = ref('')
 const loginError = ref('')
 const failedAccount = ref('')
-const accounts = [
-  { username: 'engineering', name: '工程部', description: '产品、BOM 与生产流程' },
-  { username: 'business', name: '业务部', description: '客户订单与生产计划' },
-  { username: 'stamp', name: '冲压部', description: '冲压工艺生产' },
-  { username: 'cnc', name: '机加部', description: '机加工艺生产' },
-  { username: 'polish', name: '表面处理部', description: '表面处理工艺生产' },
-  { username: 'outsource', name: '外协部', description: '蚀字、电镀外协工单' },
-  { username: 'qc', name: 'QC部门', description: '质量检验与放行' },
-  { username: 'assembly', name: '装配部', description: '装配生产' },
-  { username: 'finished', name: '成品部', description: '成品入库与订单发货' },
-  { username: 'warehouse', name: '仓库', description: '配件、装配体库存管理' },
-] as const
+const departments = ref<ProductionDepartment[]>([])
+const departmentLoading = ref(false)
+const departmentError = ref('')
+let active = true
+let requestRevision = 0
+const accounts = computed(() => [
+  { key: 'engineering', username: 'engineering', name: '工程部', description: '产品、BOM 与生产流程', path: '' },
+  { key: 'business', username: 'business', name: '业务部', description: '生产计划管理', path: '' },
+  ...departments.value.map(department => ({
+    key: `department:${department.code}`, username: department.code, name: department.name,
+    description: '本部门工单、到料与出料',
+    path: `/departments/${encodeURIComponent(department.code)}/work-orders`,
+  })),
+])
+
+async function loadDepartments() {
+  const current = ++requestRevision
+  departmentLoading.value = true
+  departmentError.value = ''
+  try {
+    const result = await queryLoginProductionDepartments()
+    if (active && current === requestRevision) departments.value = result
+  } catch (cause) {
+    if (active && current === requestRevision) departmentError.value = getApiErrorDetail(cause)?.message || '生产部门入口加载失败'
+  } finally { if (active && current === requestRevision) departmentLoading.value = false }
+}
+
+onBeforeUnmount(() => { active = false; requestRevision += 1 })
 
 onMounted(() => {
+  void loadDepartments()
   const panel = loginPanel.value
   if (!panel) return
 
@@ -64,20 +83,25 @@ onMounted(() => {
   })
 })
 
-async function loginAs(username: string) {
+async function loginAs(key: string) {
+  const account = accounts.value.find(item => item.key === key)
+  if (!account || authStore.loading) return
   finishAll()
-  activeAccount.value = username
+  activeAccount.value = key
   loginError.value = ''
   try {
-    const user = await authStore.login({ username, password: '1' })
+    const user = await authStore.login({ username: account.username, password: '1' })
+    if (!active) return
     const defaultPath = getDefaultDashboardPath(user)
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : defaultPath
+    const redirect = user.department_code ? defaultPath
+      : account.path || (typeof route.query.redirect === 'string' ? route.query.redirect : defaultPath)
     await router.replace(redirect)
   } catch {
-    failedAccount.value = username
-    loginError.value = `${accounts.find(account => account.username === username)?.name || username}登录失败，请重试`
+    if (!active) return
+    failedAccount.value = key
+    loginError.value = `${account.name}登录失败，请重试`
   } finally {
-    activeAccount.value = ''
+    if (active) activeAccount.value = ''
   }
 }
 </script>
@@ -90,7 +114,7 @@ async function loginAs(username: string) {
           <div class="brand-mark">ZZ</div>
           <div>
             <h1>ZZ ERP</h1>
-            <p>部门操作工作台</p>
+            <p>产品与计划管理</p>
           </div>
         </div>
         <span class="login-scan" data-login-motion="scan" aria-hidden="true" />
@@ -98,30 +122,31 @@ async function loginAs(username: string) {
 
       <div class="account-directory">
         <div class="account-heading" data-login-motion="reveal">
-          <h2>选择登录账号</h2>
-          <p>点击部门账号直接进入对应工作台</p>
+          <h2>选择部门入口</h2>
+          <p>各部门独立登录，生产部门只查看本部门工单</p>
         </div>
         <LoadErrorAlert :message="loginError" title="登录失败" retry-text="重新登录" :loading="authStore.loading" @retry="loginAs(failedAccount)" />
-        <div class="account-grid">
+        <LoadErrorAlert :message="departmentError" title="部门入口加载失败" :loading="departmentLoading" @retry="loadDepartments" />
+        <div class="account-grid" :aria-busy="departmentLoading">
           <button
             v-for="account in accounts"
-            :key="account.username"
+            :key="account.key"
             class="account-card"
-            :class="{ 'is-logging-in': activeAccount === account.username }"
+            :class="{ 'is-logging-in': activeAccount === account.key }"
             data-login-motion="card"
             type="button"
             :disabled="authStore.loading"
-            :aria-busy="activeAccount === account.username"
+            :aria-busy="activeAccount === account.key"
             @focus="finishAll"
-            @click="loginAs(account.username)"
+            @click="loginAs(account.key)"
           >
             <span class="account-avatar" aria-hidden="true">{{ account.name.slice(0, 1) }}</span>
             <span class="account-copy">
               <strong>{{ account.name }}</strong>
-              <small>{{ account.username }}</small>
+              <small>{{ account.path ? '部门工单' : account.username }}</small>
               <span>{{ account.description }}</span>
             </span>
-            <span v-if="activeAccount === account.username" class="account-state">登录中…</span>
+            <span v-if="activeAccount === account.key" class="account-state">登录中…</span>
             <span v-else class="account-arrow">进入</span>
           </button>
         </div>

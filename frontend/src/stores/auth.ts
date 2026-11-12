@@ -11,7 +11,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   const isLoggedIn = computed(() => Boolean(user.value))
   const permissions = computed(() => user.value?.permissions ?? [])
-  const department = computed(() => user.value?.department)
 
   function setUser(profile: UserProfile) {
     user.value = profile
@@ -70,7 +69,6 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   return {
-    department,
     clearSession,
     hasPermission,
     initialized,

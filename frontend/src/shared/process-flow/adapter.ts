@@ -3,7 +3,6 @@ import {
   PROCESS_FLOW_SCHEMA_VERSION,
   type FlowEdge,
   type FlowNode,
-  type FlowNodeType,
   type FlowPoint,
   type ProcessFlow,
 } from './types'
@@ -11,31 +10,8 @@ import {
 export const PROCESS_FLOW_GRID_X = 500
 export const PROCESS_FLOW_GRID_Y = 250
 
-const NODE_TYPES = new Set<FlowNodeType>([
-  'part',
-  'process',
-  'qc',
-  'assembly',
-  'finished_inbound',
-  'supplier_processing',
-])
-const NODE_SIZE: Record<FlowNodeType, { halfWidth: number; halfHeight: number }> = {
-  part: { halfWidth: 75, halfHeight: 28 },
-  process: { halfWidth: 75, halfHeight: 28 },
-  qc: { halfWidth: 68, halfHeight: 42 },
-  finished_inbound: { halfWidth: 75, halfHeight: 28 },
-  assembly: { halfWidth: 80, halfHeight: 28 },
-  supplier_processing: { halfWidth: 80, halfHeight: 28 },
-}
-
-type RenderOptions = {
-  workshopDepartmentCode?: (workshopId: number) => string | undefined
-  workshopDirectInbound?: (workshopId: number) => boolean
-}
-
 export function toLogicFlowData(
   flow: ProcessFlow,
-  options: RenderOptions = {},
 ): LogicFlow.GraphConfigData {
   const normalizedFlow = normalizeEdgeAnchors(flow)
   return {
@@ -49,7 +25,7 @@ export function toLogicFlowData(
         : node.label,
       zIndex: node.z_index,
       rotate: node.rotation,
-      properties: nodeProperties(node, options),
+      properties: node.type === 'part' ? { bomItemId: node.bom_item_id } : { departmentCode: node.department_code },
     })),
     edges: normalizedFlow.edges.map((edge) => ({
       id: edge.id,
@@ -82,57 +58,25 @@ export function fromLogicFlowData(data: LogicFlow.GraphData): ProcessFlow {
 }
 
 function toBusinessNode(node: LogicFlow.NodeData): FlowNode {
-  if (!NODE_TYPES.has(node.type as FlowNodeType)) {
-    throw new Error(`Unsupported LogicFlow node type: ${node.type}`)
-  }
-  const type = node.type as FlowNodeType
-  const properties = node.properties ?? {}
   const base = {
-    id: node.id,
-    type,
-    x: snapCoordinate(node.x, PROCESS_FLOW_GRID_X),
-    y: snapCoordinate(node.y, PROCESS_FLOW_GRID_Y),
-    label: textValue(node.text),
-    label_position: textPosition(node.text),
-    z_index: node.zIndex,
-    rotation: node.rotate,
+    id: node.id, x: snapCoordinate(node.x, PROCESS_FLOW_GRID_X),
+    y: snapCoordinate(node.y, PROCESS_FLOW_GRID_Y), label: textValue(node.text),
+    label_position: textPosition(node.text), z_index: node.zIndex, rotation: node.rotate,
   }
-  if (type === 'part') {
-    return {
-      ...base,
-      type,
-      bom_item_id: requiredNumber(properties.bomItemId, 'bomItemId'),
-      part_no: requiredString(properties.partNo, 'partNo'),
-    }
+  const properties = node.properties ?? {}
+  if (node.type === 'part' && typeof properties.bomItemId === 'number') {
+    return { ...base, type: 'part', bom_item_id: properties.bomItemId }
   }
-  if (type === 'process') {
-    return {
-      ...base,
-      type,
-      workshop_id: requiredNumber(properties.workshopId, 'workshopId'),
-    }
+  if (node.type === 'department' && typeof properties.departmentCode === 'string' && properties.departmentCode) {
+    return { ...base, type: 'department', department_code: properties.departmentCode }
   }
-  if (type === 'qc') return { ...base, type: 'qc' }
-  if (type === 'supplier_processing') return { ...base, type: 'supplier_processing' }
-  if (type === 'finished_inbound') return { ...base, type: 'finished_inbound' }
-  return {
-    ...base,
-    type: 'assembly',
-    workshop_id: requiredNumber(properties.workshopId, 'workshopId'),
-    output_name: stringValue(properties.outputName),
-    output_pcs: requiredNumber(properties.outputPcs ?? 1, 'outputPcs'),
-    assembly_sequence: typeof properties.assemblySequence === 'number'
-      ? properties.assemblySequence
-      : undefined,
-    assembly_code: stringValue(properties.assemblyCode) || undefined,
-    assembly_name: stringValue(properties.assemblyName) || undefined,
-  }
+  throw new Error(`节点类型或来源资料不完整：${node.id}`)
 }
 
 function toBusinessEdge(edge: LogicFlow.EdgeData, nodes: FlowNode[]): FlowEdge {
   return normalizeEdgeAnchor({
     id: edge.id,
-    edge_type: edge.type,
+    edge_type: 'polyline',
     source_node_id: edge.sourceNodeId,
     target_node_id: edge.targetNodeId,
     source_anchor_id: edge.sourceAnchorId,
@@ -146,51 +90,12 @@ function toBusinessEdge(edge: LogicFlow.EdgeData, nodes: FlowNode[]): FlowEdge {
   }, nodes)
 }
 
-function nodeProperties(node: FlowNode, options: RenderOptions): Record<string, unknown> {
-  if (node.type === 'part') return { bomItemId: node.bom_item_id, partNo: node.part_no }
-  if (node.type === 'process') {
-    return {
-      workshopId: node.workshop_id,
-      departmentCode: options.workshopDepartmentCode?.(node.workshop_id),
-      directInbound: options.workshopDirectInbound?.(node.workshop_id) ?? false,
-    }
-  }
-  if (node.type === 'qc') return {}
-  if (node.type === 'supplier_processing') return {}
-  if (node.type === 'finished_inbound') return {}
-  if (node.type === 'assembly') {
-    return {
-      workshopId: node.workshop_id,
-      outputName: node.output_name,
-      outputPcs: node.output_pcs,
-      assemblySequence: node.assembly_sequence,
-      assemblyCode: node.assembly_code,
-      assemblyName: node.assembly_name,
-    }
-  }
-  return {}
-}
-
 function textValue(text: LogicFlow.TextConfig | string | undefined): string {
   return typeof text === 'string' ? text : text?.value ?? ''
 }
 
 function textPosition(text: LogicFlow.TextConfig | string | undefined): FlowPoint | undefined {
   return typeof text === 'object' ? { x: text.x, y: text.y } : undefined
-}
-
-function requiredString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || !value.trim()) throw new Error(`Missing ${field}`)
-  return value
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === 'string' ? value : ''
-}
-
-function requiredNumber(value: unknown, field: string): number {
-  if (typeof value !== 'number') throw new Error(`Missing ${field}`)
-  return value
 }
 
 function normalizeEdgeAnchors(flow: ProcessFlow): ProcessFlow {
@@ -257,7 +162,7 @@ type NodeAnchor = { id: string; point: FlowPoint }
 type NodeAnchors = [NodeAnchor, NodeAnchor, NodeAnchor, NodeAnchor]
 
 function nodeAnchors(node: FlowNode): NodeAnchors {
-  const size = NODE_SIZE[node.type]
+  const size = { halfWidth: 75, halfHeight: 28 }
   return [
     { id: `${node.id}_0`, point: { x: node.x, y: node.y - size.halfHeight } },
     { id: `${node.id}_1`, point: { x: node.x + size.halfWidth, y: node.y } },

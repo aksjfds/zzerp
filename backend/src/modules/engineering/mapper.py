@@ -1,4 +1,6 @@
 from domain.time import business_iso
+from modules.engineering.routing import validate_nodes
+from schemas.engineering import ProcessFlowPayload
 from modules.engineering.persistence import Product, ProductBom
 
 
@@ -20,8 +22,8 @@ def serialize_product_summary(
     bom_count: int,
     customer_name: str,
     *,
-    order_ready: bool,
-    order_ready_reason: str,
+    design_ready: bool,
+    design_ready_reason: str,
 ) -> dict:
     return {
         "id": product.id,
@@ -33,21 +35,22 @@ def serialize_product_summary(
         "factory_code": product.factory_code,
         "customer_code": product.customer_code,
         "bom_count": bom_count,
-        "order_ready": order_ready,
-        "order_ready_reason": order_ready_reason,
+        "design_ready": design_ready,
+        "design_ready_reason": design_ready_reason,
         "created_at": business_iso(product.created_at),
         "updated_at": business_iso(product.updated_at),
     }
 
 
 def serialize_product_detail(
+    session,
     product: Product,
     empty_flow: dict,
     requested_version: int | None = None,
     *,
     customer_name: str,
-    order_ready: bool,
-    order_ready_reason: str,
+    design_ready: bool,
+    design_ready_reason: str,
     base_info_editable: bool = True,
     version_editable: bool = True,
 ) -> dict:
@@ -63,19 +66,21 @@ def serialize_product_detail(
         "revision": product.revision,
         "base_info_editable": base_info_editable,
         "version_editable": version_editable,
-        "order_ready": order_ready,
-        "order_ready_reason": order_ready_reason,
+        "design_ready": design_ready,
+        "design_ready_reason": design_ready_reason,
         "customer_id": product.customer_id,
         "customer_name": customer_name,
         "product_name": product.product_name,
         "factory_code": product.factory_code,
         "customer_code": product.customer_code,
         "bom_items": [serialize_bom(item) for item in bom_items],
-        "process_flow": (
-            process_flow.draft_flow_json
-            if process_flow and process_flow.draft_flow_json is not None
-            else process_flow.flow_json if process_flow else empty_flow
-        ),
+        "process_flow": validate_nodes(
+            session, product.id, version, ProcessFlowPayload.model_validate(
+                process_flow.draft_flow_json
+                if process_flow and process_flow.draft_flow_json is not None
+                else process_flow.flow_json if process_flow else empty_flow
+            ),
+        ).model_dump(exclude_none=True),
         "process_flow_is_draft": bool(
             process_flow and process_flow.draft_flow_json is not None
         ),

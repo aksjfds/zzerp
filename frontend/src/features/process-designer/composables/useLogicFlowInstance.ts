@@ -28,8 +28,6 @@ type Callbacks = {
   onConnectionError: (message: string) => void
   onSelectEdge: (edge: FlowEdge | null) => void
   onSelectNode: (node: FlowNode | null) => void
-  workshopDepartmentCode?: (workshopId: number) => string | undefined
-  workshopDirectInbound?: (workshopId: number) => boolean
 }
 
 type SelectedElements = ReturnType<LogicFlow['getSelectElements']>
@@ -141,7 +139,7 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       edgeTextEdit: !readonly,
       hideAnchors: readonly,
       nodeTextDraggable: false,
-      nodeTextEdit: !readonly,
+      nodeTextEdit: false,
       stopMoveGraph: true,
       stopScrollGraph: true,
       stopZoomGraph: true,
@@ -176,15 +174,13 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   }
 
   function emitChange() {
-    callbacks.onChange(currentFlow())
+    const flow = currentFlow()
+    callbacks.onChange(flow)
   }
 
   function renderFlow(flow: ProcessFlow) {
     const lf = instance.value
-    lf?.renderRawData(toLogicFlowData(flow, {
-      workshopDepartmentCode: callbacks.workshopDepartmentCode,
-      workshopDirectInbound: callbacks.workshopDirectInbound,
-    }))
+    lf?.renderRawData(toLogicFlowData(flow))
     if (lf) {
       applyNodeDisplayScale(lf)
       refreshNodeReadability(lf)
@@ -205,7 +201,8 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
       stopScrollGraph: true,
       stopZoomGraph: true,
       guards: {
-        beforeClone: () => !(callbacks.readonly?.() ?? false),
+        beforeClone: (data) => !(callbacks.readonly?.() ?? false)
+          && ('type' in data ? data.type !== 'part' : data.nodes.every(node => node.type !== 'part')),
         beforeDelete: () => !(callbacks.readonly?.() ?? false),
       },
       plugins: [Control, Menu],

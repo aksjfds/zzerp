@@ -4,21 +4,13 @@ export const PRODUCT_PERMISSIONS = {
   edit: 'engineering:product:edit',
 } as const
 
-export const ORDER_PERMISSIONS = {
-  view: 'order:view',
-  add: 'order:add',
-  edit: 'order:edit',
-  confirm: 'order:confirm',
-  cancel: 'order:cancel',
-} as const
+export const DEPARTMENT_WORK_ORDER_VIEW = 'department:work-order:view'
+export const DEPARTMENT_WORK_ORDER_OPERATE = 'department:work-order:operate'
 
-export const PRODUCTION_PERMISSIONS = {
-  view: 'production:view',
-  manage: 'production:manage',
-  inspect: 'qc:inspect',
-} as const
-
-export const SUPPLIER_PROCESSING_PERMISSIONS = {
-  view: 'supplier_processing:view',
-  create: 'supplier_processing:create',
+export const PLAN_PERMISSIONS = {
+  view: 'plan:view',
+  add: 'plan:add',
+  edit: 'plan:edit',
+  confirm: 'plan:confirm',
+  cancel: 'plan:cancel',
 } as const

@@ -13,16 +13,10 @@ from database import engine
 from domain.errors import DomainViolation
 from routers import (
     auth,
-    customer_orders,
     customers,
-    inventory,
-    organization,
-    procedure_prices,
-    production,
+    production_plans,
+    production_departments,
     products,
-    qc,
-    supplier_processing,
-    work_orders,
 )
 from modules.errors import DomainError
 
@@ -195,15 +189,9 @@ async def validate_request_origin(request: Request, call_next):
 
 app.include_router(auth.router)
 app.include_router(products.router)
-app.include_router(organization.router)
 app.include_router(customers.router)
-app.include_router(customer_orders.router)
-app.include_router(inventory.router)
-app.include_router(production.router)
-app.include_router(procedure_prices.router)
-app.include_router(work_orders.router)
-app.include_router(qc.router)
-app.include_router(supplier_processing.router)
+app.include_router(production_plans.router)
+app.include_router(production_departments.router)
 
 
 @app.get("/")

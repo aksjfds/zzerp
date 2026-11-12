@@ -41,7 +41,7 @@ onMounted(loadProducts)
   <main class="page-shell">
     <header class="page-header">
       <div>
-        <div class="page-kicker">工程部</div>
+        <div class="page-kicker">工程管理</div>
         <h1>产品工程资料</h1>
         <p>统一维护产品基础信息、BOM 和图形化工艺路线。</p>
       </div>
@@ -70,10 +70,10 @@ onMounted(loadProducts)
         <ElTableColumn label="可用状态" min-width="210">
           <template #default="{ row }">
             <div class="readiness-cell">
-              <ElTag :type="row.order_ready ? 'success' : 'danger'" effect="light">
-                {{ row.order_ready ? '可用' : '不可用' }}
+              <ElTag :type="row.design_ready ? 'success' : 'danger'" effect="light">
+                {{ row.design_ready ? '可用' : '不可用' }}
               </ElTag>
-              <span v-if="!row.order_ready">{{ row.order_ready_reason }}</span>
+              <span v-if="!row.design_ready">{{ row.design_ready_reason }}</span>
             </div>
           </template>
         </ElTableColumn>

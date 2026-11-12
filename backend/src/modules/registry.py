@@ -1,31 +1,17 @@
-from modules.assembly.descriptor import MODULE as ASSEMBLY
 from modules.engineering.descriptor import MODULE as ENGINEERING
-from modules.identity.descriptor import MODULE as IDENTITY
-from modules.inventory.descriptor import MODULE as INVENTORY
 from modules.organization.descriptor import MODULE as ORGANIZATION
+from modules.identity.descriptor import MODULE as IDENTITY
 from modules.planning.descriptor import MODULE as PLANNING
-from modules.production_core.descriptor import MODULE as PRODUCTION_CORE
-from modules.quality.descriptor import MODULE as QUALITY
 from modules.sales.descriptor import MODULE as SALES
-from modules.standard_execution.descriptor import MODULE as STANDARD_EXECUTION
-from modules.supplier_processing.descriptor import MODULE as SUPPLIER_PROCESSING
-from modules.workforce.descriptor import MODULE as WORKFORCE
 
 
 MODULES = {
     module.name: module
     for module in (
         IDENTITY,
-        INVENTORY,
         ORGANIZATION,
         ENGINEERING,
         SALES,
-        PRODUCTION_CORE,
-        STANDARD_EXECUTION,
-        SUPPLIER_PROCESSING,
-        ASSEMBLY,
-        QUALITY,
-        WORKFORCE,
         PLANNING,
     )
 }

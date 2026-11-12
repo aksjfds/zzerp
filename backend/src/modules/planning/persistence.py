@@ -1,20 +1,10 @@
-from __future__ import annotations
+"""Production plans reference products directly, without a version snapshot."""
 
 from datetime import datetime
+from uuid import UUID
 
-from sqlalchemy import (
-    BigInteger,
-    CheckConstraint,
-    ForeignKey,
-    ForeignKeyConstraint,
-    Index,
-    Integer,
-    Text,
-    TIMESTAMP,
-    UniqueConstraint,
-    text,
-)
-from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Integer, Text, TIMESTAMP, UniqueConstraint, Uuid, text
+from sqlalchemy.orm import Mapped, mapped_column
 
 from database import Base
 
@@ -22,11 +12,20 @@ from database import Base
 class ProductionPlan(Base):
     __tablename__ = "production_plan"
     __table_args__ = (
+        UniqueConstraint("order_no", name="uq_production_plan_order_no"),
+        UniqueConstraint("id", "product_id", name="uq_production_plan_product"),
+        ForeignKeyConstraint(
+            ["product_id", "customer_id"],
+            ["product.id", "product.customer_id"],
+            name="fk_production_plan_product_customer",
+        ),
+        CheckConstraint("order_quantity > 0", name="ck_production_plan_order_quantity"),
+        CheckConstraint("production_quantity > 0", name="ck_production_plan_production_quantity"),
+        CheckConstraint("revision > 0", name="ck_production_plan_revision"),
         CheckConstraint(
             "status IN ('draft', 'confirmed', 'cancelled', 'completed')",
             name="ck_production_plan_status",
         ),
-        CheckConstraint("revision > 0", name="ck_production_plan_revision"),
         CheckConstraint(
             "(status IN ('confirmed', 'completed') AND confirmed_at IS NOT NULL "
             "AND confirmed_by IS NOT NULL) OR status IN ('draft', 'cancelled')",
@@ -37,191 +36,72 @@ class ProductionPlan(Base):
             "OR (status <> 'completed' AND completed_at IS NULL AND completed_by IS NULL)",
             name="ck_production_plan_completion",
         ),
-        UniqueConstraint("customer_order_id", name="uq_production_plan_order"),
-        UniqueConstraint(
-            "id",
-            "customer_order_id",
-            name="uq_production_plan_context",
-        ),
+        Index("idx_production_plan_customer", "customer_id"),
+        Index("idx_production_plan_product", "product_id"),
         Index("idx_production_plan_status", "status", "id"),
+        Index("idx_production_plan_updated", text("updated_at DESC"), text("id DESC")),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    customer_order_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("customer_order.id", ondelete="CASCADE"), nullable=False
-    )
+    customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customer.id"), nullable=False)
+    order_no: Mapped[str] = mapped_column(Text, nullable=False)
+    order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    production_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     confirmed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     confirmed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
     completed_by: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
-    )
-    items: Mapped[list[ProductionPlanItem]] = relationship(
-        back_populates="plan",
-        cascade="all, delete-orphan",
-        order_by="ProductionPlanItem.sort_order",
-    )
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
-class ProductionPlanItem(Base):
-    __tablename__ = "production_plan_item"
+class DepartmentWorkOrder(Base):
+    __tablename__ = "department_work_order"
     __table_args__ = (
-        CheckConstraint(
-            "item_type IN ('part', 'assembly', 'finished_product')",
-            name="ck_production_plan_item_type",
-        ),
-        CheckConstraint(
-            "(item_type = 'part' AND product_bom_id IS NOT NULL) OR "
-            "(item_type IN ('assembly', 'finished_product') AND product_bom_id IS NULL)",
-            name="ck_production_plan_item_bom_scope",
-        ),
-        CheckConstraint("product_version > 0", name="ck_plan_item_version"),
-        CheckConstraint("unit_requirement > 0", name="ck_plan_item_unit_requirement"),
-        CheckConstraint("gross_required_quantity >= 0", name="ck_plan_item_gross_required"),
-        CheckConstraint("estimated_inventory_quantity >= 0", name="ck_plan_item_estimated_stock"),
-        CheckConstraint("net_required_quantity >= 0", name="ck_plan_item_net_required"),
-        CheckConstraint("planned_production_quantity >= 0", name="ck_plan_item_planned"),
-        CheckConstraint(
-            "allocated_inventory_quantity >= 0",
-            name="ck_plan_item_allocated_inventory",
-        ),
-        UniqueConstraint(
-            "production_plan_id",
-            "customer_order_item_id",
-            "identity_key",
-            name="uq_production_plan_item_identity",
-        ),
-        UniqueConstraint(
-            "id",
-            "production_plan_id",
-            name="uq_production_plan_item_plan_context",
-        ),
-        UniqueConstraint(
-            "id",
-            "production_plan_id",
-            "customer_order_item_id",
-            name="uq_production_plan_item_reservation_context",
-        ),
         ForeignKeyConstraint(
-            ["production_plan_id", "customer_order_id"],
-            ["production_plan.id", "production_plan.customer_order_id"],
-            name="fk_production_plan_item_plan_context",
+            ["production_plan_id", "product_id"],
+            ["production_plan.id", "production_plan.product_id"],
+            name="fk_department_work_order_plan",
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            [
-                "customer_order_item_id",
-                "customer_order_id",
-                "product_id",
-                "product_version",
-            ],
-            [
-                "customer_order_item.id",
-                "customer_order_item.customer_order_id",
-                "customer_order_item.product_id",
-                "customer_order_item.product_version",
-            ],
-            name="fk_production_plan_item_order_context",
-            ondelete="CASCADE",
+            ["product_id", "material_node_id", "department_node_id"],
+            ["product_department_route.product_id", "product_department_route.material_node_id", "product_department_route.department_node_id"],
+            name="fk_department_work_order_route",
         ),
-        ForeignKeyConstraint(
-            ["product_bom_id", "product_id", "product_version"],
-            ["product_bom.id", "product_bom.product_id", "product_bom.product_version"],
-            name="fk_production_plan_item_bom_version",
-        ),
-        Index("idx_production_plan_item_plan", "production_plan_id", "sort_order"),
-        Index("idx_production_plan_item_order_item", "customer_order_item_id"),
+        UniqueConstraint("production_plan_id", "material_node_id", "department_node_id", name="uq_department_work_order_plan_route"),
+        CheckConstraint("task_quantity > 0", name="ck_department_work_order_quantity"),
+        Index("idx_department_work_order_route", "product_id", "material_node_id", "department_node_id"),
+        Index("idx_department_work_order_product", "product_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     production_plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    customer_order_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    customer_order_item_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    identity_key: Mapped[str] = mapped_column(Text, nullable=False)
-    item_type: Mapped[str] = mapped_column(Text, nullable=False)
     product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    product_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    product_bom_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    item_code: Mapped[str] = mapped_column(Text, nullable=False)
-    item_name: Mapped[str] = mapped_column(Text, nullable=False)
-    unit_requirement: Mapped[int] = mapped_column(Integer, nullable=False)
-    gross_required_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    estimated_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    net_required_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    planned_production_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    allocated_inventory_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    sort_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    plan: Mapped[ProductionPlan] = relationship(back_populates="items")
-    route_tasks: Mapped[list[ProductionRouteTask]] = relationship(
-        back_populates="plan_item",
-        cascade="all, delete-orphan",
-    )
+    material_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    department_node_id: Mapped[str] = mapped_column(Text, nullable=False)
+    task_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
-class ProductionRouteTask(Base):
-    __tablename__ = "production_route_task"
+class DepartmentWorkOrderMovement(Base):
+    __tablename__ = "department_work_order_movement"
     __table_args__ = (
-        CheckConstraint(
-            "route_node_type IN ('process', 'assembly', 'supplier_processing')",
-            name="ck_production_route_task_node_type",
-        ),
-        CheckConstraint(
-            "(route_node_type IN ('process', 'assembly') "
-            "AND workshop_id IS NOT NULL) OR "
-            "(route_node_type = 'supplier_processing' AND workshop_id IS NULL)",
-            name="ck_production_route_task_execution_scope",
-        ),
-        ForeignKeyConstraint(
-            ["workshop_id", "department_id"],
-            ["workshop.id", "workshop.department_id"],
-            name="fk_production_route_task_workshop_department",
-        ),
-        CheckConstraint("route_order >= 0", name="ck_production_route_task_order"),
-        ForeignKeyConstraint(
-            ["production_plan_item_id", "production_plan_id"],
-            ["production_plan_item.id", "production_plan_item.production_plan_id"],
-            ondelete="CASCADE",
-            name="fk_production_route_task_plan_item",
-        ),
-        UniqueConstraint(
-            "production_plan_item_id",
-            "route_flow_node_id",
-            name="uq_production_route_task_item_node",
-        ),
-        Index(
-            "idx_production_route_task_plan_page",
-            "production_plan_id",
-            "production_plan_item_id",
-            "route_order",
-        ),
-        Index(
-            "idx_production_route_task_workshop",
-            "workshop_id",
-            "production_plan_item_id",
-        ),
-        Index(
-            "idx_production_route_task_department",
-            "department_id",
-            "production_plan_id",
-            "production_plan_item_id",
-        ),
+        UniqueConstraint("work_order_id", "request_id", name="uq_department_movement_request"),
+        CheckConstraint("direction IN ('receipt', 'issue')", name="ck_department_movement_direction"),
+        CheckConstraint("quantity > 0 AND quantity <= 9007199254740991", name="ck_department_movement_quantity"),
+        Index("idx_department_movement_order", "work_order_id", "created_at", "id"),
+        Index("idx_department_movement_actor", "actor_user_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    production_plan_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    production_plan_item_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    route_flow_node_id: Mapped[str] = mapped_column(Text, nullable=False)
-    route_node_type: Mapped[str] = mapped_column(Text, nullable=False)
-    workshop_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    department_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("department.id"), nullable=False
-    )
-    route_order: Mapped[int] = mapped_column(Integer, nullable=False)
-    plan_item: Mapped[ProductionPlanItem] = relationship(back_populates="route_tasks")
+    work_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order.id"), nullable=False)
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    request_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    actor_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))

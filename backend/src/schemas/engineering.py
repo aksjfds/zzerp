@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class ContractModel(BaseModel):
-    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False)
 
 
 class PointPayload(ContractModel):
@@ -16,7 +16,7 @@ class FlowNodeBase(ContractModel):
     id: str = Field(min_length=1, max_length=100)
     x: float
     y: float
-    label: str = Field(min_length=1, max_length=200)
+    label: str = Field(min_length=1, max_length=500)
     label_position: PointPayload | None = None
     z_index: int | None = None
     rotation: float | None = None
@@ -25,50 +25,19 @@ class FlowNodeBase(ContractModel):
 class PartNodePayload(FlowNodeBase):
     type: Literal["part"]
     bom_item_id: int = Field(gt=0)
-    part_no: str = Field(min_length=1, max_length=200)
 
 
-class ProcessNodePayload(FlowNodeBase):
-    type: Literal["process"]
-    workshop_id: int = Field(gt=0)
+class DepartmentNodePayload(FlowNodeBase):
+    type: Literal["department"]
+    department_code: str = Field(min_length=1, max_length=50)
 
 
-class QcNodePayload(FlowNodeBase):
-    type: Literal["qc"]
-
-
-class SupplierProcessingNodePayload(FlowNodeBase):
-    type: Literal["supplier_processing"]
-
-
-class FinishedInboundNodePayload(FlowNodeBase):
-    type: Literal["finished_inbound"]
-
-
-class AssemblyNodePayload(FlowNodeBase):
-    type: Literal["assembly"]
-    workshop_id: int = Field(gt=0)
-    output_name: str = Field(min_length=1, max_length=500)
-    output_pcs: int = Field(default=1, gt=0)
-    assembly_sequence: int | None = Field(default=None, ge=81)
-    assembly_code: str | None = Field(default=None, min_length=1, max_length=250)
-    assembly_name: str | None = Field(default=None, min_length=1, max_length=500)
-
-
-FlowNodePayload = Annotated[
-    PartNodePayload
-    | ProcessNodePayload
-    | QcNodePayload
-    | SupplierProcessingNodePayload
-    | FinishedInboundNodePayload
-    | AssemblyNodePayload,
-    Field(discriminator="type"),
-]
+FlowNodePayload = Annotated[PartNodePayload | DepartmentNodePayload, Field(discriminator="type")]
 
 
 class FlowEdgePayload(ContractModel):
     id: str = Field(min_length=1, max_length=100)
-    edge_type: str = Field(default="polyline", min_length=1, max_length=100)
+    edge_type: Literal["polyline"] = "polyline"
     source_node_id: str = Field(min_length=1, max_length=100)
     target_node_id: str = Field(min_length=1, max_length=100)
     source_anchor_id: str | None = None
@@ -82,7 +51,7 @@ class FlowEdgePayload(ContractModel):
 
 
 class ProcessFlowPayload(ContractModel):
-    schema_version: Literal[5] = 5
+    schema_version: Literal[8] = 8
     nodes: list[FlowNodePayload] = Field(default_factory=list, max_length=500)
     edges: list[FlowEdgePayload] = Field(default_factory=list, max_length=2000)
 
@@ -146,8 +115,8 @@ class ProductSummaryResponse(ProductResponseFields):
     version: int
     revision: int
     bom_count: int
-    order_ready: bool
-    order_ready_reason: str
+    design_ready: bool
+    design_ready_reason: str
     created_at: str
     updated_at: str
 
@@ -159,8 +128,8 @@ class ProductDetailResponse(ProductResponseFields):
     revision: int
     base_info_editable: bool
     version_editable: bool
-    order_ready: bool
-    order_ready_reason: str
+    design_ready: bool
+    design_ready_reason: str
     bom_items: list[BomItemResponse]
     process_flow: ProcessFlowPayload
     process_flow_is_draft: bool

@@ -1,49 +1,19 @@
-"""Authoritative ownership of persisted tables in the modular monolith.
-
-Ownership means schema evolution and write invariants belong to one module.
-ORM definitions live in the owning module's ``persistence.py``. Exceptional
-shared-database reads must be explicitly registered, while every write API
-must remain with the owner instead of creating a second writer.
-"""
-
+"""Authoritative table ownership for the modular monolith."""
 
 TABLE_OWNERS = {
     "users": "identity",
     "user_sessions": "identity",
     "customer": "sales",
-    "customer_order": "sales",
-    "customer_order_item": "sales",
     "product": "engineering",
     "product_version": "engineering",
     "product_bom": "engineering",
     "product_process_flow": "engineering",
-    "product_route_task": "engineering",
-    "department": "organization",
-    "workshop": "organization",
-    "procedure": "organization",
-    "worker": "workforce",
-    "procedure_configuration": "standard_execution",
-    "procedure_price": "standard_execution",
-    "procedure_price_revision": "standard_execution",
-    "production_item": "production_core",
-    "material_processing_state": "production_core",
-    "repository": "production_core",
-    "work_order": "production_core",
-    "work_order_pay_detail": "standard_execution",
-    "work_order_material": "production_core",
-    "work_order_batch": "production_core",
-    "production_movement": "production_core",
-    "production_operation_undo": "production_core",
-    "production_warehouse_storage_line": "production_core",
-    "production_plan": "planning",
-    "production_plan_item": "planning",
-    "production_route_task": "planning",
-    "warehouse_stock": "inventory",
-    "warehouse_operation": "inventory",
-    "finished_receipt": "inventory",
-    "finished_stock": "inventory",
-    "finished_stock_reservation": "inventory",
-    "finished_stock_transaction": "inventory",
+    "production_department": "organization",
+    "product_department_route": "engineering",
+    "product_route_component": "engineering",
+    "department_work_order": "planning",
+    "department_work_order_movement": "planning",
+    "production_plan": "planning"
 }
 
 

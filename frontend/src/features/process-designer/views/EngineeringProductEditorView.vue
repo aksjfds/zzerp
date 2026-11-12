@@ -177,18 +177,6 @@ const versionReadOnly = computed(() => Boolean(
 ))
 
 function updateBom(items: BomItem[]) {
-  const nextIds = new Set(items.flatMap((item) => item.id ? [item.id] : []))
-  const removedReferencedItem = form.bom_items.find((item) =>
-    item.id
-    && !nextIds.has(item.id)
-    && form.process_flow.nodes.some(
-      (node) => node.type === 'part' && node.bom_item_id === item.id,
-    ),
-  )
-  if (removedReferencedItem) {
-    ElMessage.warning(`“${removedReferencedItem.part_name}”已被流程图引用，请先删除对应配件节点`)
-    return
-  }
   form.bom_items = items
 }
 
@@ -245,7 +233,7 @@ onScopeDispose(() => {
   <main class="editor-page">
     <header class="editor-header">
       <div>
-        <div class="page-kicker">工程部 / {{ productId ? mode === 'view' ? '查看产品' : '编辑产品' : '录入产品' }}</div>
+        <div class="page-kicker">工程管理 / {{ productId ? mode === 'view' ? '查看产品' : '编辑产品' : '录入产品' }}</div>
         <h1>{{ productId ? contentReady ? form.product_name || '产品工程资料' : '产品工程资料' : '录入新产品' }}</h1>
       </div>
       <div class="editor-actions">
@@ -306,7 +294,7 @@ onScopeDispose(() => {
         <div class="section-heading">
           <div>
             <h2>产品基础信息</h2>
-            <span>产品级资料，所有版本共享；创建订单后不可修改。</span>
+            <span>产品级资料，所有版本共享；被生产计划引用后不可修改。</span>
           </div>
           <ElButton
             v-if="productId && mode === 'edit' && canEditProduct && baseInfoEditable"
@@ -319,7 +307,7 @@ onScopeDispose(() => {
         <ElAlert
           v-if="productId && !baseInfoEditable"
           class="section-alert"
-          title="产品基础信息为共享资料，已有订单引用后固定为只读。"
+          title="产品基础信息为共享资料，已有生产计划引用后固定为只读。"
           type="info"
           :closable="false"
         />
@@ -362,15 +350,9 @@ onScopeDispose(() => {
       </section>
 
       <section class="editor-card">
-        <ElAlert
-          v-if="productId && mode === 'edit' && !versionEditable"
-          class="section-alert"
-          title="当前版本已被订单或生产记录引用，BOM 不可修改。请基于此版本创建新版后修改。"
-          type="warning"
-          :closable="false"
-        />
         <BomEditor
           :model-value="form.bom_items"
+          :factory-code="form.factory_code"
           :readonly="versionReadOnly"
           :can-save="Boolean(productId && !versionReadOnly)"
           :dirty="bomDirty"
@@ -384,12 +366,6 @@ onScopeDispose(() => {
         <ElAlert v-if="!productId" title="请先保存产品基础信息和 BOM，再配置工序流程" type="info" :closable="false" show-icon />
         <template v-else-if="editorReady">
           <ElAlert v-if="mode === 'view'" title="查看模式为只读" type="info" :closable="false" />
-          <ElAlert
-            v-else-if="!versionEditable"
-            title="当前版本已被订单或生产记录引用，工序流程不可修改。请基于此版本创建新版后修改。"
-            type="warning"
-            :closable="false"
-          />
           <ElAlert
             v-if="flowSaveError"
             class="flow-error"

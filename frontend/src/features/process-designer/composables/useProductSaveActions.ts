@@ -5,8 +5,6 @@ import { getApiErrorDetail } from '@/api/request'
 import type { ApiErrorDetail } from '@/api/types'
 import type { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import {
-  synchronizeFlowPartMetadata,
-  synchronizeAssemblyIdentity,
   type BomItem,
   type EngineeringProduct,
   type ProcessFlow,
@@ -80,11 +78,7 @@ export function useProductSaveActions(options: Options) {
       form.version = product.version
       form.revision = product.revision
       form.bom_items = product.bom_items.map((item) => ({ ...item }))
-      form.process_flow = synchronizeFlowPartMetadata(
-        localFlow,
-        form.bom_items,
-        form.factory_code,
-      )
+      form.process_flow = localFlow
       flowEditor.value?.reload(form.process_flow)
       bomSnapshot.value = JSON.stringify(form.bom_items)
       flowSnapshot.value = JSON.stringify(product.process_flow)
@@ -125,10 +119,7 @@ export function useProductSaveActions(options: Options) {
   async function saveFlow() {
     if (!productId.value || form.revision === null || form.version === null || !flowEditor.value) return
     flowSaveError.value = null
-    form.process_flow = synchronizeAssemblyIdentity(
-      flowEditor.value.getGraphData(),
-      form.factory_code,
-    )
+    form.process_flow = flowEditor.value.getGraphData()
     try {
       const product = await store.saveProcessFlow(
         productId.value,
@@ -151,10 +142,7 @@ export function useProductSaveActions(options: Options) {
   async function saveFlowDraft() {
     if (!productId.value || form.revision === null || form.version === null || !flowEditor.value) return
     flowSaveError.value = null
-    form.process_flow = synchronizeAssemblyIdentity(
-      flowEditor.value.getGraphData(),
-      form.factory_code,
-    )
+    form.process_flow = flowEditor.value.getGraphData()
     try {
       const product = await store.saveProcessFlowDraft(
         productId.value,

@@ -1,180 +1,45 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import type { ProductionDepartment } from '@/features/production-departments'
 import type { BomItem } from '../domain/types'
-import type { WorkshopRouteOption } from '@/api/organization'
 
-const props = defineProps<{
-  bomItems: BomItem[]
-  workshops: WorkshopRouteOption[]
-  placedBomIds: number[]
-}>()
-type DepartmentGroup = {
-  departmentCode: string
-  departmentName: string
-  workshops: WorkshopRouteOption[]
-}
-const fixedDepartments = [
-  { departmentCode: 'business', departmentName: '业务部' },
-  { departmentCode: 'qc', departmentName: 'QC部门' },
-  { departmentCode: 'finished', departmentName: '成品部' },
-]
-const departmentOrder = [
-  'business', 'stamp', 'cnc', 'polish', 'outsource', 'qc', 'assembly', 'finished',
-]
-const departmentGroups = computed<DepartmentGroup[]>(() => {
-  const groups = new Map<string, DepartmentGroup>()
-  props.workshops.forEach((workshop) => {
-    const group = groups.get(workshop.department_code) ?? {
-      departmentCode: workshop.department_code,
-      departmentName: workshop.department_name,
-      workshops: [],
-    }
-    group.workshops.push(workshop)
-    groups.set(workshop.department_code, group)
-  })
-  fixedDepartments.forEach((department) => {
-    if (!groups.has(department.departmentCode)) {
-      groups.set(department.departmentCode, { ...department, workshops: [] })
-    }
-  })
-  return [...groups.values()].sort((left, right) => {
-    const a = departmentOrder.indexOf(left.departmentCode)
-    const b = departmentOrder.indexOf(right.departmentCode)
-    return (a < 0 ? departmentOrder.length : a) - (b < 0 ? departmentOrder.length : b)
-  })
-})
-function fixedNodeCount(code: string) {
-  return ['business', 'qc', 'finished'].includes(code) ? 1 : 0
-}
-function workshopColorClass(workshop: WorkshopRouteOption) {
-  if (workshop.department_code === 'outsource') return 'outsource'
-  if (workshop.department_code === 'assembly') return 'assembly'
-  return 'process'
-}
+defineProps<{ bomItems: BomItem[]; departments: ProductionDepartment[]; placedBomIds: number[]; loading?: boolean }>()
 const emit = defineEmits<{
-  dragSupplierProcessing: []
-  dragQc: []
-  dragFinishedInbound: []
-  dragWorkshop: [workshop: WorkshopRouteOption]
-  dragPart: [item: BomItem]
+  dragPart: [part: BomItem]; addPart: [part: BomItem]
+  dragDepartment: [department: ProductionDepartment]; addDepartment: [department: ProductionDepartment]
 }>()
 </script>
 
 <template>
   <aside class="palette">
-    <header class="palette-heading">
-      <strong>流程节点</strong>
-      <span>按住条目并拖到右侧画布</span>
-    </header>
-
-    <section class="palette-group part-group">
-      <div class="group-heading">
-        <div>
-          <span class="group-mark part-mark" />
-          <h3>BOM 配件</h3>
-        </div>
-        <span class="group-count">{{ bomItems.length }}</span>
-      </div>
-      <p class="group-hint">每个 BOM 配件在流程图中只能放置一次。</p>
-      <div class="group-items">
-        <button
-          v-for="item in bomItems"
-          :key="item.id ?? item.part_no"
-          class="palette-item part"
-          type="button"
-          :disabled="!item.id || placedBomIds.includes(item.id)"
-          :title="!item.id ? '请先保存 BOM 配件' : placedBomIds.includes(item.id) ? '该配件已放入流程图' : `拖动配件“${item.part_name}”到画布`"
-          @mousedown="emit('dragPart', item)"
-        >
-          <span class="drag-handle" aria-hidden="true">⠿</span>
-          <span class="item-content">
-            <strong>{{ item.part_name }}</strong>
-            <small>{{ item.part_no }}</small>
-          </span>
-          <span class="item-kind">配件</span>
-        </button>
-        <p v-if="!bomItems.length" class="empty-hint">暂无 BOM 配件</p>
-      </div>
+    <header><strong>流程节点</strong><p>拖到右侧画布；也可聚焦后按 Enter 添加。</p></header>
+    <section>
+      <h3>配件节点</h3>
+      <p>每个 BOM 配件只放置一个路线起点。</p>
+      <button v-for="part in bomItems" :key="part.id ?? part.part_no" type="button" class="palette-node part" :disabled="!part.id || placedBomIds.includes(part.id)" @mousedown="emit('dragPart', part)" @keydown.enter.prevent="emit('addPart', part)">
+        <strong>{{ part.part_name }}</strong><small>{{ part.part_no }}</small>
+        <small v-if="part.id && placedBomIds.includes(part.id)">已放置</small>
+      </button>
+      <p v-if="!bomItems.length">暂无 BOM 配件</p>
     </section>
-
-    <section
-      v-for="group in departmentGroups"
-      :key="group.departmentCode"
-      class="palette-group"
-      :class="`department-${group.departmentCode}`"
-    >
-      <div class="group-heading">
-        <div>
-          <span class="group-mark" />
-          <h3>{{ group.departmentName }}</h3>
-        </div>
-        <span class="group-count">{{ group.workshops.length + fixedNodeCount(group.departmentCode) }}</span>
-      </div>
-      <div class="group-items">
-        <button v-if="group.departmentCode === 'business'" class="palette-item supplier-processing" type="button" title="拖动委外加工节点到画布" @mousedown="emit('dragSupplierProcessing')">
-          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>委外加工</strong></span><span class="item-kind">委外</span>
-        </button>
-        <button
-          v-for="workshop in group.workshops"
-          :key="workshop.id"
-          class="palette-item"
-          :class="workshopColorClass(workshop)"
-          type="button"
-          :title="`拖动“${workshop.workshop_name}”到画布`"
-          @mousedown="emit('dragWorkshop', workshop)"
-        >
-          <span class="drag-handle" aria-hidden="true">⠿</span>
-          <span class="item-content"><strong>{{ workshop.workshop_name }}</strong></span>
-          <span class="item-kind">{{ workshop.input_mode === 'multiple' ? '多路' : '单路' }}</span>
-        </button>
-        <button v-if="group.departmentCode === 'qc'" class="palette-item qc" type="button" title="拖动 QC 到画布" @mousedown="emit('dragQc')">
-          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>QC</strong></span><span class="item-kind">QC</span>
-        </button>
-        <button v-if="group.departmentCode === 'finished'" class="palette-item finished-inbound" type="button" title="拖动入库节点到画布" @mousedown="emit('dragFinishedInbound')">
-          <span class="drag-handle" aria-hidden="true">⠿</span><span class="item-content"><strong>入库</strong></span><span class="item-kind">入库</span>
-        </button>
-      </div>
+    <section>
+      <h3>部门节点</h3>
+      <p>同一部门可放置多个节点，分别安排生产。</p>
+      <p v-if="loading">正在加载部门…</p>
+      <button v-for="department in departments" :key="department.code" type="button" class="palette-node department" @mousedown="emit('dragDepartment', department)" @keydown.enter.prevent="emit('addDepartment', department)">{{ department.name }}</button>
     </section>
   </aside>
 </template>
 
 <style scoped>
-.palette { box-sizing: border-box; height: clamp(620px, 72vh, 820px); min-height: 0; padding: 12px; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; border-right: 1px solid var(--md-outline-variant); background: var(--md-surface-container-low); }
-.palette-heading { margin: 0 2px 12px; }
-.palette-heading strong { display: block; color: var(--md-on-surface); font-size: 15px; }
-.palette-heading span { display: block; margin-top: 3px; color: var(--erp-text-secondary); font-size: 12px; line-height: 1.5; }
-.palette-group { margin-bottom: 12px; overflow: hidden; border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius); background: var(--md-surface-container-lowest); }
-.group-heading { display: flex; align-items: center; justify-content: space-between; min-height: 34px; padding: 0 9px; border-bottom: 1px solid var(--md-outline-variant); background: var(--md-surface-container); }
-.group-heading > div { display: flex; min-width: 0; align-items: center; gap: 7px; }
-.group-heading h3 { margin: 0; padding-block: 6px; color: var(--erp-text); font-size: 12px; font-weight: 650; overflow-wrap: anywhere; }
-.group-mark { width: 4px; height: 14px; flex: 0 0 auto; border-radius: 999px; background: var(--flow-production); }
-.part-mark { background: var(--md-primary); }
-.department-outsource .group-mark { background: var(--flow-outsource); }
-.department-business .group-mark { background: var(--flow-supplier-processing); }
-.department-qc .group-mark { background: var(--flow-qc); }
-.department-assembly .group-mark { background: var(--flow-assembly); }
-.department-finished .group-mark { background: var(--flow-finished); }
-.group-count { min-width: 20px; padding: 1px 5px; border-radius: var(--erp-radius-sm); background: var(--erp-surface-sunken); color: var(--erp-text-secondary); font-size: 11px; line-height: 16px; text-align: center; }
-.group-items { display: grid; gap: 6px; padding: 7px; }
-.group-hint { margin: 0; padding: 7px 9px 0; color: var(--erp-text-secondary); font-size: 12px; line-height: 1.5; }
-.palette-item { display: flex; width: 100%; min-height: 40px; align-items: center; gap: 7px; padding: 8px; border: 1px solid; border-radius: var(--erp-radius-sm); background: var(--erp-surface); color: var(--erp-text); text-align: left; cursor: grab; }
-.palette-item:hover:not(:disabled) { outline: 1px solid currentcolor; outline-offset: -2px; }
-.palette-item:active:not(:disabled) { cursor: grabbing; }
-.drag-handle { flex: 0 0 auto; color: var(--md-on-surface-variant); font-size: 15px; line-height: 1; opacity: .65; }
-.item-content { display: flex; min-width: 0; flex: 1; flex-direction: column; }
-.item-content strong { font-size: 13px; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
-.item-content small { margin-top: 1px; color: var(--erp-text-secondary); font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
-.item-kind { flex: 0 0 auto; padding: 2px 5px; border-radius: var(--erp-radius-sm); background: var(--erp-surface); color: var(--erp-text-secondary); font-size: 11px; line-height: 1.5; }
-.empty-hint { margin: 6px; color: var(--md-on-surface-variant); font-size: 11px; text-align: center; }
-.palette-item.part { border-color: var(--md-primary); background: var(--md-primary-container); }
-.palette-item.process { border-color: var(--flow-production); background: var(--flow-production-container); }
-.palette-item.outsource { border-color: var(--flow-outsource); background: var(--flow-outsource-container); }
-.palette-item.supplier-processing { border-color: var(--flow-supplier-processing); background: var(--flow-supplier-processing-container); }
-.palette-item.qc { border-color: var(--flow-qc); background: var(--flow-qc-container); }
-.palette-item.finished-inbound { border-color: var(--flow-finished); background: var(--flow-finished-container); }
-.palette-item.assembly { border-color: var(--flow-assembly); background: var(--flow-assembly-container); }
-.palette-item:disabled { cursor: not-allowed; color: var(--erp-text-muted); border-color: var(--erp-border); background: var(--erp-surface-sunken); }
-@media (max-width: 900px) {
-  .palette { height: auto; max-height: 280px; overflow-y: auto; border-right: 0; border-bottom: 1px solid var(--md-outline-variant); }
-}
+.palette { padding: 14px; overflow-y: auto; max-height: 850px; border-right: 1px solid var(--erp-border); background: var(--erp-surface-muted); }
+section { margin-top: 18px; }
+h3 { margin: 0; font-size: 14px; }
+p { color: var(--erp-text-secondary); font-size: 12px; line-height: 1.6; }
+.palette-node { display: grid; gap: 3px; width: 100%; margin: 8px 0; padding: 12px; border: 1px solid var(--erp-primary); background: var(--erp-surface); color: var(--erp-text); font: inherit; text-align: left; cursor: grab; overflow-wrap: anywhere; }
+.part { border-radius: 6px; background: var(--erp-primary-soft); }
+.department { border-radius: 24px; text-align: center; }
+small { color: var(--erp-text-secondary); font-size: 12px; }
+.palette-node:disabled { opacity: .55; cursor: default; }
+.palette-node:focus-visible { outline: 2px solid var(--erp-primary); outline-offset: 2px; }
+@media (max-width: 900px) { .palette { border-right: 0; border-bottom: 1px solid var(--erp-border); max-height: 350px; } }
 </style>
