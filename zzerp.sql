@@ -233,14 +233,109 @@ CREATE TABLE department_work_order_movement (
     note TEXT NOT NULL,
     request_id UUID NOT NULL,
     actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    receipt_source TEXT,
+    ticket_id BIGINT,
+    input_material_node_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_department_movement_request UNIQUE (work_order_id, request_id),
     CONSTRAINT ck_department_movement_direction CHECK (direction IN ('receipt', 'issue')),
-    CONSTRAINT ck_department_movement_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991)
+    CONSTRAINT ck_department_movement_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
+    CONSTRAINT ck_unattributed_receipt_note CHECK (receipt_source IS DISTINCT FROM 'external' OR note ~ '[^[:space:]]'),
+    CONSTRAINT ck_department_movement_source CHECK (
+        (direction = 'issue' AND receipt_source IS NULL AND ticket_id IS NULL AND input_material_node_id IS NULL)
+        OR (direction = 'receipt' AND receipt_source IS NOT NULL AND input_material_node_id IS NOT NULL
+            AND ((receipt_source = 'external' AND ticket_id IS NULL) OR (receipt_source = 'ticket' AND ticket_id IS NOT NULL))))
 );
 
 CREATE INDEX idx_department_movement_order ON department_work_order_movement(work_order_id, created_at, id);
 CREATE INDEX idx_department_movement_actor ON department_work_order_movement(actor_user_id);
+CREATE INDEX idx_department_movement_ticket ON department_work_order_movement(ticket_id);
+
+CREATE TABLE department_handoff_ticket (
+    id BIGSERIAL PRIMARY KEY,
+    issue_movement_id BIGINT NOT NULL REFERENCES department_work_order_movement(id),
+    target_work_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
+    CONSTRAINT uq_handoff_issue UNIQUE (issue_movement_id)
+);
+CREATE INDEX idx_handoff_target ON department_handoff_ticket(target_work_order_id, id);
+ALTER TABLE department_work_order_movement ADD FOREIGN KEY (ticket_id) REFERENCES department_handoff_ticket(id);
+
+CREATE TABLE department_movement_receipt_link (
+    issue_movement_id BIGINT NOT NULL REFERENCES department_work_order_movement(id),
+    receipt_movement_id BIGINT NOT NULL REFERENCES department_work_order_movement(id),
+    PRIMARY KEY (issue_movement_id, receipt_movement_id)
+);
+CREATE INDEX idx_movement_link_receipt ON department_movement_receipt_link(receipt_movement_id);
+
+CREATE FUNCTION validate_handoff_ticket() RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM department_work_order_movement AS issue
+        JOIN department_work_order AS source ON source.id = issue.work_order_id
+        JOIN department_work_order AS target ON target.id = NEW.target_work_order_id
+        WHERE issue.id = NEW.issue_movement_id AND issue.direction = 'issue'
+            AND source.production_plan_id = target.production_plan_id AND source.product_id = target.product_id
+    ) THEN
+        RAISE EXCEPTION '交接票必须引用同计划的出料和目标工单' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_handoff_ticket BEFORE INSERT ON department_handoff_ticket
+FOR EACH ROW EXECUTE FUNCTION validate_handoff_ticket();
+
+CREATE FUNCTION validate_movement_receipt_link() RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM department_work_order_movement AS issue
+        JOIN department_work_order_movement AS receipt ON receipt.work_order_id = issue.work_order_id
+        WHERE issue.id = NEW.issue_movement_id AND receipt.id = NEW.receipt_movement_id
+            AND issue.direction = 'issue' AND receipt.direction = 'receipt'
+    ) THEN
+        RAISE EXCEPTION '出料只能关联本工单到料' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_movement_receipt_link BEFORE INSERT ON department_movement_receipt_link
+FOR EACH ROW EXECUTE FUNCTION validate_movement_receipt_link();
+
+CREATE FUNCTION validate_ticket_receipt() RETURNS TRIGGER AS $$
+DECLARE
+    issue_quantity BIGINT;
+    received_quantity NUMERIC;
+BEGIN
+    IF NEW.receipt_source = 'ticket' THEN
+        SELECT issue.quantity INTO issue_quantity
+        FROM department_handoff_ticket AS ticket
+        JOIN department_work_order_movement AS issue ON issue.id = ticket.issue_movement_id
+        WHERE ticket.id = NEW.ticket_id FOR UPDATE OF ticket;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION '交接票不存在' USING ERRCODE = '23514';
+        END IF;
+        IF NEW.quantity < issue_quantity AND NEW.note !~ '[^[:space:]]' THEN
+            RAISE EXCEPTION '登记到料数量小于交接票数量，必须填写备注' USING ERRCODE = '23514';
+        END IF;
+        SELECT COALESCE(SUM(quantity), 0) INTO received_quantity
+        FROM department_work_order_movement WHERE ticket_id = NEW.ticket_id;
+        IF received_quantity + NEW.quantity > issue_quantity THEN
+            RAISE EXCEPTION '累计交接到料不能超过上游出料数量' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    IF NEW.receipt_source = 'ticket' AND NOT EXISTS (
+        SELECT 1 FROM department_handoff_ticket AS ticket
+        JOIN department_work_order_movement AS issue ON issue.id = ticket.issue_movement_id
+        JOIN department_work_order AS source ON source.id = issue.work_order_id
+        WHERE ticket.id = NEW.ticket_id AND ticket.target_work_order_id = NEW.work_order_id
+            AND source.material_node_id = NEW.input_material_node_id
+    ) THEN
+        RAISE EXCEPTION '到料必须引用发给本工单的交接票及来源物料' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_ticket_receipt BEFORE INSERT ON department_work_order_movement
+FOR EACH ROW EXECUTE FUNCTION validate_ticket_receipt();
 
 CREATE FUNCTION protect_department_movement_history() RETURNS TRIGGER AS $$
 BEGIN
@@ -254,6 +349,15 @@ FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
 
 CREATE TRIGGER trg_department_movement_no_truncate
 BEFORE TRUNCATE ON department_work_order_movement
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+
+CREATE TRIGGER trg_handoff_immutable BEFORE UPDATE OR DELETE ON department_handoff_ticket
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_handoff_no_truncate BEFORE TRUNCATE ON department_handoff_ticket
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_receipt_link_immutable BEFORE UPDATE OR DELETE ON department_movement_receipt_link
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_receipt_link_no_truncate BEFORE TRUNCATE ON department_movement_receipt_link
 FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
 
 CREATE FUNCTION protect_recorded_department_work_order() RETURNS TRIGGER AS $$
@@ -392,32 +496,46 @@ CROSS JOIN (VALUES
 ) AS component(part_name, part_no, sort_order)
 WHERE product.factory_code = 'Z8737';
 
--- 三路配件汇合到同一激光节点，从该节点起以装配体安排。
+-- 三路配件独立加工后汇合到同一激光节点，汇合后使用装配体身份。
 INSERT INTO product_process_flow (product_id, product_version, flow_json)
 SELECT product.id, 1, jsonb_build_object(
     'schema_version', 8,
     'nodes', jsonb_build_array(
         jsonb_build_object('id', 'part-body', 'type', 'part', 'x', 0, 'y', 0,
             'label', body.part_no || ' · ' || body.part_name, 'bom_item_id', body.id),
-        jsonb_build_object('id', 'part-bridge', 'type', 'part', 'x', 0, 'y', 250,
+        jsonb_build_object('id', 'part-bridge', 'type', 'part', 'x', 0, 'y', 500,
             'label', bridge.part_no || ' · ' || bridge.part_name, 'bom_item_id', bridge.id),
-        jsonb_build_object('id', 'part-head', 'type', 'part', 'x', 0, 'y', 500,
+        jsonb_build_object('id', 'part-head', 'type', 'part', 'x', 0, 'y', 1000,
             'label', head.part_no || ' · ' || head.part_name, 'bom_item_id', head.id),
         jsonb_build_object('id', 'stamp-body', 'type', 'department', 'x', 500, 'y', 0,
             'label', '冲压部', 'department_code', 'stamp'),
         jsonb_build_object('id', 'cnc-body', 'type', 'department', 'x', 1000, 'y', 0,
             'label', 'CNC部', 'department_code', 'cnc'),
-        jsonb_build_object('id', 'stamp-bridge', 'type', 'department', 'x', 500, 'y', 250,
-            'label', '冲压部', 'department_code', 'stamp'),
-        jsonb_build_object('id', 'purchase-head', 'type', 'department', 'x', 500, 'y', 500,
-            'label', '外购部', 'department_code', 'purchase'),
-        jsonb_build_object('id', 'laser-merge', 'type', 'department', 'x', 1500, 'y', 250,
-            'label', '激光部', 'department_code', 'laser'),
-        jsonb_build_object('id', 'vibration-next', 'type', 'department', 'x', 2000, 'y', 250,
-            'label', '震机部', 'department_code', 'vibration'),
-        jsonb_build_object('id', 'outsource-next', 'type', 'department', 'x', 2500, 'y', 250,
+        jsonb_build_object('id', 'grinding-body-before', 'type', 'department', 'x', 1500, 'y', 0,
+            'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'outsource-body', 'type', 'department', 'x', 2000, 'y', 0,
             'label', '委外部', 'department_code', 'outsource'),
-        jsonb_build_object('id', 'finished-end', 'type', 'department', 'x', 3000, 'y', 250,
+        jsonb_build_object('id', 'grinding-body-after', 'type', 'department', 'x', 2500, 'y', 0,
+            'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'stamp-bridge', 'type', 'department', 'x', 500, 'y', 500,
+            'label', '冲压部', 'department_code', 'stamp'),
+        jsonb_build_object('id', 'cnc-bridge', 'type', 'department', 'x', 1000, 'y', 500,
+            'label', 'CNC部', 'department_code', 'cnc'),
+        jsonb_build_object('id', 'grinding-bridge', 'type', 'department', 'x', 1500, 'y', 500,
+            'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'purchase-head', 'type', 'department', 'x', 500, 'y', 1000,
+            'label', '外购部', 'department_code', 'purchase'),
+        jsonb_build_object('id', 'grinding-head', 'type', 'department', 'x', 1000, 'y', 1000,
+            'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'laser-merge', 'type', 'department', 'x', 3000, 'y', 500,
+            'label', '激光部', 'department_code', 'laser'),
+        jsonb_build_object('id', 'grinding-assembly', 'type', 'department', 'x', 3500, 'y', 500,
+            'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'vibration-next', 'type', 'department', 'x', 4000, 'y', 500,
+            'label', '震机部', 'department_code', 'vibration'),
+        jsonb_build_object('id', 'outsource-next', 'type', 'department', 'x', 4500, 'y', 500,
+            'label', '委外部', 'department_code', 'outsource'),
+        jsonb_build_object('id', 'finished-end', 'type', 'department', 'x', 5000, 'y', 500,
             'label', '成品部', 'department_code', 'finished')
     ),
     'edges', jsonb_build_array(
@@ -426,20 +544,34 @@ SELECT product.id, 1, jsonb_build_object(
         jsonb_build_object('id', 'line-2', 'edge_type', 'polyline',
             'source_node_id', 'stamp-body', 'target_node_id', 'cnc-body'),
         jsonb_build_object('id', 'line-3', 'edge_type', 'polyline',
-            'source_node_id', 'cnc-body', 'target_node_id', 'laser-merge'),
+            'source_node_id', 'cnc-body', 'target_node_id', 'grinding-body-before'),
         jsonb_build_object('id', 'line-4', 'edge_type', 'polyline',
-            'source_node_id', 'part-bridge', 'target_node_id', 'stamp-bridge'),
+            'source_node_id', 'grinding-body-before', 'target_node_id', 'outsource-body'),
         jsonb_build_object('id', 'line-5', 'edge_type', 'polyline',
-            'source_node_id', 'stamp-bridge', 'target_node_id', 'laser-merge'),
+            'source_node_id', 'outsource-body', 'target_node_id', 'grinding-body-after'),
         jsonb_build_object('id', 'line-6', 'edge_type', 'polyline',
-            'source_node_id', 'part-head', 'target_node_id', 'purchase-head'),
+            'source_node_id', 'grinding-body-after', 'target_node_id', 'laser-merge'),
         jsonb_build_object('id', 'line-7', 'edge_type', 'polyline',
-            'source_node_id', 'purchase-head', 'target_node_id', 'laser-merge'),
+            'source_node_id', 'part-bridge', 'target_node_id', 'stamp-bridge'),
         jsonb_build_object('id', 'line-8', 'edge_type', 'polyline',
-            'source_node_id', 'laser-merge', 'target_node_id', 'vibration-next'),
+            'source_node_id', 'stamp-bridge', 'target_node_id', 'cnc-bridge'),
         jsonb_build_object('id', 'line-9', 'edge_type', 'polyline',
-            'source_node_id', 'vibration-next', 'target_node_id', 'outsource-next'),
+            'source_node_id', 'cnc-bridge', 'target_node_id', 'grinding-bridge'),
         jsonb_build_object('id', 'line-10', 'edge_type', 'polyline',
+            'source_node_id', 'grinding-bridge', 'target_node_id', 'laser-merge'),
+        jsonb_build_object('id', 'line-11', 'edge_type', 'polyline',
+            'source_node_id', 'part-head', 'target_node_id', 'purchase-head'),
+        jsonb_build_object('id', 'line-12', 'edge_type', 'polyline',
+            'source_node_id', 'purchase-head', 'target_node_id', 'grinding-head'),
+        jsonb_build_object('id', 'line-13', 'edge_type', 'polyline',
+            'source_node_id', 'grinding-head', 'target_node_id', 'laser-merge'),
+        jsonb_build_object('id', 'line-14', 'edge_type', 'polyline',
+            'source_node_id', 'laser-merge', 'target_node_id', 'grinding-assembly'),
+        jsonb_build_object('id', 'line-15', 'edge_type', 'polyline',
+            'source_node_id', 'grinding-assembly', 'target_node_id', 'vibration-next'),
+        jsonb_build_object('id', 'line-16', 'edge_type', 'polyline',
+            'source_node_id', 'vibration-next', 'target_node_id', 'outsource-next'),
+        jsonb_build_object('id', 'line-17', 'edge_type', 'polyline',
             'source_node_id', 'outsource-next', 'target_node_id', 'finished-end')
     )
 )
@@ -452,16 +584,23 @@ JOIN product_bom AS head ON head.product_id = product.id
     AND head.product_version = 1 AND head.part_no = 'Z8737-03'
 WHERE product.factory_code = 'Z8737';
 
--- 当前路线投影：汇合前四项配件安排，汇合起四项装配体安排。
+-- 当前路线投影：汇合前10项配件安排，汇合起5项装配体安排。
 INSERT INTO product_department_route (product_id, material_node_id, department_node_id, department_code)
 SELECT product.id, route.material_node_id, route.department_node_id, route.department_code
 FROM product
 CROSS JOIN (VALUES
     ('part-body', 'stamp-body', 'stamp'),
     ('part-body', 'cnc-body', 'cnc'),
+    ('part-body', 'grinding-body-before', 'grinding'),
+    ('part-body', 'outsource-body', 'outsource'),
+    ('part-body', 'grinding-body-after', 'grinding'),
     ('part-bridge', 'stamp-bridge', 'stamp'),
+    ('part-bridge', 'cnc-bridge', 'cnc'),
+    ('part-bridge', 'grinding-bridge', 'grinding'),
     ('part-head', 'purchase-head', 'purchase'),
+    ('part-head', 'grinding-head', 'grinding'),
     ('laser-merge', 'laser-merge', 'laser'),
+    ('laser-merge', 'grinding-assembly', 'grinding'),
     ('laser-merge', 'vibration-next', 'vibration'),
     ('laser-merge', 'outsource-next', 'outsource'),
     ('laser-merge', 'finished-end', 'finished')
@@ -485,7 +624,7 @@ SELECT customer_id, 'ORDER-Z8737-0001', 3000, id, 4000, 'draft', 1
 FROM product
 WHERE factory_code = 'Z8737';
 
--- 使用当前路线投影生成8张部门工单；装配体按生产数量，不累加组成配件用量。
+-- 使用当前路线投影生成15张部门工单；装配体按生产数量，不累加组成配件用量。
 INSERT INTO department_work_order (
     production_plan_id, product_id, material_node_id, department_node_id, task_quantity
 )

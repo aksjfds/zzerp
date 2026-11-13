@@ -2,12 +2,14 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
+import { ElMessage } from 'element-plus'
 import {
   queryDepartmentMovements, recordDepartmentMovement,
-  type DepartmentMovement, type DepartmentMovementInput, type DepartmentWorkOrder,
+  queryHandoffOptions, type HandoffOptions, type HandoffTicket,
+  type DepartmentMovement, type DepartmentMovementInput, type DepartmentWorkOrder, type WorkOrderComponent,
 } from '../api/plans'
 
-const props = defineProps<{ order: DepartmentWorkOrder; direction?: 'receipt' | 'issue' }>()
+const props = defineProps<{ order: DepartmentWorkOrder; direction?: 'receipt' | 'issue'; ticket?: HandoffTicket; component?: WorkOrderComponent }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
 const visible = ref(true)
 const quantity = ref<number>()
@@ -19,10 +21,40 @@ const total = ref(0)
 const page = ref(1)
 const loading = ref(false)
 const error = ref('')
-const title = computed(() => props.direction === 'receipt' ? '到料登记' : props.direction === 'issue' ? '出料登记' : '到料／出料流水')
+const title = computed(() => props.direction === 'receipt' ? '到料登记' : props.direction === 'issue' ? '出料登记' : props.component ? '配件到料流水' : '到料／出料流水')
 let active = true
 let revision = 0
 let pending: DepartmentMovementInput | undefined
+const options = ref<HandoffOptions>()
+const optionError = ref('')
+const optionLoading = ref(false)
+const target = ref<number>()
+const input = ref(props.component?.material_node_id || '')
+const noteRequired = computed(() => props.direction === 'receipt'
+  && (!props.ticket || (quantity.value !== undefined && quantity.value < props.ticket.quantity)))
+const quantityMax = computed(() => {
+  let available: bigint | undefined
+  if (props.direction === 'receipt' && props.ticket) available = BigInt(props.ticket.quantity) - BigInt(props.ticket.received_quantity)
+  if (props.direction === 'issue' && options.value?.available_issue_quantity != null) available = BigInt(options.value.available_issue_quantity)
+  if (available === undefined) return Number.MAX_SAFE_INTEGER
+  return Number(available < 0n ? 0n : available > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : available)
+})
+async function loadOptions() {
+  optionLoading.value = true; optionError.value = ''
+  try {
+    const result = await queryHandoffOptions(props.order.id)
+    if (!active) return
+    if (props.component && !result.external_inputs.some(item => item.material_node_id === props.component!.material_node_id)) {
+      optionError.value = '此配件已不属于当前工单，请关闭后刷新工单'
+      return
+    }
+    options.value = result
+    if (result.targets.length === 1) target.value = result.targets[0]!.id
+    if (!props.component && result.external_inputs.length === 1) input.value = result.external_inputs[0]!.material_node_id
+  } catch (cause) {
+    if (active) optionError.value = getApiErrorDetail(cause)?.message || '来料及去向加载失败'
+  } finally { if (active) optionLoading.value = false }
+}
 
 async function load() {
   const current = ++revision
@@ -30,7 +62,7 @@ async function load() {
   error.value = ''
   rows.value = []
   try {
-    const result = await queryDepartmentMovements(props.order.id, page.value)
+    const result = await queryDepartmentMovements(props.order.id, page.value, props.component?.material_node_id)
     if (!active || current !== revision) return
     rows.value = result.data
     total.value = result.total
@@ -41,19 +73,32 @@ async function load() {
 
 async function save() {
   if (saving.value || !props.direction) return
+  if (!options.value || optionLoading.value || optionError.value) return
+  if (props.direction === 'receipt' && !options.value.can_receive) { saveError.value = '本部门无需登记到料，请直接出料'; return }
   if (!Number.isSafeInteger(quantity.value) || !quantity.value || quantity.value <= 0) {
     saveError.value = '请输入正整数数量'
     return
   }
-  const value = { direction: props.direction, quantity: quantity.value, note: note.value.trim() }
-  if (!pending || pending.direction !== value.direction || pending.quantity !== value.quantity || pending.note !== value.note) {
+  if (quantity.value > quantityMax.value) { saveError.value = props.direction === 'issue' ? `本次出料不能超过剩余可出数量 ${quantityMax.value}` : `本票剩余可到料 ${quantityMax.value}`; return }
+  if (noteRequired.value && !note.value.trim()) { saveError.value = props.ticket ? '登记到料数量小于交接票数量，必须填写备注' : '无来源到料必须填写备注'; return }
+  if (props.direction === 'issue' && options.value.targets.length && !target.value) { saveError.value = '请选择出料去向'; return }
+  if (props.direction === 'receipt' && !props.ticket && !input.value) { saveError.value = '请选择实际到料物料'; return }
+  const value: Omit<DepartmentMovementInput, 'request_id'> = {
+    direction: props.direction, quantity: quantity.value, note: note.value.trim(),
+    receipt_source: props.direction === 'receipt' ? (props.ticket ? 'ticket' : 'external') : null,
+    ticket_id: props.direction === 'receipt' && props.ticket ? props.ticket.id : null,
+    input_material_node_id: props.direction === 'receipt' && !props.ticket ? input.value : null,
+    target_work_order_id: props.direction === 'issue' ? target.value ?? null : null,
+  }
+  if (!pending || JSON.stringify({ ...pending, request_id: undefined }) !== JSON.stringify(value)) {
     pending = { ...value, request_id: crypto.randomUUID() }
   }
   saving.value = true
   saveError.value = ''
   try {
-    await recordDepartmentMovement(props.order.id, pending)
+    const result = await recordDepartmentMovement(props.order.id, pending)
     if (!active) return
+    ElMessage.success(result.ticket_no ? `已保存，交接票 ${result.ticket_no}` : '登记已保存')
     emit('changed')
     visible.value = false
   } catch (cause) {
@@ -62,29 +107,47 @@ async function save() {
 }
 
 function beforeClose(done: () => void) { if (!saving.value) done() }
-onMounted(load)
+onMounted(() => { if (props.direction) void loadOptions(); else void load() })
 onBeforeUnmount(() => { active = false; revision += 1 })
 </script>
 
 <template>
   <ElDialog v-model="visible" :title="title" width="min(1000px, 96vw)" :before-close="beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="emit('close')">
     <p>{{ order.order_no }} · {{ order.department_name }} · {{ order.part_name }}</p>
+    <p v-if="component">配件：{{ component.part_no }} · {{ component.part_name }}（仅此配件直接到料）</p>
     <ElForm v-if="direction" label-width="80px" @submit.prevent="save">
-      <ElFormItem label="数量"><ElInputNumber v-model="quantity" :min="1" :max="Number.MAX_SAFE_INTEGER" :precision="0" :step="1" :disabled="saving" controls-position="right" /></ElFormItem>
-      <ElFormItem label="备注"><ElInput v-model="note" type="textarea" :rows="2" maxlength="1000" show-word-limit :disabled="saving" /></ElFormItem>
-      <p class="movement-note">支持分批登记；到料和出料独立记录，不限制任务数、不自动转入下游。保存后流水不可修改或删除。</p>
+      <LoadErrorAlert :message="optionError" :loading="optionLoading" @retry="loadOptions" />
+      <template v-if="direction === 'receipt'">
+        <p v-if="ticket">{{ ticket.ticket_no }} · {{ ticket.factory_code }} {{ ticket.product_name }} · {{ ticket.source_department }} → {{ ticket.target_department }} · {{ ticket.material_name }} · 出料 {{ ticket.quantity }}</p>
+        <template v-else>
+          <p>本次为无来源到料，请确认工单与实际物料，并在备注中说明原因。</p>
+          <ElFormItem label="实际物料"><ElSelect v-model="input" :disabled="saving || optionLoading || !!component" placeholder="请选择实际到料物料"><ElOption v-for="part in options?.external_inputs" :key="part.material_node_id" :label="part.label" :value="part.material_node_id" /></ElSelect></ElFormItem>
+        </template>
+      </template>
+      <template v-else>
+        <p v-if="options">{{ options.available_issue_quantity === null ? '本部门直接出料，不受到料数量限制。' : `剩余可出：${options.available_issue_quantity}（装配体按 BOM 齐套折算）` }} <ElButton text :loading="optionLoading" :disabled="saving" @click="loadOptions">刷新可出量</ElButton></p>
+        <ElFormItem v-if="options?.targets.length" label="去向"><ElSelect v-model="target" :disabled="saving || optionLoading" style="width:100%"><ElOption v-for="item in options.targets" :key="item.id" :label="item.label" :value="item.id" /></ElSelect></ElFormItem>
+        <p v-else-if="options">终端出料：不生成内部交接票。</p>
+      </template>
+      <ElFormItem label="数量"><ElInputNumber v-model="quantity" :min="1" :max="Math.max(1, quantityMax)" :precision="0" :step="1" :disabled="saving || quantityMax <= 0" controls-position="right" /></ElFormItem>
+      <ElFormItem label="备注" :required="noteRequired"><ElInput v-model="note" type="textarea" :rows="2" maxlength="1000" show-word-limit :disabled="saving" /></ElFormItem>
+      <p class="movement-note">累计交接到料不能超出票面数量；本次到料小于票面数量、或无来源到料时备注必填。流水保存后不可修改或删除。</p>
       <LoadErrorAlert :message="saveError" title="登记未完成" retry-text="重试保存" :loading="saving" @retry="save" />
-      <ElFormItem><ElButton type="primary" native-type="submit" :loading="saving">保存{{ direction === 'receipt' ? '到料' : '出料' }}</ElButton></ElFormItem>
+      <ElFormItem><ElButton type="primary" native-type="submit" :disabled="optionLoading || !!optionError || !options || quantityMax <= 0" :loading="saving">保存{{ direction === 'receipt' ? '到料' : '出料' }}</ElButton></ElFormItem>
     </ElForm>
+    <template v-if="!direction">
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
     <ElTable v-if="!error" v-loading="loading" :data="rows" border empty-text="暂无到料或出料流水">
       <ElTableColumn label="类型" width="90"><template #default="{ row }">{{ row.direction === 'receipt' ? '到料' : '出料' }}</template></ElTableColumn>
       <ElTableColumn prop="quantity" label="数量" width="140" align="right" />
+      <ElTableColumn prop="material_name" label="实际物料" min-width="150" />
+      <ElTableColumn prop="ticket_no" label="交接票" min-width="150" />
       <ElTableColumn prop="actor_username" label="操作人" min-width="110" />
       <ElTableColumn prop="created_at" label="时间" min-width="210" />
       <ElTableColumn prop="note" label="备注" min-width="180" />
     </ElTable>
     <ElPagination v-if="!error" v-model:current-page="page" layout="prev, pager, next, total" :total="total" :page-size="50" @current-change="load" />
+    </template>
     <template #footer><ElButton :disabled="saving" @click="visible = false">关闭</ElButton></template>
   </ElDialog>
 </template>

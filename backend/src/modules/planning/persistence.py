@@ -95,6 +95,12 @@ class DepartmentWorkOrderMovement(Base):
         CheckConstraint("quantity > 0 AND quantity <= 9007199254740991", name="ck_department_movement_quantity"),
         Index("idx_department_movement_order", "work_order_id", "created_at", "id"),
         Index("idx_department_movement_actor", "actor_user_id"),
+        Index("idx_department_movement_ticket", "ticket_id"),
+        CheckConstraint("receipt_source IS DISTINCT FROM 'external' OR note ~ '[^[:space:]]'", name="ck_unattributed_receipt_note"),
+        CheckConstraint("(direction = 'issue' AND receipt_source IS NULL AND ticket_id IS NULL AND input_material_node_id IS NULL) OR "
+                        "(direction = 'receipt' AND receipt_source IS NOT NULL AND input_material_node_id IS NOT NULL AND "
+                        "((receipt_source = 'external' AND ticket_id IS NULL) OR (receipt_source = 'ticket' AND ticket_id IS NOT NULL)))",
+                        name="ck_department_movement_source"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -104,4 +110,25 @@ class DepartmentWorkOrderMovement(Base):
     note: Mapped[str] = mapped_column(Text, nullable=False, default="")
     request_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
     actor_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    receipt_source: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ticket_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("department_handoff_ticket.id"), nullable=True)
+    input_material_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class DepartmentHandoffTicket(Base):
+    __tablename__ = "department_handoff_ticket"
+    __table_args__ = (
+        UniqueConstraint("issue_movement_id", name="uq_handoff_issue"),
+        Index("idx_handoff_target", "target_work_order_id", "id"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    issue_movement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order_movement.id"), nullable=False)
+    target_work_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order.id"), nullable=False)
+
+
+class DepartmentMovementReceiptLink(Base):
+    __tablename__ = "department_movement_receipt_link"
+    issue_movement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order_movement.id"), primary_key=True)
+    receipt_movement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order_movement.id"), primary_key=True)
+    __table_args__ = (Index("idx_movement_link_receipt", "receipt_movement_id"),)

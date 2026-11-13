@@ -1,4 +1,5 @@
 from copy import deepcopy
+from modules.engineering.handoff_routes import ensure_handoffs_preserved
 
 from sqlalchemy.exc import IntegrityError
 
@@ -9,7 +10,7 @@ from domain.time import utc_now
 from modules.engineering.persistence import ProductVersion
 from modules.engineering.command_support import command_result, product_versions
 from modules.engineering.collaboration_contract import EngineeringCollaborators
-from modules.engineering.routing import ensure_referenced_routes_preserved, synchronize_routes, validate_nodes
+from modules.engineering.routing import ensure_referenced_routes_preserved, ensure_recorded_inputs_preserved, synchronize_routes, validate_nodes
 from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import (
     empty_process_flow,
@@ -76,6 +77,8 @@ def create_product_version(
                 if node.type == "part":
                     node.bom_item_id = bom_id_map[node.bom_item_id]
             copied_flow = validate_nodes(session, product.id, next_version, copied_flow)
+            ensure_handoffs_preserved(copied_flow, collaborators.referenced_handoff_pairs(session, product.id))
+            ensure_recorded_inputs_preserved(product, copied_flow, collaborators.referenced_input_nodes(session, product.id))
             ensure_referenced_routes_preserved(
                 session, product, copied_flow,
                 collaborators.referenced_route_pairs(session, product.id),

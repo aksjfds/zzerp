@@ -3,12 +3,12 @@
 from sqlalchemy import delete, func, select, tuple_
 
 from database import SessionLocal
-from modules.engineering.route_api import current_route_references, validated_plan_routes
+from modules.engineering.route_api import current_route_references, validated_plan_routes, handoff_contexts
 from modules.engineering.product_reference_api import get_product_references, matching_product_ids
 from modules.errors import DomainError
 from modules.sales.customer_api import customer_names_by_ids
-from modules.organization.read_api import department_names
-from modules.planning.persistence import DepartmentWorkOrder, ProductionPlan
+from modules.organization.read_api import department_names, allows_receipts, uses_assembly_tree
+from modules.planning.persistence import DepartmentWorkOrder, DepartmentWorkOrderMovement, ProductionPlan
 from modules.planning.material_movements import ensure_plan_without_movements, movement_totals
 
 
@@ -31,9 +31,34 @@ def rebuild_work_orders(session, plan: ProductionPlan) -> None:
     session.flush()
 
 
+def assembly_components(session, orders, routes):
+    candidates = [order for order in orders if uses_assembly_tree(
+        routes[(order.product_id, order.material_node_id, order.department_node_id)].department_code)]
+    contexts = handoff_contexts(session, {order.product_id for order in candidates})
+    assemblies = [order for order in candidates
+                  if len(contexts[order.product_id]["requirements"][order.material_node_id]) > 1]
+    if not assemblies:
+        return {}
+    received = {(order_id, material): int(quantity) for order_id, material, quantity in session.execute(
+        select(DepartmentWorkOrderMovement.work_order_id, DepartmentWorkOrderMovement.input_material_node_id,
+               func.sum(DepartmentWorkOrderMovement.quantity))
+        .where(DepartmentWorkOrderMovement.work_order_id.in_({order.id for order in assemblies}),
+               DepartmentWorkOrderMovement.direction == "receipt")
+        .group_by(DepartmentWorkOrderMovement.work_order_id, DepartmentWorkOrderMovement.input_material_node_id))}
+    result = {}
+    for order in assemblies:
+        context = contexts[order.product_id]
+        requirements = context["requirements"][order.material_node_id]
+        result[order.id] = [dict(material_node_id=part, **context["parts"][part],
+            required_quantity=str(order.task_quantity * requirements[part]),
+            received_quantity=str(received.get((order.id, part), 0)))
+            for part in sorted(requirements, key=lambda part: context["parts"][part]["part_no"])]
+    return result
+
+
 def list_work_orders(
     page: int, page_size: int, *, department_scope: str | None, department_code: str | None = None,
-    plan_id: int | None = None, order_no: str | None = None,
+    plan_id: int | None = None, work_order_id: int | None = None, order_no: str | None = None,
     product_keyword: str | None = None,
 ) -> tuple[list[dict], int]:
     if department_scope is not None:
@@ -45,6 +70,8 @@ def list_work_orders(
         if department_code is not None and department_code not in departments:
             raise DomainError("department_not_found", "生产部门不存在", status_code=404)
         conditions = []
+        if work_order_id is not None:
+            conditions.append(DepartmentWorkOrder.id == work_order_id)
         if department_code is not None:
             route_keys = set(current_route_references(session, department_code=department_code))
             conditions.append(tuple_(DepartmentWorkOrder.product_id, DepartmentWorkOrder.material_node_id,
@@ -65,28 +92,37 @@ def list_work_orders(
             statement.order_by(DepartmentWorkOrder.id.desc())
             .offset((page - 1) * page_size).limit(page_size)
         ).all()
-        routes = current_route_references(session, route_keys={
-            (order.product_id, order.material_node_id, order.department_node_id) for order, plan in rows
+        return serialize_work_orders(session, rows, departments=departments), total
+
+
+def serialize_work_orders(session, rows, *, include_components=True, departments=None):
+    routes = current_route_references(session, route_keys={
+        (order.product_id, order.material_node_id, order.department_node_id) for order, plan in rows
+    })
+    products = get_product_references(session, {plan.product_id for order, plan in rows})
+    customers = customer_names_by_ids(session, {plan.customer_id for order, plan in rows})
+    if departments is None:
+        departments = department_names(session)
+    if any((order.product_id, order.material_node_id, order.department_node_id) not in routes for order, plan in rows):
+        raise DomainError("department_work_order_route_missing", "部门工单关联的当前正式路线不存在，请检查工程资料", status_code=409)
+    components = assembly_components(session, [order for order, plan in rows], routes) if include_components else {}
+    totals = movement_totals(session, {order.id for order, plan in rows})
+    data = []
+    for order, plan in rows:
+        route = routes[(order.product_id, order.material_node_id, order.department_node_id)]
+        product = products[plan.product_id]
+        data.append({
+            "id": order.id, "production_plan_id": plan.id, "material_node_id": order.material_node_id, "department_node_id": order.department_node_id,
+            "order_no": plan.order_no, "customer_name": customers[plan.customer_id],
+            "order_quantity": plan.order_quantity,
+            "product_id": plan.product_id, "factory_code": product.factory_code,
+            "product_name": product.product_name, "part_no": route.part_no,
+            "part_name": route.part_name, "department_code": route.department_code,
+            "department_name": departments[route.department_code],
+            "can_receive": allows_receipts(route.department_code),
+            "task_quantity": order.task_quantity, "plan_status": plan.status,
+            "received_quantity": totals.get(order.id, ("0", "0"))[0],
+            "issued_quantity": totals.get(order.id, ("0", "0"))[1],
+            "components": components.get(order.id, []),
         })
-        products = get_product_references(session, {plan.product_id for order, plan in rows})
-        customers = customer_names_by_ids(session, {plan.customer_id for order, plan in rows})
-        data = []
-        totals = movement_totals(session, {order.id for order, plan in rows})
-        for order, plan in rows:
-            route = routes.get((order.product_id, order.material_node_id, order.department_node_id))
-            if route is None:
-                raise DomainError("department_work_order_route_missing", "部门工单关联的当前正式路线不存在，请检查工程资料", status_code=409)
-            product = products[plan.product_id]
-            data.append({
-                "id": order.id, "production_plan_id": plan.id, "material_node_id": order.material_node_id, "department_node_id": order.department_node_id,
-                "order_no": plan.order_no, "customer_name": customers[plan.customer_id],
-                "order_quantity": plan.order_quantity,
-                "product_id": plan.product_id, "factory_code": product.factory_code,
-                "product_name": product.product_name, "part_no": route.part_no,
-                "part_name": route.part_name, "department_code": route.department_code,
-                "department_name": departments[route.department_code],
-                "task_quantity": order.task_quantity, "plan_status": plan.status,
-                "received_quantity": totals.get(order.id, ("0", "0"))[0],
-                "issued_quantity": totals.get(order.id, ("0", "0"))[1],
-            })
-        return data, total
+    return data

@@ -4,6 +4,14 @@ from modules.errors import DomainError
 from modules.organization.persistence import ProductionDepartment
 
 
+def allows_receipts(department_code: str) -> bool:
+    return department_code not in {"stamp", "purchase"}
+
+
+def uses_assembly_tree(department_code: str) -> bool:
+    return department_code in {"laser", "assembly"}
+
+
 def department_names(session, codes: set[str] | None = None) -> dict[str, str]:
     statement = select(ProductionDepartment).order_by(ProductionDepartment.code)
     if codes is not None:

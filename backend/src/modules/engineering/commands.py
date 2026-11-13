@@ -1,4 +1,5 @@
 from sqlalchemy.exc import IntegrityError
+from modules.engineering.handoff_routes import ensure_handoffs_preserved
 from sqlalchemy.orm.exc import StaleDataError
 
 from database import SessionLocal
@@ -12,7 +13,7 @@ from modules.engineering.editability import (
 from modules.engineering.persistence import Product, ProductVersion
 from modules.engineering.routing import (
     ensure_bom_nodes_retained, ensure_referenced_bom_identity,
-    ensure_referenced_routes_preserved, validate_nodes,
+    ensure_referenced_routes_preserved, ensure_recorded_inputs_preserved, validate_nodes,
 )
 from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import (
@@ -154,6 +155,8 @@ def update_product_process_flow(
             ensure_version_exists(product, product_version)
             process_flow = validate_nodes(session, product.id, product_version, process_flow)
             if product_version == product.version:
+                ensure_handoffs_preserved(process_flow, collaborators.referenced_handoff_pairs(session, product.id))
+                ensure_recorded_inputs_preserved(product, process_flow, collaborators.referenced_input_nodes(session, product.id))
                 ensure_referenced_routes_preserved(
                     session, product, process_flow,
                     collaborators.referenced_route_pairs(session, product.id),

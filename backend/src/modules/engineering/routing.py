@@ -83,6 +83,20 @@ def route_identities(product, flow):
     }
 
 
+def ensure_recorded_inputs_preserved(product, flow, input_ids):
+    if not input_ids:
+        return
+    payload = next(record.flow_json for record in product.process_flows if record.product_version == product.version)
+    current = ProcessFlowPayload.model_validate(payload)
+    bom = {item.id: item.part_no for item in product.bom_items}
+    def identities(graph):
+        return {node.id: (node.type, bom[node.bom_item_id] if node.type == "part" else node.department_code)
+                for node in graph.nodes}
+    before, after = identities(current), identities(flow)
+    if any(key not in before or before[key] != after.get(key) for key in input_ids):
+        raise DomainError("recorded_input_in_use", "物料节点已有到料流水，不能删除、换号或更换其身份", status_code=409)
+
+
 def ensure_referenced_routes_preserved(session, product, flow, referenced_pairs):
     if not referenced_pairs:
         return

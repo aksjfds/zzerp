@@ -98,7 +98,7 @@ onBeforeUnmount(() => { sequence += 1 })
   <main class="plans-page">
     <PageHeader section-name="计划管理" page-title="生产计划">
       <template #actions>
-        <ElButton @click="router.push('/department-work-orders')">部门生产安排</ElButton>
+        <ElButton @click="router.push('/department-work-orders')">生产进度查看</ElButton>
         <ElButton @click="logout">退出登录</ElButton>
         <ElButton v-permission="PLAN_PERMISSIONS.add" type="primary" @click="open()">创建生产计划</ElButton>
       </template>

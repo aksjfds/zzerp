@@ -8,6 +8,12 @@ from modules.planning.api import create_plan, delete_plan, get_plan, list_plans,
 from schemas.planning import ProductionPlanCreate, ProductionPlanUpdate, ProductionPlanEnvelope, ProductionPlanListEnvelope, DepartmentWorkOrderListEnvelope
 from schemas.planning import DepartmentMovementCreate, DepartmentMovementEnvelope, DepartmentMovementListEnvelope
 from modules.planning.api import list_movements, record_movement
+from modules.planning.api import get_handoff_options, list_handoff_tickets
+from schemas.planning import HandoffOptionsResponse, HandoffTicketListEnvelope
+from modules.planning.api import list_department_movements
+from schemas.planning import DepartmentLedgerEnvelope
+from modules.planning.api import list_production_progress
+from schemas.planning import ProductionProgressEnvelope
 
 
 router = APIRouter(prefix="/production-plans", tags=["production-plans"])
@@ -37,13 +43,54 @@ def department_work_order_list(
     page_size: int = Query(default=50, gt=0, le=200),
     department_code: str | None = Query(default=None, max_length=50),
     plan_id: int | None = Query(default=None, gt=0),
+    work_order_id: int | None = Query(default=None, gt=0),
     order_no: str | None = Query(default=None, max_length=200),
     product_keyword: str | None = Query(default=None, max_length=200),
     user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
 ):
     data, total = list_work_orders(page, page_size, department_scope=user["department_code"], department_code=department_code,
-                                  plan_id=plan_id, order_no=order_no, product_keyword=product_keyword)
+                                  plan_id=plan_id, work_order_id=work_order_id, order_no=order_no, product_keyword=product_keyword)
     return {"data": data, "total": total}
+
+
+@router.get("/progress", response_model=ProductionProgressEnvelope)
+def production_progress(
+    page: int = Query(default=1, gt=0), page_size: int = Query(default=20, gt=0, le=50),
+    order_no: str | None = Query(default=None, max_length=200),
+    product_keyword: str | None = Query(default=None, max_length=200),
+    user: dict = Depends(require_any_permission(PLAN_VIEW)),
+):
+    data, total = list_production_progress(page, page_size, department_scope=user["department_code"],
+                                          order_no=order_no, product_keyword=product_keyword)
+    return {"data": data, "total": total}
+
+
+@router.get("/department-movements", response_model=DepartmentLedgerEnvelope)
+def department_ledger(
+    page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=200),
+    department_code: str | None = Query(default=None, max_length=50),
+    user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
+):
+    data,total = list_department_movements(page,page_size,department_scope=user["department_code"],department_code=department_code)
+    return {"data":data,"total":total}
+
+
+@router.get("/handoff-tickets", response_model=HandoffTicketListEnvelope)
+def handoff_ticket_list(
+    page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=200),
+    unreceived: bool = False, order_no: str | None = Query(default=None, max_length=200),
+    target_order_id: int | None = Query(default=None, gt=0),
+    department_code: str | None = Query(default=None, max_length=50),
+    user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
+):
+    data,total = list_handoff_tickets(page,page_size,department_scope=user["department_code"],
+        unreceived=unreceived,order_no=order_no,target_order_id=target_order_id,department_code=department_code)
+    return {"data": data,"total": total}
+
+
+@router.get("/department-work-orders/{order_id}/handoff-options", response_model=HandoffOptionsResponse)
+def handoff_options(order_id: int, user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW))):
+    return get_handoff_options(order_id, department_scope=user["department_code"])
 
 
 @router.get("/department-work-orders/{order_id}/movements", response_model=DepartmentMovementListEnvelope)
@@ -51,9 +98,11 @@ def department_movement_list(
     order_id: int,
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
+    input_material_node_id: str | None = Query(default=None, min_length=1, max_length=100),
     user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
 ):
-    data, total = list_movements(order_id, page, page_size, department_scope=user["department_code"])
+    data, total = list_movements(order_id, page, page_size, department_scope=user["department_code"],
+                                 input_material_node_id=input_material_node_id)
     return {"data": data, "total": total}
 
 

@@ -13,6 +13,8 @@ TABLE_OWNERS = {
     "product_route_component": "engineering",
     "department_work_order": "planning",
     "department_work_order_movement": "planning",
+    "department_handoff_ticket": "planning",
+    "department_movement_receipt_link": "planning",
     "production_plan": "planning"
 }
 

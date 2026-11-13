@@ -4,12 +4,14 @@ from dataclasses import dataclass
 from sqlalchemy import select, tuple_
 
 from domain.process_flow import material_routes
+from domain.route_order import department_route_order
 from modules.engineering.persistence import (
     Product, ProductBom, ProductDepartmentRoute, ProductProcessFlow, ProductRouteComponent,
 )
 from modules.engineering.routing import validate_nodes
 from modules.errors import DomainError
 from schemas.engineering import ProcessFlowPayload
+from modules.engineering.handoff_routes import resolve_handoff_routes
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,6 +23,56 @@ class RouteReference:
     part_name: str
     unit_requirement: int
     department_code: str
+
+
+def handoff_contexts(session, product_ids: set[int]):
+    if not product_ids:
+        return {}
+    records = list(session.execute(select(ProductProcessFlow.product_id, ProductProcessFlow.product_version,
+        ProductProcessFlow.flow_json).join(Product, (Product.id == ProductProcessFlow.product_id)
+        & (Product.version == ProductProcessFlow.product_version)).where(Product.id.in_(product_ids))))
+    if {row[0] for row in records} != product_ids:
+        raise DomainError("handoff_flow_missing", "产品缺少当前正式流程图", status_code=409)
+    bom = {(row.product_id, row.product_version, row.id): row for row in session.scalars(select(ProductBom)
+        .where(tuple_(ProductBom.product_id, ProductBom.product_version).in_({(p, v) for p, v, f in records})))}
+    result = {}
+    for product_id, version, payload in records:
+        flow = ProcessFlowPayload.model_validate(payload)
+        parts = {}
+        for node in flow.nodes:
+            if node.type == "part":
+                item = bom.get((product_id, version, node.bom_item_id))
+                if item is None:
+                    raise DomainError("handoff_part_missing", "流程配件不存在", status_code=409)
+                parts[node.id] = item
+        materials = {key: row.part_name for key, row in parts.items()}
+        receipt_materials = {key: {key} for key in parts}
+        requirements = {key: {key: 1} for key in parts}
+        for route in material_routes(flow):
+            receipt_materials[route.material_node_id] = {route.material_node_id, *route.part_node_ids}
+            if route.material_node_id not in parts:
+                requirements[route.material_node_id] = {part: parts[part].pcs for part in route.part_node_ids}
+            if route.material_node_id not in materials:
+                members = sorted((parts[key] for key in route.part_node_ids), key=lambda row: row.part_no)
+                materials[route.material_node_id] = "（" + "+".join(row.part_name for row in members) + "）装配体"
+        result[product_id] = dict(routes=resolve_handoff_routes(flow), materials=materials,
+                                 receipt_materials=receipt_materials, requirements=requirements,
+                                 parts={key: dict(part_no=part.part_no, part_name=part.part_name)
+                                        for key, part in parts.items()})
+    return result
+
+
+def current_department_orders(session, product_ids: set[int]):
+    if not product_ids:
+        return {}
+    rows = list(session.execute(select(ProductProcessFlow.product_id, ProductProcessFlow.flow_json)
+        .join(Product, (Product.id == ProductProcessFlow.product_id)
+              & (Product.version == ProductProcessFlow.product_version))
+        .where(Product.id.in_(product_ids))))
+    if {product_id for product_id, payload in rows} != product_ids:
+        raise DomainError("progress_flow_missing", "产品缺少当前正式流程图", status_code=409)
+    return {product_id: department_route_order(ProcessFlowPayload.model_validate(payload))
+            for product_id, payload in rows}
 
 
 def current_route_references(session, *, product_ids=None, route_keys=None, department_code=None):

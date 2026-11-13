@@ -1,11 +1,13 @@
 from modules.engineering import command_api as engineering
 from modules.engineering.api import get_product as query_product
-from modules.planning.reference_api import has_product_reference, referenced_route_pairs
+from modules.planning.reference_api import has_product_reference, referenced_route_pairs, referenced_handoff_pairs, referenced_input_nodes
 
 
 class _EngineeringCollaborators:
     has_product_reference = staticmethod(has_product_reference)
     referenced_route_pairs = staticmethod(referenced_route_pairs)
+    referenced_handoff_pairs = staticmethod(referenced_handoff_pairs)
+    referenced_input_nodes = staticmethod(referenced_input_nodes)
 
 
 COLLABORATORS = _EngineeringCollaborators()
