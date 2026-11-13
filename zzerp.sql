@@ -2,6 +2,7 @@
 -- 保留工程设计、统一生产计划及账号认证。
 -- 配件节点和部门节点通过连线形成当前生产路线。
 
+
 BEGIN;
 
 DROP SCHEMA public CASCADE;

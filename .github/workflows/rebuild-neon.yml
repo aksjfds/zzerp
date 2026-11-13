@@ -7,6 +7,7 @@ on:
       - mes
     paths:
       - zzerp.sql
+      - .github/workflows/rebuild-neon.yml
   workflow_dispatch:
 
 permissions:
