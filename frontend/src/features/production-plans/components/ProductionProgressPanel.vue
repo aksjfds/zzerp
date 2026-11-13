@@ -8,48 +8,67 @@ import DepartmentMovementDialog from './DepartmentMovementDialog.vue'
 type ProgressRow = {
   key: string
   label: string
-  kind: 'product' | 'material' | 'order'
   part_no?: string
   order?: DepartmentWorkOrder
   children?: ProgressRow[]
 }
 const products = ref<ProgressProduct[]>([])
-const total = ref(0), page = ref(1), loading = ref(false), error = ref('')
+const total = ref(0)
+const page = ref(1)
+const loading = ref(false)
+const error = ref('')
 const filters = reactive({ order_no: '', product_keyword: '' })
 const movementOrder = ref<DepartmentWorkOrder | null>(null)
-let active = true, revision = 0
+let active = true
+let revision = 0
 const rows = computed<ProgressRow[]>(() => products.value.map(product => ({
-  key: `product:${product.product_id}`, kind: 'product',
+  key: `product:${product.product_id}`,
   label: `${product.factory_code} · ${product.product_name}`,
   children: product.materials.map(material => ({
     key: `product:${product.product_id}:material:${material.material_node_id}`,
-    kind: 'material', label: material.part_name, part_no: material.part_no,
+    label: material.part_name, part_no: material.part_no,
     children: material.work_orders.map(order => ({
-      key: `order:${order.id}`, kind: 'order', label: order.department_name, order,
+      key: `order:${order.id}`, label: order.department_name, order,
     })),
   })),
 })))
 const expandedProductKeys = computed(() => rows.value.map(row => row.key))
 async function load() {
   const current = ++revision
-  loading.value = true; error.value = ''; products.value = []
+  loading.value = true
+  error.value = ''
+  products.value = []
   try {
-    const result = await queryProductionProgress({ page: page.value,
+    const result = await queryProductionProgress({
+      page: page.value,
       order_no: filters.order_no.trim() || undefined,
-      product_keyword: filters.product_keyword.trim() || undefined })
+      product_keyword: filters.product_keyword.trim() || undefined,
+    })
     if (!active || current !== revision) return
-    if (!result.data.length && page.value > 1 && result.total <= (page.value-1)*20) {
-      page.value = Math.max(1, Math.ceil(result.total/20)); await load(); return
+    if (!result.data.length && page.value > 1 && result.total <= (page.value - 1) * 20) {
+      page.value = Math.max(1, Math.ceil(result.total / 20))
+      await load()
+      return
     }
-    products.value = result.data; total.value = result.total
+    products.value = result.data
+    total.value = result.total
   } catch (cause) {
     if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '生产进度加载失败'
   } finally { if (active && current === revision) loading.value = false }
 }
-function search() { page.value = 1; void load() }
-function clear() { Object.assign(filters, { order_no: '', product_keyword: '' }); search() }
+function search() {
+  page.value = 1
+  void load()
+}
+function clear() {
+  Object.assign(filters, { order_no: '', product_keyword: '' })
+  search()
+}
 onMounted(load)
-onBeforeUnmount(() => { active = false; revision += 1 })
+onBeforeUnmount(() => {
+  active = false
+  revision += 1
+})
 </script>
 
 <template>

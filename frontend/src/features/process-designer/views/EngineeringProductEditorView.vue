@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onScopeDispose, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
+import type { FormInstance, FormRules } from 'element-plus'
 import BomEditor from '../components/BomEditor.vue'
 import ProcessFlowEditor from '../components/ProcessFlowEditor.vue'
 import { type BomItem, type ProductFields } from '../domain/types'

@@ -477,7 +477,7 @@ FROM production_department;
 
 INSERT INTO customer (customer_name) VALUES ('Celine');
 
--- 工程示例仅保留 Z8737，末尾初始化其草稿计划及部门工单。
+-- 工程示例包含 Z8737 及下方的 Z8738，末尾初始化草稿计划及部门工单。
 INSERT INTO product (customer_id, product_name, factory_code, customer_code, version)
 SELECT customer.id, 'L24.4 椭圆搭扣', 'Z8737', 'FIG6850', 1
 FROM customer
@@ -616,6 +616,101 @@ WHERE (route.material_node_id = 'part-body' AND part.part_no = 'Z8737-01')
     OR (route.material_node_id = 'part-head' AND part.part_no = 'Z8737-03')
     OR route.material_node_id = 'laser-merge';
 
+-- Z8738：面盖、底座先激光汇合，再与连接环在装配部二次汇合。
+INSERT INTO product (customer_id, product_name, factory_code, customer_code, version)
+SELECT id, '双段装配搭扣', 'Z8738', 'DEMO-Z8738', 1
+FROM customer WHERE customer_name = 'Celine';
+
+INSERT INTO product_version (product_id, version)
+SELECT id, 1 FROM product WHERE factory_code = 'Z8738';
+
+INSERT INTO product_bom (product_id, product_version, part_name, part_no, pcs, remark, sort_order)
+SELECT product.id, 1, component.part_name, component.part_no, 1, NULL, component.sort_order
+FROM product
+CROSS JOIN (VALUES
+    ('面盖', 'Z8738-01', 1),
+    ('底座', 'Z8738-02', 2),
+    ('连接环', 'Z8738-03', 3)
+) AS component(part_name, part_no, sort_order)
+WHERE product.factory_code = 'Z8738';
+
+INSERT INTO product_process_flow (product_id, product_version, flow_json)
+SELECT product.id, 1, jsonb_build_object(
+    'schema_version', 8,
+    'nodes', jsonb_build_array(
+        jsonb_build_object('id', 'part-cover', 'type', 'part', 'x', 0, 'y', 0,
+            'label', cover.part_no || ' · ' || cover.part_name, 'bom_item_id', cover.id),
+        jsonb_build_object('id', 'part-base', 'type', 'part', 'x', 0, 'y', 500,
+            'label', base.part_no || ' · ' || base.part_name, 'bom_item_id', base.id),
+        jsonb_build_object('id', 'part-ring', 'type', 'part', 'x', 0, 'y', 1000,
+            'label', ring.part_no || ' · ' || ring.part_name, 'bom_item_id', ring.id),
+        jsonb_build_object('id', 'stamp-cover', 'type', 'department', 'x', 500, 'y', 0,
+            'label', '冲压部', 'department_code', 'stamp'),
+        jsonb_build_object('id', 'stamp-base', 'type', 'department', 'x', 500, 'y', 500,
+            'label', '冲压部', 'department_code', 'stamp'),
+        jsonb_build_object('id', 'purchase-ring', 'type', 'department', 'x', 500, 'y', 1000,
+            'label', '外购部', 'department_code', 'purchase'),
+        jsonb_build_object('id', 'laser-primary', 'type', 'department', 'x', 1000, 'y', 250,
+            'label', '激光部', 'department_code', 'laser'),
+        jsonb_build_object('id', 'assembly-final', 'type', 'department', 'x', 1500, 'y', 500,
+            'label', '装配部', 'department_code', 'assembly'),
+        jsonb_build_object('id', 'finished-final', 'type', 'department', 'x', 2000, 'y', 500,
+            'label', '成品部', 'department_code', 'finished')
+    ),
+    'edges', jsonb_build_array(
+        jsonb_build_object('id', 'line-1', 'edge_type', 'polyline',
+            'source_node_id', 'part-cover', 'target_node_id', 'stamp-cover'),
+        jsonb_build_object('id', 'line-2', 'edge_type', 'polyline',
+            'source_node_id', 'stamp-cover', 'target_node_id', 'laser-primary'),
+        jsonb_build_object('id', 'line-3', 'edge_type', 'polyline',
+            'source_node_id', 'part-base', 'target_node_id', 'stamp-base'),
+        jsonb_build_object('id', 'line-4', 'edge_type', 'polyline',
+            'source_node_id', 'stamp-base', 'target_node_id', 'laser-primary'),
+        jsonb_build_object('id', 'line-5', 'edge_type', 'polyline',
+            'source_node_id', 'part-ring', 'target_node_id', 'purchase-ring'),
+        jsonb_build_object('id', 'line-6', 'edge_type', 'polyline',
+            'source_node_id', 'purchase-ring', 'target_node_id', 'assembly-final'),
+        jsonb_build_object('id', 'line-7', 'edge_type', 'polyline',
+            'source_node_id', 'laser-primary', 'target_node_id', 'assembly-final'),
+        jsonb_build_object('id', 'line-8', 'edge_type', 'polyline',
+            'source_node_id', 'assembly-final', 'target_node_id', 'finished-final')
+    )
+)
+FROM product
+JOIN product_bom AS cover ON cover.product_id = product.id
+    AND cover.product_version = 1 AND cover.part_no = 'Z8738-01'
+JOIN product_bom AS base ON base.product_id = product.id
+    AND base.product_version = 1 AND base.part_no = 'Z8738-02'
+JOIN product_bom AS ring ON ring.product_id = product.id
+    AND ring.product_version = 1 AND ring.part_no = 'Z8738-03'
+WHERE product.factory_code = 'Z8738';
+
+INSERT INTO product_department_route (product_id, material_node_id, department_node_id, department_code)
+SELECT product.id, route.material_node_id, route.department_node_id, route.department_code
+FROM product
+CROSS JOIN (VALUES
+    ('part-cover', 'stamp-cover', 'stamp'),
+    ('part-base', 'stamp-base', 'stamp'),
+    ('part-ring', 'purchase-ring', 'purchase'),
+    ('laser-primary', 'laser-primary', 'laser'),
+    ('assembly-final', 'assembly-final', 'assembly'),
+    ('assembly-final', 'finished-final', 'finished')
+) AS route(material_node_id, department_node_id, department_code)
+WHERE product.factory_code = 'Z8738';
+
+INSERT INTO product_route_component (product_id, material_node_id, department_node_id, product_bom_id)
+SELECT route.product_id, route.material_node_id, route.department_node_id, part.id
+FROM product_department_route AS route
+JOIN product AS product ON product.id = route.product_id
+JOIN product_bom AS part ON part.product_id = route.product_id AND part.product_version = 1
+WHERE product.factory_code = 'Z8738' AND (
+    (route.material_node_id = 'part-cover' AND part.part_no = 'Z8738-01')
+    OR (route.material_node_id = 'part-base' AND part.part_no = 'Z8738-02')
+    OR (route.material_node_id = 'part-ring' AND part.part_no = 'Z8738-03')
+    OR (route.material_node_id = 'laser-primary' AND part.part_no IN ('Z8738-01', 'Z8738-02'))
+    OR route.material_node_id = 'assembly-final'
+);
+
 -- Z8737 示例草稿计划：订单3000件，安排新生产4000件。
 INSERT INTO production_plan (
     customer_id, order_no, order_quantity, product_id, production_quantity, status, revision
@@ -624,7 +719,14 @@ SELECT customer_id, 'ORDER-Z8737-0001', 3000, id, 4000, 'draft', 1
 FROM product
 WHERE factory_code = 'Z8737';
 
--- 使用当前路线投影生成15张部门工单；装配体按生产数量，不累加组成配件用量。
+-- Z8738 示例草稿计划：订单1000件，生产1200件。
+INSERT INTO production_plan (
+    customer_id, order_no, order_quantity, product_id, production_quantity, status, revision
+)
+SELECT customer_id, 'ORDER-Z8738-0001', 1000, id, 1200, 'draft', 1
+FROM product WHERE factory_code = 'Z8738';
+
+-- 两个计划共21张部门工单；装配体按生产数量，不累加组成配件用量。
 INSERT INTO department_work_order (
     production_plan_id, product_id, material_node_id, department_node_id, task_quantity
 )
@@ -637,7 +739,7 @@ JOIN product_route_component AS component
     AND component.material_node_id = route.material_node_id
     AND component.department_node_id = route.department_node_id
 JOIN product_bom AS part ON part.id = component.product_bom_id
-WHERE plan.order_no = 'ORDER-Z8737-0001'
+WHERE plan.order_no IN ('ORDER-Z8737-0001', 'ORDER-Z8738-0001')
 GROUP BY plan.id, plan.product_id, plan.production_quantity,
          route.material_node_id, route.department_node_id;
 

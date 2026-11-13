@@ -27,11 +27,10 @@ def ensure_plan_without_movements(session, plan_id: int) -> None:
         raise DomainError("plan_has_material_movements", "计划已有到料或出料流水，不能撤回、重建或删除工单", status_code=409)
 
 
-def movement_totals(session, order_ids: set[int]) -> dict[int, tuple[str, str]]:
-    if not order_ids:
+def movement_totals(session, orders, contexts) -> dict[int, tuple[str, str]]:
+    if not orders:
         return {}
-    orders = list(session.scalars(select(DepartmentWorkOrder).where(DepartmentWorkOrder.id.in_(order_ids))))
-    contexts = handoff_contexts(session, {order.product_id for order in orders})
+    order_ids = {order.id for order in orders}
     grouped = session.execute(select(DepartmentWorkOrderMovement.work_order_id,
         DepartmentWorkOrderMovement.direction, DepartmentWorkOrderMovement.input_material_node_id,
         func.sum(DepartmentWorkOrderMovement.quantity)).where(DepartmentWorkOrderMovement.work_order_id.in_(order_ids))

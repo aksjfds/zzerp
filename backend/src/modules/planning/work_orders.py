@@ -31,10 +31,9 @@ def rebuild_work_orders(session, plan: ProductionPlan) -> None:
     session.flush()
 
 
-def assembly_components(session, orders, routes):
+def assembly_components(session, orders, routes, contexts):
     candidates = [order for order in orders if uses_assembly_tree(
         routes[(order.product_id, order.material_node_id, order.department_node_id)].department_code)]
-    contexts = handoff_contexts(session, {order.product_id for order in candidates})
     assemblies = [order for order in candidates
                   if len(contexts[order.product_id]["requirements"][order.material_node_id]) > 1]
     if not assemblies:
@@ -96,6 +95,8 @@ def list_work_orders(
 
 
 def serialize_work_orders(session, rows, *, include_components=True, departments=None):
+    if not rows:
+        return []
     routes = current_route_references(session, route_keys={
         (order.product_id, order.material_node_id, order.department_node_id) for order, plan in rows
     })
@@ -105,8 +106,10 @@ def serialize_work_orders(session, rows, *, include_components=True, departments
         departments = department_names(session)
     if any((order.product_id, order.material_node_id, order.department_node_id) not in routes for order, plan in rows):
         raise DomainError("department_work_order_route_missing", "部门工单关联的当前正式路线不存在，请检查工程资料", status_code=409)
-    components = assembly_components(session, [order for order, plan in rows], routes) if include_components else {}
-    totals = movement_totals(session, {order.id for order, plan in rows})
+    orders = [order for order, plan in rows]
+    contexts = handoff_contexts(session, {order.product_id for order in orders})
+    components = assembly_components(session, orders, routes, contexts) if include_components else {}
+    totals = movement_totals(session, orders, contexts)
     data = []
     for order, plan in rows:
         route = routes[(order.product_id, order.material_node_id, order.department_node_id)]

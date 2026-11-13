@@ -4,7 +4,6 @@ import { Control, Menu } from '@logicflow/extension'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
 import {
   fromLogicFlowData,
-  PROCESS_FLOW_GRID_X,
   PROCESS_FLOW_GRID_Y,
   toLogicFlowData,
 } from '@/shared/process-flow/adapter'
