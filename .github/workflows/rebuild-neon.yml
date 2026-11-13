@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - mes
     paths:
       - zzerp.sql
   workflow_dispatch:
