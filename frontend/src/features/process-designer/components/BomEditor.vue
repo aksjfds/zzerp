@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { useCompactViewport } from '@/shared/layout/useCompactViewport'
+
 import { watch } from 'vue'
 import { nextPartNumber } from '../domain/bomNumbers'
 import type { BomItem } from '../domain/types'
 
+const compact = useCompactViewport()
 const props = defineProps<{
   modelValue: BomItem[]
   factoryCode: string
@@ -148,7 +151,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
           />
         </template>
       </ElTableColumn>
-      <ElTableColumn v-if="!readonly" label="操作" width="84" fixed="right">
+      <ElTableColumn v-if="!readonly" label="操作" width="84" :fixed="compact ? false : 'right'">
         <template #default="{ $index }">
           <ElPopconfirm title="确定删除这条 BOM 配件吗？" @confirm="removeRow($index)">
             <template #reference><ElButton type="danger" link>删除</ElButton></template>

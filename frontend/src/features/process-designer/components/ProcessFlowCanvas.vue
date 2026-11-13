@@ -76,7 +76,7 @@ defineExpose({ dragPart, addPart, dragDepartment, addDepartment, focusElement, g
 
 <style scoped>
 .flow-canvas-shell { position: relative; min-width: 0; }
-.flow-canvas { position: relative; min-width: 0; height: clamp(680px, calc(100vh - 180px), 960px); background: var(--md-surface-container-lowest); }
+.flow-canvas { position: relative; min-width: 0; height: clamp(680px, calc(100vh - 180px), 960px); background: var(--md-surface-container-lowest); touch-action: none; }
 .flow-canvas :deep(.lf-node-content text) { font-size: var(--process-node-font-size, 13px); font-weight: 700; text-rendering: geometricPrecision; }
 .flow-canvas :deep(.lf-edge path),
 .flow-canvas :deep(.lf-node-content > g > rect),

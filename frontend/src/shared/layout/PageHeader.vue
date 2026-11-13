@@ -48,5 +48,6 @@ async function logout() {
   .page-header { padding: 0 0 16px; }
   .page-header h1 { font-size: 22px; }
   .actions { width: 100%; justify-content: flex-start; }
+  .actions :deep(.el-button) { flex: 1 1 auto; }
 }
 </style>

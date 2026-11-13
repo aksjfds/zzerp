@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useCompactViewport } from '@/shared/layout/useCompactViewport'
+
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
@@ -7,6 +9,7 @@ import { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 
+const compact = useCompactViewport()
 const router = useRouter()
 const authStore = useAuthStore()
 const store = useEngineeringProductsStore()
@@ -78,7 +81,7 @@ onMounted(loadProducts)
           </template>
         </ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" min-width="160" />
-        <ElTableColumn label="操作" min-width="120" fixed="right">
+        <ElTableColumn label="操作" min-width="120" :fixed="compact ? false : 'right'">
           <template #default="{ row }">
             <div class="row-actions">
               <ElButton

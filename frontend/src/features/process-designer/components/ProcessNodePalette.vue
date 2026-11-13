@@ -7,15 +7,23 @@ const emit = defineEmits<{
   dragPart: [part: BomItem]; addPart: [part: BomItem]
   dragDepartment: [department: ProductionDepartment]; addDepartment: [department: ProductionDepartment]
 }>()
+let pointerType = 'mouse'
+function startPointer(event: PointerEvent, drag: () => void) {
+  pointerType = event.pointerType
+  if (pointerType === 'mouse') drag()
+}
+function addOnTap(event: MouseEvent, add: () => void) {
+  if (pointerType !== 'mouse' || event.detail === 0) add()
+}
 </script>
 
 <template>
   <aside class="palette">
-    <header><strong>流程节点</strong><p>拖到右侧画布；也可聚焦后按 Enter 添加。</p></header>
+    <header><strong>流程节点</strong><p>鼠标拖到画布；触屏点击添加，也可聚焦后按 Enter 或空格添加。</p></header>
     <section>
       <h3>配件节点</h3>
       <p>每个 BOM 配件只放置一个路线起点。</p>
-      <button v-for="part in bomItems" :key="part.id ?? part.part_no" type="button" class="palette-node part" :disabled="!part.id || placedBomIds.includes(part.id)" @mousedown="emit('dragPart', part)" @keydown.enter.prevent="emit('addPart', part)">
+      <button v-for="part in bomItems" :key="part.id ?? part.part_no" type="button" class="palette-node part" :disabled="!part.id || placedBomIds.includes(part.id)" @pointerdown="startPointer($event, () => emit('dragPart', part))" @click="addOnTap($event, () => emit('addPart', part))">
         <strong>{{ part.part_name }}</strong><small>{{ part.part_no }}</small>
         <small v-if="part.id && placedBomIds.includes(part.id)">已放置</small>
       </button>
@@ -25,7 +33,7 @@ const emit = defineEmits<{
       <h3>部门节点</h3>
       <p>同一部门可放置多个节点，分别安排生产。</p>
       <p v-if="loading">正在加载部门…</p>
-      <button v-for="department in departments" :key="department.code" type="button" class="palette-node department" @mousedown="emit('dragDepartment', department)" @keydown.enter.prevent="emit('addDepartment', department)">{{ department.name }}</button>
+      <button v-for="department in departments" :key="department.code" type="button" class="palette-node department" @pointerdown="startPointer($event, () => emit('dragDepartment', department))" @click="addOnTap($event, () => emit('addDepartment', department))">{{ department.name }}</button>
     </section>
   </aside>
 </template>

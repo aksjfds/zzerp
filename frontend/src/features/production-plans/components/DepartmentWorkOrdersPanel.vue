@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useCompactViewport } from '@/shared/layout/useCompactViewport'
+
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
@@ -9,6 +11,7 @@ import HandoffTicketsPanel from './HandoffTicketsPanel.vue'
 import { queryProductionDepartments, type ProductionDepartment } from '@/features/production-departments'
 import { queryDepartmentWorkOrders, type DepartmentWorkOrder, type WorkOrderComponent } from '../api/plans'
 
+const compact = useCompactViewport()
 const props = defineProps<{ planId?: number; departmentCode?: string }>()
 const authStore = useAuthStore()
 const movementOrder = ref<DepartmentWorkOrder | null>(null)
@@ -111,7 +114,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
       <ElTableColumn label="累积到料/累计出料" min-width="170" align="right">
         <template #default="{ row }">{{ row.component?.received_quantity ?? row.received_quantity }}/{{ row.component ? '—' : row.issued_quantity }}</template>
       </ElTableColumn>
-      <ElTableColumn label="操作" min-width="190" fixed="right"><template #default="{ row }">
+      <ElTableColumn label="操作" min-width="190" :fixed="compact ? false : 'right'"><template #default="{ row }">
         <ElButton v-if="canOperate(row) && row.can_receive" link type="primary" :disabled="row.plan_status !== 'confirmed'" @click="openMovement(row, 'receipt', row.component)">无来源到料</ElButton>
         <ElButton v-if="!row.component && canOperate(row)" link type="primary" :disabled="row.plan_status !== 'confirmed'" @click="openMovement(row, 'issue')">出料</ElButton>
         <ElButton link type="primary" @click="openMovement(row, undefined, row.component)">{{ row.component ? '到料流水' : '流水' }}</ElButton>

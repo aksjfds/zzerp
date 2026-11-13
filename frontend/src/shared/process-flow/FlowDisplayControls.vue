@@ -34,4 +34,5 @@ const emit = defineEmits<{
 button { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-sm); color: var(--erp-text); background: var(--erp-surface); cursor: pointer; font-size: 16px; }
 button:hover { border-color: var(--erp-primary); color: var(--erp-primary); background: var(--erp-primary-soft); }
 @media (max-width: 600px) { .flow-display-controls { justify-content: flex-start; } }
+@media (pointer: coarse) { button { width: 44px; height: 44px; } }
 </style>

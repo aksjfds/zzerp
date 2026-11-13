@@ -44,6 +44,7 @@
 :root .el-date-editor { max-width: 100%; }
 
 :root .el-table {
+  max-width: 100%;
   --el-table-header-bg-color: var(--erp-surface-muted);
   --el-table-row-hover-bg-color: var(--erp-primary-soft);
   --el-table-current-row-bg-color: var(--erp-primary-soft);
@@ -163,10 +164,42 @@
   :root .el-date-range-picker__body { display: flex; flex-direction: column; max-height: 65dvh; overflow: auto; }
   :root .el-date-range-picker__content { width: 100%; }
 }
+@media (max-width: 600px) {
+  :root .el-form--inline { display: flex; flex-direction: column; }
+  :root .el-form--inline > .el-form-item { display: block; width: 100%; margin-right: 0; }
+  :root .el-form--inline > .el-form-item > .el-form-item__label {
+    display: block; height: auto; margin-bottom: 6px; padding-right: 0; line-height: 1.5;
+  }
+  :root .el-form--inline > .el-form-item > .el-form-item__content {
+    min-width: 0; margin-left: 0 !important; gap: 8px;
+  }
+  :root .el-form--inline .el-input,
+  :root .el-form--inline .el-select { width: 100% !important; min-width: 0; }
+  :root .el-form--inline .el-button + .el-button { margin-left: 0; }
+  :root .el-dialog { width: calc(100vw - 24px); }
+  :root .el-dialog__title { display: block; overflow-wrap: anywhere; }
+  :root .el-dialog__body { overscroll-behavior: contain; }
+  :root .el-dialog__body > p { overflow-wrap: anywhere; }
+  :root .el-dialog .el-form-item__content > .el-select,
+  :root .el-dialog .el-form-item__content > .el-input-number { width: 100%; }
+  :root .el-dialog__footer .el-button { flex: 1 1 auto; }
+  :root .el-table__body-wrapper { overscroll-behavior-x: contain; }
+  :root .el-table__expand-icon { width: 32px; height: 36px; }
+}
 @media (pointer: coarse) {
+  :root { --el-component-size: 44px; }
   :root .el-button:not(.is-link),
   :root .el-pagination button,
   :root .el-pagination .el-pager li { min-height: 40px; }
+  :root .el-button.is-link { min-height: 44px; }
+  :root .el-checkbox { min-height: 44px; }
+  :root .el-dialog__headerbtn { width: 44px; height: 44px; top: 6px; right: 6px; }
+  :root .lf-control-item { min-width: 44px; min-height: 44px; }
+}
+@media (max-width: 600px) and (pointer: coarse) {
+  :root .el-input__inner,
+  :root .el-textarea__inner,
+  :root .el-select__input { font-size: 16px; }
 }
 @media print {
   :root .el-dialog { display: block; max-width: none; max-height: none; overflow: visible; }

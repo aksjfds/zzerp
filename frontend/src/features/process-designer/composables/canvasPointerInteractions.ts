@@ -7,30 +7,36 @@ type InteractionOptions = {
 }
 
 export function createCanvasPointerInteractions(options: InteractionOptions) {
-  let middlePanPoint: { x: number; y: number } | null = null
+  let middlePanPoint: { x: number; y: number; pointerId: number } | null = null
   let selectionStart: { clientX: number; clientY: number; x: number; y: number } | null = null
   let selectionBox: HTMLDivElement | null = null
 
   function middlePanStart(event: PointerEvent) {
     const element = options.container()
-    if (event.button !== 1 || !options.logicFlow() || !element) return
+    if (!options.logicFlow() || !element || middlePanPoint) return
+    if (event.pointerType === 'touch') {
+      const target = event.target
+      if (!event.isPrimary || !(target instanceof Element)
+        || !target.closest('.lf-canvas-overlay')
+        || target.closest('.lf-node, .lf-edge, .lf-anchor, .lf-control, .lf-menu')) return
+    } else if (event.button !== 1) return
     event.preventDefault()
     event.stopPropagation()
-    middlePanPoint = { x: event.clientX, y: event.clientY }
+    middlePanPoint = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
     element.classList.add('is-middle-panning')
   }
 
   function middlePanMove(event: PointerEvent) {
     const logicFlow = options.logicFlow()
-    if (!middlePanPoint || !logicFlow) return
+    if (!middlePanPoint || !logicFlow || event.pointerId !== middlePanPoint.pointerId) return
     event.preventDefault()
     logicFlow.translate(event.clientX - middlePanPoint.x, event.clientY - middlePanPoint.y)
-    middlePanPoint = { x: event.clientX, y: event.clientY }
+    middlePanPoint = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
   }
 
   function middlePanEnd(event: PointerEvent) {
     const element = options.container()
-    if (event.button !== 1 || !middlePanPoint) return
+    if (!middlePanPoint || event.pointerId !== middlePanPoint.pointerId) return
     middlePanPoint = null
     element?.classList.remove('is-middle-panning')
   }
@@ -51,6 +57,7 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
   }
 
   function selectionStartHandler(event: PointerEvent) {
+    if (event.pointerType === 'touch') return
     const logicFlow = options.logicFlow()
     const element = options.container()
     if (event.button !== 0 || !logicFlow || !element) return
@@ -122,6 +129,7 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
     document.addEventListener('pointermove', middlePanMove)
     document.addEventListener('pointermove', selectionMove)
     document.addEventListener('pointerup', middlePanEnd)
+    document.addEventListener('pointercancel', middlePanEnd)
     document.addEventListener('pointerup', selectionEnd)
   }
 
@@ -133,6 +141,7 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
     document.removeEventListener('pointermove', middlePanMove)
     document.removeEventListener('pointermove', selectionMove)
     document.removeEventListener('pointerup', middlePanEnd)
+    document.removeEventListener('pointercancel', middlePanEnd)
     document.removeEventListener('pointerup', selectionEnd)
     selectionBox?.remove()
     selectionBox = null

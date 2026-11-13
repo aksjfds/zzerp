@@ -45,3 +45,10 @@ a { color: inherit; text-decoration: none; }
   :root { --erp-page-gutter: 16px; }
   .erp-data-grid { grid-template-columns: 1fr; }
 }
+@media (max-width: 600px) {
+  :root { --erp-page-gutter: 12px; }
+  body { min-height: 100dvh; }
+  #app { padding-bottom: env(safe-area-inset-bottom); }
+  main { min-width: 0; }
+  p, h1, h2, h3 { overflow-wrap: anywhere; }
+}

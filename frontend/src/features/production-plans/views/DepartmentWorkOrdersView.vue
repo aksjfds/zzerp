@@ -65,4 +65,9 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 .department-card { padding: 20px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); }
 .department-links { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 20px; }
 .department-links :deep(.el-button + .el-button) { margin-left: 0; }
+@media (max-width: 600px) {
+  .department-card { min-width: 0; padding: 12px; }
+  .department-links { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 8px; }
+  .department-links :deep(.el-button) { flex-shrink: 0; }
+}
 </style>

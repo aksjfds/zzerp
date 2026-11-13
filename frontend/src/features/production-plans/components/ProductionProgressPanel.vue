@@ -1,10 +1,13 @@
 <script setup lang="ts">
+import { useCompactViewport } from '@/shared/layout/useCompactViewport'
+
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { queryProductionProgress, type DepartmentWorkOrder, type ProgressProduct } from '../api/plans'
 import DepartmentMovementDialog from './DepartmentMovementDialog.vue'
 
+const compact = useCompactViewport()
 type ProgressRow = {
   key: string
   label: string
@@ -88,7 +91,7 @@ onBeforeUnmount(() => {
       <ElTableColumn label="订单数量" width="110" align="right"><template #default="{ row }">{{ row.order?.order_quantity ?? '—' }}</template></ElTableColumn>
       <ElTableColumn label="任务数量" width="110" align="right"><template #default="{ row }">{{ row.order?.task_quantity ?? '—' }}</template></ElTableColumn>
       <ElTableColumn label="累积到料/累计出料" min-width="230"><template #default="{ row }">{{ row.order ? `${row.order.received_quantity}/${row.order.issued_quantity}` : '—' }}</template></ElTableColumn>
-      <ElTableColumn label="查看" width="90" fixed="right"><template #default="{ row }"><ElButton v-if="row.order" link type="primary" @click="movementOrder = row.order">流水</ElButton></template></ElTableColumn>
+      <ElTableColumn label="查看" width="90" :fixed="compact ? false : 'right'"><template #default="{ row }"><ElButton v-if="row.order" link type="primary" @click="movementOrder = row.order">流水</ElButton></template></ElTableColumn>
     </ElTable>
     <p v-if="!error" class="progress-note">按产品分页，每页最多20个产品，页内包含所选订单范围的全部部门工单。</p>
     <ElPagination v-if="!error" v-model:current-page="page" :total="total" :page-size="20" layout="prev, pager, next, total" @current-change="load" />
