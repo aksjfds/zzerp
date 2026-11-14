@@ -15,7 +15,8 @@ TABLE_OWNERS = {
     "department_work_order_movement": "planning",
     "department_handoff_ticket": "planning",
     "department_movement_receipt_link": "planning",
-    "production_plan": "planning"
+    "production_plan": "planning",
+    "production_plan_item": "planning",
 }
 
 

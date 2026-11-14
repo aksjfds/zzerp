@@ -12,7 +12,7 @@ import { queryProductionDepartments, type ProductionDepartment } from '@/feature
 import { queryDepartmentWorkOrders, type DepartmentWorkOrder, type WorkOrderComponent } from '../api/plans'
 
 const compact = useCompactViewport()
-const props = defineProps<{ planId?: number; departmentCode?: string }>()
+const props = defineProps<{ planId?: number; departmentCode?: string; canReceive?: boolean }>()
 const authStore = useAuthStore()
 const movementOrder = ref<DepartmentWorkOrder | null>(null)
 const movementDirection = ref<'receipt' | 'issue'>()
@@ -122,7 +122,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     </ElTable>
     <ElPagination v-if="!error" v-model:current-page="page" class="pagination" layout="prev, pager, next, total" :total="total" :page-size="50" @current-change="load" />
     <DepartmentMovementDialog v-if="movementOrder" :key="`${movementOrder.id}:${movementDirection}:${movementComponent?.material_node_id || ''}`" :order="movementOrder" :direction="movementDirection" :component="movementComponent" @close="movementOrder = null" @changed="movementChanged" />
-    <HandoffTicketsPanel v-if="!planId" ref="ticketsPanel" :department-code="departmentCode" @changed="load" />
+    <HandoffTicketsPanel v-if="!planId && canReceive" ref="ticketsPanel" :department-code="departmentCode" @changed="load" />
   </section>
 </template>
 

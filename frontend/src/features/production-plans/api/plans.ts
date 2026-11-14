@@ -101,9 +101,16 @@ export type ProgressProduct = {
 }
 
 export async function queryProductionProgress(params: { page: number; order_no?: string; product_keyword?: string }) {
-  return (await service.get<{ data: ProgressProduct[]; total: number }>(
+  return (await service.get<{ data: ProgressPlan[]; total: number }>(
     '/production-plans/progress', { params: { ...params, page_size: 20 } },
   )).data
+}
+
+export type ProgressPlan = {
+  production_plan_id: number
+  order_no: string
+  customer_name: string
+  products: ProgressProduct[]
 }
 
 export type DepartmentMovementInput = {
@@ -118,6 +125,8 @@ export type DepartmentMovementInput = {
 }
 
 export type DepartmentMovement = DepartmentMovementInput & {
+  source_department: string | null
+  target_department: string | null
   id: number
   actor_username: string
   created_at: string

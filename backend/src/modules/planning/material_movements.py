@@ -55,6 +55,8 @@ def movement_totals(session, orders, contexts) -> dict[int, tuple[str, str]]:
 
 
 def serialize_movements(session, movements) -> list[dict]:
+    if not movements:
+        return []
     names = usernames_by_ids(session, {row.actor_user_id for row in movements})
     ids = {row.id for row in movements}
     tickets = list(session.scalars(select(DepartmentHandoffTicket).where(or_(
@@ -66,21 +68,45 @@ def serialize_movements(session, movements) -> list[dict]:
     for issue_id, receipt_id in session.execute(select(DepartmentMovementReceiptLink.issue_movement_id,
         DepartmentMovementReceiptLink.receipt_movement_id).where(DepartmentMovementReceiptLink.issue_movement_id.in_(ids))):
         links.setdefault(issue_id, []).append(receipt_id)
+    issues = {row.id: row for row in movements if row.direction == "issue"}
+    missing_issues = {ticket.issue_movement_id for ticket in tickets} - issues.keys()
+    if missing_issues:
+        issues.update({row.id: row for row in session.scalars(select(DepartmentWorkOrderMovement)
+            .where(DepartmentWorkOrderMovement.id.in_(missing_issues)))})
+    order_ids = ({m.work_order_id for m in movements} | {m.work_order_id for m in issues.values()}
+                 | {ticket.target_work_order_id for ticket in tickets})
     orders = {row.id: row for row in session.scalars(select(DepartmentWorkOrder)
-        .where(DepartmentWorkOrder.id.in_({m.work_order_id for m in movements})))}
+        .where(DepartmentWorkOrder.id.in_(order_ids)))}
+    references = current_route_references(session, route_keys={
+        (order.product_id, order.material_node_id, order.department_node_id) for order in orders.values()})
+    departments = department_names(session)
+    order_departments = {}
+    for order in orders.values():
+        reference = references.get((order.product_id, order.material_node_id, order.department_node_id))
+        if reference is None:
+            raise DomainError("department_work_order_route_missing", "流水关联工单的当前路线不存在", status_code=409)
+        order_departments[order.id] = departments[reference.department_code]
     contexts = handoff_contexts(session, {order.product_id for order in orders.values()})
     result = []
     for row in movements:
         order = orders[row.work_order_id]
         ticket = by_issue.get(row.id) if row.direction == "issue" else by_ticket.get(row.ticket_id)
         material = row.input_material_node_id if row.direction == "receipt" else order.material_node_id
+        source_id = issues[ticket.issue_movement_id].work_order_id if ticket else None
+        target_id = ticket.target_work_order_id if ticket else None
+        if row.direction == "receipt":
+            target_id = order.id
+        else:
+            source_id = order.id
         result.append(dict(id=row.id, direction=row.direction, quantity=row.quantity,
             note=row.note, request_id=row.request_id, actor_username=names[row.actor_user_id],
             created_at=row.created_at.astimezone(BUSINESS_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S"),
             receipt_source=row.receipt_source, ticket_id=row.ticket_id, input_material_node_id=row.input_material_node_id,
             target_work_order_id=ticket.target_work_order_id if row.direction == "issue" and ticket else None,
             receipt_movement_ids=sorted(links.get(row.id, [])), ticket_no=ticket_number(ticket.id) if ticket else None,
-            material_name=contexts[order.product_id]["materials"][material]))
+            material_name=contexts[order.product_id]["materials"][material],
+            source_department=order_departments[source_id] if source_id is not None else None,
+            target_department=order_departments[target_id] if target_id is not None else None))
     return result
 
 
@@ -110,7 +136,8 @@ def resolve_receipt_input(session, order, payload, context, key):
         raise DomainError("partial_receipt_note_required", "登记到料数量小于交接票数量，必须填写备注", path="note")
     source = session.get(DepartmentWorkOrder, issue.work_order_id)
     source_key = (source.material_node_id, source.department_node_id)
-    if source.production_plan_id != order.production_plan_id or key not in context["routes"].successors.get(source_key, frozenset()):
+    if (source.production_plan_id != order.production_plan_id or source.product_id != order.product_id
+        or key not in context["routes"].successors.get(source_key, frozenset())):
         raise DomainError("handoff_route_invalid", "交接票来源与当前直接路线不匹配", status_code=409)
     received = session.scalar(select(func.coalesce(func.sum(DepartmentWorkOrderMovement.quantity), 0))
         .where(DepartmentWorkOrderMovement.ticket_id == ticket.id))
@@ -126,7 +153,7 @@ def record_movement(order_id: int, payload: DepartmentMovementCreate, *, departm
     with SessionLocal.begin() as session:
         order = load_scoped_order(session, order_id, department_scope)
         plan = load_plan(session, order.production_plan_id, for_update=True)
-        resolve_plan_product(session, plan.product_id, plan.customer_id)
+        resolve_plan_product(session, order.product_id, plan.customer_id)
         order = load_scoped_order(session, order_id, department_scope)
         previous = session.scalar(select(DepartmentWorkOrderMovement).where(
             DepartmentWorkOrderMovement.work_order_id == order.id,
@@ -150,12 +177,14 @@ def record_movement(order_id: int, payload: DepartmentMovementCreate, *, departm
             input_material = resolve_receipt_input(session, order, payload, context, key)
         else:
             available = available_issue_quantity(session, order, context, department_scope)
-            if available is not None and payload.quantity > available:
-                raise DomainError("issue_exceeds_available", f"本次出料超过剩余可出数量，当前可出 {available}", status_code=409)
+            if available is not None and payload.quantity > available and not payload.note.strip():
+                raise DomainError("excess_issue_note_required",
+                    f"本次出料超过部门停留数量 {available}，必须填写备注", path="note")
             destinations = context["routes"].successors[key]
             target = session.get(DepartmentWorkOrder, payload.target_work_order_id) if payload.target_work_order_id else None
             if destinations:
                 if (target is None or target.production_plan_id != order.production_plan_id
+                    or target.product_id != order.product_id
                     or (target.material_node_id,target.department_node_id) not in destinations):
                     raise DomainError("handoff_target_invalid", "请选择当前路线的合法下一步工单，不能跳步或跨计划", status_code=409)
             elif payload.target_work_order_id is not None:

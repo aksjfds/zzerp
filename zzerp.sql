@@ -134,14 +134,11 @@ CREATE TABLE product_process_flow (
     CONSTRAINT ck_process_flow_version CHECK (product_version > 0)
 );
 
--- 合并后的生产计划只关联产品，不保存产品版本或物料快照。
+-- 计划头保存订单和状态，产品明细分别保存数量，不保存版本或物料快照。
 CREATE TABLE production_plan (
     id BIGSERIAL PRIMARY KEY,
     customer_id BIGINT NOT NULL REFERENCES customer(id),
     order_no TEXT NOT NULL,
-    order_quantity INT NOT NULL,
-    product_id BIGINT NOT NULL,
-    production_quantity INT NOT NULL,
     status TEXT NOT NULL DEFAULT 'draft',
     revision INT NOT NULL DEFAULT 1,
     confirmed_at TIMESTAMPTZ,
@@ -151,12 +148,7 @@ CREATE TABLE production_plan (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_production_plan_order_no UNIQUE (order_no),
-    CONSTRAINT uq_production_plan_product UNIQUE (id, product_id),
-    CONSTRAINT fk_production_plan_product_customer
-        FOREIGN KEY (product_id, customer_id)
-        REFERENCES product(id, customer_id),
-    CONSTRAINT ck_production_plan_order_quantity CHECK (order_quantity > 0),
-    CONSTRAINT ck_production_plan_production_quantity CHECK (production_quantity > 0),
+    CONSTRAINT uq_production_plan_customer UNIQUE (id, customer_id),
     CONSTRAINT ck_production_plan_revision CHECK (revision > 0),
     CONSTRAINT ck_production_plan_status
         CHECK (status IN ('draft', 'confirmed', 'cancelled', 'completed')),
@@ -169,6 +161,22 @@ CREATE TABLE production_plan (
         OR (status <> 'completed' AND completed_at IS NULL AND completed_by IS NULL)
     )
 );
+
+CREATE TABLE production_plan_item (
+    production_plan_id BIGINT NOT NULL,
+    product_id BIGINT NOT NULL,
+    customer_id BIGINT NOT NULL,
+    order_quantity INT NOT NULL,
+    production_quantity INT NOT NULL,
+    PRIMARY KEY (production_plan_id, product_id),
+    CONSTRAINT fk_production_plan_item_plan FOREIGN KEY (production_plan_id, customer_id)
+        REFERENCES production_plan(id, customer_id) ON DELETE CASCADE,
+    CONSTRAINT fk_production_plan_item_product_customer FOREIGN KEY (product_id, customer_id)
+        REFERENCES product(id, customer_id),
+    CONSTRAINT ck_production_plan_item_order_quantity CHECK (order_quantity > 0),
+    CONSTRAINT ck_production_plan_item_production_quantity CHECK (production_quantity > 0)
+);
+CREATE INDEX idx_production_plan_item_product ON production_plan_item(product_id);
 
 CREATE TABLE production_department (
     code TEXT PRIMARY KEY,
@@ -215,11 +223,11 @@ CREATE TABLE department_work_order (
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_department_work_order_plan
         FOREIGN KEY (production_plan_id, product_id)
-        REFERENCES production_plan(id, product_id) ON DELETE CASCADE,
+        REFERENCES production_plan_item(production_plan_id, product_id) ON DELETE CASCADE,
     CONSTRAINT fk_department_work_order_route
         FOREIGN KEY (product_id, material_node_id, department_node_id)
         REFERENCES product_department_route(product_id, material_node_id, department_node_id),
-    CONSTRAINT uq_department_work_order_plan_route UNIQUE (production_plan_id, material_node_id, department_node_id),
+    CONSTRAINT uq_department_work_order_plan_route UNIQUE (production_plan_id, product_id, material_node_id, department_node_id),
     CONSTRAINT ck_department_work_order_quantity CHECK (task_quantity > 0)
 );
 
@@ -444,8 +452,6 @@ CREATE INDEX idx_product_bom_product ON product_bom(product_id, sort_order);
 CREATE INDEX idx_production_plan_status ON production_plan(status, id);
 
 CREATE INDEX idx_production_plan_customer ON production_plan(customer_id);
-
-CREATE INDEX idx_production_plan_product ON production_plan(product_id);
 
 CREATE INDEX idx_production_plan_updated ON production_plan(updated_at DESC, id DESC);
 
@@ -712,36 +718,36 @@ WHERE product.factory_code = 'Z8738' AND (
     OR route.material_node_id = 'assembly-final'
 );
 
--- Z8737 示例草稿计划：订单3000件，安排新生产4000件。
-INSERT INTO production_plan (
-    customer_id, order_no, order_quantity, product_id, production_quantity, status, revision
-)
-SELECT customer_id, 'ORDER-Z8737-0001', 3000, id, 4000, 'draft', 1
-FROM product
-WHERE factory_code = 'Z8737';
+-- 两个相同草稿计划，各包含两个产品，数量独立。
+INSERT INTO production_plan (customer_id, order_no, status, revision)
+SELECT customer.id, seed.order_no, 'draft', 1 FROM customer
+CROSS JOIN (VALUES ('ORDER-Z8737-0001'), ('ORDER-Z8737-0002')) AS seed(order_no)
+WHERE customer.customer_name = 'Celine';
 
--- Z8738 示例草稿计划：订单1000件，生产1200件。
-INSERT INTO production_plan (
-    customer_id, order_no, order_quantity, product_id, production_quantity, status, revision
-)
-SELECT customer_id, 'ORDER-Z8738-0001', 1000, id, 1200, 'draft', 1
-FROM product WHERE factory_code = 'Z8738';
+INSERT INTO production_plan_item (production_plan_id, product_id, customer_id, order_quantity, production_quantity)
+SELECT plan.id, product.id, plan.customer_id, item.order_quantity, item.production_quantity
+FROM production_plan AS plan
+JOIN product ON product.customer_id = plan.customer_id
+JOIN (VALUES ('Z8737', 3000, 4000), ('Z8738', 1000, 1200))
+    AS item(factory_code, order_quantity, production_quantity) ON item.factory_code = product.factory_code
+WHERE plan.order_no IN ('ORDER-Z8737-0001', 'ORDER-Z8737-0002');
 
--- 两个计划共21张部门工单；装配体按生产数量，不累加组成配件用量。
+-- 每个计划21张，共42张部门工单；装配体按各产品生产数量安排。
 INSERT INTO department_work_order (
     production_plan_id, product_id, material_node_id, department_node_id, task_quantity
 )
-SELECT plan.id, plan.product_id, route.material_node_id, route.department_node_id,
-       plan.production_quantity * CASE WHEN COUNT(part.id) > 1 THEN 1 ELSE MAX(part.pcs) END
+SELECT plan.id, item.product_id, route.material_node_id, route.department_node_id,
+       item.production_quantity * CASE WHEN COUNT(part.id) > 1 THEN 1 ELSE MAX(part.pcs) END
 FROM production_plan AS plan
-JOIN product_department_route AS route ON route.product_id = plan.product_id
+JOIN production_plan_item AS item ON item.production_plan_id = plan.id
+JOIN product_department_route AS route ON route.product_id = item.product_id
 JOIN product_route_component AS component
     ON component.product_id = route.product_id
     AND component.material_node_id = route.material_node_id
     AND component.department_node_id = route.department_node_id
 JOIN product_bom AS part ON part.id = component.product_bom_id
-WHERE plan.order_no IN ('ORDER-Z8737-0001', 'ORDER-Z8738-0001')
-GROUP BY plan.id, plan.product_id, plan.production_quantity,
+WHERE plan.order_no IN ('ORDER-Z8737-0001', 'ORDER-Z8737-0002')
+GROUP BY plan.id, item.product_id, item.production_quantity,
          route.material_node_id, route.department_node_id;
 
 COMMIT;

@@ -37,6 +37,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
       <ElTableColumn prop="material_name" label="实际物料" min-width="170" />
       <ElTableColumn label="类型" width="80"><template #default="{ row }">{{ row.direction === 'receipt' ? '到料' : '出料' }}</template></ElTableColumn>
       <ElTableColumn prop="quantity" label="数量" min-width="120" align="right" />
+      <ElTableColumn label="来自/到达" min-width="140"><template #default="{ row }">{{ row.direction === 'receipt' ? (row.source_department || '无来源到料') : (row.target_department || '终端出料') }}</template></ElTableColumn>
       <ElTableColumn prop="ticket_no" label="交接票" min-width="140" />
       <ElTableColumn prop="actor_username" label="操作人" min-width="100" />
       <ElTableColumn prop="created_at" label="时间" min-width="180" />

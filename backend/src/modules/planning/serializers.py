@@ -1,10 +1,23 @@
 from domain.time import business_iso
 from modules.engineering.product_reference_api import get_product_references
 from modules.sales.customer_api import customer_names_by_ids
+from sqlalchemy import select
+from modules.planning.persistence import ProductionPlanItem
 
 
 def serialize_plans(session, plans) -> list[dict]:
-    products = get_product_references(session, {plan.product_id for plan in plans})
+    if not plans:
+        return []
+    items = list(session.scalars(select(ProductionPlanItem)
+        .where(ProductionPlanItem.production_plan_id.in_({plan.id for plan in plans}))
+        .order_by(ProductionPlanItem.product_id)))
+    products = get_product_references(session, {item.product_id for item in items})
+    by_plan = {}
+    for item in items:
+        product = products[item.product_id]
+        by_plan.setdefault(item.production_plan_id, []).append(dict(product_id=item.product_id,
+            product_name=product.product_name, factory_code=product.factory_code,
+            order_quantity=item.order_quantity, production_quantity=item.production_quantity))
     customers = customer_names_by_ids(session, {plan.customer_id for plan in plans})
     return [
         {
@@ -12,11 +25,7 @@ def serialize_plans(session, plans) -> list[dict]:
             "customer_id": plan.customer_id,
             "customer_name": customers[plan.customer_id],
             "order_no": plan.order_no,
-            "order_quantity": plan.order_quantity,
-            "product_id": plan.product_id,
-            "product_name": products[plan.product_id].product_name,
-            "factory_code": products[plan.product_id].factory_code,
-            "production_quantity": plan.production_quantity,
+            "items": by_plan.get(plan.id, []),
             "status": plan.status,
             "revision": plan.revision,
             "confirmed_at": business_iso(plan.confirmed_at),

@@ -109,9 +109,7 @@ onBeforeUnmount(() => { sequence += 1 })
       <ElTable v-else v-table-column-widths="'planning.plans'" v-loading="loading" :data="plans" border stripe table-layout="auto" empty-text="暂无生产计划">
         <ElTableColumn prop="order_no" label="订单号" min-width="160" />
         <ElTableColumn prop="customer_name" label="客户" min-width="140" />
-        <ElTableColumn label="产品" min-width="220"><template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template></ElTableColumn>
-        <ElTableColumn prop="order_quantity" label="订单数量" width="110" align="right" />
-        <ElTableColumn prop="production_quantity" label="生产数量" width="110" align="right" />
+        <ElTableColumn label="产品／订单数量／生产数量" min-width="350"><template #default="{ row }"><div v-for="item in row.items" :key="item.product_id">{{ item.factory_code }} · {{ item.product_name }} ／ {{ item.order_quantity }} ／ {{ item.production_quantity }}</div></template></ElTableColumn>
         <ElTableColumn label="状态" width="100"><template #default="{ row }">{{ labels[row.status as PlanStatus] }}</template></ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" min-width="170" />
         <ElTableColumn label="操作" min-width="320">

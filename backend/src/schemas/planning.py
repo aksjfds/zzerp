@@ -1,30 +1,44 @@
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class PlanningModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
-class ProductionPlanCreate(PlanningModel):
-    customer_id: int = Field(gt=0)
-    order_no: str = Field(min_length=1, max_length=200)
+class ProductionPlanItemCreate(PlanningModel):
     order_quantity: int = Field(strict=True, gt=0, le=2147483647)
     product_id: int = Field(gt=0)
     production_quantity: int = Field(strict=True, gt=0, le=2147483647)
+
+
+class ProductionPlanCreate(PlanningModel):
+    customer_id: int = Field(gt=0)
+    order_no: str = Field(min_length=1, max_length=200)
+    items: list[ProductionPlanItemCreate] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def unique_products(self):
+        if len({item.product_id for item in self.items}) != len(self.items):
+            raise ValueError("同一计划不能重复选择产品")
+        return self
 
 
 class ProductionPlanUpdate(ProductionPlanCreate):
     expected_revision: int = Field(gt=0)
 
 
-class ProductionPlanResponse(ProductionPlanCreate):
-    id: int
-    customer_name: str
+class ProductionPlanItemResponse(ProductionPlanItemCreate):
     product_name: str
     factory_code: str
+
+
+class ProductionPlanResponse(ProductionPlanCreate):
+    items: list[ProductionPlanItemResponse]
+    id: int
+    customer_name: str
     status: Literal["draft", "confirmed", "cancelled", "completed"]
     revision: int
     confirmed_at: str | None
@@ -94,8 +108,15 @@ class ProgressProduct(PlanningModel):
     materials: list[ProgressMaterial]
 
 
+class ProgressPlan(PlanningModel):
+    production_plan_id: int
+    order_no: str
+    customer_name: str
+    products: list[ProgressProduct]
+
+
 class ProductionProgressEnvelope(PlanningModel):
-    data: list[ProgressProduct]
+    data: list[ProgressPlan]
     total: int
 
 
@@ -111,6 +132,8 @@ class DepartmentMovementCreate(PlanningModel):
 
 
 class DepartmentMovementResponse(DepartmentMovementCreate):
+    source_department: str | None
+    target_department: str | None
     receipt_movement_ids: list[int]
     id: int
     actor_username: str

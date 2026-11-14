@@ -1,6 +1,6 @@
 """Department work orders are derived assignments, without execution state."""
 
-from sqlalchemy import delete, func, select, tuple_
+from sqlalchemy import func, select, tuple_
 
 from database import SessionLocal
 from modules.engineering.route_api import current_route_references, validated_plan_routes, handoff_contexts
@@ -8,24 +8,26 @@ from modules.engineering.product_reference_api import get_product_references, ma
 from modules.errors import DomainError
 from modules.sales.customer_api import customer_names_by_ids
 from modules.organization.read_api import department_names, allows_receipts, uses_assembly_tree
-from modules.planning.persistence import DepartmentWorkOrder, DepartmentWorkOrderMovement, ProductionPlan
+from modules.planning.persistence import DepartmentWorkOrder, DepartmentWorkOrderMovement, ProductionPlan, ProductionPlanItem
 from modules.planning.material_movements import ensure_plan_without_movements, movement_totals
 
 
 def rebuild_work_orders(session, plan: ProductionPlan) -> None:
     ensure_plan_without_movements(session, plan.id)
-    routes = validated_plan_routes(session, plan.product_id)
     quantities = []
-    for route in routes.values():
-        quantity = plan.production_quantity * route.unit_requirement
-        if not 0 < quantity <= 2147483647:
-            raise DomainError("department_task_quantity_invalid", "部门任务数量超出允许范围")
-        quantities.append((route.material_node_id, route.department_node_id, quantity))
-    session.execute(delete(DepartmentWorkOrder).where(DepartmentWorkOrder.production_plan_id == plan.id))
-    session.flush()
-    for material_id, department_id, quantity in quantities:
+    items = list(session.scalars(select(ProductionPlanItem)
+        .where(ProductionPlanItem.production_plan_id == plan.id).order_by(ProductionPlanItem.product_id)))
+    if not items:
+        raise DomainError("plan_products_required", "生产计划至少需要一个产品")
+    for item in items:
+        for route in validated_plan_routes(session, item.product_id).values():
+            quantity = item.production_quantity * route.unit_requirement
+            if not 0 < quantity <= 2147483647:
+                raise DomainError("department_task_quantity_invalid", "部门任务数量超出允许范围")
+            quantities.append((item.product_id, route.material_node_id, route.department_node_id, quantity))
+    for product_id, material_id, department_id, quantity in quantities:
         session.add(DepartmentWorkOrder(
-            production_plan_id=plan.id, product_id=plan.product_id,
+            production_plan_id=plan.id, product_id=product_id,
             material_node_id=material_id, department_node_id=department_id, task_quantity=quantity,
         ))
     session.flush()
@@ -80,7 +82,7 @@ def list_work_orders(
         if order_no:
             conditions.append(ProductionPlan.order_no.ilike(f"%{order_no.strip()}%"))
         if product_keyword:
-            conditions.append(ProductionPlan.product_id.in_(matching_product_ids(session, product_keyword)))
+            conditions.append(DepartmentWorkOrder.product_id.in_(matching_product_ids(session, product_keyword)))
         statement = (
             select(DepartmentWorkOrder, ProductionPlan)
             .join(ProductionPlan, ProductionPlan.id == DepartmentWorkOrder.production_plan_id)
@@ -100,7 +102,10 @@ def serialize_work_orders(session, rows, *, include_components=True, departments
     routes = current_route_references(session, route_keys={
         (order.product_id, order.material_node_id, order.department_node_id) for order, plan in rows
     })
-    products = get_product_references(session, {plan.product_id for order, plan in rows})
+    products = get_product_references(session, {order.product_id for order, plan in rows})
+    items = {(item.production_plan_id, item.product_id): item for item in session.scalars(
+        select(ProductionPlanItem).where(tuple_(ProductionPlanItem.production_plan_id, ProductionPlanItem.product_id)
+            .in_({(order.production_plan_id, order.product_id) for order, plan in rows})))}
     customers = customer_names_by_ids(session, {plan.customer_id for order, plan in rows})
     if departments is None:
         departments = department_names(session)
@@ -113,12 +118,13 @@ def serialize_work_orders(session, rows, *, include_components=True, departments
     data = []
     for order, plan in rows:
         route = routes[(order.product_id, order.material_node_id, order.department_node_id)]
-        product = products[plan.product_id]
+        product = products[order.product_id]
+        item = items[(plan.id, order.product_id)]
         data.append({
             "id": order.id, "production_plan_id": plan.id, "material_node_id": order.material_node_id, "department_node_id": order.department_node_id,
             "order_no": plan.order_no, "customer_name": customers[plan.customer_id],
-            "order_quantity": plan.order_quantity,
-            "product_id": plan.product_id, "factory_code": product.factory_code,
+            "order_quantity": item.order_quantity,
+            "product_id": order.product_id, "factory_code": product.factory_code,
             "product_name": product.product_name, "part_no": route.part_no,
             "part_name": route.part_name, "department_code": route.department_code,
             "department_name": departments[route.department_code],

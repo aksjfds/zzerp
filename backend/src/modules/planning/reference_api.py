@@ -3,12 +3,12 @@
 from sqlalchemy import select
 from sqlalchemy.orm import aliased
 
-from modules.planning.persistence import DepartmentWorkOrder, DepartmentWorkOrderMovement, DepartmentHandoffTicket, ProductionPlan
+from modules.planning.persistence import DepartmentWorkOrder, DepartmentWorkOrderMovement, DepartmentHandoffTicket, ProductionPlanItem
 
 
 def has_product_reference(session, product_id: int) -> bool:
     return session.scalar(
-        select(ProductionPlan.id).where(ProductionPlan.product_id == product_id).limit(1)
+        select(ProductionPlanItem.production_plan_id).where(ProductionPlanItem.product_id == product_id).limit(1)
     ) is not None
 
 

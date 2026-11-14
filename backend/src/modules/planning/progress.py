@@ -1,4 +1,4 @@
-"""Product-paged, read-only production progress from real department orders."""
+"""Plan-paged, read-only production progress from real department orders."""
 
 from sqlalchemy import func, select
 
@@ -30,7 +30,7 @@ def group_progress(orders, route_orders, product_ids):
             if any(order["department_node_id"] not in ranks for order in material["work_orders"]):
                 raise DomainError("progress_route_missing", "工单部门不在当前正式流程中", status_code=409)
             material["work_orders"].sort(key=lambda order: (
-                order["order_no"], ranks[order["department_node_id"]], order["id"]))
+                ranks[order["department_node_id"]], order["id"]))
         materials.sort(key=lambda material: (
             min(ranks[order["department_node_id"]] for order in material["work_orders"]),
             material["part_no"], material["material_node_id"]))
@@ -47,18 +47,35 @@ def list_production_progress(page, page_size, *, department_scope, order_no=None
         if order_no:
             conditions.append(ProductionPlan.order_no.ilike(f"%{order_no.strip()}%"))
         if product_keyword:
-            conditions.append(ProductionPlan.product_id.in_(matching_product_ids(session, product_keyword)))
-        product_query = (select(ProductionPlan.product_id)
+            conditions.append(DepartmentWorkOrder.product_id.in_(matching_product_ids(session, product_keyword)))
+        plan_query = (select(ProductionPlan.id)
             .join(DepartmentWorkOrder, DepartmentWorkOrder.production_plan_id == ProductionPlan.id)
             .where(*conditions).distinct().subquery())
-        total = session.scalar(select(func.count()).select_from(product_query)) or 0
-        product_ids = list(session.scalars(select(product_query.c.product_id)
-            .order_by(product_query.c.product_id.desc()).offset((page-1)*page_size).limit(page_size)))
-        if not product_ids:
+        total = session.scalar(select(func.count()).select_from(plan_query)) or 0
+        plan_ids = list(session.scalars(select(plan_query.c.id)
+            .order_by(plan_query.c.id.desc()).offset((page-1)*page_size).limit(page_size)))
+        if not plan_ids:
             return [], total
         rows = session.execute(select(DepartmentWorkOrder, ProductionPlan)
             .join(ProductionPlan, ProductionPlan.id == DepartmentWorkOrder.production_plan_id)
-            .where(*conditions, DepartmentWorkOrder.product_id.in_(product_ids))).all()
+            .where(*conditions, ProductionPlan.id.in_(plan_ids))).all()
         orders = serialize_work_orders(session, rows, include_components=False)
+        product_ids = {order["product_id"] for order in orders}
         route_orders = current_department_orders(session, set(product_ids))
-        return group_progress(orders, route_orders, product_ids), total
+        return group_plan_progress(orders, route_orders, plan_ids), total
+
+
+def group_plan_progress(orders, route_orders, plan_ids):
+    by_plan = {}
+    for order in orders:
+        by_plan.setdefault(order["production_plan_id"], []).append(order)
+    result = []
+    for plan_id in plan_ids:
+        plan_orders = by_plan.get(plan_id, [])
+        if not plan_orders:
+            continue
+        products = sorted({order["product_id"] for order in plan_orders})
+        result.append(dict(production_plan_id=plan_id, order_no=plan_orders[0]["order_no"],
+            customer_name=plan_orders[0]["customer_name"],
+            products=group_progress(plan_orders, route_orders, products)))
+    return result

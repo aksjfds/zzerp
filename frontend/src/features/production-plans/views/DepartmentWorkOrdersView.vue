@@ -46,13 +46,10 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     <PageHeader section-name="生产部门" :page-title="code ? (selected ? selected.name + '工单' : '部门工单') : '生产进度查看'"><template #actions><ElButton :disabled="loading || !!error || (!!code && !selected)" @click="ledgerOpen = true">部门流水</ElButton><ElButton v-if="!authStore.user?.department_code" @click="router.push('/production-plans')">返回生产计划</ElButton><ElButton @click="logout">退出登录</ElButton></template></PageHeader>
     <section class="department-card" v-loading="loading">
       <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
-      <nav v-if="!authStore.user?.department_code" aria-label="生产部门" class="department-links">
-        <ElButton :type="!code ? 'primary' : 'default'" @click="router.push('/department-work-orders')">生产进度</ElButton>
-        <ElButton v-for="department in departments" :key="department.code" :type="code === department.code ? 'primary' : 'default'" @click="router.push({ name: 'department-production', params: { departmentCode: department.code } })">{{ department.name }}</ElButton>
-      </nav>
+      
       <ElAlert v-if="code && !selected && !loading && !error" type="error" title="生产部门不存在" :closable="false" />
       <ProductionProgressPanel v-if="!code" />
-      <DepartmentWorkOrdersPanel v-else-if="selected" :key="code" :department-code="code" />
+      <DepartmentWorkOrdersPanel v-else-if="selected" :key="code" :department-code="code" :can-receive="selected.can_receive" />
     </section>
     <ElDialog v-model="ledgerOpen" :title="`${selected?.name || '全部部门'}流水`" width="min(1440px, 98vw)" destroy-on-close>
       <DepartmentLedgerPanel v-if="ledgerOpen" :key="code" :department-code="code || undefined" />

@@ -13,14 +13,7 @@ class ProductionPlan(Base):
     __tablename__ = "production_plan"
     __table_args__ = (
         UniqueConstraint("order_no", name="uq_production_plan_order_no"),
-        UniqueConstraint("id", "product_id", name="uq_production_plan_product"),
-        ForeignKeyConstraint(
-            ["product_id", "customer_id"],
-            ["product.id", "product.customer_id"],
-            name="fk_production_plan_product_customer",
-        ),
-        CheckConstraint("order_quantity > 0", name="ck_production_plan_order_quantity"),
-        CheckConstraint("production_quantity > 0", name="ck_production_plan_production_quantity"),
+        UniqueConstraint("id", "customer_id", name="uq_production_plan_customer"),
         CheckConstraint("revision > 0", name="ck_production_plan_revision"),
         CheckConstraint(
             "status IN ('draft', 'confirmed', 'cancelled', 'completed')",
@@ -37,7 +30,6 @@ class ProductionPlan(Base):
             name="ck_production_plan_completion",
         ),
         Index("idx_production_plan_customer", "customer_id"),
-        Index("idx_production_plan_product", "product_id"),
         Index("idx_production_plan_status", "status", "id"),
         Index("idx_production_plan_updated", text("updated_at DESC"), text("id DESC")),
     )
@@ -45,9 +37,6 @@ class ProductionPlan(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customer.id"), nullable=False)
     order_no: Mapped[str] = mapped_column(Text, nullable=False)
-    order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
-    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    production_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     confirmed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
@@ -58,12 +47,31 @@ class ProductionPlan(Base):
     updated_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
+class ProductionPlanItem(Base):
+    __tablename__ = "production_plan_item"
+    __table_args__ = (
+        ForeignKeyConstraint(["production_plan_id", "customer_id"],
+            ["production_plan.id", "production_plan.customer_id"],
+            name="fk_production_plan_item_plan", ondelete="CASCADE"),
+        ForeignKeyConstraint(["product_id", "customer_id"], ["product.id", "product.customer_id"],
+            name="fk_production_plan_item_product_customer"),
+        CheckConstraint("order_quantity > 0", name="ck_production_plan_item_order_quantity"),
+        CheckConstraint("production_quantity > 0", name="ck_production_plan_item_production_quantity"),
+        Index("idx_production_plan_item_product", "product_id"),
+    )
+    production_plan_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    production_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+
+
 class DepartmentWorkOrder(Base):
     __tablename__ = "department_work_order"
     __table_args__ = (
         ForeignKeyConstraint(
             ["production_plan_id", "product_id"],
-            ["production_plan.id", "production_plan.product_id"],
+            ["production_plan_item.production_plan_id", "production_plan_item.product_id"],
             name="fk_department_work_order_plan",
             ondelete="CASCADE",
         ),
@@ -72,7 +80,7 @@ class DepartmentWorkOrder(Base):
             ["product_department_route.product_id", "product_department_route.material_node_id", "product_department_route.department_node_id"],
             name="fk_department_work_order_route",
         ),
-        UniqueConstraint("production_plan_id", "material_node_id", "department_node_id", name="uq_department_work_order_plan_route"),
+        UniqueConstraint("production_plan_id", "product_id", "material_node_id", "department_node_id", name="uq_department_work_order_plan_route"),
         CheckConstraint("task_quantity > 0", name="ck_department_work_order_quantity"),
         Index("idx_department_work_order_route", "product_id", "material_node_id", "department_node_id"),
         Index("idx_department_work_order_product", "product_id"),

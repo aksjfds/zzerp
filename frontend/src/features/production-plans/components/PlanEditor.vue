@@ -5,7 +5,7 @@ import { getApiErrorDetail } from '@/api/request'
 import { queryCustomers, type Customer } from '@/features/customers'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { queryPlanProducts, savePlan, type PlanProduct } from '../api/plans'
-import type { ProductionPlan, ProductionPlanInput } from '../domain/types'
+import type { ProductionPlan, ProductionPlanInput, ProductionPlanItemInput } from '../domain/types'
 
 const props = defineProps<{ plan?: ProductionPlan; readonly?: boolean }>()
 const emit = defineEmits<{ saved: []; busy: [value: boolean] }>()
@@ -21,20 +21,17 @@ let searchSequence = 0
 const form = reactive({
   customer_id: props.plan?.customer_id as number | undefined,
   order_no: props.plan?.order_no || '',
-  order_quantity: props.plan?.order_quantity ?? 1,
-  product_id: props.plan?.product_id as number | undefined,
-  production_quantity: props.plan?.production_quantity ?? 1,
+  items: props.plan?.items.map(item => ({ product_id: item.product_id,
+    order_quantity: item.order_quantity, production_quantity: item.production_quantity })) ?? [] as ProductionPlanItemInput[],
 })
-const selectedProduct = ref<PlanProduct | undefined>(props.plan ? {
-  id: props.plan.product_id,
-  customer_id: props.plan.customer_id,
-  product_name: props.plan.product_name,
-  factory_code: props.plan.factory_code,
-} : undefined)
+const selectedProducts = ref<PlanProduct[]>(props.plan?.items.map(item => ({
+  id: item.product_id, customer_id: props.plan!.customer_id,
+  product_name: item.product_name, factory_code: item.factory_code,
+})) ?? [])
+const selectedIds = computed(() => form.items.map(item => item.product_id))
 const options = computed(() => {
-  const selected = selectedProduct.value
-  return selected && !products.value.some(item => item.id === selected.id)
-    ? [selected, ...products.value] : products.value
+  const byId = new Map([...selectedProducts.value, ...products.value].map(item => [item.id, item]))
+  return [...byId.values()]
 })
 const disabled = computed(() => props.readonly || saving.value)
 
@@ -71,29 +68,36 @@ async function searchProducts(keyword = '') {
 }
 
 function changeCustomer() {
-  form.product_id = undefined
-  selectedProduct.value = undefined
+  form.items = []
+  selectedProducts.value = []
   void searchProducts()
 }
 
-function chooseProduct(id: number) {
-  selectedProduct.value = options.value.find(item => item.id === id)
+function chooseProducts(ids: number[]) {
+  const previous = new Map(form.items.map(item => [item.product_id, item]))
+  selectedProducts.value = options.value.filter(item => ids.includes(item.id))
+  form.items = ids.map(product_id => previous.get(product_id)
+    ?? { product_id, order_quantity: 1, production_quantity: 1 })
+}
+function productLabel(id: number) {
+  const item = selectedProducts.value.find(product => product.id === id)
+  return item ? `${item.factory_code} · ${item.product_name}` : String(id)
 }
 
 async function save() {
   if (disabled.value || customerLoading.value || productLoading.value || customerError.value || productError.value) return
-  if (!form.customer_id || !form.product_id || !form.order_no.trim()
-    || !Number.isInteger(form.order_quantity) || form.order_quantity < 1
-    || !Number.isInteger(form.production_quantity) || form.production_quantity < 1) {
-    ElMessage.warning('请完整填写客户、订单号、订单数量、产品和生产数量')
+  if (!form.customer_id || !form.order_no.trim() || !form.items.length
+    || form.items.some(item => !Number.isInteger(item.order_quantity) || item.order_quantity < 1
+      || item.order_quantity > 2147483647 || !Number.isInteger(item.production_quantity)
+      || item.production_quantity < 1 || item.production_quantity > 2147483647)) {
+    ElMessage.warning('请填写客户、订单号，并为每个产品填写有效订单数量和生产数量')
     return
   }
   saving.value = true
   emit('busy', true)
   const input: ProductionPlanInput = {
     customer_id: form.customer_id, order_no: form.order_no.trim(),
-    order_quantity: form.order_quantity, product_id: form.product_id,
-    production_quantity: form.production_quantity,
+    items: form.items.map(item => ({ ...item })),
   }
   try {
     await savePlan(input, props.plan)
@@ -132,21 +136,26 @@ onBeforeUnmount(() => { active = false; searchSequence += 1 })
         <span v-if="readonly">{{ form.order_no }}</span>
         <ElInput v-else v-model="form.order_no" maxlength="200" placeholder="填写订单号" />
       </ElFormItem>
-      <ElFormItem label="订单数量" required>
-        <span v-if="readonly">{{ form.order_quantity }}</span>
-        <ElInputNumber v-else v-model="form.order_quantity" :min="1" :max="2147483647" :precision="0" />
-      </ElFormItem>
-      <ElFormItem label="产品" required>
-        <RouterLink v-if="readonly && plan" :to="`/products/${plan.product_id}?mode=view`">{{ plan.factory_code }} · {{ plan.product_name }}</RouterLink>
-        <ElSelect v-else v-model="form.product_id" filterable remote :remote-method="searchProducts" :loading="productLoading" :disabled="!form.customer_id || customerLoading" placeholder="选择该客户的产品" @change="chooseProduct">
-          <ElOption v-for="item in options" :key="item.id" :label="`${item.factory_code} · ${item.product_name}`" :value="item.id" />
-        </ElSelect>
-      </ElFormItem>
-      <ElFormItem label="生产数量" required>
-        <span v-if="readonly">{{ form.production_quantity }}</span>
-        <ElInputNumber v-else v-model="form.production_quantity" :min="1" :max="2147483647" :precision="0" />
-      </ElFormItem>
     </div>
+    <ElFormItem v-if="!readonly" label="产品（可多选）" required>
+      <ElSelect :model-value="selectedIds" multiple filterable remote :remote-method="searchProducts" :loading="productLoading" :disabled="!form.customer_id || customerLoading" placeholder="选择该客户的多个产品" @change="chooseProducts">
+        <ElOption v-for="item in options" :key="item.id" :label="`${item.factory_code} · ${item.product_name}`" :value="item.id" />
+      </ElSelect>
+    </ElFormItem>
+    <section v-for="item in form.items" :key="item.product_id" class="product-item">
+      <RouterLink v-if="readonly" :to="`/products/${item.product_id}?mode=view`">{{ productLabel(item.product_id) }}</RouterLink>
+      <h3 v-else>{{ productLabel(item.product_id) }}</h3>
+      <div class="plan-form">
+        <ElFormItem label="订单数量" required>
+          <span v-if="readonly">{{ item.order_quantity }}</span>
+          <ElInputNumber v-else v-model="item.order_quantity" :min="1" :max="2147483647" :precision="0" />
+        </ElFormItem>
+        <ElFormItem label="生产数量" required>
+          <span v-if="readonly">{{ item.production_quantity }}</span>
+          <ElInputNumber v-else v-model="item.production_quantity" :min="1" :max="2147483647" :precision="0" />
+        </ElFormItem>
+      </div>
+    </section>
     <p class="plan-note">计划不绑定产品版本。{{ readonly ? '部门安排数量不随工程修改自动重算。' : '保存时按正式路线生成部门工单。配件任务数为生产数量 × BOM 用量；激光或装配汇合后的装配体按生产数量安排。' }}</p>
     <ElButton v-if="!readonly" type="primary" native-type="submit" :loading="saving" :disabled="customerLoading || productLoading || !!customerError || !!productError">保存生产计划</ElButton>
   </ElForm>
@@ -154,7 +163,9 @@ onBeforeUnmount(() => { active = false; searchSequence += 1 })
 
 <style scoped>
 .plan-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
-.plan-form :deep(.el-select) { width: 100%; }
+.el-select { width: 100%; }
+.product-item { margin-bottom: 16px; padding: 12px; border: 1px solid var(--erp-border); border-radius: 6px; }
+.product-item h3 { margin: 0 0 12px; font-size: 15px; overflow-wrap: anywhere; }
 .plan-note { margin: 0 0 20px; color: var(--erp-text-secondary); line-height: 1.6; }
 @media (max-width: 640px) { .plan-form { grid-template-columns: 1fr; } }
 </style>

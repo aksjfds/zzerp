@@ -30,7 +30,8 @@ def get_handoff_options(order_id, *, department_scope):
         order = load_scoped_order(session, order_id, department_scope)
         context, key = order_context(session, order)
         candidates = list(session.scalars(select(DepartmentWorkOrder).where(
-            DepartmentWorkOrder.production_plan_id == order.production_plan_id)))
+            DepartmentWorkOrder.production_plan_id == order.production_plan_id,
+            DepartmentWorkOrder.product_id == order.product_id)))
         by_key = {(o.material_node_id, o.department_node_id): o for o in candidates}
         destination_keys = context["routes"].successors[key]
         if destination_keys - by_key.keys():

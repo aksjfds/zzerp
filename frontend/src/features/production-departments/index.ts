@@ -1,6 +1,6 @@
 import { service } from '@/api/request'
 
-export type ProductionDepartment = { code: string; name: string }
+export type ProductionDepartment = { code: string; name: string; can_receive: boolean }
 
 export async function queryProductionDepartments() {
   const response = await service.get<ProductionDepartment[]>('/production-departments')

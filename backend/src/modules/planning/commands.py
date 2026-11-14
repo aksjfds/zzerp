@@ -1,10 +1,11 @@
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
 from domain.time import utc_now
 from modules.engineering.product_reference_api import resolve_plan_product
 from modules.errors import DomainError
-from modules.planning.persistence import ProductionPlan
+from modules.planning.persistence import ProductionPlan, ProductionPlanItem, DepartmentWorkOrder
 from modules.planning.queries import load_plan
 from modules.planning.serializers import serialize_plans
 from modules.sales.customer_api import resolve_customer
@@ -22,9 +23,24 @@ def ensure_revision(plan: ProductionPlan, expected_revision: int) -> None:
         )
 
 
-def validate_plan_product(session, payload: ProductionPlanCreate) -> None:
-    resolve_plan_product(session, payload.product_id, payload.customer_id)
+def validate_plan_products(session, payload: ProductionPlanCreate, plan=None) -> None:
+    selected_ids = {item.product_id for item in payload.items}
+    product_ids = set(selected_ids)
+    if plan is not None:
+        product_ids.update(session.scalars(select(ProductionPlanItem.product_id)
+            .where(ProductionPlanItem.production_plan_id == plan.id)))
+    for product_id in sorted(product_ids):
+        customer_id = payload.customer_id if product_id in selected_ids else plan.customer_id
+        resolve_plan_product(session, product_id, customer_id)
     resolve_customer(session, payload.customer_id, None, allow_create=False)
+
+
+def create_plan_items(session, plan, items):
+    for item in items:
+        session.add(ProductionPlanItem(production_plan_id=plan.id, customer_id=plan.customer_id,
+                                       **item.model_dump()))
+    session.flush()
+    rebuild_work_orders(session, plan)
 
 
 def raise_plan_integrity_error(exc: IntegrityError) -> None:
@@ -42,11 +58,11 @@ def raise_plan_integrity_error(exc: IntegrityError) -> None:
 def create_plan(payload: ProductionPlanCreate) -> dict:
     try:
         with SessionLocal.begin() as session:
-            validate_plan_product(session, payload)
-            plan = ProductionPlan(**payload.model_dump())
+            validate_plan_products(session, payload)
+            plan = ProductionPlan(**payload.model_dump(exclude={"items"}))
             session.add(plan)
             session.flush()
-            rebuild_work_orders(session, plan)
+            create_plan_items(session, plan, payload.items)
             return serialize_plans(session, [plan])[0]
     except IntegrityError as exc:
         raise_plan_integrity_error(exc)
@@ -62,15 +78,21 @@ def update_plan(plan_id: int, payload: ProductionPlanUpdate) -> dict:
                     "production_plan_not_editable", "只有草稿或已取消计划允许修改",
                     status_code=409,
                 )
-            validate_plan_product(session, payload)
-            for field, value in payload.model_dump(exclude={"expected_revision"}).items():
+            ensure_plan_without_movements(session, plan.id)
+            validate_plan_products(session, payload, plan)
+            # Remove old customer-bound details before changing the plan customer.
+            session.execute(delete(DepartmentWorkOrder).where(DepartmentWorkOrder.production_plan_id == plan.id))
+            session.flush()
+            session.execute(delete(ProductionPlanItem).where(ProductionPlanItem.production_plan_id == plan.id))
+            for field, value in payload.model_dump(exclude={"expected_revision", "items"}).items():
                 setattr(plan, field, value)
             plan.status = "draft"
             plan.confirmed_at = None
             plan.confirmed_by = None
             plan.revision += 1
             plan.updated_at = utc_now()
-            rebuild_work_orders(session, plan)
+            session.flush()
+            create_plan_items(session, plan, payload.items)
             return serialize_plans(session, [plan])[0]
     except IntegrityError as exc:
         raise_plan_integrity_error(exc)
