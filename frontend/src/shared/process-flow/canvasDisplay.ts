@@ -1,4 +1,5 @@
 import type LogicFlow from '@logicflow/core'
+import { readDisplayPreference } from '@/shared/storage/displayPreferences'
 
 export const PROCESS_FLOW_FONT_SIZE_STORAGE_KEY = 'zzerp.processFlow.fontSize'
 export const PROCESS_FLOW_NODE_SCALE_STORAGE_KEY = 'zzerp.processFlow.nodeScale'
@@ -10,7 +11,7 @@ export function storedProcessFlowNumber(
   minimum: number,
   maximum = Number.POSITIVE_INFINITY,
 ) {
-  const stored = localStorage.getItem(key)
+  const stored = readDisplayPreference(key)
   if (stored === null || stored.trim() === '') return fallback
   const value = Number(stored)
   return Number.isFinite(value)

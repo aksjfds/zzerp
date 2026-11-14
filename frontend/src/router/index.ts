@@ -1,6 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { setupRouterGuard } from '@/permission/guard'
-import { DEPARTMENT_WORK_ORDER_VIEW, PLAN_PERMISSIONS, PRODUCT_PERMISSIONS } from '@/permission/constants'
+import { DEPARTMENT_WORK_ORDER_VIEW, PLAN_PERMISSIONS, PRODUCT_PERMISSIONS } from '@/features/identity'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -9,7 +9,7 @@ const router = createRouter({
     {
       path: '/login',
       name: 'login',
-      component: () => import('@/views/LoginView.vue'),
+      component: () => import('@/features/identity/views/LoginView.vue'),
     },
     {
       path: '/forbidden',
@@ -48,7 +48,7 @@ const router = createRouter({
       meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.add] },
     },
     {
-      path: '/products/:productId(\\d+)',
+      path: '/products/:productId([1-9]\\d*)',
       name: 'engineering-product-edit',
       component: () => import('@/features/process-designer/views/EngineeringProductEditorView.vue'),
       meta: { requiresAuth: true, permissions: [PRODUCT_PERMISSIONS.view] },

@@ -8,7 +8,7 @@ import App from './App.vue'
 import { setupPermission } from './permission'
 import router from './router'
 import { setupTableColumnWidthPersistence } from './shared/table/columnWidthPersistence'
-import { useAuthStore } from './stores/auth'
+import { useAuthStore } from './features/identity'
 import { erpMotionStyles } from './shared/motion/tokens'
 import './shared/motion/motion.css'
 

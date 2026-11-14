@@ -1,5 +1,8 @@
 __pycache__/
 *.py[cod]
+.venv/
+.ruff_cache/
+.import_linter_cache/
 .pnpm-store
 node_modules/
 .DS_Store

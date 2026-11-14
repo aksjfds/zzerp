@@ -1,8 +1,7 @@
 import type { Router } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import { useAuthStore } from '@/stores/auth'
-import { getDefaultDashboardPath } from './defaultRoute'
+import { useAuthStore, getDefaultDashboardPath } from '@/features/identity'
 
 export function setupRouterGuard(router: Router) {
   router.beforeEach(async (to) => {

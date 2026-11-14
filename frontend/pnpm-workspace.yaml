@@ -1,2 +1,4 @@
 allowBuilds:
   '@logicflow/core': true
+# Keep type and boundary checks read-only across pnpm versions.
+verifyDepsBeforeRun: false

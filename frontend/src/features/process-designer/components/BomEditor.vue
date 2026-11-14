@@ -61,7 +61,8 @@ watch(() => props.factoryCode, () => {
 function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
   const item = props.modelValue[index]
   if (!item) return '必填'
-  if (field === 'pcs') return item.pcs > 0 ? '' : '必须大于 0'
+  if (field === 'pcs') return Number.isInteger(item.pcs) && item.pcs > 0 && item.pcs <= 2147483647
+    ? '' : '请输入有效的正整数用量'
   if (!item[field].trim()) return '必填'
   if (
     field === 'part_no'
@@ -78,7 +79,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
     <div class="section-heading">
       <div>
         <h2>BOM 明细</h2>
-        <p>{{ readonly ? '当前产品版本的配件、用量与备注。' : '配件名称、配件编号和用量必填；保存后可拖入流程图。' }}</p>
+        <p>{{ readonly ? '当前产品外观的配件、用量与备注。' : '配件名称、配件编号和用量必填；保存后可拖入流程图。' }}</p>
       </div>
       <div v-if="!readonly" class="heading-actions">
         <ElButton plain :disabled="saving" @click="addRow">新增配件</ElButton>
@@ -91,7 +92,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
         >保存 BOM</ElButton>
       </div>
     </div>
-    <ElTable v-table-column-widths="'engineering.bom-editor'" :data="modelValue" border table-layout="auto" :empty-text="readonly ? '当前版本暂无 BOM 明细' : '请新增至少一条 BOM 明细'">
+    <ElTable v-table-column-widths="'engineering.bom-editor'" :data="modelValue" border table-layout="auto" :empty-text="readonly ? '当前外观暂无 BOM 明细' : '请新增至少一条 BOM 明细'">
       <ElTableColumn type="index" label="#" width="54" />
       <ElTableColumn label="配件名称" min-width="170">
         <template #default="{ row, $index }">
@@ -129,6 +130,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
               :model-value="row.pcs"
               :disabled="readonly"
               :min="1"
+              :max="2147483647"
               :step="1"
               :precision="0"
               controls-position="right"

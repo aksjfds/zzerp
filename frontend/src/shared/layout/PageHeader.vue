@@ -1,7 +1,4 @@
 <script setup lang="ts">
-import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-
 defineProps<{
   sectionName: string
   description?: string
@@ -10,13 +7,6 @@ defineProps<{
 }>()
 defineEmits<{ refresh: [] }>()
 
-const router = useRouter()
-const authStore = useAuthStore()
-
-async function logout() {
-  await authStore.logout()
-  router.replace('/login')
-}
 </script>
 
 <template>
@@ -29,7 +19,6 @@ async function logout() {
     <div class="actions">
       <slot name="actions">
         <ElButton :loading="loading" @click="$emit('refresh')">刷新</ElButton>
-        <ElButton @click="logout">退出登录</ElButton>
       </slot>
     </div>
   </header>

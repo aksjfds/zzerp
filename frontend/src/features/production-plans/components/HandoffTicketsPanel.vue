@@ -1,46 +1,49 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useAuthStore } from '@/stores/auth'
-import { DEPARTMENT_WORK_ORDER_OPERATE } from '@/permission/constants'
-import { getApiErrorDetail } from '@/api/request'
+import { computed, ref } from 'vue'
+import { useAuthStore, DEPARTMENT_WORK_ORDER_OPERATE } from '@/features/identity'
+import { usePagedQuery } from '@/shared/query/usePagedQuery'
+import { useRequest } from '@/shared/query/useRequest'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import DepartmentMovementDialog from './DepartmentMovementDialog.vue'
-import { queryHandoffTickets, queryDepartmentWorkOrders, type HandoffTicket, type DepartmentWorkOrder } from '../api/plans'
+import { queryHandoffTickets, queryDepartmentWorkOrders } from '../api/plans'
+import type { HandoffTicket, DepartmentWorkOrder } from '../domain/types'
+
 const props = defineProps<{ departmentCode?: string }>()
 const emit = defineEmits<{ changed: [] }>()
 const auth = useAuthStore()
-const rows = ref<HandoffTicket[]>([]), total = ref(0), page = ref(1)
-const unreceived = ref(true), keyword = ref(''), loading = ref(false), error = ref('')
+const unreceived = ref(true), keyword = ref('')
 const ticket = ref<HandoffTicket>(), order = ref<DepartmentWorkOrder>()
-const opening = ref(false)
-function remaining(row: HandoffTicket) { return (BigInt(row.quantity) - BigInt(row.received_quantity)).toString() }
-let active = true, revision = 0
-async function load() {
-  const current = ++revision; loading.value = true; error.value = ''; rows.value = []
-  try {
-    const result = await queryHandoffTickets({ page: page.value, unreceived: unreceived.value, order_no: keyword.value.trim() || undefined, department_code: props.departmentCode })
-    if (!active || current !== revision) return
-    if (!result.data.length && page.value > 1 && result.total <= (page.value-1)*50) { page.value = Math.max(1,Math.ceil(result.total/50)); await load(); return }
-    rows.value = result.data; total.value = result.total
-  } catch (cause) { if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '交接票加载失败' }
-  finally { if (active && current === revision) loading.value = false }
+const openingRequest = useRequest<DepartmentWorkOrder>('目标工单不可访问，请刷新后重试')
+const opening = openingRequest.loading
+const {
+  data: rows, total, page, loading, error: listError, load: reload, search: searchTickets,
+} = usePagedQuery<HandoffTicket>(
+  ({ page, signal }) => queryHandoffTickets({
+    page, unreceived: unreceived.value, order_no: keyword.value.trim() || undefined,
+    department_code: props.departmentCode,
+  }, signal),
+  '交接票加载失败',
+)
+const error = computed(() => openingRequest.error.value || listError.value)
+function remaining(row: HandoffTicket) {
+  return (BigInt(row.quantity) - BigInt(row.received_quantity)).toString()
 }
-function search() { page.value = 1; void load() }
+function load() { openingRequest.error.value = ''; return reload() }
+function search() { openingRequest.error.value = ''; return searchTickets() }
+
 async function receive(row: HandoffTicket) {
   if (opening.value) return
-  opening.value = true; error.value = ''
-  try {
-    const result = await queryDepartmentWorkOrders({ page: 1, work_order_id: row.target_work_order_id })
-    if (!active) return
+  const target = await openingRequest.run(async signal => {
+    const result = await queryDepartmentWorkOrders({
+      page: 1, work_order_id: row.target_work_order_id,
+    }, signal)
     if (!result.data[0]) throw new Error('目标工单不可访问')
-    order.value = result.data[0]; ticket.value = row
-  } catch (cause) { if (active) error.value = getApiErrorDetail(cause)?.message || '目标工单不可访问，请刷新后重试' }
-  finally { if (active) opening.value = false }
+    return result.data[0]
+  })
+  if (target) { order.value = target; ticket.value = row }
 }
 function changed() { emit('changed'); void load() }
 defineExpose({ refresh: load })
-onMounted(load)
-onBeforeUnmount(() => { active = false; revision += 1 })
 </script>
 <template>
   <section class="ticket-panel">
@@ -54,6 +57,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
     <ElTable v-if="!error" v-loading="loading" :data="rows" border empty-text="暂无符合条件的交接票">
       <ElTableColumn prop="ticket_no" label="交接票" min-width="140" />
+      <ElTableColumn prop="appearance_name" label="外观" min-width="120" />
       <ElTableColumn prop="order_no" label="订单号" min-width="150" />
       <ElTableColumn label="产品" min-width="180"><template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template></ElTableColumn>
       <ElTableColumn prop="material_name" label="实际来料" min-width="160" />

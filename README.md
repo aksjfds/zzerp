@@ -1,74 +1,67 @@
-# zzerp v6
+# zzerp MES
 
-zzerp MES 是基于 FastAPI、PostgreSQL 和 Vue 的模块化应用，保留工程产品版本、
-BOM、流程图与统一生产计划。创建计划填写客户和唯一订单号，可选择多个该客户的产品，
-每个产品分别填写订单数量和生产数量，不绑定工程版本。任一产品生成失败则整单回滚。
-流程图由配件节点和部门节点组成，连线表达路线。创建计划时按物料路线生成部门工单；
-普通配件按生产数量乘 BOM 用量安排，激光/装配汇合后的装配体按生产数量安排并自动命名。
-九个生产部门使用独立账号，只能查看和操作各自工单；内部出料生成交接票，下游按票手动分批到料；交接到料累计不得超过票面出料；冲压部和外购部无需到料，直接出料；其他本部门工单可登记无来源到料，但备注必填。登记时不选择关联到料，除冲压/外购豁免外，本次出料大于部门停留数量时必须备注，有备注允许超额；普通配件停留数量按到料减出料，装配体按BOM齐套数减出料，不自动转入下游。装配体到料按实际物料分项。已有流水不可删除，计划不能再重建工单。新增配件自动填写厂编加递增后缀。不保存配件或路线快照。后端模块通过公开 API 协作。
-生产账号用户名为部门代码（stamp、cnc、grinding、outsource、vibration、laser、assembly、purchase、finished），
-开发基线初始密码沿用 1。工单范围由后端按认证部门强制限定，工程/业务账号保留原权限。
+面向生产安排与部门交接的 MES，使用 FastAPI、SQLAlchemy、PostgreSQL、Vue 3、TypeScript 和 Element Plus，采用模块化单体。
 
-## AI 与 Agent 项目原则
+## 业务范围
 
-稳定 + 规范 + 低耦合 + 尽量无性能损失。
+- 工程维护产品共用 BOM 和命名外观，每种外观独立维护配件/部门流程图；正式图生成对应外观路线投影，草稿不生成工单。
+- 计划按客户与唯一订单号组织产品及外观，同产品不同外观分行填写订单数量和生产数量；按各外观正式路线生成部门工单，交接按外观隔离。
+- 九个生产部门独立登录，只能查看和登记本部门工单；内部出料生成交接票，下游按票分批到料。
+- 激光/装配汇合形成装配体，数量按 BOM 齐套折算；流水与交接历史只追加。
+- 业务账号按订单查看生产进度；不提供库存、QC、工资、车间或收发货功能。
 
-所有修改必须基于当前真实代码和实际问题，优先采用可回退、可验证、职责边界
-清晰的实现；不得为了局部性能提升破坏稳定性、正确性、兼容性或代码结构。
+完整现行业务规则见 [MES 规范](openspec/specs/mes/spec.md)。
 
-## 数据库职责
+产品使用命名外观管理，共用 BOM、分别维护流程。旧产品版本数据库与接口已移除，需由用户按当前 `zzerp.sql` 重建；不自动迁移。`revision` 仍用于并发校验，`schema_version` 仍用于图格式，两者均不作为产品版本展示。
 
-`zzerp.sql` 是开发阶段唯一的破坏性重建基线，负责表结构、关系约束、必要的
-并发完整性底线以及初始化数据。SQLAlchemy ORM 必须与其保持一致，但不作为
-第二套结构来源。完整业务状态转换由后端领域模块负责，不在数据库触发器中
-重复实现。
+## 仓库结构
 
-数据库函数不解析流程图或选择节点。数据库保留关系、数量与格式约束，
-部门页面的“部门流水”可分页查看本部门全部工单流水，按秒级时间从早到晚排列。交接票本次到料小于票面原数量时必须填写备注，包含最后一批余量接收；累计不得超过票面。
+```text
+zzerp/
+├── README.md                 # 项目介绍与使用入口
+├── AGENTS.md                 # AI 编码与审查约束
+├── pyproject.toml            # Ruff、Deptry
+├── .importlinter             # Python 架构依赖约束
+├── openspec/
+│   ├── config.yaml           # 项目上下文与产物规则
+│   ├── specs/                # 当前有效规范
+│   └── changes/              # 每项变更的提案、设计与任务
+├── backend/
+│   ├── requirements.txt      # 运行依赖
+│   ├── requirements-dev.txt  # 开发检查工具
+│   └── src/zzerp/            # 唯一 Python 包，无根目录导入包装
+│       ├── app.py            # 应用工厂与资源释放
+│       ├── database.py       # 显式查询/命令事务执行器
+│       ├── http/             # HTTP 依赖、授权与路由
+│       ├── application/      # 跨模块同事务编排
+│       └── modules/          # 五业务模块，各有 api/contracts/内部规则及持久化
+├── frontend/src/
+│   ├── features/             # 身份、工程和生产等业务，经 index.ts 对外协作
+│   └── shared/               # 展示、几何、主题、可取消请求与分页，无业务状态
+├── scripts/                  # 项目静态检查与显式数据库重建
+└── zzerp.sql                  # 唯一开发重建基线
+```
 
-激光部、装配部的装配体工单以树形显示各配件，可逐件登记无来源到料和查看到料流水；装配体统一登记出料，整套到料保留在一级全部流水。
+## 开发与检查
 
-业务“生产进度查看”按订单分页，每个订单一张独立的产品→配件/装配体→部门工单三级树表，表内无订单号列，表外标题显示订单。可筛选订单/产品并查看流水，路线及数量按订单独立，三级默认收起。生产账号仍使用所属部门操作页。
-
-手机端筛选纵向排列，宽表在表格区域横向滑动；窄屏操作列随表格滚动。工程流程节点可触屏点击添加，画布空白处可单指平移，缩放使用画布工具按钮；桌面仍支持鼠标拖拽与框选。
-
-触发器维护通用更新时间、流水不可变及已登记工单来源保护；流程图结构、节点引用及可达关系由后端统一校验。
-
-初始化数据分为系统必需基础数据和可删除开发示例数据；数据库重建由用户执行。
-
-## 开发环境
+业务运行环境为 Python 3.12、Node.js 22.22.2+ 或 24.15+、pnpm。开发工具安装在项目本地：
 
 ```bash
-python3 -m pip install -r backend/requirements.txt
-pnpm --dir frontend install
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+pnpm install --frozen-lockfile
+pnpm --dir frontend install --frozen-lockfile
 pnpm run check
 ```
 
-`pnpm run check` 会执行后端架构一致性检查、前端类型检查和生产构建。后端检查会在不连接数据库的前提下核对应用导入、表所有权、模块公开接口、未声明依赖、循环与局部导入、SQL/ORM 的表/字段/约束/索引名称，以及前端 shared 和 feature 导入边界。AI 或 Agent 默认只做代码规范、模块耦合和稳定性审查；只有用户当前请求明确要求时才执行构建或项目脚本。
+`check` 依次运行 Ruff（格式、导入、现代语法及默认复杂度上限10）、Deptry、Import Linter、后端包/端口及 SQL/ORM 声明检查、前端严格类型/导入边界检查和 OpenSpec 规范校验；不导入后端应用，不连接数据库，不生成构建产物或检查缓存。不包含自动化测试。
 
-AI 或 Agent 只有在用户当前请求明确授权后才能执行安装、构建、项目脚本或数据库操作；具体限制以 `AGENTS.md` 为准。
+数据库检查核对表归属、字段与命名约束、CHECK表达式、外键列/目标/删除及延迟选项、唯一键和索引表达式/顺序/覆盖列/条件；同时检查SQL函数定界和固定search_path。这是静态声明核对，不替代PostgreSQL语法解析、执行计划或数据库并发验收。流水索引对应UTC秒级排序，订单搜索使用trigram；优化生效需按新基线重建数据库。
 
-## Docker 开发
-
-```bash
-docker compose up -d --build app
-docker exec -it app bash
-pnpm f
-```
-
-Compose 会为容器创建独立的 `frontend/node_modules` 数据卷，并按照容器的
-Linux 架构自动安装锁文件中的依赖。不要把宿主机的 `node_modules` 直接共享给
-容器；Vite/Rolldown 等工具包含平台相关的原生二进制。开发镜像固定使用
-Python 3.12 和 Node 22，并在构建阶段安装 `backend/requirements.txt`；
-后端依赖变更后再次执行带 `--build` 的启动命令即可。
-
-## 部署
-
-Render 后端和 Netlify 前端的仓库配置分别见 [render.yaml](render.yaml) 与
-[netlify.toml](netlify.toml)。数据库密钥只配置在托管平台环境变量中，不写入仓库。
-
-## 文档入口
-
-- [项目介绍、业务流程与目录职责](PROJECT_OVERVIEW.md)
-- [AI 与 Agent 协作规范](AGENTS.md)
-- [大型整改方案与执行记录](MODIFICATION.md)
+- 后端开发：`pnpm run b:dev`；前端开发：`pnpm run f:dev`。
+- 生产构建独立执行：`pnpm run f:build:prod`。
+- OpenSpec：`pnpm run spec --help`；AI 工作流程见 [AGENTS.md](AGENTS.md)。
+- 数据库配置参考 `backend/.env.example`；重建由用户显式执行 `pnpm run b:reset-db`，会清空目标数据库。当前代码仅接受哈希密码，旧明文账号不能继续登录，需使用新 SQL 基线重建。开发种子账号密码仍为 `1`，SQL 只保存独立盐哈希。
+- 后端使用 `zzerp.app:create_app --factory`，本地命令与 Render 已同步；查询会话、写事务和引擎释放均由应用管理。
+- 部署配置见 `render.yaml`、`netlify.toml` 与 `docker-compose.yaml`；GitHub 数据库重建工作流仅允许手动触发。

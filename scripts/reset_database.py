@@ -8,7 +8,6 @@ from pathlib import Path
 import psycopg2
 from dotenv import load_dotenv
 
-
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SCHEMA_FILE = ROOT_DIR / "zzerp.sql"
 
@@ -34,9 +33,7 @@ def database_connection() -> dict | str:
 
 def main() -> None:
     if os.getenv("ALLOW_DATABASE_RESET") != "yes":
-        raise RuntimeError(
-            "Database reset refused. Set ALLOW_DATABASE_RESET=yes explicitly."
-        )
+        raise RuntimeError("Database reset refused. Set ALLOW_DATABASE_RESET=yes explicitly.")
     sql = SCHEMA_FILE.read_text(encoding="utf-8")
     connection_config = database_connection()
     connection = (
@@ -44,11 +41,14 @@ def main() -> None:
         if isinstance(connection_config, str)
         else psycopg2.connect(**connection_config)
     )
-    with connection:
-        with connection.cursor() as cursor:
-            cursor.execute(sql)
+    try:
+        with connection:
+            with connection.cursor() as cursor:
+                cursor.execute(sql)
+    finally:
+        connection.close()
 
-    print("Database schema and test seed data were rebuilt successfully.")
+    print("Database schema and development seed data were rebuilt successfully.")
 
 
 if __name__ == "__main__":

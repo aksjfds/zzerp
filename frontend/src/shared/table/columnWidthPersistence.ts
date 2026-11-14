@@ -1,4 +1,5 @@
 import type { App, Directive, DirectiveBinding } from 'vue'
+import { readDisplayPreference, writeDisplayPreference } from '@/shared/storage/displayPreferences'
 
 const STORAGE_PREFIX = 'zzerp.tableColumnWidths.'
 
@@ -57,7 +58,7 @@ function storageKey(key: string) {
 
 function readWidths(key: string): TableColumnWidths {
   try {
-    const value = JSON.parse(localStorage.getItem(storageKey(key)) || '{}')
+    const value = JSON.parse(readDisplayPreference(storageKey(key)) || '{}')
     if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
     return Object.fromEntries(
       Object.entries(value).filter((entry): entry is [string, number] => (
@@ -86,7 +87,7 @@ function applyWidths(table: HTMLElement, headers: HTMLElement[], widths: TableCo
 
 function restoreWidths(table: HTMLElement, state: TableState) {
   requestAnimationFrame(() => {
-    if (!table.isConnected) return
+    if (!table.isConnected || tableStates.get(table) !== state) return
     const headers = leafHeaders(table)
     if (!headers.length) return
     state.signature = columnSignature(headers)
@@ -95,17 +96,20 @@ function restoreWidths(table: HTMLElement, state: TableState) {
 }
 
 function saveWidths(table: HTMLElement, state: TableState) {
+  if (!table.isConnected || tableStates.get(table) !== state) return
   const headers = leafHeaders(table)
-  if (!state.startWidths || headers.length !== state.startWidths.length) return
+  const startWidths = state.startWidths
+  state.startWidths = null
+  if (!startWidths || headers.length !== startWidths.length) return
   const measured = headers.map(header => Math.round(header.getBoundingClientRect().width))
-  if (!measured.some((width, index) => Math.abs(width - state.startWidths![index]!) >= 2)) {
+  if (!measured.some((width, index) => Math.abs(width - startWidths[index]!) >= 2)) {
     return
   }
   const stored = readWidths(state.key)
   columnKeys(headers).forEach((key, index) => {
     stored[key] = measured[index]!
   })
-  localStorage.setItem(storageKey(state.key), JSON.stringify(stored))
+  writeDisplayPreference(storageKey(state.key), JSON.stringify(stored))
 }
 
 function mountTable(element: HTMLElement, binding: DirectiveBinding<string>) {

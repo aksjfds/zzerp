@@ -1,29 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { getApiErrorDetail } from '@/api/request'
+import { usePagedQuery } from '@/shared/query/usePagedQuery'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
-import { queryDepartmentLedger, type DepartmentLedgerMovement } from '../api/plans'
+import { queryDepartmentLedger } from '../api/plans'
+import type { DepartmentLedgerMovement } from '../domain/types'
 
 const props = defineProps<{ departmentCode?: string }>()
-const rows = ref<DepartmentLedgerMovement[]>([])
-const total = ref(0), page = ref(1), loading = ref(false), error = ref('')
-let active = true, revision = 0
-async function load() {
-  const current = ++revision
-  loading.value = true; error.value = ''; rows.value = []
-  try {
-    const result = await queryDepartmentLedger(page.value, props.departmentCode)
-    if (!active || current !== revision) return
-    if (!result.data.length && page.value > 1 && result.total <= (page.value-1)*50) {
-      page.value = Math.max(1,Math.ceil(result.total/50)); await load(); return
-    }
-    rows.value = result.data; total.value = result.total
-  } catch (cause) {
-    if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '部门流水加载失败'
-  } finally { if (active && current === revision) loading.value = false }
-}
-onMounted(load)
-onBeforeUnmount(() => { active = false; revision += 1 })
+const { data: rows, total, page, loading, error, load } = usePagedQuery<DepartmentLedgerMovement>(
+  ({ page, signal }) => queryDepartmentLedger(page, props.departmentCode, signal),
+  '部门流水加载失败',
+)
 </script>
 <template>
   <section>
@@ -31,6 +16,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     <p>当前部门范围内所有工单的到料、出料记录，按时间精确到秒从早到晚排列。</p>
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
     <ElTable v-if="!error" v-loading="loading" :data="rows" border empty-text="暂无部门流水">
+      <ElTableColumn prop="appearance_name" label="外观" min-width="120" />
       <ElTableColumn prop="order_no" label="订单号" min-width="160" />
       <ElTableColumn prop="department_name" label="部门" min-width="100" />
       <ElTableColumn label="产品" min-width="190"><template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template></ElTableColumn>

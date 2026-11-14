@@ -1,0 +1,4 @@
+packages:
+  - '.'
+# Script execution must never install dependencies implicitly.
+verifyDepsBeforeRun: false

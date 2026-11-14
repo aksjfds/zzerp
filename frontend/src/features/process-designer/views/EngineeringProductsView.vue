@@ -1,22 +1,23 @@
 <script setup lang="ts">
+import { useSessionNavigation } from '@/features/identity'
 import { useCompactViewport } from '@/shared/layout/useCompactViewport'
 
-import { computed, onMounted, ref } from 'vue'
-import { storeToRefs } from 'pinia'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
-import { useEngineeringProductsStore } from '../stores/engineeringProducts'
-import { PRODUCT_PERMISSIONS } from '@/permission/constants'
+import { queryProducts } from '../api/engineeringProducts'
+import type { ProductSummary } from '../domain/types'
+import { usePagedQuery } from '@/shared/query/usePagedQuery'
+import { PRODUCT_PERMISSIONS } from '@/features/identity'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 
 const compact = useCompactViewport()
 const router = useRouter()
-const authStore = useAuthStore()
-const store = useEngineeringProductsStore()
-const { loading, products, productTotal, productsError } = storeToRefs(store)
+const {
+  data: products, total: productTotal, error: productsError, loading, page, pageSize, load: loadProducts,
+} = usePagedQuery<ProductSummary>(
+  ({ page, pageSize, signal }) => queryProducts(page, pageSize, undefined, signal), '产品列表加载失败',
+)
 const keyword = ref('')
-const page = ref(1)
-const pageSize = 50
 const filteredProducts = computed(() => {
   const value = keyword.value.trim().toLowerCase()
   if (!value) return products.value
@@ -25,19 +26,12 @@ const filteredProducts = computed(() => {
     product.product_name,
     product.factory_code,
     product.customer_code,
+    product.appearance_names.join(' '),
   ].some((item) => item.toLowerCase().includes(value)))
 })
 
-async function logout() {
-  await authStore.logout()
-  router.replace('/login')
-}
+const { logout } = useSessionNavigation()
 
-function loadProducts() {
-  return store.loadProducts(page.value, pageSize)
-}
-
-onMounted(loadProducts)
 </script>
 
 <template>
@@ -69,7 +63,7 @@ onMounted(loadProducts)
         <ElTableColumn prop="product_name" label="名称" min-width="190" />
         <ElTableColumn prop="factory_code" label="厂编" min-width="140" />
         <ElTableColumn prop="customer_code" label="客编" min-width="140" />
-        <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.version }}</template></ElTableColumn>
+        <ElTableColumn label="外观" min-width="160"><template #default="{ row }">{{ row.appearance_names.join('、') || '未配置外观' }}</template></ElTableColumn>
         <ElTableColumn label="可用状态" min-width="210">
           <template #default="{ row }">
             <div class="readiness-cell">

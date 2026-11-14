@@ -1,6 +1,7 @@
 import { nextTick, onBeforeUnmount, onMounted, shallowRef, type Ref } from 'vue'
 import LogicFlow from '@logicflow/core'
 import { Control, Menu } from '@logicflow/extension'
+import { writeDisplayPreference } from '@/shared/storage/displayPreferences'
 import { registerProcessNodes } from '@/shared/process-flow/registerNodes'
 import {
   fromLogicFlowData,
@@ -50,12 +51,12 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
   function changeFontSize(delta: number) {
     fontSize = Math.max(10, fontSize + delta)
     container.value?.style.setProperty('--process-node-font-size', `${fontSize}px`)
-    localStorage.setItem(PROCESS_FLOW_FONT_SIZE_STORAGE_KEY, String(fontSize))
+    writeDisplayPreference(PROCESS_FLOW_FONT_SIZE_STORAGE_KEY, String(fontSize))
   }
 
   function changeNodeSize(delta: number) {
     nodeDisplayScale = Math.max(0.6, Number((nodeDisplayScale + delta).toFixed(2)))
-    localStorage.setItem(PROCESS_FLOW_NODE_SCALE_STORAGE_KEY, String(nodeDisplayScale))
+    writeDisplayPreference(PROCESS_FLOW_NODE_SCALE_STORAGE_KEY, String(nodeDisplayScale))
     if (instance.value) applyNodeDisplayScale(instance.value)
   }
 
@@ -97,8 +98,11 @@ export function useLogicFlowInstance(container: Ref<HTMLDivElement | undefined>,
 
   function applyNodeDisplayScale(lf: LogicFlow, nodeId?: string) {
     applyingDisplayScale = true
-    applyProcessNodeScale(lf, nodeDisplayScale, nodeId)
-    applyingDisplayScale = false
+    try {
+      applyProcessNodeScale(lf, nodeDisplayScale, nodeId)
+    } finally {
+      applyingDisplayScale = false
+    }
   }
 
   function refreshNodeReadability(lf: LogicFlow) {

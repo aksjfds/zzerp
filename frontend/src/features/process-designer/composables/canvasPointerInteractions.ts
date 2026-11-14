@@ -11,6 +11,12 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
   let selectionStart: { clientX: number; clientY: number; x: number; y: number } | null = null
   let selectionBox: HTMLDivElement | null = null
 
+  function cancelSelection() {
+    selectionBox?.remove()
+    selectionBox = null
+    selectionStart = null
+  }
+
   function middlePanStart(event: PointerEvent) {
     const element = options.container()
     if (!options.logicFlow() || !element || middlePanPoint) return
@@ -68,6 +74,7 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
     event.preventDefault()
     event.stopPropagation()
     const rect = element.getBoundingClientRect()
+    cancelSelection()
     selectionStart = {
       clientX: event.clientX,
       clientY: event.clientY,
@@ -103,9 +110,7 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
     const start = selectionStart
     const width = Math.abs(event.clientX - start.clientX)
     const height = Math.abs(event.clientY - start.clientY)
-    selectionStart = null
-    selectionBox?.remove()
-    selectionBox = null
+    cancelSelection()
     if (width < 6 || height < 6) return
     const startPoint = logicFlow.getPointByClient(start.clientX, start.clientY).domOverlayPosition
     const endPoint = logicFlow.getPointByClient(event.clientX, event.clientY).domOverlayPosition
@@ -131,6 +136,7 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
     document.addEventListener('pointerup', middlePanEnd)
     document.addEventListener('pointercancel', middlePanEnd)
     document.addEventListener('pointerup', selectionEnd)
+    document.addEventListener('pointercancel', cancelSelection)
   }
 
   function dispose(element: HTMLDivElement | null) {
@@ -143,9 +149,8 @@ export function createCanvasPointerInteractions(options: InteractionOptions) {
     document.removeEventListener('pointerup', middlePanEnd)
     document.removeEventListener('pointercancel', middlePanEnd)
     document.removeEventListener('pointerup', selectionEnd)
-    selectionBox?.remove()
-    selectionBox = null
-    selectionStart = null
+    document.removeEventListener('pointercancel', cancelSelection)
+    cancelSelection()
     middlePanPoint = null
   }
 

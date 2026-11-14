@@ -1,15 +1,15 @@
 <script setup lang="ts">
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useCompactViewport } from '@/shared/layout/useCompactViewport'
-
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
-import { getApiErrorDetail } from '@/api/request'
+import { usePagedQuery } from '@/shared/query/usePagedQuery'
+import { useRequest } from '@/shared/query/useRequest'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
-import { useAuthStore } from '@/stores/auth'
-import { DEPARTMENT_WORK_ORDER_OPERATE } from '@/permission/constants'
+import { useAuthStore, DEPARTMENT_WORK_ORDER_OPERATE } from '@/features/identity'
+import { queryProductionDepartments, type ProductionDepartment } from '@/features/production-departments'
 import DepartmentMovementDialog from './DepartmentMovementDialog.vue'
 import HandoffTicketsPanel from './HandoffTicketsPanel.vue'
-import { queryProductionDepartments, type ProductionDepartment } from '@/features/production-departments'
-import { queryDepartmentWorkOrders, type DepartmentWorkOrder, type WorkOrderComponent } from '../api/plans'
+import { queryDepartmentWorkOrders } from '../api/plans'
+import type { DepartmentWorkOrder, WorkOrderComponent } from '../domain/types'
 
 const compact = useCompactViewport()
 const props = defineProps<{ planId?: number; departmentCode?: string; canReceive?: boolean }>()
@@ -18,6 +18,20 @@ const movementOrder = ref<DepartmentWorkOrder | null>(null)
 const movementDirection = ref<'receipt' | 'issue'>()
 const movementComponent = ref<WorkOrderComponent>()
 const ticketsPanel = ref<InstanceType<typeof HandoffTicketsPanel>>()
+const filters = reactive({ department_code: '', order_no: '', product_keyword: '' })
+const { data: rows, total, page, loading, error, load, search } = usePagedQuery<DepartmentWorkOrder>(
+  ({ page, signal }) => queryDepartmentWorkOrders({
+    page, department_code: props.departmentCode || filters.department_code || undefined,
+    plan_id: props.planId, order_no: filters.order_no.trim() || undefined,
+    product_keyword: filters.product_keyword.trim() || undefined,
+  }, signal),
+  '部门生产安排加载失败',
+)
+const departmentRequest = useRequest<ProductionDepartment[]>('生产部门加载失败')
+const departments = computed(() => departmentRequest.data.value ?? [])
+const departmentError = departmentRequest.error
+const departmentLoading = departmentRequest.loading
+function loadDepartments() { return departmentRequest.run(queryProductionDepartments) }
 function movementChanged() { void load(); void ticketsPanel.value?.refresh() }
 function canOperate(order: DepartmentWorkOrder) {
   return authStore.user?.department_code === order.department_code
@@ -28,9 +42,9 @@ function openMovement(order: DepartmentWorkOrder, direction?: 'receipt' | 'issue
   movementDirection.value = direction
   movementComponent.value = component
 }
-const departments = ref<ProductionDepartment[]>([])
-const rows = ref<DepartmentWorkOrder[]>([])
-type WorkOrderRow = DepartmentWorkOrder & { row_key: string; component?: WorkOrderComponent; children?: WorkOrderRow[] }
+type WorkOrderRow = DepartmentWorkOrder & {
+  row_key: string; component?: WorkOrderComponent; children?: WorkOrderRow[]
+}
 const tableRows = computed<WorkOrderRow[]>(() => rows.value.map(order => ({
   ...order, row_key: `order:${order.id}`,
   children: order.components.length ? order.components.map(component => ({
@@ -38,57 +52,12 @@ const tableRows = computed<WorkOrderRow[]>(() => rows.value.map(order => ({
   })) : undefined,
 })))
 const hasComponents = computed(() => rows.value.some(order => order.components.length > 0))
-const total = ref(0)
-const page = ref(1)
-const loading = ref(false)
-const error = ref('')
-const departmentError = ref('')
-const departmentLoading = ref(false)
-const filters = reactive({ department_code: '', order_no: '', product_keyword: '' })
-let active = true
-let revision = 0
-
-async function loadDepartments() {
-  departmentLoading.value = true
-  departmentError.value = ''
-  try {
-    const result = await queryProductionDepartments()
-    if (active) departments.value = result
-  } catch (cause) {
-    if (active) departmentError.value = getApiErrorDetail(cause)?.message || '生产部门加载失败'
-  } finally { if (active) departmentLoading.value = false }
-}
-async function load() {
-  const current = ++revision
-  rows.value = []
-  loading.value = true
-  error.value = ''
-  try {
-    const result = await queryDepartmentWorkOrders({
-      page: page.value, department_code: props.departmentCode || filters.department_code || undefined,
-      plan_id: props.planId, order_no: filters.order_no.trim() || undefined,
-      product_keyword: filters.product_keyword.trim() || undefined,
-    })
-    if (!active || current !== revision) return
-    if (!result.data.length && page.value > 1 && result.total <= (page.value - 1) * 50) {
-      page.value = Math.max(1, Math.ceil(result.total / 50))
-      await load()
-      return
-    }
-    rows.value = result.data
-    total.value = result.total
-  } catch (cause) {
-    if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '部门生产安排加载失败'
-  } finally { if (active && current === revision) loading.value = false }
-}
-function search() { page.value = 1; void load() }
 function clear() {
   Object.assign(filters, { department_code: '', order_no: '', product_keyword: '' })
-  search()
+  void search()
 }
-onMounted(() => { if (!props.departmentCode) void loadDepartments(); void load() })
-watch(() => props.departmentCode, search)
-onBeforeUnmount(() => { active = false; revision += 1 })
+onMounted(() => { if (!props.departmentCode) void loadDepartments() })
+watch(() => [props.departmentCode, props.planId], () => { void search() })
 </script>
 
 <template>
@@ -104,6 +73,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     <p v-if="hasComponents" class="tree-note">装配体展开后可按配件登记和查看到料。配件需求按当前 BOM 计算，仅统计该配件直接到料；整套或嵌套装配体到料请查看一级流水。出料统一在装配体登记。</p>
     <ElTable v-if="!error" v-table-column-widths="'planning.department-work-orders'" v-loading="loading" :data="tableRows" row-key="row_key" default-expand-all border stripe table-layout="auto" empty-text="暂无部门生产安排">
       <ElTableColumn label="配件／装配体名称" min-width="240"><template #default="{ row }">{{ row.component?.part_name ?? row.part_name }}</template></ElTableColumn>
+      <ElTableColumn prop="appearance_name" label="外观" min-width="120" />
       <ElTableColumn prop="order_no" label="订单号" min-width="160" />
       <ElTableColumn prop="department_name" label="部门" min-width="100" />
       <ElTableColumn prop="customer_name" label="客户" min-width="130" />

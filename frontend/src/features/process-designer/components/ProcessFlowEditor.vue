@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import '@logicflow/core/es/index.css'
 import '@logicflow/extension/lib/style/index.css'
-import { getApiErrorDetail } from '@/api/request'
+import { useRequest } from '@/shared/query/useRequest'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { queryProductionDepartments, type ProductionDepartment } from '@/features/production-departments'
 import ProcessFlowCanvas from './ProcessFlowCanvas.vue'
@@ -15,24 +15,14 @@ const emit = defineEmits<{ 'update:modelValue': [value: ProcessFlow] }>()
 const canvas = ref<InstanceType<typeof ProcessFlowCanvas>>()
 const selectedNodeId = ref<string | null>(null)
 const selectedEdgeId = ref<string | null>(null)
-const departments = ref<ProductionDepartment[]>([])
-const loading = ref(false)
-const error = ref('')
-let active = true
-let revision = 0
+const departmentRequest = useRequest<ProductionDepartment[]>('生产部门加载失败')
+const departments = computed(() => departmentRequest.data.value ?? [])
+const loading = departmentRequest.loading
+const error = departmentRequest.error
 const selectedNode = computed(() => props.modelValue.nodes.find(node => node.id === selectedNodeId.value) ?? null)
 const selectedEdge = computed(() => props.modelValue.edges.find(edge => edge.id === selectedEdgeId.value) ?? null)
 const placedBomIds = computed(() => props.modelValue.nodes.flatMap(node => node.type === 'part' ? [node.bom_item_id] : []))
-async function loadDepartments() {
-  const current = ++revision
-  loading.value = true; error.value = ''
-  try {
-    const result = await queryProductionDepartments()
-    if (active && current === revision) departments.value = result
-  } catch (cause) {
-    if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '生产部门加载失败'
-  } finally { if (active && current === revision) loading.value = false }
-}
+function loadDepartments() { return departmentRequest.run(queryProductionDepartments) }
 function updateFlow(flow: ProcessFlow) { if (!props.readonly) emit('update:modelValue', flow) }
 function graphData() { return canvas.value?.getGraphData() ?? props.modelValue }
 function focusElement(id?: string) { canvas.value?.focusElement(id) }
@@ -42,7 +32,6 @@ function reload(flow: ProcessFlow) {
 }
 defineExpose({ focusElement, getGraphData: graphData, reload })
 onMounted(loadDepartments)
-onBeforeUnmount(() => { active = false; revision += 1 })
 </script>
 
 <template>

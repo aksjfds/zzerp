@@ -1,0 +1,31 @@
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+src = ["backend/src"]
+extend-exclude = ["node_modules", "frontend/node_modules"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "C901"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.deptry]
+requirements_files = ["backend/requirements.txt"]
+requirements_files_dev = ["backend/requirements-dev.txt"]
+known_first_party = ["zzerp"]
+extend_exclude = ["frontend", "node_modules"]
+ignore_notebooks = true
+
+[tool.deptry.package_module_name_map]
+fastapi = ["fastapi"]
+uvicorn = ["uvicorn"]
+sqlalchemy = ["sqlalchemy"]
+psycopg2-binary = ["psycopg2"]
+pydantic = ["pydantic"]
+python-dotenv = ["dotenv"]
+
+[tool.deptry.per_rule_ignores]
+# Started by package.json, Dockerfile and render.yaml rather than Python imports.
+DEP002 = ["uvicorn"]

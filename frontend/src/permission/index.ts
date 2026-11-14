@@ -1,5 +1,5 @@
 import type { App, DirectiveBinding } from 'vue'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/features/identity'
 
 function updatePermission(el: HTMLElement, binding: DirectiveBinding<string | string[]>) {
   const authStore = useAuthStore()

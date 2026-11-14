@@ -42,6 +42,8 @@ export function getApiErrorDetail(error: unknown): ApiErrorDetail | null {
 
 let csrfToken: string | undefined
 
+export function clearCsrfToken() { csrfToken = undefined }
+
 service.interceptors.request.use((config) => {
   const method = config.method?.toUpperCase()
 
@@ -71,7 +73,7 @@ service.interceptors.response.use(
     } else if (status === 403) {
       window.dispatchEvent(
         new CustomEvent('zzerp:forbidden', {
-          detail: error.response?.data?.detail,
+          detail: getApiErrorDetail(error)?.message,
         }),
       )
     }

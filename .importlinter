@@ -1,0 +1,149 @@
+[importlinter]
+root_package = zzerp
+include_external_packages = True
+
+[importlinter:contract:module-direction]
+name = Business modules do not depend on HTTP or application orchestration
+type = forbidden
+source_modules = zzerp.modules
+forbidden_modules =
+    zzerp.http
+    zzerp.application
+
+[importlinter:contract:resources]
+name = Business modules do not read application configuration
+type = forbidden
+source_modules = zzerp.modules
+forbidden_modules = zzerp.config
+allow_indirect_imports = True
+
+[importlinter:contract:router-persistence]
+name = Routers do not access ORM or SQL APIs
+type = forbidden
+source_modules = zzerp.http.routers
+forbidden_modules = sqlalchemy
+allow_indirect_imports = True
+
+[importlinter:contract:module-cycles]
+name = Business modules and their files have no dependency cycles
+type = acyclic_siblings
+ancestors = zzerp.modules
+
+[importlinter:contract:application-direction]
+name = Application orchestration stays independent of HTTP
+type = forbidden
+source_modules = zzerp.application
+forbidden_modules =
+    zzerp.http
+    fastapi
+allow_indirect_imports = True
+
+[importlinter:contract:rules]
+name = Pure graph, product and password rules have no infrastructure dependencies
+type = forbidden
+source_modules =
+    zzerp.modules.engineering.flow
+    zzerp.modules.engineering.route_order
+    zzerp.modules.engineering.rules
+    zzerp.modules.identity.passwords
+forbidden_modules =
+    zzerp.database
+    zzerp.config
+    zzerp.http
+    zzerp.application
+    sqlalchemy
+    fastapi
+    pydantic
+
+[importlinter:contract:module-layers]
+name = Planning consumes engineering and supporting modules without reverse dependencies
+type = layers
+layers =
+    zzerp.modules.planning
+    zzerp.modules.engineering
+    zzerp.modules.identity | zzerp.modules.organization | zzerp.modules.sales
+
+[importlinter:contract:engineering-owner]
+name = engineering owns its persistence
+type = protected
+protected_modules = zzerp.modules.engineering.persistence
+allowed_importers = zzerp.modules.engineering
+
+[importlinter:contract:engineering-contracts]
+name = engineering contracts do not depend on implementation
+type = forbidden
+source_modules = zzerp.modules.engineering.contracts
+forbidden_modules =
+    zzerp.modules.engineering.persistence
+    zzerp.modules.engineering.api
+    zzerp.http
+    zzerp.application
+    zzerp.config
+
+[importlinter:contract:planning-owner]
+name = planning owns its persistence
+type = protected
+protected_modules = zzerp.modules.planning.persistence
+allowed_importers = zzerp.modules.planning
+
+[importlinter:contract:planning-contracts]
+name = planning contracts do not depend on implementation
+type = forbidden
+source_modules = zzerp.modules.planning.contracts
+forbidden_modules =
+    zzerp.modules.planning.persistence
+    zzerp.modules.planning.api
+    zzerp.http
+    zzerp.application
+    zzerp.config
+
+[importlinter:contract:identity-owner]
+name = identity owns its persistence
+type = protected
+protected_modules = zzerp.modules.identity.persistence
+allowed_importers = zzerp.modules.identity
+
+[importlinter:contract:identity-contracts]
+name = identity contracts do not depend on implementation
+type = forbidden
+source_modules = zzerp.modules.identity.contracts
+forbidden_modules =
+    zzerp.modules.identity.persistence
+    zzerp.modules.identity.api
+    zzerp.http
+    zzerp.application
+    zzerp.config
+
+[importlinter:contract:organization-owner]
+name = organization owns its persistence
+type = protected
+protected_modules = zzerp.modules.organization.persistence
+allowed_importers = zzerp.modules.organization
+
+[importlinter:contract:organization-contracts]
+name = organization contracts do not depend on implementation
+type = forbidden
+source_modules = zzerp.modules.organization.contracts
+forbidden_modules =
+    zzerp.modules.organization.persistence
+    zzerp.modules.organization.api
+    zzerp.http
+    zzerp.application
+    zzerp.config
+
+[importlinter:contract:sales-owner]
+name = sales owns its persistence
+type = protected
+protected_modules = zzerp.modules.sales.persistence
+allowed_importers = zzerp.modules.sales
+
+[importlinter:contract:sales-contracts]
+name = sales contracts do not depend on implementation
+type = forbidden
+source_modules = zzerp.modules.sales.contracts
+forbidden_modules =
+    zzerp.modules.sales.persistence
+    zzerp.modules.sales.api
+    zzerp.http
+    zzerp.application
+    zzerp.config

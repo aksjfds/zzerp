@@ -1,13 +1,15 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
+import { usePagedQuery } from '@/shared/query/usePagedQuery'
+import { useRequest } from '@/shared/query/useRequest'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { ElMessage } from 'element-plus'
-import {
-  queryDepartmentMovements, recordDepartmentMovement,
-  queryHandoffOptions, type HandoffOptions, type HandoffTicket,
-  type DepartmentMovement, type DepartmentMovementInput, type DepartmentWorkOrder, type WorkOrderComponent,
-} from '../api/plans'
+import { queryDepartmentMovements, recordDepartmentMovement, queryHandoffOptions } from '../api/plans'
+import type {
+  HandoffOptions, HandoffTicket, DepartmentMovement,
+  DepartmentMovementInput, DepartmentWorkOrder, WorkOrderComponent,
+} from '../domain/types'
 
 const props = defineProps<{ order: DepartmentWorkOrder; direction?: 'receipt' | 'issue'; ticket?: HandoffTicket; component?: WorkOrderComponent }>()
 const emit = defineEmits<{ close: []; changed: [] }>()
@@ -16,18 +18,17 @@ const quantity = ref<number>()
 const note = ref('')
 const saving = ref(false)
 const saveError = ref('')
-const rows = ref<DepartmentMovement[]>([])
-const total = ref(0)
-const page = ref(1)
-const loading = ref(false)
-const error = ref('')
+const { data: rows, total, page, loading, error, load } = usePagedQuery<DepartmentMovement>(
+  ({ page, signal }) => queryDepartmentMovements(props.order.id, page, props.component?.material_node_id, signal),
+  '流水加载失败', { immediate: !props.direction },
+)
 const title = computed(() => props.direction === 'receipt' ? '到料登记' : props.direction === 'issue' ? '出料登记' : props.component ? '配件到料流水' : '到料／出料流水')
 let active = true
-let revision = 0
 let pending: DepartmentMovementInput | undefined
-const options = ref<HandoffOptions>()
-const optionError = ref('')
-const optionLoading = ref(false)
+const optionRequest = useRequest<HandoffOptions>('来料及去向加载失败')
+const options = optionRequest.data
+const optionError = optionRequest.error
+const optionLoading = optionRequest.loading
 const target = ref<number>()
 const input = ref(props.component?.material_node_id || '')
 const excessIssue = computed(() => props.direction === 'issue'
@@ -46,35 +47,14 @@ const ticketRemaining = computed(() => props.ticket
   ? (BigInt(props.ticket.quantity) - BigInt(props.ticket.received_quantity)).toString()
   : '')
 async function loadOptions() {
-  optionLoading.value = true; optionError.value = ''
-  try {
-    const result = await queryHandoffOptions(props.order.id)
-    if (!active) return
-    if (props.component && !result.external_inputs.some(item => item.material_node_id === props.component!.material_node_id)) {
-      optionError.value = '此配件已不属于当前工单，请关闭后刷新工单'
-      return
-    }
-    options.value = result
-    if (result.targets.length === 1) target.value = result.targets[0]!.id
-    if (!props.component && result.external_inputs.length === 1) input.value = result.external_inputs[0]!.material_node_id
-  } catch (cause) {
-    if (active) optionError.value = getApiErrorDetail(cause)?.message || '来料及去向加载失败'
-  } finally { if (active) optionLoading.value = false }
-}
-
-async function load() {
-  const current = ++revision
-  loading.value = true
-  error.value = ''
-  rows.value = []
-  try {
-    const result = await queryDepartmentMovements(props.order.id, page.value, props.component?.material_node_id)
-    if (!active || current !== revision) return
-    rows.value = result.data
-    total.value = result.total
-  } catch (cause) {
-    if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '流水加载失败'
-  } finally { if (active && current === revision) loading.value = false }
+  const result = await optionRequest.run(signal => queryHandoffOptions(props.order.id, signal))
+  if (!result) return
+  if (props.component && !result.external_inputs.some(item => item.material_node_id === props.component!.material_node_id)) {
+    optionError.value = '此配件已不属于当前工单，请关闭后刷新工单'
+    return
+  }
+  if (result.targets.length === 1) target.value = result.targets[0]!.id
+  if (!props.component && result.external_inputs.length === 1) input.value = result.external_inputs[0]!.material_node_id
 }
 
 async function save() {
@@ -117,19 +97,19 @@ async function save() {
 }
 
 function beforeClose(done: () => void) { if (!saving.value) done() }
-onMounted(() => { if (props.direction) void loadOptions(); else void load() })
-onBeforeUnmount(() => { active = false; revision += 1 })
+onMounted(() => { if (props.direction) void loadOptions() })
+onBeforeUnmount(() => { active = false })
 </script>
 
 <template>
   <ElDialog v-model="visible" :title="title" width="min(1000px, 96vw)" :before-close="beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="emit('close')">
-    <p>{{ order.order_no }} · {{ order.department_name }} · {{ order.part_name }}</p>
+    <p>{{ order.order_no }} · {{ order.appearance_name }} · {{ order.department_name }} · {{ order.part_name }}</p>
     <p v-if="component">配件：{{ component.part_no }} · {{ component.part_name }}（仅此配件直接到料）</p>
     <ElForm v-if="direction" label-width="80px" @submit.prevent="save">
       <LoadErrorAlert :message="optionError" :loading="optionLoading" @retry="loadOptions" />
       <template v-if="direction === 'receipt'">
         <section v-if="ticket" class="ticket-summary" aria-label="交接票数量核对">
-          <p>{{ ticket.ticket_no }} · {{ ticket.factory_code }} {{ ticket.product_name }} · {{ ticket.material_name }}</p>
+          <p>{{ ticket.ticket_no }} · {{ ticket.factory_code }} {{ ticket.product_name }} · {{ ticket.appearance_name }} · {{ ticket.material_name }}</p>
           <p>{{ ticket.source_department }} → {{ ticket.target_department }}</p>
           <div class="ticket-quantity"><span>交接票数量</span><strong>{{ ticket.quantity }}</strong></div>
           <div class="ticket-balance"><span>已到料：{{ ticket.received_quantity }}</span><span>剩余可到料：<b>{{ ticketRemaining }}</b></span></div>

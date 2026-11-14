@@ -1,6 +1,7 @@
 import { service } from '@/api/request'
 import type {
   BomItem,
+  Appearance,
   CreateProductPayload,
   EngineeringProduct,
   ProcessFlow,
@@ -8,36 +9,37 @@ import type {
   ProductSummary,
 } from '../domain/types'
 
-export async function queryProducts(page = 1, pageSize = 50, keyword?: string) {
+export async function queryProducts(page = 1, pageSize = 50, keyword?: string, signal?: AbortSignal) {
   const response = await service.get<{ data: ProductSummary[]; total: number }>('/products', {
     params: { page, page_size: pageSize, keyword: keyword || undefined },
+    signal,
   })
-  return { items: response.data.data, total: response.data.total }
+  return response.data
 }
 
-export async function queryProduct(productId: number, version?: number) {
+export async function queryProduct(productId: number, appearance_id?: number, signal?: AbortSignal) {
   const response = await service.get<{ data: EngineeringProduct }>(`/products/${productId}`, {
-    params: version ? { version } : undefined,
+    params: appearance_id ? { appearance_id } : undefined,
+    signal,
   })
   return response.data.data
 }
 
-export async function queryProductVersions(productId: number) {
-  const response = await service.get<{ data: number[] }>(`/products/${productId}/versions`)
+export async function queryProductAppearances(productId: number, signal?: AbortSignal) {
+  const response = await service.get<{ data: Appearance[] }>(`/products/${productId}/appearances`, { signal })
   return response.data.data
 }
 
-export async function createProductVersion(
-  productId: number,
-  expectedRevision: number,
-  sourceVersion?: number,
-) {
-  const response = await service.post<{ data: EngineeringProduct }>(
-    `/products/${productId}/versions`,
-    undefined,
-    { params: { expected_revision: expectedRevision, source_version: sourceVersion } },
-  )
-  return response.data.data
+export async function createProductAppearance(productId: number, expectedRevision: number, appearanceName: string, sourceAppearanceId?: number) {
+  return (await service.post<{ data: EngineeringProduct }>(`/products/${productId}/appearances`, {
+    expected_revision: expectedRevision, appearance_name: appearanceName, source_appearance_id: sourceAppearanceId,
+  })).data.data
+}
+
+export async function renameProductAppearance(productId: number, appearanceId: number, expectedRevision: number, appearanceName: string) {
+  return (await service.put<{ data: EngineeringProduct }>(`/products/${productId}/appearances/${appearanceId}`, {
+    expected_revision: expectedRevision, appearance_name: appearanceName,
+  })).data.data
 }
 
 export async function createProduct(payload: CreateProductPayload) {
@@ -60,12 +62,11 @@ export async function updateProductInfo(
 export async function replaceProductBom(
   productId: number,
   expectedRevision: number,
-  productVersion: number,
   bomItems: BomItem[],
 ) {
   const response = await service.put<{ data: EngineeringProduct }>(
     `/products/${productId}/bom`,
-    { expected_revision: expectedRevision, product_version: productVersion, bom_items: bomItems },
+    { expected_revision: expectedRevision, bom_items: bomItems },
   )
   return response.data.data
 }
@@ -73,12 +74,12 @@ export async function replaceProductBom(
 export async function updateProductProcessFlow(
   productId: number,
   expectedRevision: number,
-  productVersion: number,
+  appearanceId: number,
   processFlow: ProcessFlow,
 ) {
   const response = await service.put<{ data: EngineeringProduct }>(
     `/products/${productId}/process-flow`,
-    { expected_revision: expectedRevision, product_version: productVersion, process_flow: processFlow },
+    { expected_revision: expectedRevision, appearance_id: appearanceId, process_flow: processFlow },
   )
   return response.data.data
 }
@@ -86,12 +87,12 @@ export async function updateProductProcessFlow(
 export async function saveProductProcessFlowDraft(
   productId: number,
   expectedRevision: number,
-  productVersion: number,
+  appearanceId: number,
   processFlow: ProcessFlow,
 ) {
   const response = await service.put<{ data: EngineeringProduct }>(
     `/products/${productId}/process-flow/draft`,
-    { expected_revision: expectedRevision, product_version: productVersion, process_flow: processFlow },
+    { expected_revision: expectedRevision, appearance_id: appearanceId, process_flow: processFlow },
   )
   return response.data.data
 }

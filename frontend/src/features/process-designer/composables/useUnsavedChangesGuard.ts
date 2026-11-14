@@ -1,5 +1,5 @@
 import { onBeforeUnmount, onMounted, type ComputedRef } from 'vue'
-import { onBeforeRouteLeave } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { ElMessageBox } from 'element-plus'
 
 export function useUnsavedChangesGuard(isDirty: ComputedRef<boolean>) {
@@ -9,7 +9,7 @@ export function useUnsavedChangesGuard(isDirty: ComputedRef<boolean>) {
     event.returnValue = ''
   }
 
-  onBeforeRouteLeave(async () => {
+  async function confirmLeave() {
     if (!isDirty.value) return true
     try {
       await ElMessageBox.confirm('当前页面有未保存的修改，确认离开？', '未保存修改', {
@@ -21,7 +21,10 @@ export function useUnsavedChangesGuard(isDirty: ComputedRef<boolean>) {
     } catch {
       return false
     }
-  })
+  }
+
+  onBeforeRouteLeave(confirmLeave)
+  onBeforeRouteUpdate(confirmLeave)
 
   onMounted(() => window.addEventListener('beforeunload', handleBeforeUnload))
   onBeforeUnmount(() => window.removeEventListener('beforeunload', handleBeforeUnload))

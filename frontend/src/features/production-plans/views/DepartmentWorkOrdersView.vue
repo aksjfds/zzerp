@@ -1,11 +1,12 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useSessionNavigation } from '@/features/identity'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { queryProductionDepartments, type ProductionDepartment } from '@/features/production-departments'
-import { getApiErrorDetail } from '@/api/request'
+import { useRequest } from '@/shared/query/useRequest'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import PageHeader from '@/shared/layout/PageHeader.vue'
-import { useAuthStore } from '@/stores/auth'
+import { useAuthStore } from '@/features/identity'
 import DepartmentWorkOrdersPanel from '../components/DepartmentWorkOrdersPanel.vue'
 import DepartmentLedgerPanel from '../components/DepartmentLedgerPanel.vue'
 import ProductionProgressPanel from '../components/ProductionProgressPanel.vue'
@@ -13,32 +14,17 @@ import ProductionProgressPanel from '../components/ProductionProgressPanel.vue'
 const router = useRouter()
 const authStore = useAuthStore()
 const route = useRoute()
-const departments = ref<ProductionDepartment[]>([])
-const loading = ref(false)
-const error = ref('')
+const departmentRequest = useRequest<ProductionDepartment[]>('部门加载失败')
+const departments = computed(() => departmentRequest.data.value ?? [])
+const loading = departmentRequest.loading
+const error = departmentRequest.error
 const ledgerOpen = ref(false)
-let active = true
-let revision = 0
 const code = computed(() => String(route.params.departmentCode || ''))
 const selected = computed(() => departments.value.find(item => item.code === code.value))
 watch(code, () => { ledgerOpen.value = false })
-async function logout() {
-  await authStore.logout()
-  await router.replace('/login')
-}
-async function load() {
-  const current = ++revision
-  loading.value = true
-  error.value = ''
-  try {
-    const result = await queryProductionDepartments()
-    if (active && current === revision) departments.value = result
-  } catch (cause) {
-    if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '部门加载失败'
-  } finally { if (active && current === revision) loading.value = false }
-}
+const { logout } = useSessionNavigation()
+function load() { return departmentRequest.run(queryProductionDepartments) }
 onMounted(load)
-onBeforeUnmount(() => { active = false; revision += 1 })
 </script>
 
 <template>

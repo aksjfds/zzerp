@@ -2,69 +2,65 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
+import { useRequest } from '@/shared/query/useRequest'
 import { queryCustomers, type Customer } from '@/features/customers'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
-import { queryPlanProducts, savePlan, type PlanProduct } from '../api/plans'
-import type { ProductionPlan, ProductionPlanInput, ProductionPlanItemInput } from '../domain/types'
+import { queryPlanProducts, savePlan } from '../api/plans'
+import type {
+  PlanProduct, ProductionPlan, ProductionPlanInput, ProductionPlanItemInput,
+} from '../domain/types'
 
 const props = defineProps<{ plan?: ProductionPlan; readonly?: boolean }>()
 const emit = defineEmits<{ saved: []; busy: [value: boolean] }>()
-const customers = ref<Customer[]>([])
-const products = ref<PlanProduct[]>([])
-const customerLoading = ref(false)
-const productLoading = ref(false)
+const customerRequest = useRequest<Customer[]>('客户列表加载失败')
+const productRequest = useRequest<PlanProduct[]>('产品列表加载失败')
+const customers = computed(() => customerRequest.data.value ?? [])
+const products = computed(() => productRequest.data.value ?? [])
+const customerLoading = customerRequest.loading
+const productLoading = productRequest.loading
 const saving = ref(false)
-const customerError = ref('')
-const productError = ref('')
+const customerError = customerRequest.error
+const productError = productRequest.error
 let active = true
-let searchSequence = 0
+let searchTimer: ReturnType<typeof setTimeout> | undefined
 const form = reactive({
   customer_id: props.plan?.customer_id as number | undefined,
   order_no: props.plan?.order_no || '',
-  items: props.plan?.items.map(item => ({ product_id: item.product_id,
+  items: props.plan?.items.map(item => ({ product_id: item.product_id, appearance_id: item.appearance_id,
     order_quantity: item.order_quantity, production_quantity: item.production_quantity })) ?? [] as ProductionPlanItemInput[],
 })
 const selectedProducts = ref<PlanProduct[]>(props.plan?.items.map(item => ({
-  id: item.product_id, customer_id: props.plan!.customer_id,
+  id: item.product_id, appearance_id: item.appearance_id, appearance_name: item.appearance_name, customer_id: props.plan!.customer_id,
   product_name: item.product_name, factory_code: item.factory_code,
 })) ?? [])
-const selectedIds = computed(() => form.items.map(item => item.product_id))
+const selectedIds = computed(() => form.items.map(item => item.appearance_id))
 const options = computed(() => {
-  const byId = new Map([...selectedProducts.value, ...products.value].map(item => [item.id, item]))
+  const byId = new Map([...selectedProducts.value, ...products.value].map(item => [item.appearance_id, item]))
   return [...byId.values()]
 })
 const disabled = computed(() => props.readonly || saving.value)
 
-async function loadCustomers() {
-  customerLoading.value = true
-  customerError.value = ''
-  try {
-    const result = await queryCustomers()
-    if (active) customers.value = result
-  } catch (error) {
-    if (active) customerError.value = getApiErrorDetail(error)?.message || '客户列表加载失败'
-  } finally {
-    if (active) customerLoading.value = false
-  }
-}
+function loadCustomers() { return customerRequest.run(signal => queryCustomers(undefined, signal)) }
 
-async function searchProducts(keyword = '') {
-  const sequence = ++searchSequence
-  products.value = []
-  productError.value = ''
-  if (!form.customer_id) {
-    productLoading.value = false
+function searchProducts(keyword = '') {
+  clearTimeout(searchTimer)
+  const customerId = form.customer_id
+  if (!customerId) {
+    productRequest.cancel()
+    productRequest.data.value = undefined
+    productError.value = ''
     return
   }
-  productLoading.value = true
-  try {
-    const result = await queryPlanProducts(form.customer_id, keyword)
-    if (active && sequence === searchSequence) products.value = result
-  } catch (error) {
-    if (active && sequence === searchSequence) productError.value = getApiErrorDetail(error)?.message || '产品列表加载失败'
-  } finally {
-    if (active && sequence === searchSequence) productLoading.value = false
-  }
+  return productRequest.run(signal => queryPlanProducts(customerId, keyword, signal))
+}
+
+function queueProductSearch(keyword: string) {
+  // Cancel immediately; this page owns the delay instead of stacking Select's debounce.
+  clearTimeout(searchTimer)
+  productRequest.cancel()
+  productRequest.data.value = undefined
+  productError.value = ''
+  searchTimer = setTimeout(() => { void searchProducts(keyword) }, 250)
 }
 
 function changeCustomer() {
@@ -74,14 +70,14 @@ function changeCustomer() {
 }
 
 function chooseProducts(ids: number[]) {
-  const previous = new Map(form.items.map(item => [item.product_id, item]))
-  selectedProducts.value = options.value.filter(item => ids.includes(item.id))
-  form.items = ids.map(product_id => previous.get(product_id)
-    ?? { product_id, order_quantity: 1, production_quantity: 1 })
+  const previous = new Map(form.items.map(item => [item.appearance_id, item]))
+  selectedProducts.value = options.value.filter(item => ids.includes(item.appearance_id))
+  form.items = ids.map(appearance_id => previous.get(appearance_id)
+    ?? { product_id: selectedProducts.value.find(p => p.appearance_id === appearance_id)!.id, appearance_id, order_quantity: 1, production_quantity: 1 })
 }
 function productLabel(id: number) {
-  const item = selectedProducts.value.find(product => product.id === id)
-  return item ? `${item.factory_code} · ${item.product_name}` : String(id)
+  const item = selectedProducts.value.find(product => product.appearance_id === id)
+  return item ? `${item.factory_code} · ${item.product_name} · ${item.appearance_name}` : String(id)
 }
 
 async function save() {
@@ -107,8 +103,10 @@ async function save() {
   } catch (error) {
     if (active) ElMessage.error(getApiErrorDetail(error)?.message || '生产计划保存失败')
   } finally {
-    saving.value = false
-    emit('busy', false)
+    if (active) {
+      saving.value = false
+      emit('busy', false)
+    }
   }
 }
 
@@ -118,7 +116,7 @@ onMounted(() => {
     void searchProducts()
   }
 })
-onBeforeUnmount(() => { active = false; searchSequence += 1 })
+onBeforeUnmount(() => { active = false; clearTimeout(searchTimer) })
 </script>
 
 <template>
@@ -137,14 +135,14 @@ onBeforeUnmount(() => { active = false; searchSequence += 1 })
         <ElInput v-else v-model="form.order_no" maxlength="200" placeholder="填写订单号" />
       </ElFormItem>
     </div>
-    <ElFormItem v-if="!readonly" label="产品（可多选）" required>
-      <ElSelect :model-value="selectedIds" multiple filterable remote :remote-method="searchProducts" :loading="productLoading" :disabled="!form.customer_id || customerLoading" placeholder="选择该客户的多个产品" @change="chooseProducts">
-        <ElOption v-for="item in options" :key="item.id" :label="`${item.factory_code} · ${item.product_name}`" :value="item.id" />
+    <ElFormItem v-if="!readonly" label="产品及外观（可多选）" required>
+      <ElSelect :model-value="selectedIds" multiple filterable remote :debounce="0" :remote-method="queueProductSearch" :loading="productLoading" :disabled="!form.customer_id || customerLoading" placeholder="选择该客户的多个产品" @change="chooseProducts">
+        <ElOption v-for="item in options" :key="item.appearance_id" :label="`${item.factory_code} · ${item.product_name} · ${item.appearance_name}`" :value="item.appearance_id" />
       </ElSelect>
     </ElFormItem>
-    <section v-for="item in form.items" :key="item.product_id" class="product-item">
-      <RouterLink v-if="readonly" :to="`/products/${item.product_id}?mode=view`">{{ productLabel(item.product_id) }}</RouterLink>
-      <h3 v-else>{{ productLabel(item.product_id) }}</h3>
+    <section v-for="item in form.items" :key="item.appearance_id" class="product-item">
+      <RouterLink v-if="readonly" :to="`/products/${item.product_id}?mode=view&appearance_id=${item.appearance_id}`">{{ productLabel(item.appearance_id) }}</RouterLink>
+      <h3 v-else>{{ productLabel(item.appearance_id) }}</h3>
       <div class="plan-form">
         <ElFormItem label="订单数量" required>
           <span v-if="readonly">{{ item.order_quantity }}</span>
@@ -156,7 +154,7 @@ onBeforeUnmount(() => { active = false; searchSequence += 1 })
         </ElFormItem>
       </div>
     </section>
-    <p class="plan-note">计划不绑定产品版本。{{ readonly ? '部门安排数量不随工程修改自动重算。' : '保存时按正式路线生成部门工单。配件任务数为生产数量 × BOM 用量；激光或装配汇合后的装配体按生产数量安排。' }}</p>
+    <p class="plan-note">计划按产品及外观分别安排。{{ readonly ? '部门安排数量不随工程修改自动重算。' : '保存时按所选外观正式路线生成部门工单。配件任务数为生产数量 × BOM 用量；激光或装配汇合后的装配体按生产数量安排。' }}</p>
     <ElButton v-if="!readonly" type="primary" native-type="submit" :loading="saving" :disabled="customerLoading || productLoading || !!customerError || !!productError">保存生产计划</ElButton>
   </ElForm>
 </template>

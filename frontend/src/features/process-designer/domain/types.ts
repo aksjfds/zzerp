@@ -4,7 +4,6 @@ export type { FlowNodeType, FlowPoint, FlowNode, FlowEdge, ProcessFlow } from '@
 
 export type BomItem = {
   id?: number
-  product_version?: number
   part_name: string
   part_no: string
   pcs: number
@@ -21,8 +20,8 @@ export type ProductFields = {
 }
 
 export type ProductSummary = ProductFields & {
+  appearance_names: string[]
   id: number
-  version: number
   revision: number
   bom_count: number
   design_ready: boolean
@@ -33,11 +32,12 @@ export type ProductSummary = ProductFields & {
 
 export type EngineeringProduct = ProductFields & {
   id: number
-  version: number
-  current_version: number
+  appearance_id: number | null
+  appearance_name: string
+  appearances: Appearance[]
   revision: number
   base_info_editable: boolean
-  version_editable: boolean
+  appearance_editable: boolean
   design_ready: boolean
   design_ready_reason: string
   bom_items: BomItem[]
@@ -47,10 +47,13 @@ export type EngineeringProduct = ProductFields & {
   updated_at: string
 }
 
-export type CreateProductPayload = ProductFields & { bom_items: BomItem[] }
+export type Appearance = { id: number; appearance_name: string }
+
+export type CreateProductPayload = ProductFields & { appearance_name: string; bom_items: BomItem[] }
 
 export type ProductForm = ProductFields & {
-  version: number | null
+  appearance_id: number | null
+  appearance_name: string
   revision: number | null
   bom_items: BomItem[]
   process_flow: ProcessFlow

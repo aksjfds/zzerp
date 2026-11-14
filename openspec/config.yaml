@@ -1,0 +1,31 @@
+schema: spec-driven
+
+context: |
+  使用简体中文编写说明，Requirement/Scenario 和 MUST/SHALL 保留 OpenSpec 语法。
+  项目为 zzerp MES：FastAPI/SQLAlchemy、PostgreSQL、Vue 3/TypeScript/Element Plus，模块化单体。
+  阅读 README.md、AGENTS.md 和 openspec/specs；已批准的当前用户请求优先。
+  后端使用 backend/src/zzerp 原生包，模块以 api.py 公开行为、contracts.py 公开契约；业务显式接收Session，事务归执行器。
+  前端使用 features 公共 index，页面拥有草稿，shared/query 管理请求生命周期；shared不依赖业务feature。
+  zzerp.sql 是唯一开发重建基线，实际数据库由用户重建。
+  本项目不引入自动化测试、测试框架、测试目录或测试阶段；Scenario 是规范验收描述。
+  质量依据为代码规范、低耦合与稳定性源码审查，以及无缓存静态检查。
+
+rules:
+  proposal:
+    - 写清真实问题、目标、非目标和影响范围，避免扩大业务范围。
+  design:
+    - 基于真实代码说明复用点、接口边界、执行顺序和风险；不为满足工具而重构业务。
+  specs:
+    - 每项 Requirement 使用 SHALL 或 MUST，并至少包含一个 WHEN/THEN Scenario。
+    - 只记录当前有效规范；已有 capability 使用变更差量，不重复整份规范。
+  tasks:
+    - 按依赖顺序拆分可核对的实施任务，包含静态检查和三类代码审查，不添加测试任务。
+    - 范围内问题全部解决且有实际证据后才能勾选完成；未执行检查应明确说明。
+
+operations:
+  apply:
+    guidance:
+      - 依据现有代码按任务实现，执行无缓存静态检查；不添加或运行测试，不执行构建或数据库操作。
+  archive:
+    guidance:
+      - 核对任务与实际证据，同步正式规范后归档，保留精简的三类审查结论。

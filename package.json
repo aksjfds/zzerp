@@ -9,10 +9,20 @@
     "f:build:prod": "pnpm --dir frontend build:prod",
     "f:preview:prod": "pnpm --dir frontend preview:prod",
     "b": "pnpm run b:dev",
-    "b:check": "APP_ENV=development python3 scripts/check_backend.py",
-    "b:dev": "APP_ENV=development uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
-    "b:prod": "APP_ENV=production uvicorn main:app --host 0.0.0.0 --port ${PORT:-8000}",
+    "b:check": "python3 -B -m scripts.check_backend",
+    "b:dev": "APP_ENV=development uvicorn zzerp.app:create_app --factory --app-dir backend/src --host 0.0.0.0 --port 8000 --reload",
+    "b:prod": "APP_ENV=production uvicorn zzerp.app:create_app --factory --app-dir backend/src --host 0.0.0.0 --port ${PORT:-8000}",
     "b:reset-db": "ALLOW_DATABASE_RESET=yes APP_ENV=development python3 scripts/reset_database.py",
-    "check": "pnpm run b:check && pnpm --dir frontend type-check && pnpm --dir frontend build-only:prod"
+    "check:python": ".venv/bin/ruff check --no-cache . && .venv/bin/ruff format --check --no-cache . && PYTHONDONTWRITEBYTECODE=1 .venv/bin/deptry . && PYTHONPATH=backend/src PYTHONDONTWRITEBYTECODE=1 .venv/bin/lint-imports --no-cache && pnpm run b:check",
+    "check:frontend": "pnpm --dir frontend type-check && pnpm --dir frontend check:boundaries",
+    "check:specs": "OPENSPEC_TELEMETRY=0 openspec validate --all --strict --no-interactive",
+    "check": "pnpm run check:python && pnpm run check:frontend && pnpm run check:specs",
+    "spec": "OPENSPEC_TELEMETRY=0 openspec"
+  },
+  "devDependencies": {
+    "@fission-ai/openspec": "2.0.0"
+  },
+  "engines": {
+    "node": "^22.22.2 || ^24.15.0 || >=26.0.0"
   }
 }

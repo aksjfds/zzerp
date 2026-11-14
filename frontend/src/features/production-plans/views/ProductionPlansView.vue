@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { useSessionNavigation } from '@/features/identity'
+import { onBeforeUnmount, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
-import { PLAN_PERMISSIONS } from '@/permission/constants'
-import { useAuthStore } from '@/stores/auth'
+import { PLAN_PERMISSIONS } from '@/features/identity'
+import { useAuthStore } from '@/features/identity'
 import PageHeader from '@/shared/layout/PageHeader.vue'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
+import { usePagedQuery } from '@/shared/query/usePagedQuery'
 import { queryPlans, changePlanStatus, deletePlan } from '../api/plans'
 import PlanEditor from '../components/PlanEditor.vue'
 import DepartmentWorkOrdersPanel from '../components/DepartmentWorkOrdersPanel.vue'
@@ -14,11 +16,9 @@ import type { PlanAction, PlanStatus, ProductionPlan } from '../domain/types'
 
 const auth = useAuthStore()
 const router = useRouter()
-const plans = ref<ProductionPlan[]>([])
-const total = ref(0)
-const page = ref(1)
-const loading = ref(false)
-const error = ref('')
+const { data: plans, total, page, loading, error, load } = usePagedQuery<ProductionPlan>(
+  ({ page, pageSize, signal }) => queryPlans(page, pageSize, signal), '生产计划加载失败',
+)
 const dialog = ref(false)
 const workOrderPlan = ref<ProductionPlan>()
 const workOrderDialog = ref(false)
@@ -26,7 +26,7 @@ const selected = ref<ProductionPlan>()
 const editorBusy = ref(false)
 const commandBusy = ref(false)
 const readonly = ref(false)
-let sequence = 0
+let active = true
 const labels: Record<PlanStatus, string> = { draft: '草稿', confirmed: '已确认', cancelled: '已取消', completed: '已完成' }
 const actions: { action: PlanAction; label: string; statuses: PlanStatus[]; permission: string }[] = [
   { action: 'confirm', label: '确认', statuses: ['draft'], permission: PLAN_PERMISSIONS.confirm },
@@ -35,28 +35,6 @@ const actions: { action: PlanAction; label: string; statuses: PlanStatus[]; perm
   { action: 'reopen', label: '恢复', statuses: ['completed'], permission: PLAN_PERMISSIONS.confirm },
   { action: 'cancel', label: '取消', statuses: ['draft', 'confirmed'], permission: PLAN_PERMISSIONS.cancel },
 ]
-
-async function load() {
-  const current = ++sequence
-  loading.value = true
-  error.value = ''
-  plans.value = []
-  try {
-    const result = await queryPlans(page.value)
-    if (current !== sequence) return
-    if (!result.data.length && page.value > 1 && result.total <= (page.value - 1) * 50) {
-      page.value = Math.max(1, Math.ceil(result.total / 50))
-      await load()
-      return
-    }
-    plans.value = result.data
-    total.value = result.total
-  } catch (cause) {
-    if (current === sequence) error.value = getApiErrorDetail(cause)?.message || '生产计划加载失败'
-  } finally {
-    if (current === sequence) loading.value = false
-  }
-}
 
 function open(plan?: ProductionPlan, viewOnly = false) {
   selected.value = plan
@@ -74,24 +52,22 @@ async function act(plan: ProductionPlan, action: PlanAction | 'delete', label: s
   commandBusy.value = true
   try {
     await ElMessageBox.confirm(`确定${label}订单号为“${plan.order_no}”的生产计划吗？`, `${label}生产计划`, { type: 'warning' })
+    if (!active) return
     if (action === 'delete') await deletePlan(plan)
     else await changePlanStatus(plan, action)
+    if (!active) return
     ElMessage.success(`生产计划已${label}`)
     await load()
   } catch (cause) {
-    if (cause !== 'cancel' && cause !== 'close') ElMessage.error(getApiErrorDetail(cause)?.message || '操作失败')
+    if (active && cause !== 'cancel' && cause !== 'close') ElMessage.error(getApiErrorDetail(cause)?.message || '操作失败')
   } finally {
     commandBusy.value = false
   }
 }
 
-async function logout() {
-  await auth.logout()
-  await router.replace('/login')
-}
+const { logout } = useSessionNavigation()
 
-onMounted(load)
-onBeforeUnmount(() => { sequence += 1 })
+onBeforeUnmount(() => { active = false })
 </script>
 
 <template>
@@ -109,7 +85,7 @@ onBeforeUnmount(() => { sequence += 1 })
       <ElTable v-else v-table-column-widths="'planning.plans'" v-loading="loading" :data="plans" border stripe table-layout="auto" empty-text="暂无生产计划">
         <ElTableColumn prop="order_no" label="订单号" min-width="160" />
         <ElTableColumn prop="customer_name" label="客户" min-width="140" />
-        <ElTableColumn label="产品／订单数量／生产数量" min-width="350"><template #default="{ row }"><div v-for="item in row.items" :key="item.product_id">{{ item.factory_code }} · {{ item.product_name }} ／ {{ item.order_quantity }} ／ {{ item.production_quantity }}</div></template></ElTableColumn>
+        <ElTableColumn label="产品及外观／订单数量／生产数量" min-width="350"><template #default="{ row }"><div v-for="item in row.items" :key="item.appearance_id">{{ item.factory_code }} · {{ item.product_name }} · {{ item.appearance_name }} ／ {{ item.order_quantity }} ／ {{ item.production_quantity }}</div></template></ElTableColumn>
         <ElTableColumn label="状态" width="100"><template #default="{ row }">{{ labels[row.status as PlanStatus] }}</template></ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" min-width="170" />
         <ElTableColumn label="操作" min-width="320">
