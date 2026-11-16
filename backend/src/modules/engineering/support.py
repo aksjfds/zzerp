@@ -1,10 +1,9 @@
-
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm.exc import StaleDataError
-
 from domain.models import BomItemCommand
 from domain.process_flow import validate_process_flow
 from schemas.engineering import BomItemPayload, ProcessFlowPayload
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import StaleDataError
+
 from modules.errors import DomainError
 
 
@@ -34,6 +33,8 @@ def raise_integrity_error(exc: IntegrityError) -> None:
     constraint_name = getattr(diagnostic, "constraint_name", "") or ""
     table_name = getattr(diagnostic, "table_name", "") or ""
     column_name = getattr(diagnostic, "column_name", "") or ""
+    if constraint_name == "uq_product_version_value":
+        raise DomainError("appearance_version_value_conflict", "同一产品的外观版本值不能重复", status_code=409, path="version_value") from exc
     if constraint_name == "uq_product_factory_code":
         raise DomainError(
             "factory_code_conflict", "本厂型号已存在", status_code=409, path="factory_code"
@@ -55,14 +56,14 @@ def raise_integrity_error(exc: IntegrityError) -> None:
     if constraint_name == "uq_product_process_flow_version":
         raise DomainError(
             "process_flow_version_conflict",
-            "当前产品版本已存在工序流程记录，请刷新后重试",
+            "当前产品外观版本已存在工序流程记录，请刷新后重试",
             status_code=409,
             path="process_flow",
         ) from exc
     if constraint_name == "fk_product_process_flow_version":
         raise DomainError(
             "process_flow_product_version_missing",
-            "当前产品版本不存在，无法保存工序流程",
+            "当前产品外观版本不存在，无法保存工序流程",
             status_code=409,
             path="product_version",
         ) from exc

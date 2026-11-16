@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { PLAN_PERMISSIONS } from '@/permission/constants'
@@ -13,7 +12,6 @@ import DepartmentWorkOrdersPanel from '../components/DepartmentWorkOrdersPanel.v
 import type { PlanAction, PlanStatus, ProductionPlan } from '../domain/types'
 
 const auth = useAuthStore()
-const router = useRouter()
 const plans = ref<ProductionPlan[]>([])
 const total = ref(0)
 const page = ref(1)
@@ -85,11 +83,6 @@ async function act(plan: ProductionPlan, action: PlanAction | 'delete', label: s
   }
 }
 
-async function logout() {
-  await auth.logout()
-  await router.replace('/login')
-}
-
 onMounted(load)
 onBeforeUnmount(() => { sequence += 1 })
 </script>
@@ -98,25 +91,28 @@ onBeforeUnmount(() => { sequence += 1 })
   <main class="plans-page">
     <PageHeader section-name="计划管理" page-title="生产计划">
       <template #actions>
-        <ElButton @click="router.push('/department-work-orders')">生产进度查看</ElButton>
-        <ElButton @click="logout">退出登录</ElButton>
-        <ElButton v-permission="PLAN_PERMISSIONS.add" type="primary" @click="open()">创建生产计划</ElButton>
+        <ElButton v-permission="PLAN_PERMISSIONS.add" type="primary" @click="open()">＋ 新建计划</ElButton>
       </template>
     </PageHeader>
+    <div class="overview-grid" aria-label="计划概览" :aria-busy="loading">
+      <section class="overview-item"><span>计划总数</span><strong>{{ loading || error ? '—' : total }}</strong></section>
+      <section class="overview-item"><span>本页待确认</span><strong>{{ loading || error ? '—' : plans.filter(item => item.status === 'draft').length }}</strong></section>
+      <section class="overview-item"><span>本页已确认</span><strong>{{ loading || error ? '—' : plans.filter(item => item.status === 'confirmed').length }}</strong></section>
+    </div>
     <section class="plans-card">
-      <div class="plans-heading"><h2>生产计划</h2><ElButton :loading="loading" @click="load">刷新</ElButton></div>
+      <div class="collection-heading"><div><h2>订单计划</h2></div><ElButton :loading="loading" @click="load">刷新</ElButton></div>
       <LoadErrorAlert v-if="error" :message="error" :loading="loading" @retry="load" />
-      <ElTable v-else v-table-column-widths="'planning.plans'" v-loading="loading" :data="plans" border stripe table-layout="auto" empty-text="暂无生产计划">
-        <ElTableColumn prop="order_no" label="订单号" min-width="160" />
+      <ElTable v-else v-table-column-widths="'planning.plans'" v-loading="loading" :data="plans" stripe table-layout="auto" empty-text="暂无生产计划">
+        <ElTableColumn label="订单号" min-width="180"><template #default="{ row }"><ElButton link type="primary" @click="open(row, true)">{{ row.order_no }}</ElButton></template></ElTableColumn>
         <ElTableColumn prop="customer_name" label="客户" min-width="140" />
-        <ElTableColumn label="产品／订单数量／生产数量" min-width="350"><template #default="{ row }"><div v-for="item in row.items" :key="item.product_id">{{ item.factory_code }} · {{ item.product_name }} ／ {{ item.order_quantity }} ／ {{ item.production_quantity }}</div></template></ElTableColumn>
-        <ElTableColumn label="状态" width="100"><template #default="{ row }">{{ labels[row.status as PlanStatus] }}</template></ElTableColumn>
+        <ElTableColumn label="产品／订单数量／生产数量" min-width="350"><template #default="{ row }"><div v-for="item in row.items" :key="item.product_id">{{ item.factory_code }} · {{ item.product_name }}（{{ item.source_version_value }}） ／ {{ item.order_quantity }} ／ {{ item.production_quantity }}</div></template></ElTableColumn>
+        <ElTableColumn label="状态" width="100"><template #default="{ row }"><ElTag :type="row.status === 'completed' ? 'success' : row.status === 'cancelled' ? 'info' : row.status === 'confirmed' ? 'primary' : 'warning'">{{ labels[row.status as PlanStatus] }}</ElTag></template></ElTableColumn>
         <ElTableColumn prop="updated_at" label="更新时间" min-width="170" />
         <ElTableColumn label="操作" min-width="320">
           <template #default="{ row }">
             <div class="row-actions">
               <ElButton link type="primary" @click="open(row, true)">查看</ElButton>
-              <ElButton link type="primary" @click="workOrderPlan = row; workOrderDialog = true">部门安排</ElButton>
+              <ElButton v-if="row.status !== 'draft' && row.confirmed_at" link type="primary" @click="workOrderPlan = row; workOrderDialog = true">部门安排</ElButton>
               <template v-if="row.status === 'draft' || row.status === 'cancelled'">
                 <ElButton v-permission="PLAN_PERMISSIONS.edit" link type="primary" @click="open(row)">编辑</ElButton>
                 <ElButton v-permission="PLAN_PERMISSIONS.edit" link type="danger" :disabled="commandBusy" @click="act(row, 'delete', '删除')">删除</ElButton>
@@ -140,12 +136,13 @@ onBeforeUnmount(() => { sequence += 1 })
 </template>
 
 <style scoped>
-.plans-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--erp-bg); }
-.plans-card { padding: 20px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); }
-.plans-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
-.plans-heading h2 { margin: 0; font-size: 20px; }
+.plans-card { min-width: 0; }
+.plans-page { padding: 32px; background: var(--erp-bg); }
+.plans-card { padding: 24px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); }
+.collection-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 16px; }
+.collection-heading h2 { margin: 0; font-size: 20px; }
 .row-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .row-actions :deep(.el-button) { margin-left: 0; }
 .pagination { margin-top: 16px; justify-content: flex-end; }
-@media (max-width: 640px) { .plans-card { padding: 12px; } }
+@media (max-width: 760px) { .plans-page { padding: 24px 16px; } .plans-card { padding: 16px; } }
 </style>

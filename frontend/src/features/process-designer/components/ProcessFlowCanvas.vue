@@ -76,8 +76,8 @@ defineExpose({ dragPart, addPart, dragDepartment, addDepartment, focusElement, g
 
 <style scoped>
 .flow-canvas-shell { position: relative; min-width: 0; }
-.flow-canvas { position: relative; min-width: 0; height: clamp(680px, calc(100vh - 180px), 960px); background: var(--md-surface-container-lowest); touch-action: none; }
-.flow-canvas :deep(.lf-node-content text) { font-size: var(--process-node-font-size, 13px); font-weight: 700; text-rendering: geometricPrecision; }
+.flow-canvas { position: relative; min-width: 0; height: clamp(540px, calc(100vh - 240px), 800px); background: var(--md-surface-container-lowest); touch-action: none; }
+.flow-canvas :deep(.lf-node-content text) { font-size: var(--process-node-font-size, 13px); font-weight: 500; text-rendering: geometricPrecision; }
 .flow-canvas :deep(.lf-edge path),
 .flow-canvas :deep(.lf-node-content > g > rect),
 .flow-canvas :deep(.lf-node-content > g > polygon) { vector-effect: non-scaling-stroke; }
@@ -87,6 +87,6 @@ defineExpose({ dragPart, addPart, dragDepartment, addDepartment, focusElement, g
 .flow-canvas.is-readonly { cursor: grab; }
 .flow-canvas.is-readonly:active { cursor: grabbing; }
 .flow-canvas.is-middle-panning { cursor: grabbing; }
-.flow-canvas :deep(.process-selection-box) { position: absolute; z-index: 20; pointer-events: none; border: 1px solid var(--el-color-primary); background: color-mix(in srgb, var(--el-color-primary) 12%, transparent); }
+.flow-canvas :deep(.process-selection-box) { position: absolute; z-index: 20; pointer-events: none; border: 1px solid var(--erp-focus); background: color-mix(in srgb, var(--erp-focus) 12%, transparent); }
 @media (max-width: 600px) { .flow-canvas { height: 480px; } }
 </style>

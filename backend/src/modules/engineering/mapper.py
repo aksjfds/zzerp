@@ -1,7 +1,8 @@
 from domain.time import business_iso
-from modules.engineering.routing import validate_nodes
 from schemas.engineering import ProcessFlowPayload
+
 from modules.engineering.persistence import Product, ProductBom
+from modules.engineering.routing import validate_nodes
 
 
 def serialize_bom(item: ProductBom) -> dict:
@@ -22,12 +23,14 @@ def serialize_product_summary(
     bom_count: int,
     customer_name: str,
     *,
+    version_value: str,
     design_ready: bool,
     design_ready_reason: str,
 ) -> dict:
     return {
         "id": product.id,
         "version": product.version,
+        "version_value": version_value,
         "revision": product.revision,
         "customer_id": product.customer_id,
         "customer_name": customer_name,
@@ -62,6 +65,7 @@ def serialize_product_detail(
     return {
         "id": product.id,
         "version": version,
+        "version_value": next(item.value for item in product.versions if item.version == version),
         "current_version": product.version,
         "revision": product.revision,
         "base_info_editable": base_info_editable,

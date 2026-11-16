@@ -1,20 +1,33 @@
 """Independent departmental receipts/issues and immutable movement history."""
 
-from sqlalchemy import func, or_, select, tuple_
-
 from database import SessionLocal
 from domain.time import BUSINESS_TIMEZONE
-from modules.engineering.route_api import handoff_contexts, current_route_references
-from modules.engineering.product_reference_api import resolve_plan_product, get_product_references
+from schemas.planning import DepartmentMovementCreate
+from sqlalchemy import func, or_, select
+
 from modules.errors import DomainError
 from modules.identity.read_api import usernames_by_ids
 from modules.organization.read_api import allows_receipts, department_names
-from modules.planning.persistence import DepartmentWorkOrder, DepartmentWorkOrderMovement, DepartmentHandoffTicket, DepartmentMovementReceiptLink, ProductionPlan
-from modules.planning.work_order_access import load_scoped_order
 from modules.planning.handoffs import order_context, ticket_number
-from modules.planning.queries import load_plan
 from modules.planning.issue_limits import available_issue_quantity
-from schemas.planning import DepartmentMovementCreate
+from modules.planning.persistence import (
+    DepartmentHandoffTicket,
+    DepartmentMovementReceiptLink,
+    DepartmentWorkOrder,
+    DepartmentWorkOrderMovement,
+    ProductionPlan,
+)
+from modules.planning.queries import load_plan
+from modules.planning.snapshots import (
+    handoff_contexts,
+    item_key,
+    material_number,
+    order_department_filter,
+    route_key,
+    route_references,
+    snapshot_items,
+)
+from modules.planning.work_order_access import load_scoped_order
 
 
 def ensure_plan_without_movements(session, plan_id: int) -> None:
@@ -45,7 +58,7 @@ def movement_totals(session, orders, contexts) -> dict[int, tuple[str, str]]:
     result = {}
     for order in orders:
         parts = receipts.get(order.id, {})
-        context = contexts[order.product_id]
+        context = contexts[item_key(order)]
         if set(parts) <= {order.material_node_id}:
             received = parts.get(order.material_node_id, "0")
         else:
@@ -77,16 +90,15 @@ def serialize_movements(session, movements) -> list[dict]:
                  | {ticket.target_work_order_id for ticket in tickets})
     orders = {row.id: row for row in session.scalars(select(DepartmentWorkOrder)
         .where(DepartmentWorkOrder.id.in_(order_ids)))}
-    references = current_route_references(session, route_keys={
-        (order.product_id, order.material_node_id, order.department_node_id) for order in orders.values()})
+    references = route_references(session, route_keys={route_key(order) for order in orders.values()})
     departments = department_names(session)
     order_departments = {}
     for order in orders.values():
-        reference = references.get((order.product_id, order.material_node_id, order.department_node_id))
+        reference = references.get(route_key(order))
         if reference is None:
-            raise DomainError("department_work_order_route_missing", "流水关联工单的当前路线不存在", status_code=409)
+            raise DomainError("department_work_order_route_missing", "流水关联工单的计划快照路线不存在", status_code=409)
         order_departments[order.id] = departments[reference.department_code]
-    contexts = handoff_contexts(session, {order.product_id for order in orders.values()})
+    contexts = handoff_contexts(session, {item_key(order) for order in orders.values()})
     result = []
     for row in movements:
         order = orders[row.work_order_id]
@@ -98,15 +110,20 @@ def serialize_movements(session, movements) -> list[dict]:
             target_id = order.id
         else:
             source_id = order.id
-        result.append(dict(id=row.id, direction=row.direction, quantity=row.quantity,
-            note=row.note, request_id=row.request_id, actor_username=names[row.actor_user_id],
-            created_at=row.created_at.astimezone(BUSINESS_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S"),
-            receipt_source=row.receipt_source, ticket_id=row.ticket_id, input_material_node_id=row.input_material_node_id,
-            target_work_order_id=ticket.target_work_order_id if row.direction == "issue" and ticket else None,
-            receipt_movement_ids=sorted(links.get(row.id, [])), ticket_no=ticket_number(ticket.id) if ticket else None,
-            material_name=contexts[order.product_id]["materials"][material],
-            source_department=order_departments[source_id] if source_id is not None else None,
-            target_department=order_departments[target_id] if target_id is not None else None))
+        result.append({
+            "id": row.id, "direction": row.direction, "quantity": row.quantity,
+            "note": row.note, "request_id": row.request_id, "actor_username": names[row.actor_user_id],
+            "created_at": row.created_at.astimezone(BUSINESS_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S"),
+            "receipt_source": row.receipt_source, "ticket_id": row.ticket_id,
+            "input_material_node_id": row.input_material_node_id,
+            "target_work_order_id": ticket.target_work_order_id if row.direction == "issue" and ticket else None,
+            "receipt_movement_ids": sorted(links.get(row.id, [])),
+            "ticket_no": ticket_number(ticket.id) if ticket else None,
+            "material_no": material_number(contexts[item_key(order)], material),
+            "material_name": contexts[item_key(order)]["materials"][material],
+            "source_department": order_departments[source_id] if source_id is not None else None,
+            "target_department": order_departments[target_id] if target_id is not None else None,
+        })
     return result
 
 
@@ -131,6 +148,10 @@ def resolve_receipt_input(session, order, payload, context, key):
     ticket = session.scalar(select(DepartmentHandoffTicket).where(DepartmentHandoffTicket.id == payload.ticket_id).with_for_update())
     if ticket is None or ticket.target_work_order_id != order.id:
         raise DomainError("handoff_ticket_denied", "交接票不存在或不是发给此工单", status_code=403)
+    received = session.scalar(select(DepartmentWorkOrderMovement.id)
+        .where(DepartmentWorkOrderMovement.ticket_id == ticket.id).limit(1))
+    if received is not None:
+        raise DomainError("handoff_ticket_already_received", "此交接票已登记到料，不能再次登记", status_code=409)
     issue = session.get(DepartmentWorkOrderMovement, ticket.issue_movement_id)
     if payload.quantity < issue.quantity and not payload.note.strip():
         raise DomainError("partial_receipt_note_required", "登记到料数量小于交接票数量，必须填写备注", path="note")
@@ -139,11 +160,25 @@ def resolve_receipt_input(session, order, payload, context, key):
     if (source.production_plan_id != order.production_plan_id or source.product_id != order.product_id
         or key not in context["routes"].successors.get(source_key, frozenset())):
         raise DomainError("handoff_route_invalid", "交接票来源与当前直接路线不匹配", status_code=409)
-    received = session.scalar(select(func.coalesce(func.sum(DepartmentWorkOrderMovement.quantity), 0))
-        .where(DepartmentWorkOrderMovement.ticket_id == ticket.id))
-    if int(received) + payload.quantity > issue.quantity:
-        raise DomainError("handoff_receipt_exceeds_issue", f"交接到料不能超过上游出料，本票剩余可到料 {issue.quantity - int(received)}", status_code=409)
+    if payload.quantity > issue.quantity:
+        raise DomainError("handoff_receipt_exceeds_issue", "交接到料不能超过上游出料数量", status_code=409)
     return source.material_node_id
+
+
+def validate_issue_destination(session, order, payload, context, key, department_scope):
+    available = available_issue_quantity(session, order, context, department_scope)
+    if available is not None and payload.quantity > available and not payload.note.strip():
+        raise DomainError("excess_issue_note_required",
+            f"本次出料超过部门停留数量 {available}，必须填写备注", path="note")
+    destinations = context["routes"].successors[key]
+    target = session.get(DepartmentWorkOrder, payload.target_work_order_id) if payload.target_work_order_id else None
+    if destinations:
+        if (target is None or target.production_plan_id != order.production_plan_id
+            or target.product_id != order.product_id
+            or (target.material_node_id,target.department_node_id) not in destinations):
+            raise DomainError("handoff_target_invalid", "请选择当前路线的合法下一步工单，不能跳步或跨计划", status_code=409)
+    elif payload.target_work_order_id is not None:
+        raise DomainError("handoff_terminal_target", "终端出料不能指定内部工单")
 
 
 def record_movement(order_id: int, payload: DepartmentMovementCreate, *, department_scope: str | None, actor_user_id: int):
@@ -153,7 +188,6 @@ def record_movement(order_id: int, payload: DepartmentMovementCreate, *, departm
     with SessionLocal.begin() as session:
         order = load_scoped_order(session, order_id, department_scope)
         plan = load_plan(session, order.production_plan_id, for_update=True)
-        resolve_plan_product(session, order.product_id, plan.customer_id)
         order = load_scoped_order(session, order_id, department_scope)
         previous = session.scalar(select(DepartmentWorkOrderMovement).where(
             DepartmentWorkOrderMovement.work_order_id == order.id,
@@ -176,19 +210,7 @@ def record_movement(order_id: int, payload: DepartmentMovementCreate, *, departm
                 raise DomainError("department_receipt_disabled", "冲压部和外购部无需登记到料，请直接出料", status_code=403)
             input_material = resolve_receipt_input(session, order, payload, context, key)
         else:
-            available = available_issue_quantity(session, order, context, department_scope)
-            if available is not None and payload.quantity > available and not payload.note.strip():
-                raise DomainError("excess_issue_note_required",
-                    f"本次出料超过部门停留数量 {available}，必须填写备注", path="note")
-            destinations = context["routes"].successors[key]
-            target = session.get(DepartmentWorkOrder, payload.target_work_order_id) if payload.target_work_order_id else None
-            if destinations:
-                if (target is None or target.production_plan_id != order.production_plan_id
-                    or target.product_id != order.product_id
-                    or (target.material_node_id,target.department_node_id) not in destinations):
-                    raise DomainError("handoff_target_invalid", "请选择当前路线的合法下一步工单，不能跳步或跨计划", status_code=409)
-            elif payload.target_work_order_id is not None:
-                raise DomainError("handoff_terminal_target", "终端出料不能指定内部工单")
+            validate_issue_destination(session, order, payload, context, key, department_scope)
         movement = DepartmentWorkOrderMovement(work_order_id=order.id, direction=payload.direction,
             quantity=payload.quantity, note=payload.note, request_id=payload.request_id, actor_user_id=actor_user_id,
             receipt_source=payload.receipt_source, ticket_id=payload.ticket_id, input_material_node_id=input_material)
@@ -230,9 +252,7 @@ def list_department_movements(page: int, page_size: int, *, department_scope: st
             raise DomainError("department_not_found", "生产部门不存在", status_code=404)
         conditions = []
         if department_code is not None:
-            keys = set(current_route_references(session, department_code=department_code))
-            conditions.append(tuple_(DepartmentWorkOrder.product_id, DepartmentWorkOrder.material_node_id,
-                                     DepartmentWorkOrder.department_node_id).in_(keys))
+            conditions.append(order_department_filter(department_code))
         query = (select(DepartmentWorkOrderMovement, DepartmentWorkOrder, ProductionPlan)
             .join(DepartmentWorkOrder, DepartmentWorkOrder.id == DepartmentWorkOrderMovement.work_order_id)
             .join(ProductionPlan, ProductionPlan.id == DepartmentWorkOrder.production_plan_id).where(*conditions))
@@ -240,14 +260,13 @@ def list_department_movements(page: int, page_size: int, *, department_scope: st
         rows = session.execute(query.order_by(func.date_trunc("second", DepartmentWorkOrderMovement.created_at).asc(),
             DepartmentWorkOrderMovement.id.asc()).offset((page-1)*page_size).limit(page_size)).all()
         data = serialize_movements(session, [movement for movement, order, plan in rows])
-        products = get_product_references(session, {order.product_id for movement, order, plan in rows})
-        refs = current_route_references(session, route_keys={
-            (order.product_id,order.material_node_id,order.department_node_id) for movement,order,plan in rows})
+        products = snapshot_items(session, {item_key(order) for movement, order, plan in rows})
+        refs = route_references(session, route_keys={route_key(order) for movement, order, plan in rows})
         for entry, (movement, order, plan) in zip(data, rows):
-            ref = refs.get((order.product_id,order.material_node_id,order.department_node_id))
+            ref = refs.get(route_key(order))
             if ref is None:
                 raise DomainError("department_work_order_route_missing", "流水来源工单的路线不存在", status_code=409)
-            product = products[order.product_id]
+            product = products[item_key(order)]
             entry.update(order_no=plan.order_no, factory_code=product.factory_code,
                          product_name=product.product_name, department_name=names[ref.department_code])
         return data, total

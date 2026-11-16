@@ -27,7 +27,7 @@ defineEmits<{ retry: [] }>()
 <style scoped>
 .load-error-alert { margin-bottom: 16px; }
 .load-error-alert :deep(.el-alert__content) { flex: 1; min-width: 0; }
-.load-error-content { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 4px; font-size: 13px; }
+.load-error-content { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 4px; font-size: 14px; }
 .load-error-content > span { flex: 1 1 220px; overflow-wrap: anywhere; }
 .load-error-content :deep(.el-button) { flex-shrink: 0; }
 </style>

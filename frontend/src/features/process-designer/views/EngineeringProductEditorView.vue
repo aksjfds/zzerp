@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import type { FormInstance, FormRules } from 'element-plus'
 import BomEditor from '../components/BomEditor.vue'
 import ProcessFlowEditor from '../components/ProcessFlowEditor.vue'
-import { type BomItem, type ProductFields } from '../domain/types'
+import { type BomItem, type ProductForm } from '../domain/types'
 import { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { useAuthStore } from '@/stores/auth'
 import { PRODUCT_PERMISSIONS } from '@/permission/constants'
@@ -16,6 +16,7 @@ import { useProductVersionActions } from '../composables/useProductVersionAction
 import { queryCustomers, type Customer } from '@/features/customers'
 import { getApiErrorDetail } from '@/api/request'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -68,7 +69,9 @@ const mode = computed(() => route.query.mode === 'view' ? 'view' : 'edit')
 const canEditProduct = computed(() => authStore.hasPermission(PRODUCT_PERMISSIONS.edit))
 const editableDirty = computed(() => mode.value === 'edit' && allDirty.value)
 
-const baseRules: FormRules<ProductFields> = {
+const baseRules: FormRules<ProductForm> = {
+  version_value: [{ required: true, whitespace: true, message: '请输入外观版本', trigger: 'blur' },
+    { max: 100, message: '外观版本不能超过100个字符', trigger: 'blur' }],
   customer_name: [{ required: true, whitespace: true, message: '请输入客户名称', trigger: 'blur' }],
   product_name: [{ required: true, whitespace: true, message: '请输入产品名称', trigger: 'blur' }],
   factory_code: [{ required: true, whitespace: true, message: '请输入本厂型号', trigger: 'blur' }],
@@ -212,7 +215,7 @@ async function initializeProduct() {
       ? requestedVersion
       : undefined)
   } catch (error) {
-    if (request === initializationRequest) initializationError.value = getApiErrorDetail(error)?.message || '产品版本列表加载失败'
+    if (request === initializationRequest) initializationError.value = getApiErrorDetail(error)?.message || '产品外观版本列表加载失败'
   } finally {
     if (request === initializationRequest) initializing.value = false
   }
@@ -231,14 +234,11 @@ onScopeDispose(() => {
 
 <template>
   <main class="editor-page">
-    <header class="editor-header">
-      <div>
-        <div class="page-kicker">工程管理 / {{ productId ? mode === 'view' ? '查看产品' : '编辑产品' : '录入产品' }}</div>
-        <h1>{{ productId ? contentReady ? form.product_name || '产品工程资料' : '产品工程资料' : '录入新产品' }}</h1>
-      </div>
+    <PageHeader class="editor-heading" section-name="工程资料" :page-title="productId ? contentReady ? form.product_name || '产品工程资料' : '产品工程资料' : '新建产品'">
+      <template #actions>
       <div class="editor-actions">
         <div v-if="productId" class="version-selector">
-          <span>当前版本</span>
+          <span>当前外观版本</span>
           <ElSelect
             :model-value="requestedVersion ?? form.version"
             :disabled="store.saving || initializing || loadingProduct"
@@ -247,7 +247,7 @@ onScopeDispose(() => {
             :fallback-placements="['top-start', 'top-end']"
             @change="switchVersion"
           >
-            <ElOption v-for="version in versions" :key="version" :label="`V${version}`" :value="version" />
+            <ElOption v-for="version in versions" :key="version.version" :label="version.value" :value="version.version" />
           </ElSelect>
         </div>
         <div class="action-group navigation-actions">
@@ -271,7 +271,7 @@ onScopeDispose(() => {
             :disabled="store.saving || !contentReady"
             :loading="activeAction === 'version-create'"
             @click="performAction('version-create', createVersion)"
-          >创建新版本</ElButton>
+          >创建新外观版本</ElButton>
         </div>
         <ElButton
           v-if="!productId"
@@ -281,20 +281,26 @@ onScopeDispose(() => {
           @click="performAction('create', createProduct)"
         >保存产品并配置流程</ElButton>
       </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <LoadErrorAlert :message="initializationError" :loading="initializing" @retry="initializeProduct" />
     <LoadErrorAlert :message="productError" :loading="loadingProduct" @retry="retryProductVersion" />
     <div v-if="productId && (initializing || loadingProduct)" class="editor-loading" role="status">
       <ElSkeleton :rows="6" animated />
-      <p>正在加载产品资料与版本…</p>
+      <p>正在加载产品资料与外观版本…</p>
     </div>
     <template v-if="contentReady">
-      <section class="editor-card basic-section">
+      <nav class="editor-navigation" aria-label="工程资料章节">
+        <a href="#product-basics"><span>01</span><div>基础资料<small v-if="baseDirty">有未保存修改</small></div></a>
+        <a href="#product-bom"><span>02</span><div>物料清单<small>{{ bomDirty ? '有未保存修改' : `${form.bom_items.length} 项配件` }}</small></div></a>
+        <a href="#product-process"><span>03</span><div>工艺路线<small v-if="flowDirty">有未保存修改</small></div></a>
+      </nav>
+      <section id="product-basics" class="editor-card basic-section">
         <div class="section-heading">
           <div>
             <h2>产品基础信息</h2>
-            <span>产品级资料，所有版本共享；被生产计划引用后不可修改。</span>
+
           </div>
           <ElButton
             v-if="productId && mode === 'edit' && canEditProduct && baseInfoEditable"
@@ -304,13 +310,6 @@ onScopeDispose(() => {
             @click="performAction('base', saveProductInfo)"
           >保存基础信息</ElButton>
         </div>
-        <ElAlert
-          v-if="productId && !baseInfoEditable"
-          class="section-alert"
-          title="产品基础信息为共享资料，已有生产计划引用后固定为只读。"
-          type="info"
-          :closable="false"
-        />
         <LoadErrorAlert :message="customerError" :loading="customerLoading" @retry="loadCustomers" />
         <dl v-if="mode === 'view' || (productId && !baseInfoEditable)" class="base-details">
           <div><dt>厂编</dt><dd>{{ form.factory_code }}</dd></div>
@@ -322,6 +321,7 @@ onScopeDispose(() => {
           <div class="form-grid">
             <ElFormItem prop="factory_code" label="厂编"><ElInput v-model="form.factory_code" /></ElFormItem>
             <ElFormItem prop="product_name" label="产品名称"><ElInput v-model="form.product_name" /></ElFormItem>
+            <ElFormItem v-if="!productId" prop="version_value" label="外观版本"><ElInput v-model="form.version_value" maxlength="100" placeholder="例如：V1、金色、亮银" /></ElFormItem>
             <ElFormItem prop="customer_name" label="客户名称">
               <ElSelect
                 :model-value="customerSelection"
@@ -349,7 +349,7 @@ onScopeDispose(() => {
         </ElForm>
       </section>
 
-      <section class="editor-card">
+      <section id="product-bom" class="editor-card">
         <BomEditor
           :model-value="form.bom_items"
           :factory-code="form.factory_code"
@@ -362,10 +362,9 @@ onScopeDispose(() => {
         />
       </section>
 
-      <section class="editor-card">
+      <section id="product-process" class="editor-card process-section">
         <ElAlert v-if="!productId" title="请先保存产品基础信息和 BOM，再配置工序流程" type="info" :closable="false" show-icon />
         <template v-else-if="editorReady">
-          <ElAlert v-if="mode === 'view'" title="查看模式为只读" type="info" :closable="false" />
           <ElAlert
             v-if="flowSaveError"
             class="flow-error"
@@ -404,50 +403,21 @@ onScopeDispose(() => {
 </template>
 
 <style scoped>
-.editor-page { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
-.editor-loading { padding: 28px; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-lg); background: var(--erp-surface); }
-.editor-loading p { margin: 16px 0 0; color: var(--erp-text-secondary); }
-.editor-header, .editor-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.editor-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 18px 22px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.editor-header h1 { margin: 5px 0 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
-.editor-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
-.action-group { display: flex; align-items: center; gap: 8px; }
-.action-group + .action-group { padding-left: 8px; border-left: 1px solid var(--md-outline-variant); }
-.editor-actions :deep(.el-button + .el-button), .action-group :deep(.el-button + .el-button) { margin-left: 0; }
-.version-selector { display: flex; align-items: center; gap: 7px; margin-right: 2px; color: var(--el-text-color-secondary); font-size: 12px; white-space: nowrap; }
-.version-selector :deep(.el-select) { width: 92px; }
-.page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-.editor-card { margin-bottom: 18px; padding: 20px; }
-.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
-.section-heading > div { display: flex; align-items: baseline; gap: 12px; }
-.section-heading h2 { margin: 0; font-size: 18px; }
-.section-heading span { color: var(--el-text-color-secondary); font-size: 12px; }
-.flow-error { margin-bottom: 12px; }
-.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
-.base-details { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; margin: 0; }
-.base-details div { min-width: 0; }
-.base-details dt { margin-bottom: 4px; color: var(--erp-text-secondary); font-size: 12px; }
-.base-details dd { margin: 0; color: var(--erp-text); overflow-wrap: anywhere; }
-.basic-section :deep(.el-form-item) { margin-bottom: 12px; }
-.flow-loading { display: grid; min-height: 260px; place-items: center; color: var(--el-text-color-secondary); }
-@media (max-width: 680px) {
-  .editor-page { padding: 16px; }
-  .editor-header { align-items: flex-start; flex-direction: column; padding: 16px; }
-  .editor-actions { align-items: stretch; width: 100%; flex-direction: column; }
-  .version-selector { justify-content: space-between; margin: 0; }
-  .version-selector :deep(.el-select) { width: 120px; }
-  .action-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
-  .action-group + .action-group { padding: 8px 0 0; border-top: 1px solid var(--md-outline-variant); border-left: 0; }
-  .editor-actions > :deep(.el-button), .action-group :deep(.el-button) { width: 100%; margin: 0; }
-  .editor-card { padding: 16px; }
-  .form-grid { grid-template-columns: 1fr; }
-  .base-details { grid-template-columns: 1fr; }
-  .section-heading { align-items: flex-start; flex-direction: column; }
-  .section-heading > div { align-items: flex-start; flex-direction: column; gap: 4px; }
-}
-@media (max-width: 440px) {
-  .editor-page { padding: 12px; }
-  .action-group { grid-template-columns: 1fr; }
-  .editor-card { padding: 12px; }
-}
+.editor-page { padding: 32px; }
+.editor-heading :deep(.page-heading-actions) { width: 100%; }
+.editor-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; width: 100%; padding: 16px; border: 1px solid var(--erp-border); border-radius: 8px; background: var(--erp-surface); }
+.action-group { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }.action-group + .action-group { border-left: 1px solid var(--erp-border); padding-left: 12px; }.editor-actions :deep(.el-button) { margin: 0; }
+.version-selector { display: flex; align-items: center; gap: 8px; margin-right: auto; color: var(--erp-text-muted); font-size: 12px; }.version-selector :deep(.el-select) { width: 120px; }
+.editor-loading, .editor-card { min-width: 0; padding: 24px; margin-bottom: 24px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); }
+.editor-loading p { margin: 16px 0 0; color: var(--erp-text-muted); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }.section-heading h2 { margin: 0 0 6px; font-size: 20px; font-weight: 600; }.section-heading span { color: var(--erp-text-muted); font-size: 12px; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }.base-details { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; margin: 0; padding: 20px; border-radius: 8px; background: var(--erp-surface-muted); }.base-details div { min-width: 0; }.base-details dt { color: var(--erp-text-muted); font-size: 12px; margin-bottom: 8px; }.base-details dd { margin: 0; font-size: 14px; overflow-wrap: anywhere; }
+.section-alert, .flow-error { margin-bottom: 24px; }.flow-loading { display: grid; min-height: 260px; place-items: center; color: var(--erp-text-muted); }
+.editor-navigation { position: sticky; top: 16px; z-index: 10; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0 0 24px; padding: 8px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); }
+.editor-navigation a { min-height: 44px; display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 8px; color: var(--erp-text); font-size: 14px; font-weight: 500; }.editor-navigation a > span { color: var(--erp-primary); font-size: 12px; font-variant-numeric: tabular-nums; }.editor-navigation small { display: block; margin-top: 4px; color: var(--erp-text-muted); font-size: 12px; font-weight: 400; }
+.editor-card { scroll-margin-top: 120px; }.basic-section { border-top: 3px solid var(--erp-primary); }
+@media (hover: hover) and (pointer: fine) { .editor-navigation a:hover { background: var(--erp-primary-soft); } }
+@media (max-width: 1000px) { .base-details { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 760px) { .editor-page { padding: 24px 16px; }.editor-card { padding: 16px; }.editor-navigation { position: static; }.editor-navigation a { padding: 8px; gap: 8px; }.editor-navigation small { display: none; }.editor-card { scroll-margin-top: 16px; }.form-grid { grid-template-columns: 1fr; }.editor-actions { align-items: stretch; flex-direction: column; }.version-selector { justify-content: space-between; margin-right: 0; }.action-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }.action-group + .action-group { border-left: 0; border-top: 1px solid var(--erp-border); padding: 12px 0 0; } }
+@media (max-width: 480px) { .editor-navigation a { font-size: 12px; }.editor-navigation a > span { display: none; }.base-details { grid-template-columns: 1fr; }.action-group { grid-template-columns: 1fr; } }
 </style>

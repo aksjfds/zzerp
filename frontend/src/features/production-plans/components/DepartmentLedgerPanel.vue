@@ -27,18 +27,23 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 </script>
 <template>
   <section>
-    <ElButton :loading="loading" @click="load">刷新</ElButton>
-    <p>当前部门范围内所有工单的到料、出料记录，按时间精确到秒从早到晚排列。</p>
+<div class="collection-heading"><div><h2>部门物料流水</h2></div><ElButton :loading="loading" @click="load">刷新记录</ElButton></div>
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
-    <ElTable v-if="!error" v-loading="loading" :data="rows" border empty-text="暂无部门流水">
+    <ElTable v-if="!error" v-loading="loading" :data="rows" empty-text="暂无部门流水">
+      <ElTableColumn label="类型" width="80">
+        <template #default="{ row }">{{ row.direction === 'receipt' ? '到料' : '出料' }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="来自/到达" min-width="140">
+        <template #default="{ row }">{{ row.direction === 'receipt' ? (row.source_department || '无来源到料') : (row.target_department || '终端出料') }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="产品" min-width="190">
+        <template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="配件/装配体" min-width="240">
+        <template #default="{ row }">{{ row.material_no }} · {{ row.material_name }}</template>
+      </ElTableColumn>
       <ElTableColumn prop="order_no" label="订单号" min-width="160" />
-      <ElTableColumn prop="department_name" label="部门" min-width="100" />
-      <ElTableColumn label="产品" min-width="190"><template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template></ElTableColumn>
-      <ElTableColumn prop="material_name" label="实际物料" min-width="170" />
-      <ElTableColumn label="类型" width="80"><template #default="{ row }">{{ row.direction === 'receipt' ? '到料' : '出料' }}</template></ElTableColumn>
       <ElTableColumn prop="quantity" label="数量" min-width="120" align="right" />
-      <ElTableColumn label="来自/到达" min-width="140"><template #default="{ row }">{{ row.direction === 'receipt' ? (row.source_department || '无来源到料') : (row.target_department || '终端出料') }}</template></ElTableColumn>
-      <ElTableColumn prop="ticket_no" label="交接票" min-width="140" />
       <ElTableColumn prop="actor_username" label="操作人" min-width="100" />
       <ElTableColumn prop="created_at" label="时间" min-width="180" />
       <ElTableColumn prop="note" label="备注" min-width="190" />
@@ -47,6 +52,6 @@ onBeforeUnmount(() => { active = false; revision += 1 })
   </section>
 </template>
 <style scoped>
-p { color: var(--erp-text-secondary); font-size: 13px; }
+p { color: var(--erp-text-secondary); font-size: 14px; }
 .el-pagination { margin-top: 16px; justify-content: flex-end; }
 </style>

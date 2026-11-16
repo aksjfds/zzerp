@@ -1,4 +1,4 @@
-import type { ComputedRef } from 'vue'
+import { onScopeDispose, type ComputedRef } from 'vue'
 import type { Router } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
@@ -27,6 +27,9 @@ export function useProductVersionActions(options: Options) {
     store,
     versionDirty,
   } = options
+
+  let active = true
+  onScopeDispose(() => { active = false })
 
   function replaceMode(mode: 'view' | 'edit') {
     return router.replace({
@@ -61,20 +64,36 @@ export function useProductVersionActions(options: Options) {
   async function createVersion() {
     if (!productId.value || form.revision === null || !selectedVersion.value) return
     if (versionDirty.value) {
-      ElMessage.warning('当前产品资料有未保存内容，请先保存后再创建新版本')
+      ElMessage.warning('当前产品资料有未保存内容，请先保存后再创建新外观版本')
       return
     }
+    const id = productId.value
+    const revision = form.revision
+    const source = selectedVersion.value
     try {
+      const { value } = await ElMessageBox.prompt('', '创建新外观版本', {
+        inputPlaceholder: '例如：V2、金色、亮银',
+        confirmButtonText: '创建',
+        cancelButtonText: '取消',
+        inputValidator: (value: string) => {
+          const text = value.trim()
+          return text.length >= 1 && text.length <= 100 || '外观版本须为1–100个字符'
+        },
+      })
+      if (!active || productId.value !== id || form.revision !== revision || selectedVersion.value !== source) return
       const product = await store.createVersion(
-        productId.value,
-        form.revision,
-        selectedVersion.value,
+        id,
+        revision,
+        value.trim(),
+        source,
       )
+      if (!active || productId.value !== id) return
       await reloadVersions()
       if (!await loadProductVersion(product.version)) return
-      ElMessage.success(`已创建 V${product.version}`)
+      ElMessage.success(`已创建 ${product.version_value}`)
     } catch (error) {
-      ElMessage.error(getApiErrorDetail(error)?.message || '创建新版本失败')
+      if (!active || error === 'cancel' || error === 'close') return
+      ElMessage.error(getApiErrorDetail(error)?.message || '创建新外观版本失败')
     }
   }
 

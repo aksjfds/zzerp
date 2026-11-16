@@ -1,25 +1,55 @@
-from typing import Literal
-
-from fastapi import APIRouter, Depends, Query, Response, status
+from typing import Annotated, Literal
 
 from authorization import require_any_permission
 from domain.permissions import (
-    DEPARTMENT_WORK_ORDER_OPERATE, DEPARTMENT_WORK_ORDER_VIEW,
-    PLAN_ADD, PLAN_CANCEL, PLAN_CONFIRM, PLAN_EDIT, PLAN_VIEW,
+    DEPARTMENT_WORK_ORDER_OPERATE,
+    DEPARTMENT_WORK_ORDER_VIEW,
+    PLAN_ADD,
+    PLAN_CANCEL,
+    PLAN_CONFIRM,
+    PLAN_EDIT,
+    PLAN_VIEW,
 )
+from fastapi import APIRouter, Depends, Query, Response, status
 from modules.planning.api import (
-    change_plan_status, create_plan, delete_plan, get_handoff_options, get_plan,
-    list_department_movements, list_handoff_tickets, list_movements, list_plans,
-    list_production_progress, list_work_orders, record_movement, update_plan,
+    change_plan_status,
+    create_plan,
+    delete_plan,
+    get_handoff_options,
+    get_plan,
+    get_plan_product_snapshot,
+    list_department_movements,
+    list_handoff_tickets,
+    list_movements,
+    list_plans,
+    list_production_progress,
+    list_work_orders,
+    record_movement,
+    update_plan,
 )
 from schemas.planning import (
-    DepartmentLedgerEnvelope, DepartmentMovementCreate, DepartmentMovementEnvelope,
-    DepartmentMovementListEnvelope, DepartmentWorkOrderListEnvelope,
-    HandoffOptionsResponse, HandoffTicketListEnvelope, ProductionPlanCreate,
-    ProductionPlanEnvelope, ProductionPlanListEnvelope, ProductionPlanUpdate,
+    DepartmentLedgerEnvelope,
+    DepartmentMovementCreate,
+    DepartmentMovementEnvelope,
+    DepartmentMovementListEnvelope,
+    DepartmentWorkOrderListEnvelope,
+    HandoffOptionsResponse,
+    HandoffTicketListEnvelope,
+    PlanProductSnapshotEnvelope,
+    ProductionPlanCreate,
+    ProductionPlanEnvelope,
+    ProductionPlanListEnvelope,
+    ProductionPlanUpdate,
     ProductionProgressEnvelope,
 )
 
+PlanReader = Annotated[dict, Depends(require_any_permission(PLAN_VIEW))]
+PlanCreator = Annotated[dict, Depends(require_any_permission(PLAN_ADD, csrf=True))]
+PlanEditor = Annotated[dict, Depends(require_any_permission(PLAN_EDIT, csrf=True))]
+PlanCanceller = Annotated[dict, Depends(require_any_permission(PLAN_CANCEL, csrf=True))]
+PlanConfirmer = Annotated[dict, Depends(require_any_permission(PLAN_CONFIRM, csrf=True))]
+WorkOrderReader = Annotated[dict, Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW))]
+MovementOperator = Annotated[dict, Depends(require_any_permission(DEPARTMENT_WORK_ORDER_OPERATE, csrf=True))]
 
 router = APIRouter(prefix="/production-plans", tags=["production-plans"])
 
@@ -28,7 +58,7 @@ router = APIRouter(prefix="/production-plans", tags=["production-plans"])
 def plan_list(
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
-    _: dict = Depends(require_any_permission(PLAN_VIEW)),
+    *, _: PlanReader,
 ):
     data, total = list_plans(page, page_size)
     return {"data": data, "total": total}
@@ -37,7 +67,7 @@ def plan_list(
 @router.post("", status_code=status.HTTP_201_CREATED, response_model=ProductionPlanEnvelope)
 def plan_create(
     payload: ProductionPlanCreate,
-    _: dict = Depends(require_any_permission(PLAN_ADD, csrf=True)),
+    *, _: PlanCreator,
 ):
     return {"data": create_plan(payload)}
 
@@ -51,7 +81,7 @@ def department_work_order_list(
     work_order_id: int | None = Query(default=None, gt=0),
     order_no: str | None = Query(default=None, max_length=200),
     product_keyword: str | None = Query(default=None, max_length=200),
-    user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
+    *, user: WorkOrderReader,
 ):
     data, total = list_work_orders(page, page_size, department_scope=user["department_code"], department_code=department_code,
                                   plan_id=plan_id, work_order_id=work_order_id, order_no=order_no, product_keyword=product_keyword)
@@ -63,7 +93,7 @@ def production_progress(
     page: int = Query(default=1, gt=0), page_size: int = Query(default=20, gt=0, le=50),
     order_no: str | None = Query(default=None, max_length=200),
     product_keyword: str | None = Query(default=None, max_length=200),
-    user: dict = Depends(require_any_permission(PLAN_VIEW)),
+    *, user: PlanReader,
 ):
     data, total = list_production_progress(page, page_size, department_scope=user["department_code"],
                                           order_no=order_no, product_keyword=product_keyword)
@@ -74,7 +104,7 @@ def production_progress(
 def department_ledger(
     page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=200),
     department_code: str | None = Query(default=None, max_length=50),
-    user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
+    *, user: WorkOrderReader,
 ):
     data,total = list_department_movements(page,page_size,department_scope=user["department_code"],department_code=department_code)
     return {"data":data,"total":total}
@@ -86,7 +116,7 @@ def handoff_ticket_list(
     unreceived: bool = False, order_no: str | None = Query(default=None, max_length=200),
     target_order_id: int | None = Query(default=None, gt=0),
     department_code: str | None = Query(default=None, max_length=50),
-    user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
+    *, user: WorkOrderReader,
 ):
     data,total = list_handoff_tickets(page,page_size,department_scope=user["department_code"],
         unreceived=unreceived,order_no=order_no,target_order_id=target_order_id,department_code=department_code)
@@ -94,7 +124,7 @@ def handoff_ticket_list(
 
 
 @router.get("/department-work-orders/{order_id}/handoff-options", response_model=HandoffOptionsResponse)
-def handoff_options(order_id: int, user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW))):
+def handoff_options(order_id: int, *, user: WorkOrderReader):
     return get_handoff_options(order_id, department_scope=user["department_code"])
 
 
@@ -104,7 +134,7 @@ def department_movement_list(
     page: int = Query(default=1, gt=0),
     page_size: int = Query(default=50, gt=0, le=200),
     input_material_node_id: str | None = Query(default=None, min_length=1, max_length=100),
-    user: dict = Depends(require_any_permission(PLAN_VIEW, DEPARTMENT_WORK_ORDER_VIEW)),
+    *, user: WorkOrderReader,
 ):
     data, total = list_movements(order_id, page, page_size, department_scope=user["department_code"],
                                  input_material_node_id=input_material_node_id)
@@ -115,13 +145,18 @@ def department_movement_list(
 def department_movement_create(
     order_id: int,
     payload: DepartmentMovementCreate,
-    user: dict = Depends(require_any_permission(DEPARTMENT_WORK_ORDER_OPERATE, csrf=True)),
+    *, user: MovementOperator,
 ):
     return {"data": record_movement(order_id, payload, department_scope=user["department_code"], actor_user_id=user["id"])}
 
 
+@router.get("/{plan_id}/products/{product_id}/snapshot", response_model=PlanProductSnapshotEnvelope)
+def plan_product_snapshot(plan_id: int, product_id: int, *, user: PlanReader):
+    return {"data": get_plan_product_snapshot(plan_id, product_id, department_scope=user["department_code"])}
+
+
 @router.get("/{plan_id}", response_model=ProductionPlanEnvelope)
-def plan_detail(plan_id: int, _: dict = Depends(require_any_permission(PLAN_VIEW))):
+def plan_detail(plan_id: int, *, _: PlanReader):
     return {"data": get_plan(plan_id)}
 
 
@@ -129,7 +164,7 @@ def plan_detail(plan_id: int, _: dict = Depends(require_any_permission(PLAN_VIEW
 def plan_update(
     plan_id: int,
     payload: ProductionPlanUpdate,
-    _: dict = Depends(require_any_permission(PLAN_EDIT, csrf=True)),
+    *, _: PlanEditor,
 ):
     return {"data": update_plan(plan_id, payload)}
 
@@ -138,7 +173,7 @@ def plan_update(
 def plan_cancel(
     plan_id: int,
     expected_revision: int = Query(gt=0),
-    user: dict = Depends(require_any_permission(PLAN_CANCEL, csrf=True)),
+    *, user: PlanCanceller,
 ):
     return {"data": change_plan_status(plan_id, "cancel", expected_revision, user["username"])}
 
@@ -148,7 +183,7 @@ def plan_status(
     plan_id: int,
     action: Literal["confirm", "unconfirm", "complete", "reopen"],
     expected_revision: int = Query(gt=0),
-    user: dict = Depends(require_any_permission(PLAN_CONFIRM, csrf=True)),
+    *, user: PlanConfirmer,
 ):
     return {"data": change_plan_status(plan_id, action, expected_revision, user["username"])}
 
@@ -157,7 +192,7 @@ def plan_status(
 def plan_delete(
     plan_id: int,
     expected_revision: int = Query(gt=0),
-    _: dict = Depends(require_any_permission(PLAN_EDIT, csrf=True)),
+    *, _: PlanEditor,
 ):
     delete_plan(plan_id, expected_revision)
     return Response(status_code=status.HTTP_204_NO_CONTENT)

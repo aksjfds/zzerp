@@ -3,12 +3,15 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from schemas.engineering import ProcessFlowPayload
+
 
 class PlanningModel(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
 
 class ProductionPlanItemCreate(PlanningModel):
+    source_version: int | None = Field(default=None, gt=0)
     order_quantity: int = Field(strict=True, gt=0, le=2147483647)
     product_id: int = Field(gt=0)
     production_quantity: int = Field(strict=True, gt=0, le=2147483647)
@@ -31,6 +34,9 @@ class ProductionPlanUpdate(ProductionPlanCreate):
 
 
 class ProductionPlanItemResponse(ProductionPlanItemCreate):
+    source_version: int
+    source_version_value: str
+    customer_code: str
     product_name: str
     factory_code: str
 
@@ -95,6 +101,8 @@ class DepartmentWorkOrderListEnvelope(PlanningModel):
 
 
 class ProgressMaterial(PlanningModel):
+    order_quantity: int
+    task_quantity: int
     material_node_id: str
     part_no: str
     part_name: str
@@ -102,6 +110,8 @@ class ProgressMaterial(PlanningModel):
 
 
 class ProgressProduct(PlanningModel):
+    order_quantity: int
+    task_quantity: int
     product_id: int
     factory_code: str
     product_name: str
@@ -139,6 +149,7 @@ class DepartmentMovementResponse(DepartmentMovementCreate):
     actor_username: str
     created_at: str
     ticket_no: str | None
+    material_no: str
     material_name: str
 
 
@@ -166,6 +177,7 @@ class HandoffTicketResponse(PlanningModel):
     order_no: str
     factory_code: str
     product_name: str
+    material_no: str
     material_name: str
     source_department: str
     target_department: str
@@ -201,3 +213,27 @@ class DepartmentLedgerMovement(DepartmentMovementResponse):
 class DepartmentLedgerEnvelope(PlanningModel):
     data: list[DepartmentLedgerMovement]
     total: int
+
+
+class SnapshotBomItemResponse(PlanningModel):
+    id: int
+    part_name: str
+    part_no: str
+    pcs: int
+    remark: str
+    sort_order: int
+
+
+class PlanProductSnapshotResponse(PlanningModel):
+    product_id: int
+    source_version: int
+    source_version_value: str
+    product_name: str
+    factory_code: str
+    customer_code: str
+    bom_items: list[SnapshotBomItemResponse]
+    process_flow: ProcessFlowPayload
+
+
+class PlanProductSnapshotEnvelope(PlanningModel):
+    data: PlanProductSnapshotResponse

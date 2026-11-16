@@ -1,18 +1,24 @@
 """Immutable product identity projections for collaborating modules."""
 
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 
+from domain.errors import DomainViolation
+from domain.process_flow import validate_process_flow
+from domain.product import ProductDesignSnapshot, ProductReference, SnapshotBomItem
 from pydantic import ValidationError
+from schemas.engineering import ProcessFlowPayload
 from sqlalchemy import select, tuple_
 from sqlalchemy.orm import Session
 
-from domain.errors import DomainViolation
-from domain.product import ProductReference
-from domain.process_flow import validate_process_flow
-from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
+from modules.engineering.persistence import (
+    Product,
+    ProductBom,
+    ProductProcessFlow,
+    ProductVersion,
+)
+from modules.engineering.routing import validate_nodes
 from modules.errors import DomainError
-from schemas.engineering import ProcessFlowPayload
 
 
 @dataclass(frozen=True, slots=True)
@@ -75,11 +81,13 @@ def resolve_plan_product(
 def get_product_design_readinesses(
     session: Session,
     products: Collection[Product],
+    requested_versions: Mapping[int, int] | None = None,
 ) -> dict[int, ProductDesignReadiness]:
     product_list = list(products)
     if not product_list:
         return {}
-    version_keys = {(product.id, product.version) for product in product_list}
+    requested_versions = requested_versions or {}
+    version_keys = {(product.id, requested_versions.get(product.id, product.version)) for product in product_list}
     bom_ids: dict[tuple[int, int], set[int]] = {key: set() for key in version_keys}
     for product_id, product_version, bom_id in session.execute(
         select(ProductBom.product_id, ProductBom.product_version, ProductBom.id).where(
@@ -104,31 +112,32 @@ def get_product_design_readinesses(
     }
     result: dict[int, ProductDesignReadiness] = {}
     for product in product_list:
-        key = (product.id, product.version)
+        key = (product.id, requested_versions.get(product.id, product.version))
         if not bom_ids[key]:
-            result[product.id] = ProductDesignReadiness(False, "当前版本缺少 BOM")
+            result[product.id] = ProductDesignReadiness(False, "所选外观版本缺少 BOM")
             continue
         flow = flows.get(key)
         if not flow or not flow.get("nodes"):
-            result[product.id] = ProductDesignReadiness(False, "当前版本缺少正式流程图")
+            result[product.id] = ProductDesignReadiness(False, "所选外观版本缺少正式流程图")
             continue
         try:
             validate_process_flow(ProcessFlowPayload.model_validate(flow))
         except (ValidationError, DomainViolation):
-            result[product.id] = ProductDesignReadiness(False, "当前版本正式流程图不完整")
+            result[product.id] = ProductDesignReadiness(False, "所选外观版本正式流程图不完整")
             continue
         result[product.id] = ProductDesignReadiness(True, "")
     return result
 
 
 __all__ = [
-    "ProductReference",
     "ProductDesignReadiness",
+    "ProductReference",
+    "capture_product_snapshot",
     "get_product_design_readinesses",
     "get_product_reference",
     "get_product_references",
-    "resolve_plan_product",
     "matching_product_ids",
+    "resolve_plan_product",
 ]
 
 
@@ -137,3 +146,31 @@ def matching_product_ids(session, keyword: str) -> set[int]:
     return set(session.scalars(select(Product.id).where(
         Product.factory_code.ilike(pattern) | Product.product_name.ilike(pattern),
     )))
+
+
+def capture_product_snapshot(
+    session: Session, product_id: int, customer_id: int, source_version: int | None = None,
+) -> ProductDesignSnapshot:
+    reference = resolve_plan_product(session, product_id, customer_id)
+    version = source_version or reference.version
+    items = list(session.scalars(select(ProductBom).where(
+        ProductBom.product_id == product_id, ProductBom.product_version == version,
+    ).order_by(ProductBom.sort_order)))
+    record = session.execute(select(ProductProcessFlow, ProductVersion.value).join(ProductVersion,
+        (ProductVersion.product_id == ProductProcessFlow.product_id)
+        & (ProductVersion.version == ProductProcessFlow.product_version)).where(
+            ProductProcessFlow.product_id == product_id, ProductProcessFlow.product_version == version,
+        )).first()
+    if not items or record is None:
+        raise DomainError("plan_snapshot_design_missing", "所选外观版本必须有 BOM 和正式流程才能创建计划")
+    stored_flow, version_value = record
+    flow = validate_nodes(session, product_id, version, ProcessFlowPayload.model_validate(stored_flow.flow_json))
+    validate_process_flow(flow)
+    return ProductDesignSnapshot(
+        product_id=product_id, source_version=version, source_version_value=version_value,
+        product_name=reference.product_name, factory_code=reference.factory_code,
+        customer_code=reference.customer_code,
+        bom_snapshot=tuple(SnapshotBomItem(item.id, item.part_name, item.part_no, item.pcs,
+                                           item.remark or "", item.sort_order) for item in items),
+        process_flow_snapshot=flow.model_dump(exclude_none=True),
+    )

@@ -65,6 +65,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
   async function createProduct(form: ProductForm) {
     return withSaving(async () => {
       const product = await createProductApi({
+        version_value: form.version_value.trim(),
         customer_id: form.customer_id,
         customer_name: form.customer_name,
         product_name: form.product_name,
@@ -137,12 +138,14 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
   async function createVersion(
     productId: number,
     expectedRevision: number,
+    versionValue: string,
     sourceVersion?: number,
   ) {
     return withSaving(async () => {
       const product = await createProductVersionApi(
         productId,
         expectedRevision,
+        versionValue,
         sourceVersion,
       )
       commitActive(product)
@@ -155,6 +158,7 @@ export const useEngineeringProductsStore = defineStore('engineeringProducts', ()
     const summary: ProductSummary = {
       id: product.id,
       version: product.version,
+      version_value: product.version_value,
       revision: product.revision,
       customer_id: product.customer_id,
       customer_name: product.customer_name,

@@ -26,7 +26,7 @@ export function setupRouterGuard(router: Router) {
       }
     }
 
-    if (to.path === '/login' && authStore.isLoggedIn) {
+    if (to.path === '/login' && authStore.isLoggedIn && !authStore.endingSession) {
       return getDefaultDashboardPath(authStore.user)
     }
 

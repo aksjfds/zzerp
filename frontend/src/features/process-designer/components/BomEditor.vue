@@ -78,7 +78,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
     <div class="section-heading">
       <div>
         <h2>BOM 明细</h2>
-        <p>{{ readonly ? '当前产品版本的配件、用量与备注。' : '配件名称、配件编号和用量必填；保存后可拖入流程图。' }}</p>
+
       </div>
       <div v-if="!readonly" class="heading-actions">
         <ElButton plain :disabled="saving" @click="addRow">新增配件</ElButton>
@@ -91,7 +91,7 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
         >保存 BOM</ElButton>
       </div>
     </div>
-    <ElTable v-table-column-widths="'engineering.bom-editor'" :data="modelValue" border table-layout="auto" :empty-text="readonly ? '当前版本暂无 BOM 明细' : '请新增至少一条 BOM 明细'">
+    <ElTable v-table-column-widths="'engineering.bom-editor'" :data="modelValue" table-layout="auto" :empty-text="readonly ? '当前外观版本暂无 BOM 明细' : '请新增至少一条 BOM 明细'">
       <ElTableColumn type="index" label="#" width="54" />
       <ElTableColumn label="配件名称" min-width="170">
         <template #default="{ row, $index }">
@@ -163,12 +163,12 @@ function fieldError(index: number, field: 'part_name' | 'part_no' | 'pcs') {
 </template>
 
 <style scoped>
-.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 14px; }
+.section-heading { display: flex; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 16px; }
 .heading-actions { display: flex; align-items: center; flex: none; gap: 8px; }
 .heading-actions :deep(.el-button + .el-button) { margin-left: 0; }
-h2 { margin: 0 0 5px; font-size: 18px; }
-p { margin: 0; color: var(--el-text-color-secondary); font-size: 13px; }
-.bom-editor :deep(.el-form-item) { margin-bottom: 14px; }
+h2 { margin: 0 0 5px; font-size: 20px; }
+p { margin: 0; color: var(--el-text-color-secondary); font-size: 14px; }
+.bom-editor :deep(.el-form-item) { margin-bottom: 16px; }
 .bom-editor :deep(.el-input-number) { width: 100%; }
 .readonly-value { color: var(--erp-text); overflow-wrap: anywhere; }
 .numeric { font-variant-numeric: tabular-nums; }

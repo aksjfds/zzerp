@@ -1,19 +1,19 @@
 export const erpMotion = {
   duration: {
-    control: 130,
+    control: 150,
     content: 180,
-    reveal: 360,
-    enter: 260,
+    reveal: 180,
+    enter: 180,
     exit: 200,
     dialogEnter: 200,
     dialogExit: 160,
   },
   easing: {
-    enter: 'cubic-bezier(0.22, 1, 0.36, 1)',
-    exit: 'cubic-bezier(0.4, 0, 1, 1)',
+    enter: 'ease-out',
+    exit: 'ease-out',
   },
-  stagger: 28,
-  maxStagger: 140,
+  stagger: 0,
+  maxStagger: 0,
 } as const
 
 export const erpMotionStyles = {

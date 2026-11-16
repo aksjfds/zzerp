@@ -38,13 +38,10 @@ const noteRequired = computed(() => excessIssue.value || (props.direction === 'r
   && (!props.ticket || (quantity.value !== undefined && quantity.value < props.ticket.quantity))))
 const quantityMax = computed(() => {
   let available: bigint | undefined
-  if (props.direction === 'receipt' && props.ticket) available = BigInt(props.ticket.quantity) - BigInt(props.ticket.received_quantity)
+  if (props.direction === 'receipt' && props.ticket) available = BigInt(props.ticket.quantity)
   if (available === undefined) return Number.MAX_SAFE_INTEGER
   return Number(available < 0n ? 0n : available > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : available)
 })
-const ticketRemaining = computed(() => props.ticket
-  ? (BigInt(props.ticket.quantity) - BigInt(props.ticket.received_quantity)).toString()
-  : '')
 async function loadOptions() {
   optionLoading.value = true; optionError.value = ''
   try {
@@ -85,7 +82,11 @@ async function save() {
     saveError.value = '请输入正整数数量'
     return
   }
-  if (quantity.value > quantityMax.value) { saveError.value = `本票剩余可到料 ${quantityMax.value}`; return }
+  if (props.direction === 'receipt' && props.ticket && BigInt(props.ticket.received_quantity) > 0n) {
+    saveError.value = '此交接票已登记到料，不能再次登记'
+    return
+  }
+  if (quantity.value > quantityMax.value) { saveError.value = `到料数量不能超过票面数量 ${quantityMax.value}`; return }
   if (noteRequired.value && !note.value.trim()) {
     saveError.value = excessIssue.value ? '本次出料超过部门停留数量，必须填写备注'
       : props.ticket ? '登记到料数量小于交接票数量，必须填写备注' : '无来源到料必须填写备注'
@@ -123,36 +124,35 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 
 <template>
   <ElDialog v-model="visible" :title="title" width="min(1000px, 96vw)" :before-close="beforeClose" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @closed="emit('close')">
-    <p>{{ order.order_no }} · {{ order.department_name }} · {{ order.part_name }}</p>
-    <p v-if="component">配件：{{ component.part_no }} · {{ component.part_name }}（仅此配件直接到料）</p>
-    <ElForm v-if="direction" label-width="80px" @submit.prevent="save">
+<div class="movement-context"><span>当前工单</span><h3>{{ order.part_name }}</h3><p><strong>{{ order.order_no }}</strong><span>{{ order.department_name }}</span></p></div>
+    <p v-if="component">配件：{{ component.part_no }} · {{ component.part_name }}</p>
+    <ElForm v-if="direction" label-position="top" @submit.prevent="save">
       <LoadErrorAlert :message="optionError" :loading="optionLoading" @retry="loadOptions" />
       <template v-if="direction === 'receipt'">
         <section v-if="ticket" class="ticket-summary" aria-label="交接票数量核对">
           <p>{{ ticket.ticket_no }} · {{ ticket.factory_code }} {{ ticket.product_name }} · {{ ticket.material_name }}</p>
           <p>{{ ticket.source_department }} → {{ ticket.target_department }}</p>
           <div class="ticket-quantity"><span>交接票数量</span><strong>{{ ticket.quantity }}</strong></div>
-          <div class="ticket-balance"><span>已到料：{{ ticket.received_quantity }}</span><span>剩余可到料：<b>{{ ticketRemaining }}</b></span></div>
+          <div class="ticket-balance"><span>已到料：{{ ticket.received_quantity }}</span></div>
         </section>
         <template v-else>
-          <p>本次为无来源到料，请确认工单与实际物料，并在备注中说明原因。</p>
+
           <ElFormItem label="实际物料"><ElSelect v-model="input" :disabled="saving || optionLoading || !!component" placeholder="请选择实际到料物料"><ElOption v-for="part in options?.external_inputs" :key="part.material_node_id" :label="part.label" :value="part.material_node_id" /></ElSelect></ElFormItem>
         </template>
       </template>
       <template v-else>
-        <p v-if="options">{{ options.available_issue_quantity === null ? '本部门直接出料，不受到料数量限制。' : `部门停留数量：${options.available_issue_quantity}（装配体按 BOM 齐套折算）；超过此数量出料必须填写备注。` }} <ElButton text :loading="optionLoading" :disabled="saving" @click="loadOptions">刷新停留量</ElButton></p>
+        <p v-if="options">部门停留数量：{{ options.available_issue_quantity ?? '不限' }} <ElButton text :loading="optionLoading" :disabled="saving" @click="loadOptions">刷新停留量</ElButton></p>
         <ElFormItem v-if="options?.targets.length" label="去向"><ElSelect v-model="target" :disabled="saving || optionLoading" style="width:100%"><ElOption v-for="item in options.targets" :key="item.id" :label="item.label" :value="item.id" /></ElSelect></ElFormItem>
-        <p v-else-if="options">终端出料：不生成内部交接票。</p>
+
       </template>
       <ElFormItem label="数量"><ElInputNumber v-model="quantity" :min="1" :max="Math.max(1, quantityMax)" :precision="0" :step="1" :disabled="saving || quantityMax <= 0" controls-position="right" /></ElFormItem>
       <ElFormItem label="备注" :required="noteRequired"><ElInput v-model="note" type="textarea" :rows="2" maxlength="1000" show-word-limit :disabled="saving" /></ElFormItem>
-      <p class="movement-note">累计交接到料不能超出票面数量；本次到料小于票面数量、无来源到料、或出料超过部门停留数量时备注必填。流水保存后不可修改或删除。</p>
       <LoadErrorAlert :message="saveError" title="登记未完成" retry-text="重试保存" :loading="saving" @retry="save" />
       <ElFormItem><ElButton type="primary" native-type="submit" :disabled="optionLoading || !!optionError || !options || quantityMax <= 0" :loading="saving">保存{{ direction === 'receipt' ? '到料' : '出料' }}</ElButton></ElFormItem>
     </ElForm>
     <template v-if="!direction">
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
-    <ElTable v-if="!error" v-loading="loading" :data="rows" border empty-text="暂无到料或出料流水">
+    <ElTable v-if="!error" v-loading="loading" :data="rows" empty-text="暂无到料或出料流水">
       <ElTableColumn label="类型" width="90"><template #default="{ row }">{{ row.direction === 'receipt' ? '到料' : '出料' }}</template></ElTableColumn>
       <ElTableColumn label="来自/到达" min-width="140"><template #default="{ row }">{{ row.direction === 'receipt' ? (row.source_department || '无来源到料') : (row.target_department || '终端出料') }}</template></ElTableColumn>
       <ElTableColumn prop="material_name" label="实际物料" min-width="150" />
@@ -168,11 +168,12 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 </template>
 
 <style scoped>
-.movement-note { color: var(--erp-text-secondary); font-size: 13px; line-height: 1.6; }
+
 .el-pagination { margin-top: 16px; justify-content: flex-end; }
-.ticket-summary { margin: 12px 0 20px; padding: 16px; border: 2px solid var(--erp-primary); border-radius: 8px; background: var(--erp-primary-soft); }
+.ticket-summary { margin: 16px 0 24px; padding: 24px; border: 1px solid var(--el-color-primary-light-8); border-radius: 12px; background: var(--erp-primary-soft); }
 .ticket-summary p { margin: 0 0 6px; overflow-wrap: anywhere; }
 .ticket-quantity { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 16px; margin: 12px 0; color: var(--erp-primary-strong); }
-.ticket-quantity strong { font-size: 36px; font-weight: 750; line-height: 1.3; overflow-wrap: anywhere; }
+.ticket-quantity strong { font-size: 36px; font-weight: 700; line-height: 1.3; overflow-wrap: anywhere; }
 .ticket-balance { display: flex; flex-wrap: wrap; gap: 8px 24px; font-variant-numeric: tabular-nums; }
+.movement-context { padding: 20px; margin-bottom: 24px; border: 1px solid var(--erp-border); border-radius: 8px; background: var(--erp-surface-muted); }.movement-context > span { font-size: 11px; color: var(--erp-text-muted); }.movement-context h3 { margin: 8px 0; font-size: 20px; font-weight: 600; }.movement-context p { display: flex; flex-wrap: wrap; gap: 16px; margin: 0; font-size: 13px; color: var(--erp-text-secondary); }.movement-context strong { font-weight: 500; }
 </style>

@@ -1,5 +1,5 @@
 import { service } from '@/api/request'
-import type { PlanAction, ProductionPlan, ProductionPlanInput } from '../domain/types'
+import type { PlanAction, PlanProductSnapshot, ProductionPlan, ProductionPlanInput } from '../domain/types'
 
 export async function queryPlans(page = 1, pageSize = 50) {
   const response = await service.get<{ data: ProductionPlan[]; total: number }>('/production-plans', {
@@ -32,6 +32,8 @@ export async function deletePlan(plan: ProductionPlan) {
 }
 
 export type PlanProduct = {
+  version_value: string
+  version: number
   id: number
   customer_id: number
   product_name: string
@@ -89,10 +91,14 @@ export async function queryDepartmentWorkOrders(params: {
 
 
 export type ProgressProduct = {
+  order_quantity: number
+  task_quantity: number
   product_id: number
   factory_code: string
   product_name: string
   materials: {
+    order_quantity: number
+    task_quantity: number
     material_node_id: string
     part_no: string
     part_name: string
@@ -131,6 +137,7 @@ export type DepartmentMovement = DepartmentMovementInput & {
   actor_username: string
   created_at: string
   ticket_no: string | null
+  material_no: string
   material_name: string
 }
 
@@ -166,7 +173,7 @@ export type HandoffOptions = {
 }
 export type HandoffTicket = {
   can_receive: boolean
-  id: number; ticket_no: string; order_no: string; material_name: string
+  id: number; ticket_no: string; order_no: string; material_no: string; material_name: string
   factory_code: string; product_name: string
   source_department: string; target_department: string; quantity: number; received_quantity: string
   created_at: string; note: string; target_work_order_id: number; plan_status: ProductionPlan['status']
@@ -176,4 +183,12 @@ export async function queryHandoffOptions(orderId: number) {
 }
 export async function queryHandoffTickets(params: { page: number; unreceived: boolean; order_no?: string; department_code?: string }) {
   return (await service.get<{ data: HandoffTicket[]; total: number }>('/production-plans/handoff-tickets', { params })).data
+}
+
+
+export async function queryPlanProductSnapshot(planId: number, productId: number) {
+  const response = await service.get<{ data: PlanProductSnapshot }>(
+    `/production-plans/${planId}/products/${productId}/snapshot`,
+  )
+  return response.data.data
 }

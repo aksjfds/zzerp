@@ -6,6 +6,7 @@ import type {
   ProcessFlow,
   ProductFields,
   ProductSummary,
+  ProductVersionChoice,
 } from '../domain/types'
 
 export async function queryProducts(page = 1, pageSize = 50, keyword?: string) {
@@ -23,19 +24,20 @@ export async function queryProduct(productId: number, version?: number) {
 }
 
 export async function queryProductVersions(productId: number) {
-  const response = await service.get<{ data: number[] }>(`/products/${productId}/versions`)
+  const response = await service.get<{ data: ProductVersionChoice[] }>(`/products/${productId}/versions`)
   return response.data.data
 }
 
 export async function createProductVersion(
   productId: number,
   expectedRevision: number,
+  versionValue: string,
   sourceVersion?: number,
 ) {
   const response = await service.post<{ data: EngineeringProduct }>(
     `/products/${productId}/versions`,
     undefined,
-    { params: { expected_revision: expectedRevision, source_version: sourceVersion } },
+    { params: { expected_revision: expectedRevision, version_value: versionValue, source_version: sourceVersion } },
   )
   return response.data.data
 }

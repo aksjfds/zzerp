@@ -67,9 +67,12 @@ CREATE TABLE product (
 CREATE TABLE product_version (
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
     version INT NOT NULL,
+    value TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     PRIMARY KEY (product_id, version),
-    CONSTRAINT ck_product_version_number CHECK (version > 0)
+    CONSTRAINT ck_product_version_number CHECK (version > 0),
+    CONSTRAINT ck_product_version_value CHECK (length(btrim(value)) BETWEEN 1 AND 100),
+    CONSTRAINT uq_product_version_value UNIQUE (product_id, value)
 );
 
 CREATE TABLE product_bom (
@@ -134,7 +137,7 @@ CREATE TABLE product_process_flow (
     CONSTRAINT ck_process_flow_version CHECK (product_version > 0)
 );
 
--- 计划头保存订单和状态，产品明细分别保存数量，不保存版本或物料快照。
+-- 计划头保存订单和状态，产品明细保存独立的外观版本/BOM/正式流程快照及数量。
 CREATE TABLE production_plan (
     id BIGSERIAL PRIMARY KEY,
     customer_id BIGINT NOT NULL REFERENCES customer(id),
@@ -168,11 +171,19 @@ CREATE TABLE production_plan_item (
     customer_id BIGINT NOT NULL,
     order_quantity INT NOT NULL,
     production_quantity INT NOT NULL,
+    source_version INT NOT NULL,
+    source_version_value TEXT NOT NULL,
+    product_name TEXT NOT NULL,
+    factory_code TEXT NOT NULL,
+    customer_code TEXT NOT NULL,
+    bom_snapshot JSONB NOT NULL,
+    process_flow_snapshot JSONB NOT NULL,
     PRIMARY KEY (production_plan_id, product_id),
     CONSTRAINT fk_production_plan_item_plan FOREIGN KEY (production_plan_id, customer_id)
         REFERENCES production_plan(id, customer_id) ON DELETE CASCADE,
-    CONSTRAINT fk_production_plan_item_product_customer FOREIGN KEY (product_id, customer_id)
-        REFERENCES product(id, customer_id),
+    CONSTRAINT fk_production_plan_item_product FOREIGN KEY (product_id) REFERENCES product(id),
+    CONSTRAINT ck_plan_item_source_version CHECK (source_version > 0),
+    CONSTRAINT ck_plan_item_version_value CHECK (length(btrim(source_version_value)) BETWEEN 1 AND 100),
     CONSTRAINT ck_production_plan_item_order_quantity CHECK (order_quantity > 0),
     CONSTRAINT ck_production_plan_item_production_quantity CHECK (production_quantity > 0)
 );
@@ -188,7 +199,7 @@ ALTER TABLE users ADD CONSTRAINT fk_users_department
     FOREIGN KEY (department_code) REFERENCES production_department(code);
 CREATE INDEX idx_users_department ON users(department_code);
 
--- 工单只保存安排数量和来源引用，不保存物料/路线/版本快照。
+-- 工程投影供当前工程图使用；生产工单引用计划自己的快照路线。
 CREATE TABLE product_department_route (
     product_id BIGINT NOT NULL REFERENCES product(id) ON DELETE CASCADE,
     material_node_id TEXT NOT NULL,
@@ -213,6 +224,23 @@ CREATE TABLE product_route_component (
 
 CREATE INDEX idx_product_route_component_bom ON product_route_component(product_bom_id);
 
+-- 计划独立快照路线，由应用从创建时复制的正式图生成；SQL不解析流程图。
+CREATE TABLE plan_product_route (
+    production_plan_id BIGINT NOT NULL,
+    product_id BIGINT NOT NULL,
+    material_node_id TEXT NOT NULL,
+    department_node_id TEXT NOT NULL,
+    department_code TEXT NOT NULL REFERENCES production_department(code),
+    part_no TEXT NOT NULL,
+    part_name TEXT NOT NULL,
+    unit_requirement INT NOT NULL,
+    PRIMARY KEY (production_plan_id, product_id, material_node_id, department_node_id),
+    CONSTRAINT fk_plan_product_route_item FOREIGN KEY (production_plan_id, product_id)
+        REFERENCES production_plan_item(production_plan_id, product_id) ON DELETE CASCADE,
+    CONSTRAINT ck_plan_product_route_quantity CHECK (unit_requirement > 0)
+);
+CREATE INDEX idx_plan_product_route_department ON plan_product_route(department_code, production_plan_id, product_id);
+
 CREATE TABLE department_work_order (
     id BIGSERIAL PRIMARY KEY,
     production_plan_id BIGINT NOT NULL,
@@ -225,8 +253,8 @@ CREATE TABLE department_work_order (
         FOREIGN KEY (production_plan_id, product_id)
         REFERENCES production_plan_item(production_plan_id, product_id) ON DELETE CASCADE,
     CONSTRAINT fk_department_work_order_route
-        FOREIGN KEY (product_id, material_node_id, department_node_id)
-        REFERENCES product_department_route(product_id, material_node_id, department_node_id),
+        FOREIGN KEY (production_plan_id, product_id, material_node_id, department_node_id)
+        REFERENCES plan_product_route(production_plan_id, product_id, material_node_id, department_node_id),
     CONSTRAINT uq_department_work_order_plan_route UNIQUE (production_plan_id, product_id, material_node_id, department_node_id),
     CONSTRAINT ck_department_work_order_quantity CHECK (task_quantity > 0)
 );
@@ -247,6 +275,7 @@ CREATE TABLE department_work_order_movement (
     input_material_node_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_department_movement_request UNIQUE (work_order_id, request_id),
+    CONSTRAINT uq_department_movement_ticket UNIQUE (ticket_id),
     CONSTRAINT ck_department_movement_direction CHECK (direction IN ('receipt', 'issue')),
     CONSTRAINT ck_department_movement_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
     CONSTRAINT ck_unattributed_receipt_note CHECK (receipt_source IS DISTINCT FROM 'external' OR note ~ '[^[:space:]]'),
@@ -258,7 +287,6 @@ CREATE TABLE department_work_order_movement (
 
 CREATE INDEX idx_department_movement_order ON department_work_order_movement(work_order_id, created_at, id);
 CREATE INDEX idx_department_movement_actor ON department_work_order_movement(actor_user_id);
-CREATE INDEX idx_department_movement_ticket ON department_work_order_movement(ticket_id);
 
 CREATE TABLE department_handoff_ticket (
     id BIGSERIAL PRIMARY KEY,
@@ -312,7 +340,6 @@ FOR EACH ROW EXECUTE FUNCTION validate_movement_receipt_link();
 CREATE FUNCTION validate_ticket_receipt() RETURNS TRIGGER AS $$
 DECLARE
     issue_quantity BIGINT;
-    received_quantity NUMERIC;
 BEGIN
     IF NEW.receipt_source = 'ticket' THEN
         SELECT issue.quantity INTO issue_quantity
@@ -325,10 +352,11 @@ BEGIN
         IF NEW.quantity < issue_quantity AND NEW.note !~ '[^[:space:]]' THEN
             RAISE EXCEPTION '登记到料数量小于交接票数量，必须填写备注' USING ERRCODE = '23514';
         END IF;
-        SELECT COALESCE(SUM(quantity), 0) INTO received_quantity
-        FROM department_work_order_movement WHERE ticket_id = NEW.ticket_id;
-        IF received_quantity + NEW.quantity > issue_quantity THEN
-            RAISE EXCEPTION '累计交接到料不能超过上游出料数量' USING ERRCODE = '23514';
+        IF EXISTS (SELECT 1 FROM department_work_order_movement WHERE ticket_id = NEW.ticket_id) THEN
+            RAISE EXCEPTION '此交接票已登记到料，不能再次登记' USING ERRCODE = '23514';
+        END IF;
+        IF NEW.quantity > issue_quantity THEN
+            RAISE EXCEPTION '交接到料不能超过上游出料数量' USING ERRCODE = '23514';
         END IF;
     END IF;
     IF NEW.receipt_source = 'ticket' AND NOT EXISTS (
@@ -484,14 +512,14 @@ FROM production_department;
 
 INSERT INTO customer (customer_name) VALUES ('Celine');
 
--- 工程示例包含 Z8737 及下方的 Z8738，末尾初始化草稿计划及部门工单。
+-- 工程示例包含 Z8737 及下方的 Z8738，末尾仅初始化草稿计划与产品明细，确认后由应用生成工单。
 INSERT INTO product (customer_id, product_name, factory_code, customer_code, version)
 SELECT customer.id, 'L24.4 椭圆搭扣', 'Z8737', 'FIG6850', 1
 FROM customer
 WHERE customer.customer_name = 'Celine';
 
-INSERT INTO product_version (product_id, version)
-SELECT id, 1 FROM product WHERE factory_code = 'Z8737';
+INSERT INTO product_version (product_id, version, value)
+SELECT id, 1, 'V1' FROM product WHERE factory_code = 'Z8737';
 
 INSERT INTO product_bom (product_id, product_version, part_name, part_no, pcs, remark, sort_order)
 SELECT product.id, 1, component.part_name, component.part_no, 1, NULL, component.sort_order
@@ -628,8 +656,8 @@ INSERT INTO product (customer_id, product_name, factory_code, customer_code, ver
 SELECT id, '双段装配搭扣', 'Z8738', 'DEMO-Z8738', 1
 FROM customer WHERE customer_name = 'Celine';
 
-INSERT INTO product_version (product_id, version)
-SELECT id, 1 FROM product WHERE factory_code = 'Z8738';
+INSERT INTO product_version (product_id, version, value)
+SELECT id, 1, 'V1' FROM product WHERE factory_code = 'Z8738';
 
 INSERT INTO product_bom (product_id, product_version, part_name, part_no, pcs, remark, sort_order)
 SELECT product.id, 1, component.part_name, component.part_no, 1, NULL, component.sort_order
@@ -724,31 +752,43 @@ SELECT customer.id, seed.order_no, 'draft', 1 FROM customer
 CROSS JOIN (VALUES ('ORDER-Z8737-0001'), ('ORDER-Z8737-0002')) AS seed(order_no)
 WHERE customer.customer_name = 'Celine';
 
-INSERT INTO production_plan_item (production_plan_id, product_id, customer_id, order_quantity, production_quantity)
-SELECT plan.id, product.id, plan.customer_id, item.order_quantity, item.production_quantity
+INSERT INTO production_plan_item (
+    production_plan_id, product_id, customer_id, order_quantity, production_quantity,
+    source_version, source_version_value, product_name, factory_code, customer_code, bom_snapshot, process_flow_snapshot
+)
+SELECT plan.id, product.id, plan.customer_id, item.order_quantity, item.production_quantity,
+       product.version, version.value, product.product_name, product.factory_code, product.customer_code,
+       (SELECT jsonb_agg(jsonb_build_object('id', bom.id, 'part_name', bom.part_name,
+            'part_no', bom.part_no, 'pcs', bom.pcs, 'remark', COALESCE(bom.remark, ''),
+            'sort_order', bom.sort_order) ORDER BY bom.sort_order)
+        FROM product_bom AS bom WHERE bom.product_id = product.id AND bom.product_version = product.version),
+       flow.flow_json
 FROM production_plan AS plan
 JOIN product ON product.customer_id = plan.customer_id
+JOIN product_process_flow AS flow ON flow.product_id = product.id AND flow.product_version = product.version
+JOIN product_version AS version ON version.product_id = product.id AND version.version = product.version
 JOIN (VALUES ('Z8737', 3000, 4000), ('Z8738', 1000, 1200))
     AS item(factory_code, order_quantity, production_quantity) ON item.factory_code = product.factory_code
 WHERE plan.order_no IN ('ORDER-Z8737-0001', 'ORDER-Z8737-0002');
 
--- 每个计划21张，共42张部门工单；装配体按各产品生产数量安排。
-INSERT INTO department_work_order (
-    production_plan_id, product_id, material_node_id, department_node_id, task_quantity
+-- 示例快照投影复制已有种子组成数据，不生成生产工单。
+INSERT INTO plan_product_route (
+    production_plan_id, product_id, material_node_id, department_node_id,
+    department_code, part_no, part_name, unit_requirement
 )
-SELECT plan.id, item.product_id, route.material_node_id, route.department_node_id,
-       item.production_quantity * CASE WHEN COUNT(part.id) > 1 THEN 1 ELSE MAX(part.pcs) END
-FROM production_plan AS plan
-JOIN production_plan_item AS item ON item.production_plan_id = plan.id
+SELECT item.production_plan_id, item.product_id, route.material_node_id, route.department_node_id,
+       route.department_code, string_agg(part.part_no, ' + ' ORDER BY part.part_no),
+       CASE WHEN COUNT(part.id) > 1 THEN '（' || string_agg(part.part_name, '+' ORDER BY part.part_no) || '）装配体'
+            ELSE MAX(part.part_name) END,
+       CASE WHEN COUNT(part.id) > 1 THEN 1 ELSE MAX(part.pcs) END
+FROM production_plan_item AS item
 JOIN product_department_route AS route ON route.product_id = item.product_id
-JOIN product_route_component AS component
-    ON component.product_id = route.product_id
-    AND component.material_node_id = route.material_node_id
-    AND component.department_node_id = route.department_node_id
+JOIN product_route_component AS component ON component.product_id = route.product_id
+    AND component.material_node_id = route.material_node_id AND component.department_node_id = route.department_node_id
 JOIN product_bom AS part ON part.id = component.product_bom_id
-WHERE plan.order_no IN ('ORDER-Z8737-0001', 'ORDER-Z8737-0002')
-GROUP BY plan.id, item.product_id, item.production_quantity,
-         route.material_node_id, route.department_node_id;
+GROUP BY item.production_plan_id, item.product_id, route.material_node_id, route.department_node_id, route.department_code;
+
+-- 草稿不预置部门工单；业务确认计划时由应用按正式路线生成。
 
 COMMIT;
 

@@ -1,7 +1,17 @@
-from fastapi import APIRouter, Depends, Query, status
+from typing import Annotated
 
+from application.engineering import (
+    create_product_version,
+    get_product,
+    replace_product_bom,
+    save_product_process_flow_draft,
+    update_product_info,
+    update_product_process_flow,
+)
 from authorization import require_any_permission
 from domain.permissions import PRODUCT_ADD, PRODUCT_EDIT, PRODUCT_VIEW
+from fastapi import APIRouter, Depends, Query, status
+from modules.engineering.api import create_product, list_product_versions, list_products
 from schemas.engineering import (
     CreateProductPayload,
     ProductDetailEnvelope,
@@ -11,16 +21,10 @@ from schemas.engineering import (
     UpdateProcessFlowPayload,
     UpdateProductPayload,
 )
-from modules.engineering.api import (
-    create_product,
-    list_product_versions,
-    list_products,
-)
-from application.engineering import (
-    create_product_version, get_product, replace_product_bom,
-    save_product_process_flow_draft, update_product_info,
-    update_product_process_flow,
-)
+
+ProductViewer = Annotated[dict, Depends(require_any_permission(PRODUCT_VIEW))]
+ProductCreator = Annotated[dict, Depends(require_any_permission(PRODUCT_ADD, csrf=True))]
+ProductEditor = Annotated[dict, Depends(require_any_permission(PRODUCT_EDIT, csrf=True))]
 
 
 router = APIRouter(prefix="/products", tags=["engineering-products"])
@@ -32,7 +36,7 @@ def product_list(
     page_size: int = Query(default=50, gt=0, le=200),
     keyword: str | None = Query(default=None, max_length=200),
     customer_id: int | None = Query(default=None, gt=0),
-    _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
+    *, _user: ProductViewer,
 ):
     data, total = list_products(page, page_size, keyword, customer_id)
     return {"data": data, "total": total}
@@ -42,7 +46,7 @@ def product_list(
 def product_detail(
     product_id: int,
     version: int | None = Query(default=None, gt=0),
-    _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
+    *, _user: ProductViewer,
 ):
     return {"data": get_product(product_id, version)}
 
@@ -50,7 +54,7 @@ def product_detail(
 @router.get("/{product_id}/versions", response_model=ProductVersionsEnvelope)
 def product_versions(
     product_id: int,
-    _user: dict = Depends(require_any_permission(PRODUCT_VIEW)),
+    *, _user: ProductViewer,
 ):
     return {"data": list_product_versions(product_id)}
 
@@ -59,10 +63,11 @@ def product_versions(
 def product_version_create(
     product_id: int,
     expected_revision: int = Query(gt=0),
+    version_value: str = Query(min_length=1, max_length=100),
     source_version: int | None = Query(default=None, gt=0),
-    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+    *, _user: ProductEditor,
 ):
-    return {"data": create_product_version(product_id, expected_revision, source_version)}
+    return {"data": create_product_version(product_id, expected_revision, version_value, source_version)}
 
 
 @router.post(
@@ -72,7 +77,7 @@ def product_version_create(
 )
 def product_create(
     payload: CreateProductPayload,
-    _user: dict = Depends(require_any_permission(PRODUCT_ADD, csrf=True)),
+    *, _user: ProductCreator,
 ):
     return {"data": create_product(payload)}
 
@@ -81,7 +86,7 @@ def product_create(
 def product_update(
     product_id: int,
     payload: UpdateProductPayload,
-    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+    *, _user: ProductEditor,
 ):
     return {"data": update_product_info(product_id, payload)}
 
@@ -90,7 +95,7 @@ def product_update(
 def product_bom_replace(
     product_id: int,
     payload: ReplaceBomPayload,
-    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+    *, _user: ProductEditor,
 ):
     return {
         "data": replace_product_bom(
@@ -106,7 +111,7 @@ def product_bom_replace(
 def product_process_flow_update(
     product_id: int,
     payload: UpdateProcessFlowPayload,
-    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+    *, _user: ProductEditor,
 ):
     return {
         "data": update_product_process_flow(
@@ -122,7 +127,7 @@ def product_process_flow_update(
 def product_process_flow_draft_save(
     product_id: int,
     payload: UpdateProcessFlowPayload,
-    _user: dict = Depends(require_any_permission(PRODUCT_EDIT, csrf=True)),
+    *, _user: ProductEditor,
 ):
     return {
         "data": save_product_process_flow_draft(

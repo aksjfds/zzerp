@@ -1,8 +1,5 @@
 from database import SessionLocal
-from modules.engineering.collaboration_contract import EngineeringCollaborators
-from modules.engineering.editability import (
-    is_base_info_editable,
-)
+
 from modules.engineering.mapper import (
     serialize_product_detail,
     serialize_product_summary,
@@ -27,21 +24,22 @@ def list_products(
         )
         customer_names = customer_names_by_ids(
             session,
-            {product.customer_id for product, _ in products_with_counts},
+            {product.customer_id for product, _, _ in products_with_counts},
         )
         readiness = get_product_design_readinesses(
             session,
-            [product for product, _ in products_with_counts],
+            [product for product, _, _ in products_with_counts],
         )
         data = [
             serialize_product_summary(
                 product,
                 bom_count,
                 customer_names[product.customer_id],
+                version_value=value,
                 design_ready=readiness[product.id].ready,
                 design_ready_reason=readiness[product.id].reason,
             )
-            for product, bom_count in products_with_counts
+            for product, bom_count, value in products_with_counts
         ]
         return data, repository.count(keyword, customer_id)
 
@@ -49,7 +47,6 @@ def list_products(
 def get_product(
     product_id: int,
     version: int | None,
-    collaborators: EngineeringCollaborators,
 ) -> dict:
     with SessionLocal() as session:
         product = EngineeringProductRepository(session).get(product_id)
@@ -60,7 +57,7 @@ def get_product(
         if requested_version not in available_versions:
             raise product_not_found()
         customer_names = customer_names_by_ids(session, {product.customer_id})
-        readiness = get_product_design_readinesses(session, [product])[product.id]
+        readiness = get_product_design_readinesses(session, [product], {product.id: requested_version})[product.id]
         return serialize_product_detail(
             session,
             product,
@@ -69,21 +66,15 @@ def get_product(
             customer_name=customer_names[product.customer_id],
             design_ready=readiness.ready,
             design_ready_reason=readiness.reason,
-            base_info_editable=is_base_info_editable(
-                session,
-                product_id,
-                collaborators,
-            ),
+            base_info_editable=True,
             version_editable=True,
         )
 
 
-def list_product_versions(product_id: int) -> list[int]:
+def list_product_versions(product_id: int) -> list[dict[str, int | str]]:
     with SessionLocal() as session:
         product = EngineeringProductRepository(session).get(product_id)
         if product is None:
             raise product_not_found()
-        return sorted(
-            (item.version for item in product.versions),
-            reverse=True,
-        )
+        return [{"version": item.version, "value": item.value}
+                for item in sorted(product.versions, key=lambda item: item.version, reverse=True)]

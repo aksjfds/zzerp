@@ -1,10 +1,9 @@
-"""Direct transfer destinations from engineering."""
+"""Direct transfer destinations derived from an immutable graph value."""
 
 from collections import defaultdict
 from dataclasses import dataclass
 
 from domain.process_flow import material_routes
-from modules.errors import DomainError
 
 
 @dataclass(frozen=True)
@@ -32,8 +31,3 @@ def resolve_handoff_routes(flow) -> HandoffRoutes:
                         (target.material_node_id, target.department_node_id))
     return HandoffRoutes({key: frozenset(value) for key, value in successors.items()})
 
-
-def ensure_handoffs_preserved(flow, referenced_pairs):
-    routes = resolve_handoff_routes(flow)
-    if any((tm, td) not in routes.successors.get((sm, sd), frozenset()) for sm,sd,tm,td in referenced_pairs):
-        raise DomainError("handoff_route_in_use", "路线已有交接票，不能断开来源与目标的直接关系", status_code=409)

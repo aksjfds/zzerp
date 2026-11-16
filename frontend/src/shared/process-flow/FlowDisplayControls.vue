@@ -28,7 +28,7 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.flow-display-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 8px 10px; border-bottom: 1px solid var(--erp-border); background: var(--erp-surface-muted); }
+.flow-display-controls { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--erp-border); background: var(--erp-surface); }
 .display-control-group { display: flex; align-items: center; gap: 4px; color: var(--erp-text-secondary); font-size: 12px; }
 .display-control-group span { margin-inline: 4px; }
 button { display: grid; width: 32px; height: 32px; place-items: center; padding: 0; border: 1px solid var(--erp-border); border-radius: var(--erp-radius-sm); color: var(--erp-text); background: var(--erp-surface); cursor: pointer; font-size: 16px; }

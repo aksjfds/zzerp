@@ -12,6 +12,8 @@ type ProgressRow = {
   key: string
   label: string
   part_no?: string
+  order_quantity?: number
+  task_quantity?: number
   order?: DepartmentWorkOrder
   children?: ProgressRow[]
 }
@@ -28,9 +30,11 @@ const tables = computed(() => plans.value.map(plan => {
   const rows: ProgressRow[] = plan.products.map(product => ({
     key: `product:${product.product_id}`,
     label: `${product.factory_code} · ${product.product_name}`,
+    order_quantity: product.order_quantity, task_quantity: product.task_quantity,
     children: product.materials.map(material => ({
       key: `product:${product.product_id}:material:${material.material_node_id}`,
       label: material.part_name, part_no: material.part_no,
+      order_quantity: material.order_quantity, task_quantity: material.task_quantity,
       children: material.work_orders.map(order => ({
         key: `order:${order.id}`, label: order.department_name, order,
       })),
@@ -78,36 +82,36 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <ElForm inline @submit.prevent="search">
+    <ElForm class="query-toolbar" label-position="top" inline @submit.prevent="search">
       <ElFormItem label="订单号"><ElInput v-model="filters.order_no" clearable maxlength="200" /></ElFormItem>
       <ElFormItem label="产品"><ElInput v-model="filters.product_keyword" clearable placeholder="厂编或产品名称" maxlength="200" /></ElFormItem>
       <ElFormItem><ElButton type="primary" native-type="submit">查询</ElButton><ElButton @click="clear">清空</ElButton><ElButton :loading="loading" @click="load">刷新</ElButton></ElFormItem>
     </ElForm>
-    <p class="progress-note">每个订单独立展示：产品 → 配件或装配体 → 部门工单。部门工单沿正式流程排列；分支依图中顺序展示，回路从入口遍历，每张工单仅列一次。装配体到料按实际物料分项显示。</p>
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
     <div v-if="!error" v-loading="loading">
-    <ElEmpty v-if="!loading && !tables.length" description="暂无生产进度" />
+    <ElEmpty v-if="!loading && !tables.length" />
     <section v-for="table in tables" :key="table.production_plan_id" class="order-progress" :aria-label="`订单 ${table.order_no}`">
-    <h3>{{ table.customer_name }} · 订单 {{ table.order_no }}</h3>
-    <ElTable :data="table.rows" row-key="key" :expand-row-keys="table.expandedProductKeys" border table-layout="auto" empty-text="暂无生产进度">
+    <header class="order-heading"><div><span>客户订单</span><h3>{{ table.order_no }}</h3></div><span>{{ table.customer_name }}</span><ElTag type="info">{{ table.rows.length }} 项产品</ElTag></header>
+    <ElTable :data="table.rows" row-key="key" :expand-row-keys="table.expandedProductKeys" table-layout="auto" empty-text="暂无生产进度">
       <ElTableColumn prop="label" label="产品／配件或装配体／部门工单" min-width="330" />
       <ElTableColumn prop="part_no" label="配件／组成编号" min-width="180" />
-      <ElTableColumn label="订单数量" width="110" align="right"><template #default="{ row }">{{ row.order?.order_quantity ?? '—' }}</template></ElTableColumn>
-      <ElTableColumn label="任务数量" width="110" align="right"><template #default="{ row }">{{ row.order?.task_quantity ?? '—' }}</template></ElTableColumn>
-      <ElTableColumn label="累积到料/累计出料" min-width="230"><template #default="{ row }">{{ row.order ? `${row.order.received_quantity}/${row.order.issued_quantity}` : '—' }}</template></ElTableColumn>
+      <ElTableColumn label="订单数量" width="110" align="right"><template #default="{ row }"><span>{{ row.order_quantity ?? '' }}</span></template></ElTableColumn>
+      <ElTableColumn label="任务数量" width="110" align="right"><template #default="{ row }"><span>{{ row.task_quantity ?? '' }}</span></template></ElTableColumn>
+      <ElTableColumn label="累积到料/累计出料" min-width="230"><template #default="{ row }"><span>{{ row.order ? `${row.order.received_quantity}/${row.order.issued_quantity}` : '' }}</span></template></ElTableColumn>
       <ElTableColumn label="查看" width="90" :fixed="compact ? false : 'right'"><template #default="{ row }"><ElButton v-if="row.order" link type="primary" @click="movementOrder = row.order">流水</ElButton></template></ElTableColumn>
     </ElTable>
     </section>
     </div>
-    <p v-if="!error" class="progress-note">按订单分页，每页最多20个订单，每个表格只展示该订单在筛选范围内的产品及全部部门工单。</p>
     <ElPagination v-if="!error" v-model:current-page="page" :total="total" :page-size="20" layout="prev, pager, next, total" @current-change="load" />
     <DepartmentMovementDialog v-if="movementOrder" :key="movementOrder.id" :order="movementOrder" @close="movementOrder = null" />
   </section>
 </template>
 
 <style scoped>
-.progress-note { color: var(--erp-text-secondary); font-size: 13px; line-height: 1.6; }
+
 .el-pagination { display: flex; justify-content: flex-end; margin-top: 16px; }
-.order-progress { min-width: 0; margin: 20px 0; }
-.order-progress h3 { margin: 0 0 12px; font-size: 16px; overflow-wrap: anywhere; }
+.order-progress { min-width: 0; margin: 24px 0; padding: 16px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); }
+.order-progress h3 { margin: 0 0 12px; font-size: 20px; font-weight: 600; line-height: 1.4; overflow-wrap: anywhere; }
+.order-heading { display: flex; flex-wrap: wrap; align-items: center; gap: 16px; margin-bottom: 20px; }.order-heading > div { margin-right: auto; }.order-heading > div > span { font-size: 11px; color: var(--erp-text-muted); }.order-heading h3 { margin: 4px 0 0; }.order-heading > span { color: var(--erp-text-secondary); font-size: 14px; }
+
 </style>

@@ -3,12 +3,22 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, Text, TIMESTAMP, UniqueConstraint, text
+from database import Base
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-
-from database import Base
-
 
 JSON_TYPE = JSON(none_as_null=True).with_variant(
     JSONB(none_as_null=True),
@@ -91,6 +101,8 @@ class ProductVersion(Base):
     __tablename__ = "product_version"
     __table_args__ = (
         CheckConstraint("version > 0", name="ck_product_version_number"),
+        CheckConstraint("length(btrim(value)) BETWEEN 1 AND 100", name="ck_product_version_value"),
+        UniqueConstraint("product_id", "value", name="uq_product_version_value"),
     )
 
     product_id: Mapped[int] = mapped_column(
@@ -99,6 +111,7 @@ class ProductVersion(Base):
         primary_key=True,
     )
     version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    value: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP")
     )

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { DEPARTMENT_WORK_ORDER_OPERATE } from '@/permission/constants'
 import { getApiErrorDetail } from '@/api/request'
@@ -13,7 +13,12 @@ const rows = ref<HandoffTicket[]>([]), total = ref(0), page = ref(1)
 const unreceived = ref(true), keyword = ref(''), loading = ref(false), error = ref('')
 const ticket = ref<HandoffTicket>(), order = ref<DepartmentWorkOrder>()
 const opening = ref(false)
-function remaining(row: HandoffTicket) { return (BigInt(row.quantity) - BigInt(row.received_quantity)).toString() }
+const canRegisterReceipt = computed(() => Boolean(auth.user?.department_code)
+  && auth.hasPermission(DEPARTMENT_WORK_ORDER_OPERATE))
+function canReceive(row: HandoffTicket) {
+  return canRegisterReceipt.value && row.can_receive && BigInt(row.received_quantity) === 0n
+    && row.plan_status === 'confirmed'
+}
 let active = true, revision = 0
 async function load() {
   const current = ++revision; loading.value = true; error.value = ''; rows.value = []
@@ -25,9 +30,8 @@ async function load() {
   } catch (cause) { if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '交接票加载失败' }
   finally { if (active && current === revision) loading.value = false }
 }
-function search() { page.value = 1; void load() }
 async function receive(row: HandoffTicket) {
-  if (opening.value) return
+  if (opening.value || !canReceive(row)) return
   opening.value = true; error.value = ''
   try {
     const result = await queryDepartmentWorkOrders({ page: 1, work_order_id: row.target_work_order_id })
@@ -44,34 +48,38 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 </script>
 <template>
   <section class="ticket-panel">
-    <h3>交接票到料</h3>
-    <ElForm inline @submit.prevent="search">
-      <ElFormItem label="订单号"><ElInput v-model="keyword" clearable maxlength="200" /></ElFormItem>
-      <ElFormItem><ElCheckbox v-model="unreceived" @change="search">仅未登记到料</ElCheckbox></ElFormItem>
-      <ElFormItem><ElButton native-type="submit" :loading="loading">查询/刷新</ElButton></ElFormItem>
-    </ElForm>
-    <p>接收过的票可继续分批到料，取消“仅未登记到料”即可查看；累计到料不得超过对应出料数。</p>
+    <div class="collection-heading">
+      <div><h2>物料交接</h2></div>
+    </div>
+
+
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
-    <ElTable v-if="!error" v-loading="loading" :data="rows" border empty-text="暂无符合条件的交接票">
-      <ElTableColumn prop="ticket_no" label="交接票" min-width="140" />
-      <ElTableColumn prop="order_no" label="订单号" min-width="150" />
-      <ElTableColumn label="产品" min-width="180"><template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template></ElTableColumn>
-      <ElTableColumn prop="material_name" label="实际来料" min-width="160" />
+    <ElTable v-if="!error" v-loading="loading" :data="rows" row-key="id" empty-text="暂无符合条件的交接票">
       <ElTableColumn prop="source_department" label="来自" min-width="100" />
-      <ElTableColumn prop="target_department" label="到达" min-width="100" />
-      <ElTableColumn prop="quantity" label="上游出料" width="120" />
-      <ElTableColumn prop="received_quantity" label="已登记到料" min-width="130" />
-      <ElTableColumn label="剩余可到料" min-width="130"><template #default="{ row }">{{ remaining(row) }}</template></ElTableColumn>
-      <ElTableColumn prop="created_at" label="出料时间" min-width="180" />
+      <ElTableColumn label="产品" min-width="180">
+        <template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template>
+      </ElTableColumn>
+      <ElTableColumn label="配件/装配体" min-width="240">
+        <template #default="{ row }">{{ row.material_no }} · {{ row.material_name }}</template>
+      </ElTableColumn>
+      <ElTableColumn prop="order_no" label="订单号" min-width="150" />
+      <ElTableColumn prop="quantity" label="数量" width="120" align="right" />
+      <ElTableColumn prop="created_at" label="时间" min-width="180" />
+      <ElTableColumn label="操作" width="110">
+        <template #default="{ row }">
+          <ElButton v-if="canRegisterReceipt && row.can_receive && BigInt(row.received_quantity) === 0n" link type="primary" :disabled="loading || opening || !canReceive(row)" @click="receive(row)">登记到料</ElButton>
+          <span v-else>—</span>
+        </template>
+      </ElTableColumn>
       <ElTableColumn prop="note" label="备注" min-width="140" />
-      <ElTableColumn v-if="auth.user?.department_code && auth.hasPermission(DEPARTMENT_WORK_ORDER_OPERATE)" label="操作" width="100"><template #default="{ row }"><ElButton v-if="row.can_receive" link type="primary" :disabled="row.plan_status !== 'confirmed' || opening || remaining(row) === '0'" @click="receive(row)">登记到料</ElButton></template></ElTableColumn>
     </ElTable>
     <ElPagination v-model:current-page="page" :total="total" :page-size="50" layout="prev, pager, next, total" @current-change="load" />
     <DepartmentMovementDialog v-if="ticket && order" :order="order" direction="receipt" :ticket="ticket" @close="ticket = undefined; order = undefined" @changed="changed" />
   </section>
 </template>
 <style scoped>
-.ticket-panel { margin-top: 24px; }
-p { color: var(--erp-text-secondary); font-size: 13px; }
+.ticket-panel { min-width: 0; padding: 24px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); }
+p { color: var(--erp-text-secondary); font-size: 14px; }
 .el-pagination { margin-top: 14px; }
+@media (max-width: 760px) { .ticket-panel { padding: 16px; } }
 </style>

@@ -1,6 +1,5 @@
 from modules.contracts import ModuleDescriptor
 
-
 MODULE = ModuleDescriptor(
     name="engineering",
     public_api="modules.engineering.api",
@@ -20,6 +19,5 @@ MODULE = ModuleDescriptor(
         "modules.engineering.command_api",
         "modules.engineering.model_api",
         "modules.engineering.product_reference_api",
-        "modules.engineering.route_api",
     ),
 )

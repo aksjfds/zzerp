@@ -1,23 +1,30 @@
 from domain.time import business_iso
-from modules.engineering.product_reference_api import get_product_references
-from modules.sales.customer_api import customer_names_by_ids
 from sqlalchemy import select
+from sqlalchemy.orm import load_only
+
 from modules.planning.persistence import ProductionPlanItem
+from modules.sales.customer_api import customer_names_by_ids
 
 
 def serialize_plans(session, plans) -> list[dict]:
     if not plans:
         return []
-    items = list(session.scalars(select(ProductionPlanItem)
+    items = list(session.scalars(select(ProductionPlanItem).options(load_only(
+            ProductionPlanItem.production_plan_id, ProductionPlanItem.product_id,
+            ProductionPlanItem.product_name, ProductionPlanItem.factory_code, ProductionPlanItem.customer_code,
+            ProductionPlanItem.source_version, ProductionPlanItem.source_version_value, ProductionPlanItem.order_quantity, ProductionPlanItem.production_quantity))
         .where(ProductionPlanItem.production_plan_id.in_({plan.id for plan in plans}))
         .order_by(ProductionPlanItem.product_id)))
-    products = get_product_references(session, {item.product_id for item in items})
     by_plan = {}
     for item in items:
-        product = products[item.product_id]
-        by_plan.setdefault(item.production_plan_id, []).append(dict(product_id=item.product_id,
-            product_name=product.product_name, factory_code=product.factory_code,
-            order_quantity=item.order_quantity, production_quantity=item.production_quantity))
+        product = item
+        by_plan.setdefault(item.production_plan_id, []).append({
+            "product_id": item.product_id, "product_name": product.product_name,
+            "factory_code": product.factory_code, "source_version": item.source_version,
+            "source_version_value": item.source_version_value,
+            "customer_code": item.customer_code, "order_quantity": item.order_quantity,
+            "production_quantity": item.production_quantity,
+        })
     customers = customer_names_by_ids(session, {plan.customer_id for plan in plans})
     return [
         {

@@ -8,6 +8,7 @@ export const useAuthStore = defineStore('auth', () => {
   const user = ref<UserProfile | null>(null)
   const loading = ref(false)
   const initialized = ref(false)
+  const endingSession = ref(false)
 
   const isLoggedIn = computed(() => Boolean(user.value))
   const permissions = computed(() => user.value?.permissions ?? [])
@@ -45,12 +46,18 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function logout() {
+  async function logout(leave?: () => Promise<boolean>) {
+    endingSession.value = true
     try {
-      await logoutApi()
+      if (leave && !await leave()) return
+      try {
+        await logoutApi()
+      } finally {
+        user.value = null
+        initialized.value = true
+      }
     } finally {
-      user.value = null
-      initialized.value = true
+      endingSession.value = false
     }
   }
 
@@ -70,6 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   return {
     clearSession,
+    endingSession,
     hasPermission,
     initialized,
     isLoggedIn,

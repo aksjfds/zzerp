@@ -1,12 +1,17 @@
 from uuid import uuid4
 
+from domain.models import BomItemCommand
+from schemas.engineering import ProcessFlowPayload
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from domain.models import BomItemCommand
-from modules.engineering.persistence import Product, ProductBom, ProductProcessFlow
+from modules.engineering.persistence import (
+    Product,
+    ProductBom,
+    ProductProcessFlow,
+    ProductVersion,
+)
 from modules.engineering.routing import synchronize_routes
-from schemas.engineering import ProcessFlowPayload
 from modules.sales.customer_api import customer_ids_matching_name
 
 
@@ -20,10 +25,11 @@ class EngineeringProductRepository:
         limit: int = 50,
         keyword: str | None = None,
         customer_id: int | None = None,
-    ) -> list[tuple[Product, int]]:
+    ) -> list[tuple[Product, int, str]]:
         condition = self._search_condition(keyword)
         statement = (
-            select(Product, func.count(ProductBom.id))
+            select(Product, func.count(ProductBom.id), ProductVersion.value)
+            .join(ProductVersion, (ProductVersion.product_id == Product.id) & (ProductVersion.version == Product.version))
             .outerjoin(
                 ProductBom,
                 (ProductBom.product_id == Product.id)
@@ -35,12 +41,12 @@ class EngineeringProductRepository:
                 if customer_id is not None
                 else True,
             )
-            .group_by(Product.id)
+            .group_by(Product.id, ProductVersion.value)
             .order_by(Product.updated_at.desc(), Product.id.desc())
             .offset(offset)
             .limit(limit)
         )
-        return [(product, count) for product, count in self.session.execute(statement).all()]
+        return [(product, count, value) for product, count, value in self.session.execute(statement).all()]
 
     def count(self, keyword: str | None = None, customer_id: int | None = None) -> int:
         return self.session.scalar(

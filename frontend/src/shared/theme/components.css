@@ -1,15 +1,15 @@
 :root .el-button {
   --el-button-outline-color: var(--erp-primary);
   min-height: var(--el-component-size);
-  padding: 8px 14px;
-  border-radius: 6px;
-  font-weight: 550;
+  padding: 8px 16px;
+  border-radius: 8px;
+  font-weight: 500;
   letter-spacing: 0;
 }
 :root .el-button--small { min-height: 28px; padding: 5px 10px; }
 :root .el-button.is-link { min-height: 28px; padding: 3px 2px; }
 :root .el-button.is-text { min-height: 32px; }
-:root .el-button:not(.is-disabled):focus-visible { outline: 2px solid var(--erp-primary); outline-offset: 3px; }
+:root .el-button:not(.is-disabled):focus-visible { outline: 2px solid var(--erp-focus); outline-offset: 2px; }
 :root .el-button--primary { --el-button-hover-bg-color: var(--erp-primary-strong); --el-button-hover-border-color: var(--erp-primary-strong); --el-button-hover-link-text-color: var(--erp-primary-strong); }
 :root .el-button--success { --el-button-hover-bg-color: var(--erp-success-strong); --el-button-hover-border-color: var(--erp-success-strong); --el-button-hover-link-text-color: var(--erp-success-strong); }
 :root .el-button--warning { --el-button-hover-bg-color: var(--erp-warning-strong); --el-button-hover-border-color: var(--erp-warning-strong); --el-button-hover-link-text-color: var(--erp-warning-strong); }
@@ -20,7 +20,7 @@
 :root .el-input__wrapper,
 :root .el-select__wrapper,
 :root .el-textarea__inner {
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--erp-surface);
   box-shadow: inset 0 0 0 1px var(--erp-border-strong);
 }
@@ -29,7 +29,7 @@
 :root .el-textarea__inner:hover { box-shadow: inset 0 0 0 1px var(--erp-text-secondary); }
 :root .el-input__wrapper.is-focus,
 :root .el-select__wrapper.is-focused,
-:root .el-textarea__inner:focus { box-shadow: inset 0 0 0 2px var(--erp-primary); }
+:root .el-textarea__inner:focus { box-shadow: inset 0 0 0 1px var(--erp-primary); outline: 2px solid var(--erp-focus); outline-offset: 2px; }
 :root .el-input__inner:focus-visible,
 :root .el-select__input:focus-visible { outline: none; }
 :root .el-input.is-disabled .el-input__wrapper,
@@ -38,7 +38,7 @@
 :root .el-form-item.is-error .el-input__wrapper,
 :root .el-form-item.is-error .el-select__wrapper,
 :root .el-form-item.is-error .el-textarea__inner { box-shadow: inset 0 0 0 2px var(--erp-danger); }
-:root .el-form-item__label { color: var(--erp-text-secondary); font-weight: 550; }
+:root .el-form-item__label { color: var(--erp-text-secondary); font-weight: 500; }
 :root .el-form-item__error { line-height: 1.4; }
 :root .el-input-number { max-width: 100%; font-variant-numeric: tabular-nums; }
 :root .el-date-editor { max-width: 100%; }
@@ -54,7 +54,7 @@
   --el-table-bg-color: var(--erp-surface);
   --el-table-tr-bg-color: var(--erp-surface);
   overflow: hidden;
-  border-radius: 6px;
+  border-radius: 8px;
   font-size: 14px;
   font-variant-numeric: tabular-nums;
 }
@@ -67,9 +67,9 @@
 :root .el-table__empty-block { min-height: 120px; }
 :root .el-table__empty-text { width: auto; padding: 24px; line-height: 1.6; color: var(--erp-text-muted); }
 
-:root .el-tag { height: auto; min-height: 24px; padding: 3px 8px; border-radius: 4px; font-weight: 550; line-height: 1.4; }
+:root .el-tag { height: auto; min-height: 24px; padding: 4px 10px; border-radius: 999px; font-weight: 500; line-height: 1.4; }
 :root .el-tag--small { min-height: 20px; padding: 2px 6px; }
-:root .el-tabs__item { height: 42px; color: var(--erp-text-secondary); font-weight: 550; }
+:root .el-tabs__item { height: 42px; color: var(--erp-text-secondary); font-weight: 500; }
 :root .el-tabs__item.is-active { color: var(--erp-primary); }
 :root .el-tabs__active-bar { height: 2px; border-radius: 2px; }
 :root .el-tabs__nav-wrap::after { height: 1px; background: var(--erp-border); }
@@ -77,7 +77,7 @@
 
 :root .el-pagination { max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 8px; font-variant-numeric: tabular-nums; }
 :root .el-pagination button,
-:root .el-pagination .el-pager li { border-radius: 4px; }
+:root .el-pagination .el-pager li { border-radius: 8px; }
 :root .el-pagination .el-pager li.is-active { background: var(--erp-primary-soft); color: var(--erp-primary-strong); }
 :root .el-pagination button:disabled { background: transparent; }
 
@@ -97,8 +97,8 @@
 }
 :root .el-dialog__header { flex-shrink: 0; padding: 20px 24px 16px; border-bottom: 1px solid var(--erp-border); }
 :root .el-dialog__header.show-close { padding-right: 60px; }
-:root .el-dialog__title { color: var(--erp-text); font-size: 19px; font-weight: 650; line-height: 1.5; }
-:root .el-dialog__headerbtn { top: 14px; right: 14px; width: 32px; height: 32px; border-radius: 4px; }
+:root .el-dialog__title { color: var(--erp-text); font-size: 20px; font-weight: 600; line-height: 1.5; }
+:root .el-dialog__headerbtn { top: 14px; right: 14px; width: 32px; height: 32px; border-radius: 8px; }
 :root .el-dialog__headerbtn:hover,
 :root .el-drawer__close-btn:hover { background: var(--erp-surface-sunken); }
 :root .el-dialog__body { min-height: 0; padding: 20px 24px; overflow: auto; color: var(--erp-text); }
@@ -108,12 +108,12 @@
 :root .el-drawer.rtl,
 :root .el-drawer.ltr { max-width: min(1240px, 96vw); border-inline-start: 1px solid var(--erp-border); }
 :root .el-drawer__header { gap: 16px; flex-shrink: 0; margin-bottom: 0; padding: 20px 24px; border-bottom: 1px solid var(--erp-border); background: var(--erp-surface); color: var(--erp-text); }
-:root .el-drawer__title { font-size: 19px; font-weight: 650; overflow-wrap: anywhere; }
+:root .el-drawer__title { font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
 :root .el-drawer__body { min-height: 0; padding: 24px; }
-:root .el-drawer__close-btn { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border-radius: 4px; color: var(--erp-text-secondary); }
+:root .el-drawer__close-btn { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border-radius: 8px; color: var(--erp-text-secondary); }
 :root .el-drawer__footer { padding: 16px 24px; border-top: 1px solid var(--erp-border); background: var(--erp-surface); }
 :root .el-message-box { max-width: calc(100vw - 32px); border: 1px solid var(--erp-border); border-radius: 12px; padding: 24px; background: var(--erp-surface); }
-:root .el-message-box__title { font-size: 19px; font-weight: 650; }
+:root .el-message-box__title { font-size: 20px; font-weight: 600; }
 :root .el-message-box__content { color: var(--erp-text-secondary); line-height: 1.7; }
 :root .el-message-box__btns { flex-wrap: wrap; gap: 8px; }
 :root .el-message-box__btns .el-button { margin: 0; }
@@ -124,14 +124,14 @@
 :root .el-select-dropdown,
 :root .el-picker-panel { border-color: var(--erp-border); border-radius: 8px; background: var(--erp-surface); box-shadow: var(--erp-shadow-md); }
 :root .el-popper.is-light .el-popper__arrow::before { border-color: var(--erp-border); background: var(--erp-surface); }
-:root .el-popper.is-dark { max-width: min(480px, calc(100vw - 24px)); border-color: var(--erp-inverse); border-radius: 5px; background: var(--erp-inverse); color: var(--erp-on-inverse); overflow-wrap: anywhere; }
+:root .el-popper.is-dark { max-width: min(480px, calc(100vw - 24px)); border-color: var(--erp-inverse); border-radius: 8px; background: var(--erp-inverse); color: var(--erp-on-inverse); overflow-wrap: anywhere; }
 :root .el-popper.is-dark .el-popper__arrow::before { border-color: var(--erp-inverse); background: var(--erp-inverse); }
 :root .el-dropdown-menu__item,
-:root .el-select-dropdown__item { margin: 2px 4px; border-radius: 4px; }
+:root .el-select-dropdown__item { margin: 2px 4px; border-radius: 8px; }
 :root .el-dropdown-menu__item:not(.is-disabled):focus,
 :root .el-dropdown-menu__item:not(.is-disabled):hover,
 :root .el-select-dropdown__item.is-hovering { background: var(--erp-primary-soft); color: var(--erp-primary-strong); }
-:root .el-alert { border: 1px solid transparent; border-radius: 6px; }
+:root .el-alert { border: 1px solid transparent; border-radius: 8px; }
 :root .el-alert__title { font-size: 14px; line-height: 1.6; }
 :root .el-alert__description { line-height: 1.6; }
 :root .el-alert--error.is-light { background: var(--erp-danger-soft); color: var(--erp-danger); border-color: var(--el-color-danger-light-8); }
@@ -190,7 +190,7 @@
   :root { --el-component-size: 44px; }
   :root .el-button:not(.is-link),
   :root .el-pagination button,
-  :root .el-pagination .el-pager li { min-height: 40px; }
+  :root .el-pagination .el-pager li { min-width: 44px; min-height: 44px; }
   :root .el-button.is-link { min-height: 44px; }
   :root .el-checkbox { min-height: 44px; }
   :root .el-dialog__headerbtn { width: 44px; height: 44px; top: 6px; right: 6px; }
@@ -205,3 +205,32 @@
   :root .el-dialog { display: block; max-width: none; max-height: none; overflow: visible; }
   :root .el-dialog__body { max-height: none; overflow: visible; }
 }
+
+:root .el-button--primary:not(.is-link):not(.is-text):not(.is-plain) { box-shadow: var(--erp-shadow-sm); }
+:root .el-button:not(.is-disabled):active { transform: scale(.98); }
+:root .el-tag__content { display: inline-flex; align-items: center; gap: 6px; }
+:root .el-tag__content::before { content: ''; width: 6px; height: 6px; flex-shrink: 0; border-radius: 50%; background: currentColor; }
+:root .el-tag--success .el-tag__content::before { background: var(--erp-success-indicator); }
+:root .el-button.is-disabled { box-shadow: none; }
+:root .el-radio, :root .el-checkbox { color: var(--erp-text-secondary); }
+:root .el-table__inner-wrapper::before { background: var(--erp-border); }
+:root .el-alert { padding: 12px 16px; }
+@media (hover: hover) and (pointer: fine) {
+  :root .el-button--primary:not(.is-disabled):not(.is-link):not(.is-text):hover { transform: translateY(-2px); }
+  :root .el-button--primary:not(.is-disabled):not(.is-link):not(.is-text):active { transform: scale(.98); }
+}
+@media (pointer: coarse) {
+  :root .el-drawer__close-btn, :root .el-tabs__item,
+  :root .el-radio, :root .el-select-dropdown__item,
+  :root .el-dropdown-menu__item { min-height: 44px; }
+  :root .el-drawer__close-btn, :root .el-input-number__increase,
+  :root .el-input-number__decrease { min-width: 44px; }
+  :root .el-input-number { --el-input-number-controls-width: 44px; }
+  :root .el-table__expand-icon { width: 44px; height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  :root .el-button { transform: none !important; }
+}
+
+:root .el-checkbox__input.is-focus .el-checkbox__inner,
+:root .el-radio__input.is-focus .el-radio__inner { outline: 2px solid var(--erp-focus); outline-offset: 2px; }

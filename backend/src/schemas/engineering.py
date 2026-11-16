@@ -71,6 +71,7 @@ class ProductDataFields(ContractModel):
 
 
 class CreateProductPayload(ProductDataFields):
+    version_value: str = Field(min_length=1, max_length=100)
     customer_id: int | None = Field(default=None, gt=0)
     customer_name: str = Field(min_length=1, max_length=200)
     bom_items: list[BomItemPayload] = Field(min_length=1, max_length=1000)
@@ -113,6 +114,7 @@ class ProductResponseFields(ProductDataFields):
 class ProductSummaryResponse(ProductResponseFields):
     id: int
     version: int
+    version_value: str
     revision: int
     bom_count: int
     design_ready: bool
@@ -124,6 +126,7 @@ class ProductSummaryResponse(ProductResponseFields):
 class ProductDetailResponse(ProductResponseFields):
     id: int
     version: int
+    version_value: str
     current_version: int
     revision: int
     base_info_editable: bool
@@ -146,5 +149,10 @@ class ProductDetailEnvelope(ContractModel):
     data: ProductDetailResponse
 
 
+class ProductVersionChoice(ContractModel):
+    version: int
+    value: str
+
+
 class ProductVersionsEnvelope(ContractModel):
-    data: list[int]
+    data: list[ProductVersionChoice]

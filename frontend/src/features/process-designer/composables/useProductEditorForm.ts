@@ -10,6 +10,7 @@ import {
 function emptyProductForm(): ProductForm {
   return {
     version: null,
+    version_value: 'V1',
     revision: null,
     customer_id: null,
     customer_name: '',
@@ -28,6 +29,7 @@ export function useProductEditorForm() {
   const bomSnapshot = ref('')
   const flowSnapshot = ref('')
   const serializeBase = () => JSON.stringify({
+    version_value: form.version_value,
     customer_id: form.customer_id,
     customer_name: form.customer_name,
     product_name: form.product_name,
@@ -91,6 +93,7 @@ export function useProductEditorForm() {
   function applyProduct(product: EngineeringProduct) {
     Object.assign(form, {
       version: product.version,
+      version_value: product.version_value,
       revision: product.revision,
       customer_id: product.customer_id,
       customer_name: product.customer_name,

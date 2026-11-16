@@ -66,7 +66,7 @@ export function registerProcessNodes(lf: LogicFlow) {
         ...super.getNodeStyle(),
         fill: flowColors.primaryContainer,
         stroke: flowColors.primary,
-        strokeWidth: 2,
+        strokeWidth: 1,
       }
     }
 
@@ -80,10 +80,10 @@ export function registerProcessNodes(lf: LogicFlow) {
       const scale = displayScale(this.properties)
       this.width = 150 * scale
       this.height = 56 * scale
-      this.radius = 28 * scale
+      this.radius = 12 * scale
     }
     getNodeStyle() {
-      return { ...super.getNodeStyle(), fill: flowColors.surface, stroke: flowColors.primary, strokeWidth: 2 }
+      return { ...super.getNodeStyle(), fill: flowColors.surface, stroke: flowColors.outline, strokeWidth: 1 }
     }
     getDefaultAnchor() { return fourMidpointAnchors(this) }
   }

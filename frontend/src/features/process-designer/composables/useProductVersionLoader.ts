@@ -4,7 +4,7 @@ import { ElMessageBox } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import type { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { queryProductVersions } from '../api/engineeringProducts'
-import type { EngineeringProduct } from '../domain/types'
+import type { EngineeringProduct, ProductVersionChoice } from '../domain/types'
 
 type Options = {
   applyProduct: (product: EngineeringProduct) => void
@@ -32,7 +32,7 @@ export function useProductVersionLoader(options: Options) {
   const currentVersion = ref<number>()
   const loadingProduct = ref(false)
   const versionEditable = ref(false)
-  const versions = ref<number[]>([])
+  const versions = ref<ProductVersionChoice[]>([])
   const productError = ref('')
   const requestedVersion = ref<number>()
   let productRequest = 0
@@ -78,7 +78,7 @@ export function useProductVersionLoader(options: Options) {
       return request === productRequest
     } catch (error) {
       if (request === productRequest && id === productId.value) {
-        productError.value = getApiErrorDetail(error)?.message || '产品版本加载失败'
+        productError.value = getApiErrorDetail(error)?.message || '产品外观版本加载失败'
         editorReady.value = false
       }
       return false
@@ -100,7 +100,7 @@ export function useProductVersionLoader(options: Options) {
     if (versionDirty.value) {
       try {
         await ElMessageBox.confirm(
-          '当前产品基础信息、BOM 或流程有未保存内容，切换版本会丢失修改，是否继续？',
+          '当前产品基础信息、BOM 或流程有未保存内容，切换外观版本会丢失修改，是否继续？',
           '未保存修改',
           {
             type: 'warning',

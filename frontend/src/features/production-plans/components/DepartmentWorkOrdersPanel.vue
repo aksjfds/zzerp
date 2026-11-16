@@ -37,7 +37,6 @@ const tableRows = computed<WorkOrderRow[]>(() => rows.value.map(order => ({
     ...order, row_key: `order:${order.id}:part:${component.material_node_id}`, component,
   })) : undefined,
 })))
-const hasComponents = computed(() => rows.value.some(order => order.components.length > 0))
 const total = ref(0)
 const page = ref(1)
 const loading = ref(false)
@@ -92,25 +91,32 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 </script>
 
 <template>
-  <section>
+  <div class="department-panels">
+    <HandoffTicketsPanel v-if="!planId && canReceive" ref="ticketsPanel" :department-code="departmentCode" @changed="load" />
+  <section class="work-orders-card">
+    <div class="collection-heading"><div><h2>部门生产安排</h2></div><ElButton :loading="loading" @click="load">刷新工单</ElButton></div>
     <LoadErrorAlert :message="departmentError" :loading="departmentLoading" @retry="loadDepartments" />
-    <ElForm inline @submit.prevent="search">
+    <ElForm class="query-toolbar" label-position="top" inline @submit.prevent="search">
       <ElFormItem v-if="!departmentCode" label="部门"><ElSelect v-model="filters.department_code" clearable placeholder="全部部门" :loading="departmentLoading" :disabled="departmentLoading || !!departmentError" style="width: 150px"><ElOption v-for="department in departments" :key="department.code" :label="department.name" :value="department.code" /></ElSelect></ElFormItem>
       <ElFormItem label="订单号"><ElInput v-model="filters.order_no" clearable maxlength="200" /></ElFormItem>
       <ElFormItem label="产品"><ElInput v-model="filters.product_keyword" clearable placeholder="厂编或产品名称" maxlength="200" /></ElFormItem>
       <ElFormItem><ElButton type="primary" native-type="submit">查询</ElButton><ElButton @click="clear">清空</ElButton></ElFormItem>
     </ElForm>
     <LoadErrorAlert v-if="error" :message="error" :loading="loading" @retry="load" />
-    <p v-if="hasComponents" class="tree-note">装配体展开后可按配件登记和查看到料。配件需求按当前 BOM 计算，仅统计该配件直接到料；整套或嵌套装配体到料请查看一级流水。出料统一在装配体登记。</p>
-    <ElTable v-if="!error" v-table-column-widths="'planning.department-work-orders'" v-loading="loading" :data="tableRows" row-key="row_key" default-expand-all border stripe table-layout="auto" empty-text="暂无部门生产安排">
-      <ElTableColumn label="配件／装配体名称" min-width="240"><template #default="{ row }">{{ row.component?.part_name ?? row.part_name }}</template></ElTableColumn>
-      <ElTableColumn prop="order_no" label="订单号" min-width="160" />
-      <ElTableColumn prop="department_name" label="部门" min-width="100" />
-      <ElTableColumn prop="customer_name" label="客户" min-width="130" />
-      <ElTableColumn label="产品" min-width="220"><template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template></ElTableColumn>
-      <ElTableColumn label="配件／组成编号" min-width="150"><template #default="{ row }">{{ row.component?.part_no ?? row.part_no }}</template></ElTableColumn>
+    <ElTable v-if="!error" v-table-column-widths="'planning.department-work-orders'" v-loading="loading" :data="tableRows" row-key="row_key" default-expand-all stripe table-layout="auto" empty-text="暂无部门生产安排">
+      <ElTableColumn label="产品" min-width="220">
+        <template #default="{ row }"><span>{{ row.component ? '' : `${row.factory_code} · ${row.product_name}` }}</span></template>
+      </ElTableColumn>
+      <ElTableColumn label="配件/装配体" min-width="260">
+        <template #default="{ row }">{{ row.component?.part_no ?? row.part_no }} · {{ row.component?.part_name ?? row.part_name }}</template>
+      </ElTableColumn>
+      <ElTableColumn prop="order_no" label="订单号" min-width="160">
+        <template #default="{ row }"><span>{{ row.component ? '' : row.order_no }}</span></template>
+      </ElTableColumn>
       <ElTableColumn prop="order_quantity" label="订单数量" width="110" align="right" />
-      <ElTableColumn label="任务／配件需求" min-width="140" align="right"><template #default="{ row }">{{ row.component?.required_quantity ?? row.task_quantity }}</template></ElTableColumn>
+      <ElTableColumn label="任务数量" min-width="110" align="right">
+        <template #default="{ row }">{{ row.component?.required_quantity ?? row.task_quantity }}</template>
+      </ElTableColumn>
       <ElTableColumn label="累积到料/累计出料" min-width="170" align="right">
         <template #default="{ row }">{{ row.component?.received_quantity ?? row.received_quantity }}/{{ row.component ? '—' : row.issued_quantity }}</template>
       </ElTableColumn>
@@ -122,11 +128,14 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     </ElTable>
     <ElPagination v-if="!error" v-model:current-page="page" class="pagination" layout="prev, pager, next, total" :total="total" :page-size="50" @current-change="load" />
     <DepartmentMovementDialog v-if="movementOrder" :key="`${movementOrder.id}:${movementDirection}:${movementComponent?.material_node_id || ''}`" :order="movementOrder" :direction="movementDirection" :component="movementComponent" @close="movementOrder = null" @changed="movementChanged" />
-    <HandoffTicketsPanel v-if="!planId && canReceive" ref="ticketsPanel" :department-code="departmentCode" @changed="load" />
   </section>
+  </div>
 </template>
 
 <style scoped>
+.department-panels { display: grid; gap: 24px; min-width: 0; }
+.work-orders-card { min-width: 0; padding: 24px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); }
+@media (max-width: 760px) { .work-orders-card { padding: 16px; } }
 .pagination { display: flex; justify-content: flex-end; margin-top: 16px; }
-.tree-note { color: var(--erp-text-secondary); font-size: 13px; }
+
 </style>

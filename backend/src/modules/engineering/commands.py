@@ -1,33 +1,28 @@
+from database import SessionLocal
+from domain.engineering_products import (
+    validate_bom_identity,
+    validate_expected_revision,
+)
+from domain.time import utc_now
+from schemas.engineering import (
+    BomItemPayload,
+    CreateProductPayload,
+    ProcessFlowPayload,
+    UpdateProductPayload,
+)
 from sqlalchemy.exc import IntegrityError
-from modules.engineering.handoff_routes import ensure_handoffs_preserved
 from sqlalchemy.orm.exc import StaleDataError
 
-from database import SessionLocal
-from domain.engineering_products import validate_bom_identity, validate_expected_revision
-from domain.time import utc_now
 from modules.engineering.command_support import command_result, ensure_version_exists
-from modules.engineering.collaboration_contract import EngineeringCollaborators
-from modules.engineering.editability import (
-    ensure_base_info_editable,
-)
 from modules.engineering.persistence import Product, ProductVersion
-from modules.engineering.routing import (
-    ensure_bom_nodes_retained, ensure_referenced_bom_identity,
-    ensure_referenced_routes_preserved, ensure_recorded_inputs_preserved, validate_nodes,
-)
 from modules.engineering.repository import EngineeringProductRepository
+from modules.engineering.routing import ensure_bom_nodes_retained, validate_nodes
 from modules.engineering.support import (
     bom_commands,
     empty_process_flow,
     raise_integrity_error,
     raise_stale_data_error,
     validated_flow,
-)
-from schemas.engineering import (
-    BomItemPayload,
-    CreateProductPayload,
-    ProcessFlowPayload,
-    UpdateProductPayload,
 )
 from modules.errors import product_not_found
 from modules.sales.customer_api import resolve_customer
@@ -51,7 +46,7 @@ def create_product(payload: CreateProductPayload) -> dict:
                 factory_code=payload.factory_code,
                 customer_code=payload.customer_code,
             )
-            product.versions.append(ProductVersion(version=1))
+            product.versions.append(ProductVersion(version=1, value=payload.version_value))
             repository.add(product)
             repository.flush()
             repository.replace_bom(product, product.version, items)
@@ -64,7 +59,6 @@ def create_product(payload: CreateProductPayload) -> dict:
 def update_product_info(
     product_id: int,
     payload: UpdateProductPayload,
-    collaborators: EngineeringCollaborators,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -88,7 +82,6 @@ def update_product_info(
             )
             if unchanged:
                 return command_result(repository, product)
-            ensure_base_info_editable(session, product.id, collaborators)
             product.customer_id = customer.id
             product.product_name = payload.product_name
             product.factory_code = payload.factory_code
@@ -106,7 +99,6 @@ def replace_product_bom(
     expected_revision: int,
     product_version: int,
     items: list[BomItemPayload],
-    collaborators: EngineeringCollaborators,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -123,10 +115,6 @@ def replace_product_bom(
                 {item.id for item in product.bom_items if item.product_version == product_version},
             )
             ensure_bom_nodes_retained(product, product_version, retained_ids)
-            ensure_referenced_bom_identity(
-                session, product, product_version, commands,
-                collaborators.referenced_route_pairs(session, product.id),
-            )
             repository.replace_bom(product, product_version, commands)
             product.updated_at = utc_now()
             product.revision += 1
@@ -142,7 +130,6 @@ def update_product_process_flow(
     expected_revision: int,
     product_version: int,
     process_flow: ProcessFlowPayload,
-    collaborators: EngineeringCollaborators,
 ) -> dict:
     try:
         with SessionLocal.begin() as session:
@@ -154,13 +141,6 @@ def update_product_process_flow(
             validate_expected_revision(product.revision, expected_revision)
             ensure_version_exists(product, product_version)
             process_flow = validate_nodes(session, product.id, product_version, process_flow)
-            if product_version == product.version:
-                ensure_handoffs_preserved(process_flow, collaborators.referenced_handoff_pairs(session, product.id))
-                ensure_recorded_inputs_preserved(product, process_flow, collaborators.referenced_input_nodes(session, product.id))
-                ensure_referenced_routes_preserved(
-                    session, product, process_flow,
-                    collaborators.referenced_route_pairs(session, product.id),
-                )
             validated = validated_flow(process_flow)
             repository.set_process_flow(
                 product,

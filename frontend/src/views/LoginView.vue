@@ -33,6 +33,15 @@ const accounts = computed(() => [
   })),
 ])
 
+const accountSearch = ref('')
+const accountGroups = computed(() => {
+  const keyword = accountSearch.value.trim().toLowerCase()
+  return [
+    { key: 'management', title: '业务与工程', description: '维护生产依据，安排客户订单', items: accounts.value.slice(0, 2) },
+    { key: 'production', title: '生产部门', description: '进入所属部门，处理工单与物料交接', items: accounts.value.slice(2) },
+  ].map(group => ({ ...group, items: group.items.filter(account => `${account.name} ${account.username}`.toLowerCase().includes(keyword)) }))
+})
+
 async function loadDepartments() {
   const current = ++requestRevision
   departmentLoading.value = true
@@ -108,217 +117,76 @@ async function loginAs(key: string) {
 
 <template>
   <main class="login-page">
+    <div class="login-masthead"><span class="brand-mark">ZZ</span><strong>ZZ ERP</strong><span>制造业务工作台</span></div>
     <section ref="loginPanel" class="login-panel">
-      <div class="login-brand">
-        <div class="brand-content" data-login-motion="reveal">
-          <div class="brand-mark">ZZ</div>
-          <div>
-            <h1>ZZ ERP</h1>
-            <p>产品与计划管理</p>
-          </div>
-        </div>
-        <span class="login-scan" data-login-motion="scan" aria-hidden="true" />
+      <div class="login-introduction" data-login-motion="reveal">
+        <span class="intro-label">清晰协同 · 有序生产</span>
+        <h1>从产品资料，<br>到每一道工序。</h1>
+        <p>将工程、订单与部门生产连接起来，<br class="desktop-break">让信息有依据，让流转可追溯。</p>
+        <ol class="workflow-preview" aria-label="业务协作流程">
+          <li><span>01</span><div><strong>建立产品工程</strong><small>产品资料、BOM 与工艺路线</small></div></li>
+          <li><span>02</span><div><strong>安排生产计划</strong><small>客户订单与产品生产数量</small></div></li>
+          <li><span>03</span><div><strong>协同部门生产</strong><small>工单、物料交接与生产流水</small></div></li>
+        </ol>
+        <span class="intro-rule" data-login-motion="scan" aria-hidden="true" />
+        <p class="intro-footnote">统一的工作空间，明确的部门职责。</p>
       </div>
-
       <div class="account-directory">
-        <div class="account-heading" data-login-motion="reveal">
-          <h2>选择部门入口</h2>
-          <p>各部门独立登录，生产部门只查看本部门工单</p>
-        </div>
+        <div class="account-heading" data-login-motion="reveal"><span>欢迎使用</span><h2>选择你的工作入口</h2><p>以对应岗位进入，生产账号仅访问本部门。</p></div>
+        <ElInput v-model="accountSearch" class="account-search" clearable placeholder="查找部门或账号" aria-label="查找部门或账号" />
         <LoadErrorAlert :message="loginError" title="登录失败" retry-text="重新登录" :loading="authStore.loading" @retry="loginAs(failedAccount)" />
         <LoadErrorAlert :message="departmentError" title="部门入口加载失败" :loading="departmentLoading" @retry="loadDepartments" />
-        <div class="account-grid" :aria-busy="departmentLoading">
-          <button
-            v-for="account in accounts"
-            :key="account.key"
-            class="account-card"
-            :class="{ 'is-logging-in': activeAccount === account.key }"
-            data-login-motion="card"
-            type="button"
-            :disabled="authStore.loading"
-            :aria-busy="activeAccount === account.key"
-            @focus="finishAll"
-            @click="loginAs(account.key)"
-          >
-            <span class="account-avatar" aria-hidden="true">{{ account.name.slice(0, 1) }}</span>
-            <span class="account-copy">
-              <strong>{{ account.name }}</strong>
-              <small>{{ account.path ? '部门工单' : account.username }}</small>
-              <span>{{ account.description }}</span>
-            </span>
-            <span v-if="activeAccount === account.key" class="account-state">登录中…</span>
-            <span v-else class="account-arrow">进入</span>
-          </button>
-        </div>
+        <section v-for="group in accountGroups" :key="group.key" class="account-group" :aria-label="group.title">
+          <div class="group-heading"><h3>{{ group.title }}</h3><span>{{ group.description }}</span></div>
+          <div class="account-grid" :aria-busy="group.key === 'production' && departmentLoading">
+            <button v-for="account in group.items" :key="account.key" class="account-card" :class="{ 'is-logging-in': activeAccount === account.key }" data-login-motion="card" type="button" :disabled="authStore.loading" :aria-busy="activeAccount === account.key" @focus="finishAll" @click="loginAs(account.key)">
+              <span class="account-avatar" aria-hidden="true">{{ account.name.slice(0, 1) }}</span>
+              <span class="account-copy"><strong>{{ account.name }}</strong><small>{{ account.path ? '部门工单' : account.username }}</small></span>
+              <span class="account-arrow">{{ activeAccount === account.key ? '登录中…' : '→' }}</span>
+            </button>
+          </div>
+          <ElSkeleton v-if="group.key === 'production' && departmentLoading && !group.items.length" :rows="3" animated />
+          <p v-else-if="!group.items.length && !departmentError" class="empty-accounts">{{ accountSearch ? '未找到匹配入口，请调整关键词' : '暂无可用部门入口' }}</p>
+        </section>
       </div>
     </section>
+    <footer class="login-footer">ZZ ERP <span>工程 · 计划 · 生产</span></footer>
   </main>
 </template>
 
 <style scoped>
-.login-page {
-  display: grid;
-  min-height: 100vh;
-  place-items: center;
-  padding: 40px 24px;
-  color: var(--erp-text);
-  background: var(--erp-bg);
-}
-
-.login-panel {
-  display: grid;
-  grid-template-columns: 220px minmax(0, 1fr);
-  gap: 0;
-  width: min(1100px, 100%);
-  overflow: hidden;
-  border: 1px solid var(--erp-border);
-  border-radius: 12px;
-  background: var(--erp-surface);
-  box-shadow: 0 16px 48px rgb(41 43 39 / 5%);
-}
-
-.login-brand {
-  position: relative;
-  padding: 36px 28px;
-  background: var(--erp-inverse);
-  color: var(--erp-on-inverse);
-}
-
-.brand-content {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  align-items: flex-start;
-}
-
-.login-scan {
-  position: absolute;
-  right: 28px;
-  bottom: 36px;
-  left: 28px;
-  height: 2px;
-  background: var(--erp-border-strong);
-  transform-origin: left center;
-  pointer-events: none;
-}
-
-.brand-mark {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  place-items: center;
-  border: 1px solid var(--erp-border-strong);
-  border-radius: 6px;
-  background: transparent;
-  color: var(--erp-on-inverse);
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.login-brand h1 {
-  margin: 0;
-  font-size: 30px;
-  font-weight: 600;
-  line-height: 1.2;
-  letter-spacing: .025em;
-}
-
-.login-brand p {
-  margin: 12px 0 0;
-  color: var(--erp-primary-soft);
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.account-directory {
-  min-width: 0;
-  padding: 32px;
-}
-
-.account-heading {
-  margin-bottom: 24px;
-}
-
-.account-heading h2 { margin: 0; font-size: 22px; font-weight: 600; line-height: 1.4; }
-.account-heading p { margin: 8px 0 0; color: var(--erp-text-muted); font-size: 13px; line-height: 1.6; }
-.account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.account-card {
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  gap: 12px;
-  align-items: center;
-  min-width: 0;
-  min-height: 94px;
-  padding: 15px 14px;
-  border: 1px solid var(--erp-border);
-  border-radius: 6px;
-  background: var(--erp-surface);
-  color: var(--erp-text);
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-  transition: border-color 120ms var(--erp-motion-ease-enter), background-color 120ms var(--erp-motion-ease-enter);
-}
-.account-card:hover:not(:disabled),
-.account-card:focus-visible:not(:disabled) { border-color: var(--erp-primary); background: var(--erp-primary-soft); }
-.account-card:focus-visible { outline: 2px solid var(--erp-primary); outline-offset: 3px; }
-.account-card:active:not(:disabled) { background: var(--erp-surface-sunken); }
-.account-card:disabled { cursor: wait; background: var(--erp-surface-sunken); }
-.account-card:disabled:not(.is-logging-in) { opacity: .6; }
-.account-card.is-logging-in { border-color: var(--erp-primary); background: var(--erp-primary-soft); }
-.account-avatar {
-  display: grid;
-  width: 32px;
-  height: 32px;
-  place-items: center;
-  border: 1px solid var(--erp-border);
-  border-radius: 2px;
-  background: var(--erp-surface-sunken);
-  color: var(--erp-text);
-  font-size: 14px;
-  font-weight: 600;
-}
-.account-copy { display: grid; min-width: 0; gap: 3px; }
-.account-copy strong { font-size: 15px; font-weight: 600; line-height: 1.4; }
-.account-copy small {
-  color: var(--erp-text-muted);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  overflow-wrap: anywhere;
-}
-.account-copy > span {
-  margin-top: 3px;
-  color: var(--erp-text-muted);
-  font-size: 13px;
-  line-height: 1.6;
-  overflow-wrap: anywhere;
-}
-.account-arrow, .account-state { color: var(--erp-primary); font-size: 12px; font-weight: 600; line-height: 1.5; white-space: nowrap; }
-@media (max-width: 960px) {
-  .login-panel { grid-template-columns: 190px minmax(0, 1fr); }
-  .account-directory { padding: 24px; }
-  .login-brand { padding-right: 24px; }
-  .login-scan { right: 24px; }
-  .account-card { grid-template-columns: minmax(0, 1fr) auto; }
-  .account-avatar { display: none; }
-}
-@media (max-width: 720px) {
-  .login-page { padding: 24px 16px; }
-  .login-panel { grid-template-columns: minmax(0, 1fr); }
-  .account-directory { padding: 24px; }
-  .login-brand { padding: 24px; }
-  .brand-content { flex-direction: row; align-items: center; gap: 16px; }
-  .login-brand h1 { font-size: 26px; }
-  .login-brand p { margin-top: 4px; }
-  .login-scan { display: none; }
-  .account-heading { margin-bottom: 20px; }
-}
-@media (max-width: 480px) {
-  .login-page { padding: 12px; }
-  .account-directory { padding: 24px 18px; }
-  .account-grid { grid-template-columns: 1fr; }
-  .account-card { grid-template-columns: 32px minmax(0, 1fr) auto; }
-  .account-avatar { display: grid; }
-}
+.login-page { min-height: 100dvh; padding: 32px 48px 24px; max-width: 1440px; margin: auto; }
+.login-masthead { display: flex; align-items: center; gap: 12px; font-size: 18px; }
+.login-masthead > span:last-child { border-left: 1px solid var(--erp-border-strong); padding-left: 16px; margin-left: 4px; color: var(--erp-text-muted); font-size: 12px; }
+.brand-mark { display: grid; place-items: center; width: 40px; height: 40px; background: var(--erp-primary); color: var(--erp-on-primary); border-radius: 12px; font-size: 16px; font-weight: 700; }
+.login-panel { display: grid; grid-template-columns: minmax(280px, .85fr) minmax(0, 1.5fr); max-width: 1120px; margin: 64px auto 48px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); overflow: hidden; }
+.login-introduction { padding: 48px 32px; background: var(--erp-primary-soft); }
+.intro-label { color: var(--erp-primary); font-size: 12px; font-weight: 500; letter-spacing: .08em; }
+h1 { margin: 24px 0 16px; font-size: 36px; line-height: 1.3; font-weight: 600; letter-spacing: -.035em; }
+.login-introduction > p { color: var(--erp-text-muted); font-size: 14px; line-height: 1.8; }
+.workflow-preview { display: grid; gap: 28px; list-style: none; padding: 0; margin: 48px 0; }
+.workflow-preview li { display: flex; align-items: center; gap: 16px; }
+.workflow-preview li > span { display: grid; place-items: center; width: 36px; height: 36px; border: 1px solid var(--el-color-primary-light-8); border-radius: 8px; background: var(--erp-surface); color: var(--erp-primary); font-size: 12px; font-weight: 600; }
+.workflow-preview strong { display: block; font-size: 14px; font-weight: 500; }.workflow-preview small { display: block; color: var(--erp-text-muted); font-size: 12px; margin-top: 4px; }
+.intro-rule { display: block; height: 1px; background: var(--el-color-primary-light-8); transform-origin: left; }
+.login-introduction .intro-footnote { margin-top: 20px; font-size: 12px; }
+.account-directory { min-width: 0; padding: 40px; }
+.account-heading > span { color: var(--erp-text-muted); font-size: 12px; }
+h2 { margin: 8px 0; font-size: 24px; font-weight: 600; letter-spacing: -.025em; }
+.account-heading p { color: var(--erp-text-muted); font-size: 14px; margin: 0; }
+.account-search { margin: 24px 0 8px; }
+.account-group { margin-top: 24px; }.group-heading { margin-bottom: 12px; }.group-heading h3 { margin: 0 0 4px; font-size: 14px; font-weight: 600; }.group-heading > span { color: var(--erp-text-muted); font-size: 12px; }
+.account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.account-card { display: flex; align-items: center; gap: 12px; min-height: 80px; padding: 16px; min-width: 0; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); color: var(--erp-text); cursor: pointer; text-align: left; }
+.account-avatar { display: grid; place-items: center; flex-shrink: 0; width: 40px; height: 40px; border-radius: 12px; background: var(--erp-primary-soft); color: var(--erp-primary); font-size: 14px; font-weight: 600; transition: background-color 150ms ease-out, color 150ms ease-out, transform 150ms ease-out; }
+.account-copy { min-width: 0; }.account-copy strong { display: block; font-size: 14px; font-weight: 500; }.account-copy small { display: block; margin-top: 4px; font-size: 12px; color: var(--erp-text-muted); overflow-wrap: anywhere; }
+.account-arrow { margin-left: auto; font-size: 14px; color: var(--erp-primary); }
+.account-card:disabled { cursor: wait; opacity: .65; }.account-card.is-logging-in { border-color: var(--erp-primary); background: var(--erp-primary-soft); }
+.empty-accounts { font-size: 14px; color: var(--erp-text-muted); padding-block: 16px; }
+.login-footer { display: flex; gap: 16px; justify-content: center; color: var(--erp-text-muted); font-size: 12px; }.login-footer span { padding-left: 16px; border-left: 1px solid var(--erp-border); }
+@media (hover: hover) and (pointer: fine) { .account-card:not(:disabled):hover { border-color: var(--erp-primary); box-shadow: var(--erp-shadow-md); transform: translateY(-2px); } .account-card:not(:disabled):hover .account-avatar { background: var(--erp-primary); color: var(--erp-on-primary); transform: scale(1.1); } .account-card:not(:disabled):active { transform: scale(.98); } }
+@media (max-width: 1100px) { .login-page { padding: 24px; }.login-panel { margin-top: 40px; }.account-directory { padding: 32px 24px; }.login-introduction { padding: 40px 24px; }.account-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .login-page { padding: 24px 16px; }.login-panel { grid-template-columns: 1fr; margin: 32px 0; }.login-introduction { padding: 24px; } h1 { font-size: 30px; margin-top: 16px; }.workflow-preview { display: none; }.intro-rule, .intro-footnote, .desktop-break { display: none; }.account-directory { padding: 24px; }.account-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }.group-heading > span { display: none; } }
+@media (max-width: 480px) { .account-grid { grid-template-columns: 1fr; }.login-masthead > span:last-child { display: none; } }
+@media (prefers-reduced-motion: reduce) { .account-card:hover, .account-card:active, .account-card:hover .account-avatar { transform: none !important; } }
 </style>

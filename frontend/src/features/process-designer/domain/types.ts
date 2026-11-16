@@ -23,6 +23,7 @@ export type ProductFields = {
 export type ProductSummary = ProductFields & {
   id: number
   version: number
+  version_value: string
   revision: number
   bom_count: number
   design_ready: boolean
@@ -34,6 +35,7 @@ export type ProductSummary = ProductFields & {
 export type EngineeringProduct = ProductFields & {
   id: number
   version: number
+  version_value: string
   current_version: number
   revision: number
   base_info_editable: boolean
@@ -47,10 +49,13 @@ export type EngineeringProduct = ProductFields & {
   updated_at: string
 }
 
-export type CreateProductPayload = ProductFields & { bom_items: BomItem[] }
+export type ProductVersionChoice = { version: number; value: string }
+
+export type CreateProductPayload = ProductFields & { version_value: string; bom_items: BomItem[] }
 
 export type ProductForm = ProductFields & {
   version: number | null
+  version_value: string
   revision: number | null
   bom_items: BomItem[]
   process_flow: ProcessFlow

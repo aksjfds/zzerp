@@ -17,6 +17,7 @@ TABLE_OWNERS = {
     "department_movement_receipt_link": "planning",
     "production_plan": "planning",
     "production_plan_item": "planning",
+    "plan_product_route": "planning",
 }
 
 

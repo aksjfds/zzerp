@@ -4,14 +4,13 @@ import { useCompactViewport } from '@/shared/layout/useCompactViewport'
 import { computed, onMounted, ref } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useRouter } from 'vue-router'
-import { useAuthStore } from '@/stores/auth'
+import PageHeader from '@/shared/layout/PageHeader.vue'
 import { useEngineeringProductsStore } from '../stores/engineeringProducts'
 import { PRODUCT_PERMISSIONS } from '@/permission/constants'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 
 const compact = useCompactViewport()
 const router = useRouter()
-const authStore = useAuthStore()
 const store = useEngineeringProductsStore()
 const { loading, products, productTotal, productsError } = storeToRefs(store)
 const keyword = ref('')
@@ -28,11 +27,6 @@ const filteredProducts = computed(() => {
   ].some((item) => item.toLowerCase().includes(value)))
 })
 
-async function logout() {
-  await authStore.logout()
-  router.replace('/login')
-}
-
 function loadProducts() {
   return store.loadProducts(page.value, pageSize)
 }
@@ -42,34 +36,26 @@ onMounted(loadProducts)
 
 <template>
   <main class="page-shell">
-    <header class="page-header">
-      <div>
-        <div class="page-kicker">工程管理</div>
-        <h1>产品工程资料</h1>
-        <p>统一维护产品基础信息、BOM 和图形化工艺路线。</p>
-      </div>
-      <div class="header-actions">
-        <ElButton :loading="loading" @click="loadProducts">刷新</ElButton>
-        <ElButton
-          v-permission="PRODUCT_PERMISSIONS.add"
-          type="primary"
-          @click="router.push('/products/new')"
-        >录入新产品</ElButton>
-        <ElButton plain @click="logout">退出登录</ElButton>
-      </div>
-    </header>
+    <PageHeader section-name="工程管理" page-title="产品工程">
+      <template #actions><ElButton :loading="loading" @click="loadProducts">刷新数据</ElButton><ElButton v-permission="PRODUCT_PERMISSIONS.add" type="primary" @click="router.push('/products/new')">＋ 新建产品</ElButton></template>
+    </PageHeader>
+    <div class="overview-grid" aria-label="产品概览" :aria-busy="loading">
+      <section class="overview-item"><span>产品总数</span><strong>{{ loading || productsError ? '—' : productTotal }}</strong></section>
+      <section class="overview-item"><span>本页可用</span><strong>{{ loading || productsError ? '—' : products.filter(item => item.design_ready).length }}</strong></section>
+      <section class="overview-item"><span>本页待完善</span><strong>{{ loading || productsError ? '—' : products.filter(item => !item.design_ready).length }}</strong></section>
+    </div>
     <section class="content-card">
+      <div class="collection-heading"><div><h2>产品目录</h2></div></div>
       <div class="toolbar">
         <ElInput v-model="keyword" clearable placeholder="搜索当前页的客户、产品或型号" aria-label="搜索当前页产品" />
         <span v-if="!loading && !productsError">当前页 {{ filteredProducts.length }} 个，共 {{ productTotal }} 个产品</span>
       </div>
       <LoadErrorAlert :message="productsError" :loading="loading" @retry="loadProducts" />
-      <ElTable v-if="!productsError" v-table-column-widths="'engineering.products'" v-loading="loading" :data="filteredProducts" border table-layout="auto" :empty-text="loading ? '正在加载产品…' : keyword.trim() ? '当前页没有匹配的产品' : '暂无产品'">
+      <ElTable v-if="!productsError" v-table-column-widths="'engineering.products'" v-loading="loading" :data="filteredProducts" table-layout="auto" :empty-text="loading ? '正在加载产品…' : keyword.trim() ? '当前页没有匹配的产品' : '暂无产品'">
         <ElTableColumn prop="customer_name" label="客户" min-width="150" />
-        <ElTableColumn prop="product_name" label="名称" min-width="190" />
-        <ElTableColumn prop="factory_code" label="厂编" min-width="140" />
+        <ElTableColumn label="产品" min-width="220"><template #default="{ row }"><RouterLink class="record-title" :to="{ path: `/products/${row.id}`, query: { mode: 'view' } }">{{ row.product_name }}</RouterLink><small class="record-subtitle">{{ row.factory_code }}</small></template></ElTableColumn>
         <ElTableColumn prop="customer_code" label="客编" min-width="140" />
-        <ElTableColumn label="版本" width="80"><template #default="{ row }">V{{ row.version }}</template></ElTableColumn>
+        <ElTableColumn label="外观版本" min-width="140" show-overflow-tooltip><template #default="{ row }">{{ row.version_value }}</template></ElTableColumn>
         <ElTableColumn label="可用状态" min-width="210">
           <template #default="{ row }">
             <div class="readiness-cell">
@@ -113,31 +99,13 @@ onMounted(loadProducts)
 </template>
 
 <style scoped>
-.page-shell { min-height: 100vh; padding: var(--erp-page-gutter); background: var(--md-surface); }
-.page-header, .content-card { border: 1px solid var(--md-outline-variant); border-radius: var(--erp-radius-lg); background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.page-header { display: flex; justify-content: space-between; gap: 24px; margin-bottom: 18px; padding: 20px 24px; background: var(--md-surface-container-lowest); box-shadow: var(--erp-shadow-sm); }
-.page-header h1 { margin: 5px 0; font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
-.page-header p { margin: 0; color: var(--el-text-color-secondary); }
-.page-kicker { color: var(--erp-primary); font-size: 12px; font-weight: 700; }
-.header-actions, .row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.readiness-cell { display: flex; align-items: flex-start; flex-direction: column; gap: 5px; }
-.readiness-cell > span:not(.el-tag) { color: var(--el-text-color-secondary); font-size: 12px; line-height: 1.5; }
-.header-actions :deep(.el-button + .el-button), .row-actions :deep(.el-button + .el-button) { margin-left: 0; }
-.content-card { padding: 20px; }
-.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; margin-bottom: 16px; color: var(--el-text-color-secondary); font-size: 13px; }
-.toolbar .el-input { max-width: 360px; }
-.pagination { justify-content: flex-end; margin-top: 16px; }
-@media (max-width: 680px) {
-  .page-shell { padding: 16px; }
-  .page-header { align-items: flex-start; flex-direction: column; padding: 16px; }
-  .header-actions { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .header-actions :deep(.el-button) { width: 100%; margin: 0; }
-  .content-card { padding: 16px; }
-  .toolbar { align-items: stretch; flex-direction: column; gap: 10px; }
-  .toolbar .el-input { width: 100%; max-width: none; }
-}
-@media (max-width: 480px) {
-  .page-shell { padding: 12px; }
-  .content-card { padding: 12px; }
-}
+.page-shell { padding: 32px; }
+.content-card { min-width: 0; padding: 24px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 24px 0 16px; color: var(--erp-text-muted); font-size: 12px; }
+.toolbar .el-input { width: min(400px, 100%); }
+.row-actions { display: flex; gap: 12px; } .row-actions :deep(.el-button) { margin: 0; }
+.readiness-cell { display: grid; justify-items: start; gap: 6px; }
+.readiness-cell > span:not(.el-tag) { color: var(--erp-text-muted); font-size: 12px; }
+.pagination { margin-top: 24px; }
+@media (max-width: 760px) { .page-shell { padding: 24px 16px; } .content-card { padding: 16px; } .toolbar { align-items: stretch; flex-direction: column; } }
 </style>

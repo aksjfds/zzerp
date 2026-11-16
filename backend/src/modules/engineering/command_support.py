@@ -1,5 +1,5 @@
-from modules.engineering.persistence import Product
 from modules.engineering.mapper import serialize_product_detail
+from modules.engineering.persistence import Product
 from modules.engineering.product_reference_api import get_product_design_readinesses
 from modules.engineering.repository import EngineeringProductRepository
 from modules.engineering.support import empty_process_flow
@@ -17,7 +17,9 @@ def command_result(
         repository.session,
         {product.customer_id},
     )
-    readiness = get_product_design_readinesses(repository.session, [product])[product.id]
+    readiness = get_product_design_readinesses(
+        repository.session, [product], {product.id: requested_version or product.version},
+    )[product.id]
     return serialize_product_detail(
         repository.session,
         product,

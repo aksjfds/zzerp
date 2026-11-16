@@ -1,12 +1,27 @@
-"""Production plans reference products directly, without a version snapshot."""
+"""Plan-owned product snapshots, route projections and production history."""
 
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, CheckConstraint, ForeignKey, ForeignKeyConstraint, Index, Integer, Text, TIMESTAMP, UniqueConstraint, Uuid, text
+from database import Base
+from sqlalchemy import (
+    JSON,
+    TIMESTAMP,
+    BigInteger,
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    text,
+)
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from database import Base
+JSON_TYPE = JSON(none_as_null=True).with_variant(JSONB(none_as_null=True), "postgresql")
 
 
 class ProductionPlan(Base):
@@ -53,8 +68,9 @@ class ProductionPlanItem(Base):
         ForeignKeyConstraint(["production_plan_id", "customer_id"],
             ["production_plan.id", "production_plan.customer_id"],
             name="fk_production_plan_item_plan", ondelete="CASCADE"),
-        ForeignKeyConstraint(["product_id", "customer_id"], ["product.id", "product.customer_id"],
-            name="fk_production_plan_item_product_customer"),
+        ForeignKeyConstraint(["product_id"], ["product.id"], name="fk_production_plan_item_product"),
+        CheckConstraint("source_version > 0", name="ck_plan_item_source_version"),
+        CheckConstraint("length(btrim(source_version_value)) BETWEEN 1 AND 100", name="ck_plan_item_version_value"),
         CheckConstraint("order_quantity > 0", name="ck_production_plan_item_order_quantity"),
         CheckConstraint("production_quantity > 0", name="ck_production_plan_item_production_quantity"),
         Index("idx_production_plan_item_product", "product_id"),
@@ -64,6 +80,33 @@ class ProductionPlanItem(Base):
     customer_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     production_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_version_value: Mapped[str] = mapped_column(Text, nullable=False)
+    product_name: Mapped[str] = mapped_column(Text, nullable=False)
+    factory_code: Mapped[str] = mapped_column(Text, nullable=False)
+    customer_code: Mapped[str] = mapped_column(Text, nullable=False)
+    bom_snapshot: Mapped[list[dict]] = mapped_column(JSON_TYPE, nullable=False)
+    process_flow_snapshot: Mapped[dict] = mapped_column(JSON_TYPE, nullable=False)
+
+
+
+class PlanProductRoute(Base):
+    __tablename__ = "plan_product_route"
+    __table_args__ = (
+        ForeignKeyConstraint(["production_plan_id", "product_id"],
+            ["production_plan_item.production_plan_id", "production_plan_item.product_id"],
+            name="fk_plan_product_route_item", ondelete="CASCADE"),
+        CheckConstraint("unit_requirement > 0", name="ck_plan_product_route_quantity"),
+        Index("idx_plan_product_route_department", "department_code", "production_plan_id", "product_id"),
+    )
+    production_plan_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    material_node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    department_node_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    department_code: Mapped[str] = mapped_column(Text, ForeignKey("production_department.code"), nullable=False)
+    part_no: Mapped[str] = mapped_column(Text, nullable=False)
+    part_name: Mapped[str] = mapped_column(Text, nullable=False)
+    unit_requirement: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class DepartmentWorkOrder(Base):
@@ -76,8 +119,8 @@ class DepartmentWorkOrder(Base):
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
-            ["product_id", "material_node_id", "department_node_id"],
-            ["product_department_route.product_id", "product_department_route.material_node_id", "product_department_route.department_node_id"],
+            ["production_plan_id", "product_id", "material_node_id", "department_node_id"],
+            ["plan_product_route.production_plan_id", "plan_product_route.product_id", "plan_product_route.material_node_id", "plan_product_route.department_node_id"],
             name="fk_department_work_order_route",
         ),
         UniqueConstraint("production_plan_id", "product_id", "material_node_id", "department_node_id", name="uq_department_work_order_plan_route"),
@@ -103,7 +146,7 @@ class DepartmentWorkOrderMovement(Base):
         CheckConstraint("quantity > 0 AND quantity <= 9007199254740991", name="ck_department_movement_quantity"),
         Index("idx_department_movement_order", "work_order_id", "created_at", "id"),
         Index("idx_department_movement_actor", "actor_user_id"),
-        Index("idx_department_movement_ticket", "ticket_id"),
+        UniqueConstraint("ticket_id", name="uq_department_movement_ticket"),
         CheckConstraint("receipt_source IS DISTINCT FROM 'external' OR note ~ '[^[:space:]]'", name="ck_unattributed_receipt_note"),
         CheckConstraint("(direction = 'issue' AND receipt_source IS NULL AND ticket_id IS NULL AND input_material_node_id IS NULL) OR "
                         "(direction = 'receipt' AND receipt_source IS NOT NULL AND input_material_node_id IS NOT NULL AND "

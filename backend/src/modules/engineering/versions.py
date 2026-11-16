@@ -1,31 +1,29 @@
 from copy import deepcopy
-from modules.engineering.handoff_routes import ensure_handoffs_preserved
-
-from sqlalchemy.exc import IntegrityError
 
 from database import SessionLocal
 from domain.engineering_products import validate_expected_revision
 from domain.models import BomItemCommand
 from domain.time import utc_now
-from modules.engineering.persistence import ProductVersion
-from modules.engineering.command_support import command_result, product_versions
-from modules.engineering.collaboration_contract import EngineeringCollaborators
-from modules.engineering.routing import ensure_referenced_routes_preserved, ensure_recorded_inputs_preserved, synchronize_routes, validate_nodes
-from modules.engineering.repository import EngineeringProductRepository
-from modules.engineering.support import (
-    empty_process_flow,
-    raise_integrity_error,
-)
-from modules.errors import product_not_found
 from schemas.engineering import ProcessFlowPayload
+from sqlalchemy.exc import IntegrityError
+
+from modules.engineering.command_support import command_result, product_versions
+from modules.engineering.persistence import ProductVersion
+from modules.engineering.repository import EngineeringProductRepository
+from modules.engineering.routing import synchronize_routes, validate_nodes
+from modules.engineering.support import empty_process_flow, raise_integrity_error
+from modules.errors import DomainError, product_not_found
 
 
 def create_product_version(
     product_id: int,
     expected_revision: int,
-    collaborators: EngineeringCollaborators,
+    version_value: str,
     source_version: int | None = None,
 ) -> dict:
+    value = version_value.strip()
+    if not value or len(value) > 100:
+        raise DomainError("appearance_version_value_invalid", "外观版本值须为1–100个字符", path="version_value")
     try:
         with SessionLocal.begin() as session:
             repository = EngineeringProductRepository(session)
@@ -40,7 +38,7 @@ def create_product_version(
             if copy_from_version not in available_versions:
                 raise product_not_found()
             next_version = max(item.version for item in product.versions) + 1
-            product.versions.append(ProductVersion(version=next_version))
+            product.versions.append(ProductVersion(version=next_version, value=value))
             repository.flush()
             source_items = [
                 item
@@ -77,12 +75,6 @@ def create_product_version(
                 if node.type == "part":
                     node.bom_item_id = bom_id_map[node.bom_item_id]
             copied_flow = validate_nodes(session, product.id, next_version, copied_flow)
-            ensure_handoffs_preserved(copied_flow, collaborators.referenced_handoff_pairs(session, product.id))
-            ensure_recorded_inputs_preserved(product, copied_flow, collaborators.referenced_input_nodes(session, product.id))
-            ensure_referenced_routes_preserved(
-                session, product, copied_flow,
-                collaborators.referenced_route_pairs(session, product.id),
-            )
             copied_flow = copied_flow.model_dump(exclude_none=True)
             repository.set_process_flow(product, next_version, copied_flow)
             product.version = next_version
