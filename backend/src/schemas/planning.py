@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Literal
 from uuid import UUID
 
@@ -20,10 +21,14 @@ class ProductionPlanItemCreate(PlanningModel):
 class ProductionPlanCreate(PlanningModel):
     customer_id: int = Field(gt=0)
     order_no: str = Field(min_length=1, max_length=200)
+    order_date: date
+    delivery_date: date
     items: list[ProductionPlanItemCreate] = Field(min_length=1)
 
     @model_validator(mode="after")
     def unique_products(self):
+        if self.delivery_date < self.order_date:
+            raise ValueError("交货日期不能早于下单日期")
         if len({item.product_id for item in self.items}) != len(self.items):
             raise ValueError("同一计划不能重复选择产品")
         return self
@@ -72,7 +77,32 @@ class WorkOrderComponent(PlanningModel):
     received_quantity: str
 
 
+class WorkOrderScheduleUpdate(PlanningModel):
+    expected_revisions: dict[int, int] = Field(default_factory=dict)
+    scheduled_date: date | None
+    expected_revision: int = Field(gt=0)
+
+
+class WorkOrderScheduleResponse(PlanningModel):
+    id: int
+    scheduled_date: date | None
+    schedule_revision: int
+
+
+class WorkOrderScheduleEnvelope(PlanningModel):
+    data: list[WorkOrderScheduleResponse]
+
+
 class DepartmentWorkOrderResponse(PlanningModel):
+    upstream_departments: list[str]
+    downstream_departments: list[str]
+    can_issue: bool
+    requires_inspection: bool
+    good_quantity: str
+    scrap_quantity: str
+    rework_quantity: str
+    scheduled_date: date | None
+    schedule_revision: int
     id: int
     production_plan_id: int
     material_node_id: str
@@ -110,6 +140,7 @@ class ProgressMaterial(PlanningModel):
 
 
 class ProgressProduct(PlanningModel):
+    completed_quantity: str
     order_quantity: int
     task_quantity: int
     product_id: int
@@ -135,13 +166,15 @@ class DepartmentMovementCreate(PlanningModel):
     quantity: int = Field(strict=True, gt=0, le=9007199254740991)
     note: str = Field(default="", max_length=1000)
     request_id: UUID
-    receipt_source: Literal["external", "ticket"] | None = None
+    receipt_source: Literal["ticket", "warehouse"] | None = None
     ticket_id: int | None = Field(default=None, gt=0)
+    warehouse_pick_id: int | None = Field(default=None, gt=0)
     input_material_node_id: str | None = Field(default=None, min_length=1, max_length=100)
     target_work_order_id: int | None = Field(default=None, gt=0)
 
 
 class DepartmentMovementResponse(DepartmentMovementCreate):
+    receipt_source: Literal["external", "ticket", "warehouse"] | None
     source_department: str | None
     target_department: str | None
     receipt_movement_ids: list[int]
@@ -156,21 +189,18 @@ class DepartmentMovementResponse(DepartmentMovementCreate):
 class HandoffChoice(PlanningModel):
     id: int
     label: str
-
-
-class ExternalInputChoice(PlanningModel):
-    material_node_id: str
-    label: str
+    department_name: str
 
 
 class HandoffOptionsResponse(PlanningModel):
     available_issue_quantity: str | None
     can_receive: bool
     targets: list[HandoffChoice]
-    external_inputs: list[ExternalInputChoice]
 
 
 class HandoffTicketResponse(PlanningModel):
+    kind: Literal["normal", "rework", "return", "warehouse"]
+    action: Literal["none", "receive", "inspect", "rework_receive", "rework_return"]
     can_receive: bool
     id: int
     ticket_no: str
@@ -185,7 +215,7 @@ class HandoffTicketResponse(PlanningModel):
     received_quantity: str
     created_at: str
     note: str
-    target_work_order_id: int
+    target_work_order_id: int | None
     plan_status: Literal["draft", "confirmed", "cancelled", "completed"]
 
 

@@ -1,6 +1,6 @@
 """Plan-owned product snapshots, route projections and production history."""
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from database import Base
@@ -9,6 +9,7 @@ from sqlalchemy import (
     TIMESTAMP,
     BigInteger,
     CheckConstraint,
+    Date,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -30,6 +31,7 @@ class ProductionPlan(Base):
         UniqueConstraint("order_no", name="uq_production_plan_order_no"),
         UniqueConstraint("id", "customer_id", name="uq_production_plan_customer"),
         CheckConstraint("revision > 0", name="ck_production_plan_revision"),
+        CheckConstraint("delivery_date >= order_date", name="ck_production_plan_dates"),
         CheckConstraint(
             "status IN ('draft', 'confirmed', 'cancelled', 'completed')",
             name="ck_production_plan_status",
@@ -52,6 +54,8 @@ class ProductionPlan(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     customer_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("customer.id"), nullable=False)
     order_no: Mapped[str] = mapped_column(Text, nullable=False)
+    order_date: Mapped[date] = mapped_column(Date, nullable=False)
+    delivery_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="draft")
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     confirmed_at: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
@@ -125,6 +129,7 @@ class DepartmentWorkOrder(Base):
         ),
         UniqueConstraint("production_plan_id", "product_id", "material_node_id", "department_node_id", name="uq_department_work_order_plan_route"),
         CheckConstraint("task_quantity > 0", name="ck_department_work_order_quantity"),
+        CheckConstraint("schedule_revision > 0", name="ck_department_work_order_schedule_revision"),
         Index("idx_department_work_order_route", "product_id", "material_node_id", "department_node_id"),
         Index("idx_department_work_order_product", "product_id"),
     )
@@ -135,6 +140,8 @@ class DepartmentWorkOrder(Base):
     material_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     department_node_id: Mapped[str] = mapped_column(Text, nullable=False)
     task_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    scheduled_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    schedule_revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
 
@@ -147,11 +154,12 @@ class DepartmentWorkOrderMovement(Base):
         Index("idx_department_movement_order", "work_order_id", "created_at", "id"),
         Index("idx_department_movement_actor", "actor_user_id"),
         UniqueConstraint("ticket_id", name="uq_department_movement_ticket"),
-        CheckConstraint("receipt_source IS DISTINCT FROM 'external' OR note ~ '[^[:space:]]'", name="ck_unattributed_receipt_note"),
+        UniqueConstraint("warehouse_pick_id", name="uq_department_movement_warehouse_pick"),
         CheckConstraint("(direction = 'issue' AND receipt_source IS NULL AND ticket_id IS NULL AND input_material_node_id IS NULL) OR "
                         "(direction = 'receipt' AND receipt_source IS NOT NULL AND input_material_node_id IS NOT NULL AND "
-                        "((receipt_source = 'external' AND ticket_id IS NULL) OR (receipt_source = 'ticket' AND ticket_id IS NOT NULL)))",
+                        "((receipt_source = 'ticket' AND ticket_id IS NOT NULL) OR (receipt_source = 'warehouse' AND ticket_id IS NULL)))",
                         name="ck_department_movement_source"),
+        CheckConstraint("(warehouse_pick_id IS NOT NULL) = (receipt_source IS NOT DISTINCT FROM 'warehouse')", name="ck_department_movement_warehouse_pick"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -163,6 +171,7 @@ class DepartmentWorkOrderMovement(Base):
     actor_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
     receipt_source: Mapped[str | None] = mapped_column(Text, nullable=True)
     ticket_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("department_handoff_ticket.id"), nullable=True)
+    warehouse_pick_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("warehouse_pick.id", name="fk_department_movement_warehouse_pick", use_alter=True), nullable=True)
     input_material_node_id: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
@@ -183,3 +192,107 @@ class DepartmentMovementReceiptLink(Base):
     issue_movement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order_movement.id"), primary_key=True)
     receipt_movement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order_movement.id"), primary_key=True)
     __table_args__ = (Index("idx_movement_link_receipt", "receipt_movement_id"),)
+
+
+class QcInspection(Base):
+    __tablename__ = "qc_inspection"
+    __table_args__ = (
+        UniqueConstraint("source_ticket_id", name="uq_qc_inspection_ticket"),
+        UniqueConstraint("source_return_id", name="uq_qc_inspection_return"),
+        UniqueConstraint("source_pick_id", name="uq_qc_inspection_pick"),
+        UniqueConstraint("request_id", name="uq_qc_inspection_request"),
+        CheckConstraint("(CASE WHEN source_ticket_id IS NULL THEN 0 ELSE 1 END + CASE WHEN source_return_id IS NULL THEN 0 ELSE 1 END + CASE WHEN source_pick_id IS NULL THEN 0 ELSE 1 END) = 1", name="ck_qc_inspection_source"),
+        CheckConstraint("good_quantity >= 0 AND scrap_quantity >= 0 AND rework_quantity >= 0 AND good_quantity + scrap_quantity + rework_quantity BETWEEN 1 AND 9007199254740991", name="ck_qc_inspection_quantities"),
+        CheckConstraint("(rework_quantity > 0) = (repair_department_code IS NOT NULL)", name="ck_qc_inspection_repair"),
+        CheckConstraint("repair_department_code IS NULL OR repair_department_code <> 'qc'", name="ck_qc_repair_department"),
+        CheckConstraint("(scrap_quantity = 0 AND rework_quantity = 0) OR note ~ '[^[:space:]]'", name="ck_qc_inspection_note"),
+        Index("idx_qc_inspection_order", "work_order_id", "id"),
+        Index("idx_qc_inspection_repair", "repair_department_code", "id"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    work_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("department_work_order.id"), nullable=False)
+    source_ticket_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("department_handoff_ticket.id"), nullable=True)
+    source_return_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("qc_rework_event.id", name="fk_qc_inspection_return", use_alter=True), nullable=True)
+    source_pick_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("warehouse_pick.id", name="fk_qc_inspection_pick", use_alter=True), nullable=True)
+    good_quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    scrap_quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rework_quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    repair_department_code: Mapped[str | None] = mapped_column(Text, ForeignKey("production_department.code"), nullable=True)
+    request_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    actor_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class QcReworkTicket(Base):
+    __tablename__ = "qc_rework_ticket"
+    __table_args__ = (UniqueConstraint("inspection_id", name="uq_qc_rework_inspection"),)
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    inspection_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("qc_inspection.id"), nullable=False)
+
+
+class QcReworkEvent(Base):
+    __tablename__ = "qc_rework_event"
+    __table_args__ = (
+        UniqueConstraint("ticket_id", "action", name="uq_qc_rework_event_action"),
+        UniqueConstraint("request_id", name="uq_qc_rework_event_request"),
+        CheckConstraint("action IN ('receive', 'return')", name="ck_qc_rework_event_action"),
+        CheckConstraint("quantity > 0 AND quantity <= 9007199254740991", name="ck_qc_rework_event_quantity"),
+        CheckConstraint("repaired_quantity >= 0 AND unrepaired_quantity >= 0 AND ((action = 'receive' AND repaired_quantity = 0 AND unrepaired_quantity = 0) OR (action = 'return' AND repaired_quantity + unrepaired_quantity = quantity))", name="ck_qc_rework_event_result"),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    ticket_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("qc_rework_ticket.id"), nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    repaired_quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    unrepaired_quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    request_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    actor_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id"), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+
+class WarehouseLot(Base):
+    __tablename__ = 'warehouse_lot'
+    __table_args__ = (
+        UniqueConstraint('receipt_movement_id', name='uq_warehouse_lot_receipt'),
+        CheckConstraint('quantity > 0 AND quantity <= 9007199254740991', name='ck_warehouse_lot_quantity'),
+        Index('idx_warehouse_lot_pool', 'product_id', 'material_key', 'id'),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    warehouse_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('department_work_order.id'), nullable=False)
+    receipt_movement_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('department_work_order_movement.id'), nullable=False)
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('product.id'), nullable=False)
+    material_key: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+
+
+class WarehousePick(Base):
+    __tablename__ = 'warehouse_pick'
+    __table_args__ = (
+        UniqueConstraint('request_id', name='uq_warehouse_pick_request'),
+        CheckConstraint('quantity > 0 AND quantity <= 9007199254740991', name='ck_warehouse_pick_quantity'),
+        Index('idx_warehouse_pick_target', 'target_order_id', 'id'),
+    )
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    target_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('department_work_order.id'), nullable=False)
+    route_warehouse_order_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('department_work_order.id'), nullable=False)
+    product_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('product.id'), nullable=False)
+    material_key: Mapped[str] = mapped_column(Text, nullable=False)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    request_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    actor_user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('users.id'), nullable=False)
+    note: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(TIMESTAMP(timezone=True), nullable=False, server_default=text('CURRENT_TIMESTAMP'))
+
+
+class WarehouseAllocation(Base):
+    __tablename__ = 'warehouse_allocation'
+    __table_args__ = (
+        CheckConstraint('quantity > 0 AND quantity <= 9007199254740991', name='ck_warehouse_allocation_quantity'),
+        Index('idx_warehouse_allocation_lot', 'lot_id'),
+    )
+    pick_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('warehouse_pick.id'), primary_key=True)
+    lot_id: Mapped[int] = mapped_column(BigInteger, ForeignKey('warehouse_lot.id'), primary_key=True)
+    quantity: Mapped[int] = mapped_column(BigInteger, nullable=False)

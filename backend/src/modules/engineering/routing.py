@@ -28,7 +28,7 @@ def validate_nodes(session, product_id, version, flow):
         if node.type == "part":
             row = bom[node.bom_item_id]
             node.label = f"{row.part_no} · {row.part_name}"
-        else:
+        elif not (node.department_code == "outsource" and node.label in {"外发蚀字", "外发电镀"}):
             node.label = names[node.department_code]
     return result
 

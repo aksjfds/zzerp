@@ -4,6 +4,7 @@ from database import SessionLocal
 from sqlalchemy import func, select
 
 from modules.errors import DomainError
+from modules.planning.completion import completed_quantities
 from modules.planning.persistence import (
     DepartmentWorkOrder,
     ProductionPlan,
@@ -11,6 +12,7 @@ from modules.planning.persistence import (
 )
 from modules.planning.snapshots import (
     item_key,
+    order_department_filter,
     order_product_filter,
     snapshot_department_orders,
 )
@@ -53,7 +55,8 @@ def list_production_progress(page, page_size, *, department_scope, order_no=None
     if department_scope is not None:
         raise DomainError("progress_access_denied", "生产账号仅可查看所属部门工单", status_code=403)
     with SessionLocal() as session:
-        conditions = [ProductionPlan.status != "draft", ProductionPlan.confirmed_at.is_not(None)]
+        conditions = [ProductionPlan.status != "draft", ProductionPlan.confirmed_at.is_not(None),
+                      ~order_department_filter("warehouse")]
         if order_no:
             conditions.append(ProductionPlan.order_no.ilike(f"%{order_no.strip()}%"))
         if product_keyword:
@@ -77,7 +80,12 @@ def list_production_progress(page, page_size, *, department_scope, order_no=None
         rows = [(order, plan) for order, plan, quantity in rows]
         orders = serialize_work_orders(session, rows, include_components=False)
         route_orders = snapshot_department_orders(session, {item_key(order) for order, plan in rows})
-        return group_plan_progress(orders, route_orders, plan_ids, production_quantities), total
+        progress = group_plan_progress(orders, route_orders, plan_ids, production_quantities)
+        completed = completed_quantities(session, orders)
+        for plan in progress:
+            for product in plan['products']:
+                product['completed_quantity'] = str(completed.get((plan['production_plan_id'], product['product_id']), 0))
+        return progress, total
 
 
 def group_plan_progress(orders, route_orders, plan_ids, production_quantities):

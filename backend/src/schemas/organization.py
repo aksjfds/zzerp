@@ -6,3 +6,5 @@ class DepartmentResponse(BaseModel):
     code: str
     name: str
     can_receive: bool
+    requires_inspection: bool
+    is_warehouse: bool

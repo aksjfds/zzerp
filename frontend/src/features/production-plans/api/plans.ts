@@ -56,7 +56,29 @@ export type WorkOrderComponent = {
   received_quantity: string
 }
 
-export type DepartmentWorkOrder = {
+export type WorkOrderSchedule = {
+  id: number
+  scheduled_date: string | null
+  schedule_revision: number
+}
+
+export async function saveWorkOrderSchedule(order: DepartmentWorkOrder, scheduledDate: string | null, orders: DepartmentWorkOrder[]) {
+  const response = await service.put<{ data: WorkOrderSchedule[] }>(
+    `/production-plans/department-work-orders/${order.id}/schedule`,
+    { scheduled_date: scheduledDate, expected_revision: order.schedule_revision,
+      expected_revisions: Object.fromEntries(orders.map(item => [item.id, item.schedule_revision])) },
+  )
+  return response.data.data
+}
+
+export type DepartmentWorkOrder = WorkOrderSchedule & {
+  upstream_departments: string[]
+  downstream_departments: string[]
+  can_issue: boolean
+  requires_inspection: boolean
+  good_quantity: string
+  scrap_quantity: string
+  rework_quantity: string
   id: number
   production_plan_id: number
   material_node_id: string
@@ -91,6 +113,7 @@ export async function queryDepartmentWorkOrders(params: {
 
 
 export type ProgressProduct = {
+  completed_quantity: string
   order_quantity: number
   task_quantity: number
   product_id: number
@@ -124,13 +147,16 @@ export type DepartmentMovementInput = {
   quantity: number
   note: string
   request_id: string
-  receipt_source: 'external' | 'ticket' | null
+  receipt_source: 'ticket' | 'warehouse' | null
   ticket_id: number | null
+  warehouse_pick_id: number | null
   input_material_node_id: string | null
   target_work_order_id: number | null
 }
 
-export type DepartmentMovement = DepartmentMovementInput & {
+export type DepartmentMovement = Omit<DepartmentMovementInput, 'receipt_source'> & {
+  receipt_source: 'external' | 'ticket' | 'warehouse' | null
+  warehouse_pick_id: number | null
   source_department: string | null
   target_department: string | null
   id: number
@@ -168,20 +194,21 @@ export async function queryDepartmentLedger(page: number, departmentCode?: strin
 export type HandoffOptions = {
   available_issue_quantity: string | null
   can_receive: boolean
-  targets: { id: number; label: string }[]
-  external_inputs: { material_node_id: string; label: string }[]
+  targets: { id: number; label: string; department_name: string }[]
 }
 export type HandoffTicket = {
+  kind: 'normal' | 'rework' | 'return' | 'warehouse'
+  action: 'none' | 'receive' | 'inspect' | 'rework_receive' | 'rework_return'
   can_receive: boolean
   id: number; ticket_no: string; order_no: string; material_no: string; material_name: string
   factory_code: string; product_name: string
   source_department: string; target_department: string; quantity: number; received_quantity: string
-  created_at: string; note: string; target_work_order_id: number; plan_status: ProductionPlan['status']
+  created_at: string; note: string; target_work_order_id: number | null; plan_status: ProductionPlan['status']
 }
 export async function queryHandoffOptions(orderId: number) {
   return (await service.get<HandoffOptions>(`/production-plans/department-work-orders/${orderId}/handoff-options`)).data
 }
-export async function queryHandoffTickets(params: { page: number; unreceived: boolean; order_no?: string; department_code?: string }) {
+export async function queryHandoffTickets(params: { page: number; unreceived: boolean; order_no?: string; department_code?: string; direction?: 'incoming' | 'outgoing' }) {
   return (await service.get<{ data: HandoffTicket[]; total: number }>('/production-plans/handoff-tickets', { params })).data
 }
 

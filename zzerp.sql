@@ -142,6 +142,8 @@ CREATE TABLE production_plan (
     id BIGSERIAL PRIMARY KEY,
     customer_id BIGINT NOT NULL REFERENCES customer(id),
     order_no TEXT NOT NULL,
+    order_date DATE NOT NULL,
+    delivery_date DATE NOT NULL,
     status TEXT NOT NULL DEFAULT 'draft',
     revision INT NOT NULL DEFAULT 1,
     confirmed_at TIMESTAMPTZ,
@@ -153,6 +155,7 @@ CREATE TABLE production_plan (
     CONSTRAINT uq_production_plan_order_no UNIQUE (order_no),
     CONSTRAINT uq_production_plan_customer UNIQUE (id, customer_id),
     CONSTRAINT ck_production_plan_revision CHECK (revision > 0),
+    CONSTRAINT ck_production_plan_dates CHECK (delivery_date >= order_date),
     CONSTRAINT ck_production_plan_status
         CHECK (status IN ('draft', 'confirmed', 'cancelled', 'completed')),
     CONSTRAINT ck_production_plan_confirmation CHECK (
@@ -248,6 +251,8 @@ CREATE TABLE department_work_order (
     material_node_id TEXT NOT NULL,
     department_node_id TEXT NOT NULL,
     task_quantity INT NOT NULL,
+    scheduled_date DATE,
+    schedule_revision INT NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT fk_department_work_order_plan
         FOREIGN KEY (production_plan_id, product_id)
@@ -256,7 +261,8 @@ CREATE TABLE department_work_order (
         FOREIGN KEY (production_plan_id, product_id, material_node_id, department_node_id)
         REFERENCES plan_product_route(production_plan_id, product_id, material_node_id, department_node_id),
     CONSTRAINT uq_department_work_order_plan_route UNIQUE (production_plan_id, product_id, material_node_id, department_node_id),
-    CONSTRAINT ck_department_work_order_quantity CHECK (task_quantity > 0)
+    CONSTRAINT ck_department_work_order_quantity CHECK (task_quantity > 0),
+    CONSTRAINT ck_department_work_order_schedule_revision CHECK (schedule_revision > 0)
 );
 
 CREATE INDEX idx_department_work_order_route ON department_work_order(product_id, material_node_id, department_node_id);
@@ -272,17 +278,19 @@ CREATE TABLE department_work_order_movement (
     actor_user_id BIGINT NOT NULL REFERENCES users(id),
     receipt_source TEXT,
     ticket_id BIGINT,
+    warehouse_pick_id BIGINT,
     input_material_node_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_department_movement_request UNIQUE (work_order_id, request_id),
     CONSTRAINT uq_department_movement_ticket UNIQUE (ticket_id),
+    CONSTRAINT uq_department_movement_warehouse_pick UNIQUE (warehouse_pick_id),
+    CONSTRAINT ck_department_movement_warehouse_pick CHECK ((warehouse_pick_id IS NOT NULL) = (receipt_source IS NOT DISTINCT FROM 'warehouse')),
     CONSTRAINT ck_department_movement_direction CHECK (direction IN ('receipt', 'issue')),
     CONSTRAINT ck_department_movement_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
-    CONSTRAINT ck_unattributed_receipt_note CHECK (receipt_source IS DISTINCT FROM 'external' OR note ~ '[^[:space:]]'),
     CONSTRAINT ck_department_movement_source CHECK (
         (direction = 'issue' AND receipt_source IS NULL AND ticket_id IS NULL AND input_material_node_id IS NULL)
         OR (direction = 'receipt' AND receipt_source IS NOT NULL AND input_material_node_id IS NOT NULL
-            AND ((receipt_source = 'external' AND ticket_id IS NULL) OR (receipt_source = 'ticket' AND ticket_id IS NOT NULL))))
+            AND ((receipt_source = 'ticket' AND ticket_id IS NOT NULL) OR (receipt_source = 'warehouse' AND ticket_id IS NULL))))
 );
 
 CREATE INDEX idx_department_movement_order ON department_work_order_movement(work_order_id, created_at, id);
@@ -303,6 +311,287 @@ CREATE TABLE department_movement_receipt_link (
     PRIMARY KEY (issue_movement_id, receipt_movement_id)
 );
 CREATE INDEX idx_movement_link_receipt ON department_movement_receipt_link(receipt_movement_id);
+
+CREATE TABLE qc_inspection (
+    id BIGSERIAL PRIMARY KEY,
+    work_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
+    source_ticket_id BIGINT REFERENCES department_handoff_ticket(id),
+    source_return_id BIGINT,
+    source_pick_id BIGINT,
+    good_quantity BIGINT NOT NULL,
+    scrap_quantity BIGINT NOT NULL,
+    rework_quantity BIGINT NOT NULL,
+    repair_department_code TEXT REFERENCES production_department(code),
+    request_id UUID NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    note TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_qc_inspection_ticket UNIQUE (source_ticket_id),
+    CONSTRAINT uq_qc_inspection_return UNIQUE (source_return_id),
+    CONSTRAINT uq_qc_inspection_pick UNIQUE (source_pick_id),
+    CONSTRAINT uq_qc_inspection_request UNIQUE (request_id),
+    CONSTRAINT ck_qc_inspection_note CHECK ((scrap_quantity = 0 AND rework_quantity = 0) OR note ~ '[^[:space:]]'),
+    CONSTRAINT ck_qc_inspection_source CHECK ((CASE WHEN source_ticket_id IS NULL THEN 0 ELSE 1 END + CASE WHEN source_return_id IS NULL THEN 0 ELSE 1 END + CASE WHEN source_pick_id IS NULL THEN 0 ELSE 1 END) = 1),
+    CONSTRAINT ck_qc_inspection_quantities CHECK (good_quantity >= 0 AND scrap_quantity >= 0 AND rework_quantity >= 0 AND good_quantity + scrap_quantity + rework_quantity BETWEEN 1 AND 9007199254740991),
+    CONSTRAINT ck_qc_repair_department CHECK (repair_department_code IS NULL OR repair_department_code <> 'qc'),
+    CONSTRAINT ck_qc_inspection_repair CHECK ((rework_quantity > 0) = (repair_department_code IS NOT NULL))
+);
+CREATE INDEX idx_qc_inspection_order ON qc_inspection(work_order_id, id);
+CREATE INDEX idx_qc_inspection_repair ON qc_inspection(repair_department_code, id);
+CREATE TABLE qc_rework_ticket (
+    id BIGSERIAL PRIMARY KEY,
+    inspection_id BIGINT NOT NULL REFERENCES qc_inspection(id),
+    CONSTRAINT uq_qc_rework_inspection UNIQUE (inspection_id)
+);
+CREATE TABLE qc_rework_event (
+    id BIGSERIAL PRIMARY KEY,
+    ticket_id BIGINT NOT NULL REFERENCES qc_rework_ticket(id),
+    action TEXT NOT NULL,
+    quantity BIGINT NOT NULL,
+    repaired_quantity BIGINT NOT NULL,
+    unrepaired_quantity BIGINT NOT NULL,
+    request_id UUID NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    note TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_qc_rework_event_action UNIQUE (ticket_id, action),
+    CONSTRAINT uq_qc_rework_event_request UNIQUE (request_id),
+    CONSTRAINT ck_qc_rework_event_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
+    CONSTRAINT ck_qc_rework_event_result CHECK (repaired_quantity >= 0 AND unrepaired_quantity >= 0 AND ((action = 'receive' AND repaired_quantity = 0 AND unrepaired_quantity = 0) OR (action = 'return' AND repaired_quantity + unrepaired_quantity = quantity))),
+    CONSTRAINT ck_qc_rework_event_action CHECK (action IN ('receive', 'return'))
+);
+ALTER TABLE qc_inspection ADD CONSTRAINT fk_qc_inspection_return FOREIGN KEY (source_return_id) REFERENCES qc_rework_event(id);
+
+CREATE TABLE warehouse_lot (
+    id BIGSERIAL PRIMARY KEY,
+    warehouse_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
+    receipt_movement_id BIGINT NOT NULL REFERENCES department_work_order_movement(id),
+    product_id BIGINT NOT NULL REFERENCES product(id),
+    material_key TEXT NOT NULL,
+    quantity BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_warehouse_lot_receipt UNIQUE (receipt_movement_id),
+    CONSTRAINT ck_warehouse_lot_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991)
+);
+CREATE INDEX idx_warehouse_lot_pool ON warehouse_lot(product_id, material_key, id);
+CREATE TABLE warehouse_pick (
+    id BIGSERIAL PRIMARY KEY,
+    target_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
+    route_warehouse_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
+    product_id BIGINT NOT NULL REFERENCES product(id),
+    material_key TEXT NOT NULL,
+    quantity BIGINT NOT NULL,
+    request_id UUID NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    note TEXT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT uq_warehouse_pick_request UNIQUE (request_id),
+    CONSTRAINT ck_warehouse_pick_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991)
+);
+CREATE INDEX idx_warehouse_pick_target ON warehouse_pick(target_order_id, id);
+CREATE TABLE warehouse_allocation (
+    pick_id BIGINT NOT NULL REFERENCES warehouse_pick(id),
+    lot_id BIGINT NOT NULL REFERENCES warehouse_lot(id),
+    quantity BIGINT NOT NULL,
+    PRIMARY KEY (pick_id, lot_id),
+    CONSTRAINT ck_warehouse_allocation_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991)
+);
+CREATE INDEX idx_warehouse_allocation_lot ON warehouse_allocation(lot_id);
+ALTER TABLE department_work_order_movement ADD CONSTRAINT fk_department_movement_warehouse_pick FOREIGN KEY (warehouse_pick_id) REFERENCES warehouse_pick(id);
+ALTER TABLE qc_inspection ADD CONSTRAINT fk_qc_inspection_pick FOREIGN KEY (source_pick_id) REFERENCES warehouse_pick(id);
+
+CREATE FUNCTION validate_warehouse_lot() RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM department_work_order_movement movement
+        JOIN department_work_order wo ON wo.id = movement.work_order_id
+        JOIN plan_product_route route ON (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+            = (wo.production_plan_id, wo.product_id, wo.material_node_id, wo.department_node_id)
+        WHERE movement.id = NEW.receipt_movement_id AND movement.direction = 'receipt'
+          AND movement.quantity = NEW.quantity AND movement.input_material_node_id = wo.material_node_id
+          AND wo.id = NEW.warehouse_order_id AND wo.product_id = NEW.product_id AND route.department_code = 'warehouse'
+    ) THEN
+        RAISE EXCEPTION '仓库批次必须来自对应物料的实际入库流水' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_warehouse_lot BEFORE INSERT ON warehouse_lot FOR EACH ROW EXECUTE FUNCTION validate_warehouse_lot();
+
+CREATE FUNCTION validate_warehouse_pick() RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM department_work_order source JOIN department_work_order target
+        ON (source.production_plan_id, source.product_id) = (target.production_plan_id, target.product_id)
+        JOIN plan_product_route route ON (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+            = (source.production_plan_id, source.product_id, source.material_node_id, source.department_node_id)
+        WHERE source.id = NEW.route_warehouse_order_id AND target.id = NEW.target_order_id
+          AND target.product_id = NEW.product_id AND route.department_code = 'warehouse'
+          AND NOT EXISTS (SELECT 1 FROM plan_product_route target_route
+              WHERE (target_route.production_plan_id, target_route.product_id, target_route.material_node_id, target_route.department_node_id)
+                  = (target.production_plan_id, target.product_id, target.material_node_id, target.department_node_id)
+                AND target_route.department_code = 'warehouse')
+    ) THEN
+        RAISE EXCEPTION '领料来源必须为本计划产品的仓库工单' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_warehouse_pick BEFORE INSERT ON warehouse_pick FOR EACH ROW EXECUTE FUNCTION validate_warehouse_pick();
+
+CREATE FUNCTION validate_warehouse_allocation() RETURNS TRIGGER AS $$
+DECLARE lot_quantity BIGINT; allocated NUMERIC;
+BEGIN
+    SELECT quantity INTO lot_quantity FROM warehouse_lot WHERE id = NEW.lot_id FOR UPDATE;
+    IF NOT EXISTS (SELECT 1 FROM warehouse_pick pick JOIN warehouse_lot lot
+        ON pick.product_id = lot.product_id AND pick.material_key = lot.material_key
+        WHERE pick.id = NEW.pick_id AND lot.id = NEW.lot_id) THEN
+        RAISE EXCEPTION '领料产品和物料规格与库存批次不一致' USING ERRCODE = '23514';
+    END IF;
+    SELECT COALESCE(SUM(quantity), 0) INTO allocated FROM warehouse_allocation WHERE lot_id = NEW.lot_id;
+    IF allocated + NEW.quantity > lot_quantity THEN
+        RAISE EXCEPTION '领料数量超过仓库批次库存' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_warehouse_allocation BEFORE INSERT ON warehouse_allocation FOR EACH ROW EXECUTE FUNCTION validate_warehouse_allocation();
+
+CREATE FUNCTION validate_warehouse_pick_total() RETURNS TRIGGER AS $$
+DECLARE pick_id_value BIGINT; expected BIGINT; allocated NUMERIC;
+BEGIN
+    IF TG_TABLE_NAME = 'warehouse_pick' THEN pick_id_value := NEW.id;
+    ELSE pick_id_value := NEW.pick_id;
+    END IF;
+    SELECT quantity INTO expected FROM warehouse_pick WHERE id = pick_id_value;
+    SELECT COALESCE(SUM(quantity), 0) INTO allocated FROM warehouse_allocation WHERE pick_id = pick_id_value;
+    IF expected IS DISTINCT FROM allocated THEN
+        RAISE EXCEPTION '领料单数量必须等于全部批次扣减数量' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER trg_warehouse_pick_total AFTER INSERT ON warehouse_pick DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION validate_warehouse_pick_total();
+CREATE CONSTRAINT TRIGGER trg_warehouse_allocation_total AFTER INSERT ON warehouse_allocation DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW EXECUTE FUNCTION validate_warehouse_pick_total();
+
+CREATE FUNCTION validate_warehouse_movement() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.warehouse_pick_id IS NOT NULL THEN
+        PERFORM id FROM warehouse_pick WHERE id = NEW.warehouse_pick_id FOR UPDATE;
+        IF EXISTS (SELECT 1 FROM warehouse_pick WHERE id = NEW.warehouse_pick_id
+            AND NEW.quantity < quantity) AND NEW.note !~ '[^[:space:]]' THEN
+            RAISE EXCEPTION '到料数量小于仓库交接票数量，必须填写备注' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    IF NEW.direction = 'issue' AND EXISTS (
+        SELECT 1 FROM department_work_order wo JOIN plan_product_route route
+        ON (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+        = (wo.production_plan_id, wo.product_id, wo.material_node_id, wo.department_node_id)
+        WHERE wo.id = NEW.work_order_id AND route.department_code = 'warehouse'
+    ) THEN RAISE EXCEPTION '仓库出料必须通过库存出料流程' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.warehouse_pick_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM warehouse_pick pick JOIN department_work_order source ON source.id = pick.route_warehouse_order_id
+        WHERE pick.id = NEW.warehouse_pick_id AND pick.target_order_id = NEW.work_order_id
+          AND NEW.quantity <= pick.quantity AND NEW.direction = 'receipt'
+          AND NEW.input_material_node_id = source.material_node_id
+    ) THEN RAISE EXCEPTION '仓库领料到料必须匹配对应领料单' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_warehouse_movement BEFORE INSERT ON department_work_order_movement FOR EACH ROW EXECUTE FUNCTION validate_warehouse_movement();
+
+CREATE FUNCTION validate_qc_inspection() RETURNS TRIGGER AS $$
+DECLARE expected_quantity BIGINT;
+BEGIN
+    PERFORM plan.id FROM production_plan plan JOIN department_work_order wo ON wo.production_plan_id = plan.id
+        WHERE wo.id = NEW.work_order_id FOR UPDATE OF plan;
+    IF NOT EXISTS (SELECT 1 FROM department_work_order wo JOIN plan_product_route route
+        ON (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+        = (wo.production_plan_id, wo.product_id, wo.material_node_id, wo.department_node_id)
+        WHERE wo.id = NEW.work_order_id AND route.department_code = 'qc') THEN
+        RAISE EXCEPTION '质检记录必须归属QC工单' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.source_ticket_id IS NOT NULL THEN
+        SELECT issue.quantity INTO expected_quantity FROM department_handoff_ticket ticket
+            JOIN department_work_order_movement issue ON issue.id = ticket.issue_movement_id
+            WHERE ticket.id = NEW.source_ticket_id AND ticket.target_work_order_id = NEW.work_order_id;
+        IF EXISTS (SELECT 1 FROM department_work_order_movement WHERE ticket_id = NEW.source_ticket_id) THEN
+            RAISE EXCEPTION '此来料已登记到料' USING ERRCODE = '23514';
+        END IF;
+    ELSIF NEW.source_pick_id IS NOT NULL THEN
+        SELECT quantity INTO expected_quantity FROM warehouse_pick WHERE id = NEW.source_pick_id AND target_order_id = NEW.work_order_id;
+    ELSE
+        SELECT event.quantity INTO expected_quantity FROM qc_rework_event event
+            JOIN qc_rework_ticket ticket ON ticket.id = event.ticket_id
+            JOIN qc_inspection original ON original.id = ticket.inspection_id
+            WHERE event.id = NEW.source_return_id AND event.action = 'return' AND original.work_order_id = NEW.work_order_id;
+    END IF;
+    IF expected_quantity IS NULL OR NEW.good_quantity + NEW.scrap_quantity + NEW.rework_quantity <> expected_quantity THEN
+        RAISE EXCEPTION '质检分类数量必须等于来料数量' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_qc_inspection BEFORE INSERT ON qc_inspection
+FOR EACH ROW EXECUTE FUNCTION validate_qc_inspection();
+
+CREATE FUNCTION validate_qc_rework_event() RETURNS TRIGGER AS $$
+DECLARE ticket_quantity BIGINT; received_quantity BIGINT;
+BEGIN
+    PERFORM plan.id FROM production_plan plan
+        JOIN department_work_order wo ON wo.production_plan_id = plan.id
+        JOIN qc_inspection inspection ON inspection.work_order_id = wo.id
+        JOIN qc_rework_ticket ticket ON ticket.inspection_id = inspection.id
+        WHERE ticket.id = NEW.ticket_id FOR UPDATE OF plan;
+    SELECT inspection.rework_quantity INTO ticket_quantity FROM qc_rework_ticket ticket
+        JOIN qc_inspection inspection ON inspection.id = ticket.inspection_id WHERE ticket.id = NEW.ticket_id;
+    IF NEW.action = 'receive' THEN
+        IF NEW.quantity > ticket_quantity THEN
+            RAISE EXCEPTION '返修接收不能超过票面数量' USING ERRCODE = '23514';
+        END IF;
+        IF NEW.quantity < ticket_quantity AND NEW.note !~ '[^[:space:]]' THEN
+            RAISE EXCEPTION '返修少收必须备注' USING ERRCODE = '23514';
+        END IF;
+    ELSE
+        SELECT quantity INTO received_quantity FROM qc_rework_event WHERE ticket_id = NEW.ticket_id AND action = 'receive';
+        IF received_quantity IS NULL OR NEW.quantity <> received_quantity THEN
+            RAISE EXCEPTION '返修回交总数必须等于实际接收数量' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_qc_rework_event BEFORE INSERT ON qc_rework_event
+FOR EACH ROW EXECUTE FUNCTION validate_qc_rework_event();
+
+CREATE FUNCTION validate_qc_movement() RETURNS TRIGGER AS $$
+DECLARE good NUMERIC; issued NUMERIC;
+BEGIN
+    IF EXISTS (SELECT 1 FROM department_work_order wo JOIN plan_product_route route
+        ON (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+        = (wo.production_plan_id, wo.product_id, wo.material_node_id, wo.department_node_id)
+        WHERE wo.id = NEW.work_order_id AND route.department_code = 'qc') THEN
+        PERFORM plan.id FROM production_plan plan JOIN department_work_order wo ON wo.production_plan_id = plan.id
+            WHERE wo.id = NEW.work_order_id FOR UPDATE OF plan;
+        IF NEW.direction = 'receipt' THEN
+            RAISE EXCEPTION 'QC来料必须登记质检' USING ERRCODE = '23514';
+        END IF;
+        SELECT COALESCE(SUM(good_quantity), 0) INTO good FROM qc_inspection WHERE work_order_id = NEW.work_order_id;
+        SELECT COALESCE(SUM(quantity), 0) INTO issued FROM department_work_order_movement
+            WHERE work_order_id = NEW.work_order_id AND direction = 'issue';
+        IF NEW.quantity > good - issued THEN
+            RAISE EXCEPTION 'QC出料不能超过合格余量' USING ERRCODE = '23514';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_qc_movement BEFORE INSERT ON department_work_order_movement
+FOR EACH ROW EXECUTE FUNCTION validate_qc_movement();
 
 CREATE FUNCTION validate_handoff_ticket() RETURNS TRIGGER AS $$
 BEGIN
@@ -380,6 +669,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE TRIGGER trg_qc_inspection_immutable BEFORE UPDATE OR DELETE ON qc_inspection
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_qc_inspection_no_truncate BEFORE TRUNCATE ON qc_inspection
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_qc_rework_ticket_immutable BEFORE UPDATE OR DELETE ON qc_rework_ticket
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_qc_rework_ticket_no_truncate BEFORE TRUNCATE ON qc_rework_ticket
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_qc_rework_event_immutable BEFORE UPDATE OR DELETE ON qc_rework_event
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_qc_rework_event_no_truncate BEFORE TRUNCATE ON qc_rework_event
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+
+CREATE TRIGGER trg_warehouse_lot_immutable BEFORE UPDATE OR DELETE ON warehouse_lot
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_warehouse_lot_no_truncate BEFORE TRUNCATE ON warehouse_lot
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_warehouse_pick_immutable BEFORE UPDATE OR DELETE ON warehouse_pick
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_warehouse_pick_no_truncate BEFORE TRUNCATE ON warehouse_pick
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_warehouse_allocation_immutable BEFORE UPDATE OR DELETE ON warehouse_allocation
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_warehouse_allocation_no_truncate BEFORE TRUNCATE ON warehouse_allocation
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+
 CREATE TRIGGER trg_department_movement_immutable
 BEFORE UPDATE OR DELETE ON department_work_order_movement
 FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
@@ -401,8 +716,9 @@ CREATE FUNCTION protect_recorded_department_work_order() RETURNS TRIGGER AS $$
 BEGIN
     IF ROW(NEW.production_plan_id, NEW.product_id, NEW.material_node_id, NEW.department_node_id, NEW.task_quantity)
         IS DISTINCT FROM ROW(OLD.production_plan_id, OLD.product_id, OLD.material_node_id, OLD.department_node_id, OLD.task_quantity)
-        AND EXISTS (SELECT 1 FROM department_work_order_movement WHERE work_order_id = OLD.id) THEN
-        RAISE EXCEPTION '已有到料或出料流水，不能修改工单来源或任务数量' USING ERRCODE = '23514';
+        AND (EXISTS (SELECT 1 FROM department_work_order_movement WHERE work_order_id = OLD.id)
+             OR EXISTS (SELECT 1 FROM qc_inspection WHERE work_order_id = OLD.id)) THEN
+        RAISE EXCEPTION '已有流水或质检记录，不能修改工单来源或任务数量' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
 END;
@@ -492,7 +808,7 @@ CREATE INDEX idx_user_sessions_user ON user_sessions(user_id);
 INSERT INTO production_department (code, name) VALUES
 ('stamp', '冲压部'), ('cnc', 'CNC部'), ('grinding', '磨房'),
 ('outsource', '委外部'), ('vibration', '震机部'), ('laser', '激光部'), ('assembly', '装配部'),
-('purchase', '外购部'), ('finished', '成品部');
+('purchase', '外购部'), ('finished', '成品部'), ('qc', 'QC部'), ('warehouse', '仓库部');
 
 INSERT INTO users (
     username, password, is_system, role, permissions
@@ -531,83 +847,111 @@ CROSS JOIN (VALUES
 ) AS component(part_name, part_no, sort_order)
 WHERE product.factory_code = 'Z8737';
 
--- 三路配件独立加工后汇合到同一激光节点，汇合后使用装配体身份。
+-- 三配件先经过独立仓库与QC，再在激光汇合；装配体经过QC、共享仓库及委外后复检。
 INSERT INTO product_process_flow (product_id, product_version, flow_json)
 SELECT product.id, 1, jsonb_build_object(
     'schema_version', 8,
     'nodes', jsonb_build_array(
         jsonb_build_object('id', 'part-body', 'type', 'part', 'x', 0, 'y', 0,
             'label', body.part_no || ' · ' || body.part_name, 'bom_item_id', body.id),
-        jsonb_build_object('id', 'part-bridge', 'type', 'part', 'x', 0, 'y', 500,
-            'label', bridge.part_no || ' · ' || bridge.part_name, 'bom_item_id', bridge.id),
-        jsonb_build_object('id', 'part-head', 'type', 'part', 'x', 0, 'y', 1000,
-            'label', head.part_no || ' · ' || head.part_name, 'bom_item_id', head.id),
         jsonb_build_object('id', 'stamp-body', 'type', 'department', 'x', 500, 'y', 0,
             'label', '冲压部', 'department_code', 'stamp'),
-        jsonb_build_object('id', 'cnc-body', 'type', 'department', 'x', 1000, 'y', 0,
+        jsonb_build_object('id', 'warehouse-body', 'type', 'department', 'x', 1000, 'y', 0,
+            'label', '仓库部', 'department_code', 'warehouse'),
+        jsonb_build_object('id', 'cnc-body', 'type', 'department', 'x', 1500, 'y', 0,
             'label', 'CNC部', 'department_code', 'cnc'),
-        jsonb_build_object('id', 'grinding-body-before', 'type', 'department', 'x', 1500, 'y', 0,
+        jsonb_build_object('id', 'grinding-body-before', 'type', 'department', 'x', 2000, 'y', 0,
             'label', '磨房', 'department_code', 'grinding'),
-        jsonb_build_object('id', 'outsource-body', 'type', 'department', 'x', 2000, 'y', 0,
-            'label', '委外部', 'department_code', 'outsource'),
-        jsonb_build_object('id', 'grinding-body-after', 'type', 'department', 'x', 2500, 'y', 0,
-            'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'qc-body', 'type', 'department', 'x', 2500, 'y', 0,
+            'label', 'QC部', 'department_code', 'qc'),
+        jsonb_build_object('id', 'part-bridge', 'type', 'part', 'x', 0, 'y', 500,
+            'label', bridge.part_no || ' · ' || bridge.part_name, 'bom_item_id', bridge.id),
         jsonb_build_object('id', 'stamp-bridge', 'type', 'department', 'x', 500, 'y', 500,
             'label', '冲压部', 'department_code', 'stamp'),
-        jsonb_build_object('id', 'cnc-bridge', 'type', 'department', 'x', 1000, 'y', 500,
+        jsonb_build_object('id', 'warehouse-bridge', 'type', 'department', 'x', 1000, 'y', 500,
+            'label', '仓库部', 'department_code', 'warehouse'),
+        jsonb_build_object('id', 'cnc-bridge', 'type', 'department', 'x', 1500, 'y', 500,
             'label', 'CNC部', 'department_code', 'cnc'),
-        jsonb_build_object('id', 'grinding-bridge', 'type', 'department', 'x', 1500, 'y', 500,
+        jsonb_build_object('id', 'grinding-bridge', 'type', 'department', 'x', 2000, 'y', 500,
             'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'qc-bridge', 'type', 'department', 'x', 2500, 'y', 500,
+            'label', 'QC部', 'department_code', 'qc'),
+        jsonb_build_object('id', 'part-head', 'type', 'part', 'x', 0, 'y', 1000,
+            'label', head.part_no || ' · ' || head.part_name, 'bom_item_id', head.id),
         jsonb_build_object('id', 'purchase-head', 'type', 'department', 'x', 500, 'y', 1000,
             'label', '外购部', 'department_code', 'purchase'),
-        jsonb_build_object('id', 'grinding-head', 'type', 'department', 'x', 1000, 'y', 1000,
+        jsonb_build_object('id', 'warehouse-head', 'type', 'department', 'x', 1000, 'y', 1000,
+            'label', '仓库部', 'department_code', 'warehouse'),
+        jsonb_build_object('id', 'grinding-head', 'type', 'department', 'x', 1500, 'y', 1000,
             'label', '磨房', 'department_code', 'grinding'),
+        jsonb_build_object('id', 'qc-head', 'type', 'department', 'x', 2500, 'y', 1000,
+            'label', 'QC部', 'department_code', 'qc'),
         jsonb_build_object('id', 'laser-merge', 'type', 'department', 'x', 3000, 'y', 500,
             'label', '激光部', 'department_code', 'laser'),
         jsonb_build_object('id', 'grinding-assembly', 'type', 'department', 'x', 3500, 'y', 500,
             'label', '磨房', 'department_code', 'grinding'),
         jsonb_build_object('id', 'vibration-next', 'type', 'department', 'x', 4000, 'y', 500,
             'label', '震机部', 'department_code', 'vibration'),
-        jsonb_build_object('id', 'outsource-next', 'type', 'department', 'x', 4500, 'y', 500,
+        jsonb_build_object('id', 'qc-assembly-before-warehouse', 'type', 'department', 'x', 4500, 'y', 500,
+            'label', 'QC部', 'department_code', 'qc'),
+        jsonb_build_object('id', 'warehouse-assembly', 'type', 'department', 'x', 5000, 'y', 500,
+            'label', '仓库部', 'department_code', 'warehouse'),
+        jsonb_build_object('id', 'outsource-next', 'type', 'department', 'x', 5500, 'y', 500,
             'label', '委外部', 'department_code', 'outsource'),
-        jsonb_build_object('id', 'finished-end', 'type', 'department', 'x', 5000, 'y', 500,
+        jsonb_build_object('id', 'qc-assembly-after-outsource', 'type', 'department', 'x', 6000, 'y', 500,
+            'label', 'QC部', 'department_code', 'qc'),
+        jsonb_build_object('id', 'finished-end', 'type', 'department', 'x', 6500, 'y', 500,
             'label', '成品部', 'department_code', 'finished')
     ),
     'edges', jsonb_build_array(
         jsonb_build_object('id', 'line-1', 'edge_type', 'polyline',
             'source_node_id', 'part-body', 'target_node_id', 'stamp-body'),
         jsonb_build_object('id', 'line-2', 'edge_type', 'polyline',
-            'source_node_id', 'stamp-body', 'target_node_id', 'cnc-body'),
+            'source_node_id', 'stamp-body', 'target_node_id', 'warehouse-body'),
         jsonb_build_object('id', 'line-3', 'edge_type', 'polyline',
-            'source_node_id', 'cnc-body', 'target_node_id', 'grinding-body-before'),
+            'source_node_id', 'warehouse-body', 'target_node_id', 'cnc-body'),
         jsonb_build_object('id', 'line-4', 'edge_type', 'polyline',
-            'source_node_id', 'grinding-body-before', 'target_node_id', 'outsource-body'),
+            'source_node_id', 'cnc-body', 'target_node_id', 'grinding-body-before'),
         jsonb_build_object('id', 'line-5', 'edge_type', 'polyline',
-            'source_node_id', 'outsource-body', 'target_node_id', 'grinding-body-after'),
+            'source_node_id', 'grinding-body-before', 'target_node_id', 'qc-body'),
         jsonb_build_object('id', 'line-6', 'edge_type', 'polyline',
-            'source_node_id', 'grinding-body-after', 'target_node_id', 'laser-merge'),
+            'source_node_id', 'qc-body', 'target_node_id', 'laser-merge'),
         jsonb_build_object('id', 'line-7', 'edge_type', 'polyline',
             'source_node_id', 'part-bridge', 'target_node_id', 'stamp-bridge'),
         jsonb_build_object('id', 'line-8', 'edge_type', 'polyline',
-            'source_node_id', 'stamp-bridge', 'target_node_id', 'cnc-bridge'),
+            'source_node_id', 'stamp-bridge', 'target_node_id', 'warehouse-bridge'),
         jsonb_build_object('id', 'line-9', 'edge_type', 'polyline',
-            'source_node_id', 'cnc-bridge', 'target_node_id', 'grinding-bridge'),
+            'source_node_id', 'warehouse-bridge', 'target_node_id', 'cnc-bridge'),
         jsonb_build_object('id', 'line-10', 'edge_type', 'polyline',
-            'source_node_id', 'grinding-bridge', 'target_node_id', 'laser-merge'),
+            'source_node_id', 'cnc-bridge', 'target_node_id', 'grinding-bridge'),
         jsonb_build_object('id', 'line-11', 'edge_type', 'polyline',
-            'source_node_id', 'part-head', 'target_node_id', 'purchase-head'),
+            'source_node_id', 'grinding-bridge', 'target_node_id', 'qc-bridge'),
         jsonb_build_object('id', 'line-12', 'edge_type', 'polyline',
-            'source_node_id', 'purchase-head', 'target_node_id', 'grinding-head'),
+            'source_node_id', 'qc-bridge', 'target_node_id', 'laser-merge'),
         jsonb_build_object('id', 'line-13', 'edge_type', 'polyline',
-            'source_node_id', 'grinding-head', 'target_node_id', 'laser-merge'),
+            'source_node_id', 'part-head', 'target_node_id', 'purchase-head'),
         jsonb_build_object('id', 'line-14', 'edge_type', 'polyline',
-            'source_node_id', 'laser-merge', 'target_node_id', 'grinding-assembly'),
+            'source_node_id', 'purchase-head', 'target_node_id', 'warehouse-head'),
         jsonb_build_object('id', 'line-15', 'edge_type', 'polyline',
-            'source_node_id', 'grinding-assembly', 'target_node_id', 'vibration-next'),
+            'source_node_id', 'warehouse-head', 'target_node_id', 'grinding-head'),
         jsonb_build_object('id', 'line-16', 'edge_type', 'polyline',
-            'source_node_id', 'vibration-next', 'target_node_id', 'outsource-next'),
+            'source_node_id', 'grinding-head', 'target_node_id', 'qc-head'),
         jsonb_build_object('id', 'line-17', 'edge_type', 'polyline',
-            'source_node_id', 'outsource-next', 'target_node_id', 'finished-end')
+            'source_node_id', 'qc-head', 'target_node_id', 'laser-merge'),
+        jsonb_build_object('id', 'line-18', 'edge_type', 'polyline',
+            'source_node_id', 'laser-merge', 'target_node_id', 'grinding-assembly'),
+        jsonb_build_object('id', 'line-19', 'edge_type', 'polyline',
+            'source_node_id', 'grinding-assembly', 'target_node_id', 'vibration-next'),
+        jsonb_build_object('id', 'line-20', 'edge_type', 'polyline',
+            'source_node_id', 'vibration-next', 'target_node_id', 'qc-assembly-before-warehouse'),
+        jsonb_build_object('id', 'line-21', 'edge_type', 'polyline',
+            'source_node_id', 'qc-assembly-before-warehouse', 'target_node_id', 'warehouse-assembly'),
+        jsonb_build_object('id', 'line-22', 'edge_type', 'polyline',
+            'source_node_id', 'warehouse-assembly', 'target_node_id', 'outsource-next'),
+        jsonb_build_object('id', 'line-23', 'edge_type', 'polyline',
+            'source_node_id', 'outsource-next', 'target_node_id', 'qc-assembly-after-outsource'),
+        jsonb_build_object('id', 'line-24', 'edge_type', 'polyline',
+            'source_node_id', 'qc-assembly-after-outsource', 'target_node_id', 'finished-end')
     )
 )
 FROM product
@@ -619,25 +963,32 @@ JOIN product_bom AS head ON head.product_id = product.id
     AND head.product_version = 1 AND head.part_no = 'Z8737-03'
 WHERE product.factory_code = 'Z8737';
 
--- 当前路线投影：汇合前10项配件安排，汇合起5项装配体安排。
+-- 当前路线投影：汇合前14项配件安排，激光起8项装配体安排。
 INSERT INTO product_department_route (product_id, material_node_id, department_node_id, department_code)
 SELECT product.id, route.material_node_id, route.department_node_id, route.department_code
 FROM product
 CROSS JOIN (VALUES
     ('part-body', 'stamp-body', 'stamp'),
+    ('part-body', 'warehouse-body', 'warehouse'),
     ('part-body', 'cnc-body', 'cnc'),
     ('part-body', 'grinding-body-before', 'grinding'),
-    ('part-body', 'outsource-body', 'outsource'),
-    ('part-body', 'grinding-body-after', 'grinding'),
+    ('part-body', 'qc-body', 'qc'),
     ('part-bridge', 'stamp-bridge', 'stamp'),
+    ('part-bridge', 'warehouse-bridge', 'warehouse'),
     ('part-bridge', 'cnc-bridge', 'cnc'),
     ('part-bridge', 'grinding-bridge', 'grinding'),
+    ('part-bridge', 'qc-bridge', 'qc'),
     ('part-head', 'purchase-head', 'purchase'),
+    ('part-head', 'warehouse-head', 'warehouse'),
     ('part-head', 'grinding-head', 'grinding'),
+    ('part-head', 'qc-head', 'qc'),
     ('laser-merge', 'laser-merge', 'laser'),
     ('laser-merge', 'grinding-assembly', 'grinding'),
     ('laser-merge', 'vibration-next', 'vibration'),
+    ('laser-merge', 'qc-assembly-before-warehouse', 'qc'),
+    ('laser-merge', 'warehouse-assembly', 'warehouse'),
     ('laser-merge', 'outsource-next', 'outsource'),
+    ('laser-merge', 'qc-assembly-after-outsource', 'qc'),
     ('laser-merge', 'finished-end', 'finished')
 ) AS route(material_node_id, department_node_id, department_code)
 WHERE product.factory_code = 'Z8737';
@@ -747,8 +1098,8 @@ WHERE product.factory_code = 'Z8738' AND (
 );
 
 -- 两个相同草稿计划，各包含两个产品，数量独立。
-INSERT INTO production_plan (customer_id, order_no, status, revision)
-SELECT customer.id, seed.order_no, 'draft', 1 FROM customer
+INSERT INTO production_plan (customer_id, order_no, order_date, delivery_date, status, revision)
+SELECT customer.id, seed.order_no, DATE '2026-11-18', DATE '2026-12-18', 'draft', 1 FROM customer
 CROSS JOIN (VALUES ('ORDER-Z8737-0001'), ('ORDER-Z8737-0002')) AS seed(order_no)
 WHERE customer.customer_name = 'Celine';
 

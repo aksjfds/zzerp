@@ -7,7 +7,7 @@ const route = useRoute()
 </script>
 
 <template>
-  <ElConfigProvider :locale="zhCn">
+  <ElConfigProvider :locale="zhCn" :dialog="{ alignCenter: true }">
     <WorkspaceLayout v-if="route.meta.requiresAuth"><RouterView /></WorkspaceLayout>
     <RouterView v-else />
   </ElConfigProvider>

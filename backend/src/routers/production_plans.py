@@ -15,17 +15,28 @@ from modules.planning.api import (
     change_plan_status,
     create_plan,
     delete_plan,
+    department_warehouse_stocks,
+    dispatch_plans,
+    dispatch_targets,
+    dispatch_warehouse,
     get_handoff_options,
     get_plan,
     get_plan_product_snapshot,
+    inspect_material,
     list_department_movements,
     list_handoff_tickets,
     list_movements,
     list_plans,
     list_production_progress,
     list_work_orders,
+    qc_history,
+    qc_repair_targets,
     record_movement,
+    record_rework,
     update_plan,
+    update_work_order_schedule,
+    warehouse_picks,
+    warehouse_stocks,
 )
 from schemas.planning import (
     DepartmentLedgerEnvelope,
@@ -41,6 +52,23 @@ from schemas.planning import (
     ProductionPlanListEnvelope,
     ProductionPlanUpdate,
     ProductionProgressEnvelope,
+    WorkOrderScheduleEnvelope,
+    WorkOrderScheduleUpdate,
+)
+from schemas.quality import (
+    QcCommandEnvelope,
+    QcInspectionCreate,
+    QcListEnvelope,
+    QcReworkAction,
+    QcTargetsEnvelope,
+)
+from schemas.warehouse import (
+    WarehouseDispatchCreate,
+    WarehouseDispatchEnvelope,
+    WarehouseDispatchPlansEnvelope,
+    WarehouseDispatchTargetsEnvelope,
+    WarehousePicksEnvelope,
+    WarehouseStocksEnvelope,
 )
 
 PlanReader = Annotated[dict, Depends(require_any_permission(PLAN_VIEW))]
@@ -88,6 +116,11 @@ def department_work_order_list(
     return {"data": data, "total": total}
 
 
+@router.put("/department-work-orders/{order_id}/schedule", response_model=WorkOrderScheduleEnvelope)
+def work_order_schedule(order_id: int, payload: WorkOrderScheduleUpdate, *, user: PlanEditor):
+    return {"data": update_work_order_schedule(order_id, payload, department_scope=user["department_code"])}
+
+
 @router.get("/progress", response_model=ProductionProgressEnvelope)
 def production_progress(
     page: int = Query(default=1, gt=0), page_size: int = Query(default=20, gt=0, le=50),
@@ -112,6 +145,7 @@ def department_ledger(
 
 @router.get("/handoff-tickets", response_model=HandoffTicketListEnvelope)
 def handoff_ticket_list(
+    direction: Literal['incoming', 'outgoing'] = 'incoming',
     page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=200),
     unreceived: bool = False, order_no: str | None = Query(default=None, max_length=200),
     target_order_id: int | None = Query(default=None, gt=0),
@@ -119,7 +153,7 @@ def handoff_ticket_list(
     *, user: WorkOrderReader,
 ):
     data,total = list_handoff_tickets(page,page_size,department_scope=user["department_code"],
-        unreceived=unreceived,order_no=order_no,target_order_id=target_order_id,department_code=department_code)
+        unreceived=unreceived,order_no=order_no,target_order_id=target_order_id,department_code=department_code,direction=direction)
     return {"data": data,"total": total}
 
 
@@ -148,6 +182,60 @@ def department_movement_create(
     *, user: MovementOperator,
 ):
     return {"data": record_movement(order_id, payload, department_scope=user["department_code"], actor_user_id=user["id"])}
+
+
+@router.get("/warehouse/stocks", response_model=WarehouseStocksEnvelope)
+def warehouse_stock_list(page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=100), *, user: WorkOrderReader):
+    data, total = warehouse_stocks(page, page_size, department_scope=user["department_code"])
+    return {"data": data, "total": total}
+
+
+@router.get("/warehouse/picks", response_model=WarehousePicksEnvelope)
+def warehouse_pick_list(page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=100), pick_id: int | None = Query(default=None, gt=0), *, user: WorkOrderReader):
+    data, total = warehouse_picks(page, page_size, department_scope=user["department_code"], pick_id=pick_id)
+    return {"data": data, "total": total}
+
+
+@router.get("/warehouse/department-stocks", response_model=WarehouseStocksEnvelope)
+def department_stock_list(page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=100), department_code: str | None = None, *, user: WorkOrderReader):
+    data, total = department_warehouse_stocks(page, page_size, department_scope=user["department_code"], department_code=department_code)
+    return {"data": data, "total": total}
+
+
+@router.post("/warehouse/orders/{order_id}/dispatch", response_model=WarehouseDispatchEnvelope)
+def warehouse_dispatch(order_id: int, payload: WarehouseDispatchCreate, *, user: MovementOperator):
+    return dispatch_warehouse(order_id, payload, department_scope=user["department_code"], actor_user_id=user["id"])
+
+
+@router.get("/warehouse/lots/{lot_id}/dispatch-plans", response_model=WarehouseDispatchPlansEnvelope)
+def warehouse_dispatch_plans(lot_id: int, keyword: str | None = Query(default=None, max_length=200), *, user: WorkOrderReader):
+    return {"data": dispatch_plans(lot_id, keyword, department_scope=user["department_code"])}
+
+
+@router.get("/warehouse/lots/{lot_id}/dispatch-targets", response_model=WarehouseDispatchTargetsEnvelope)
+def warehouse_dispatch_targets(lot_id: int, plan_id: int = Query(gt=0), *, user: WorkOrderReader):
+    return {"data": dispatch_targets(lot_id, plan_id, department_scope=user["department_code"])}
+
+
+@router.get("/qc/history", response_model=QcListEnvelope)
+def quality_history(page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=100), *, user: WorkOrderReader):
+    data, total = qc_history(page, page_size, department_scope=user["department_code"])
+    return {"data": data, "total": total}
+
+
+@router.get("/qc/orders/{order_id}/targets", response_model=QcTargetsEnvelope)
+def quality_targets(order_id: int, *, user: WorkOrderReader):
+    return {"data": qc_repair_targets(order_id, department_scope=user["department_code"])}
+
+
+@router.post("/qc/inspections", response_model=QcCommandEnvelope)
+def quality_inspection(payload: QcInspectionCreate, *, user: MovementOperator):
+    return {"data": inspect_material(payload, department_scope=user["department_code"], actor_user_id=user["id"])}
+
+
+@router.post("/qc/rework/{ticket_id}/events", response_model=QcCommandEnvelope)
+def quality_rework_event(ticket_id: int, payload: QcReworkAction, *, user: MovementOperator):
+    return {"data": record_rework(ticket_id, payload, department_scope=user["department_code"], actor_user_id=user["id"])}
 
 
 @router.get("/{plan_id}/products/{product_id}/snapshot", response_model=PlanProductSnapshotEnvelope)

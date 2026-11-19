@@ -12,7 +12,7 @@ import { queryProductionDepartments, type ProductionDepartment } from '@/feature
 import { queryDepartmentWorkOrders, type DepartmentWorkOrder, type WorkOrderComponent } from '../api/plans'
 
 const compact = useCompactViewport()
-const props = defineProps<{ planId?: number; departmentCode?: string; canReceive?: boolean }>()
+const props = defineProps<{ planId?: number; departmentCode?: string; requiresInspection?: boolean; isWarehouse?: boolean }>()
 const authStore = useAuthStore()
 const movementOrder = ref<DepartmentWorkOrder | null>(null)
 const movementDirection = ref<'receipt' | 'issue'>()
@@ -52,7 +52,7 @@ async function loadDepartments() {
   departmentError.value = ''
   try {
     const result = await queryProductionDepartments()
-    if (active) departments.value = result
+    if (active) departments.value = result.filter(item => !item.is_warehouse)
   } catch (cause) {
     if (active) departmentError.value = getApiErrorDetail(cause)?.message || '生产部门加载失败'
   } finally { if (active) departmentLoading.value = false }
@@ -92,7 +92,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 
 <template>
   <div class="department-panels">
-    <HandoffTicketsPanel v-if="!planId && canReceive" ref="ticketsPanel" :department-code="departmentCode" @changed="load" />
+    <HandoffTicketsPanel v-if="!planId" ref="ticketsPanel" :department-code="departmentCode" @changed="load" />
   <section class="work-orders-card">
     <div class="collection-heading"><div><h2>部门生产安排</h2></div><ElButton :loading="loading" @click="load">刷新工单</ElButton></div>
     <LoadErrorAlert :message="departmentError" :loading="departmentLoading" @retry="loadDepartments" />
@@ -104,25 +104,27 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     </ElForm>
     <LoadErrorAlert v-if="error" :message="error" :loading="loading" @retry="load" />
     <ElTable v-if="!error" v-table-column-widths="'planning.department-work-orders'" v-loading="loading" :data="tableRows" row-key="row_key" default-expand-all stripe table-layout="auto" empty-text="暂无部门生产安排">
-      <ElTableColumn label="产品" min-width="220">
+      <ElTableColumn class-name="data-primary" label="产品" min-width="220">
         <template #default="{ row }"><span>{{ row.component ? '' : `${row.factory_code} · ${row.product_name}` }}</span></template>
       </ElTableColumn>
-      <ElTableColumn label="配件/装配体" min-width="260">
+      <ElTableColumn class-name="data-primary" label="配件/装配体" min-width="260">
         <template #default="{ row }">{{ row.component?.part_no ?? row.part_no }} · {{ row.component?.part_name ?? row.part_name }}</template>
       </ElTableColumn>
-      <ElTableColumn prop="order_no" label="订单号" min-width="160">
+      <ElTableColumn class-name="data-reference" prop="order_no" label="订单号" min-width="160">
         <template #default="{ row }"><span>{{ row.component ? '' : row.order_no }}</span></template>
       </ElTableColumn>
+      <ElTableColumn label="上游/下游" min-width="220"><template #default="{ row }"><span v-if="!row.component">{{ row.upstream_departments.join('、') || '—' }} / {{ row.downstream_departments.join('、') || '—' }}</span></template></ElTableColumn>
       <ElTableColumn prop="order_quantity" label="订单数量" width="110" align="right" />
-      <ElTableColumn label="任务数量" min-width="110" align="right">
+      <ElTableColumn label="交料日期" min-width="140"><template #default="{ row }"><span>{{ row.component ? '' : row.scheduled_date || '未安排' }}</span></template></ElTableColumn>
+      <ElTableColumn class-name="data-metric" label="任务数量" min-width="110" align="right">
         <template #default="{ row }">{{ row.component?.required_quantity ?? row.task_quantity }}</template>
       </ElTableColumn>
-      <ElTableColumn label="累积到料/累计出料" min-width="170" align="right">
-        <template #default="{ row }">{{ row.component?.received_quantity ?? row.received_quantity }}/{{ row.component ? '—' : row.issued_quantity }}</template>
+      <ElTableColumn v-if="requiresInspection || rows.some(row => row.requires_inspection)" label="合格/报废/返修" min-width="180"><template #default="{ row }"><span v-if="row.requires_inspection" class="quality-counts" :aria-label="`合格 ${row.good_quantity}，报废 ${row.scrap_quantity}，返修 ${row.rework_quantity}`"><span class="quality-good" title="合格">{{ row.good_quantity }}</span><span class="quality-divider">/</span><span class="quality-scrap" title="报废">{{ row.scrap_quantity }}</span><span class="quality-divider">/</span><span class="quality-rework" title="返修">{{ row.rework_quantity }}</span></span></template></ElTableColumn>
+      <ElTableColumn :label="isWarehouse ? '累计入库/累计领用' : requiresInspection ? '累计质检/合格出料' : '累积到料/累计出料'" min-width="170" align="right">
+        <template #default="{ row }">{{ !row.component && row.children?.length ? '—' : row.component?.received_quantity ?? row.received_quantity }}/{{ row.component ? '—' : row.issued_quantity }}</template>
       </ElTableColumn>
       <ElTableColumn label="操作" min-width="190" :fixed="compact ? false : 'right'"><template #default="{ row }">
-        <ElButton v-if="canOperate(row) && row.can_receive" link type="primary" :disabled="row.plan_status !== 'confirmed'" @click="openMovement(row, 'receipt', row.component)">无来源到料</ElButton>
-        <ElButton v-if="!row.component && canOperate(row)" link type="primary" :disabled="row.plan_status !== 'confirmed'" @click="openMovement(row, 'issue')">出料</ElButton>
+        <ElButton v-if="!row.component && canOperate(row) && row.can_issue" link type="primary" :disabled="row.plan_status !== 'confirmed'" @click="openMovement(row, 'issue')">{{ row.requires_inspection ? '合格出料' : '出料' }}</ElButton>
         <ElButton link type="primary" @click="openMovement(row, undefined, row.component)">{{ row.component ? '到料流水' : '流水' }}</ElButton>
       </template></ElTableColumn>
     </ElTable>
@@ -137,5 +139,10 @@ onBeforeUnmount(() => { active = false; revision += 1 })
 .work-orders-card { min-width: 0; padding: 24px; border: 1px solid var(--erp-border); border-radius: 12px; background: var(--erp-surface); box-shadow: var(--erp-shadow-sm); }
 @media (max-width: 760px) { .work-orders-card { padding: 16px; } }
 .pagination { display: flex; justify-content: flex-end; margin-top: 16px; }
+.quality-counts { display: inline-flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.quality-good { color: var(--erp-success-strong); }
+.quality-scrap { color: var(--erp-danger-strong); }
+.quality-rework { color: var(--erp-warning-strong); }
+.quality-divider { color: var(--erp-text-muted); font-size: 13px; font-weight: 400; }
 
 </style>

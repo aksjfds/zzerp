@@ -32,6 +32,8 @@ def serialize_plans(session, plans) -> list[dict]:
             "customer_id": plan.customer_id,
             "customer_name": customers[plan.customer_id],
             "order_no": plan.order_no,
+            "order_date": plan.order_date.isoformat(),
+            "delivery_date": plan.delivery_date.isoformat(),
             "items": by_plan.get(plan.id, []),
             "status": plan.status,
             "revision": plan.revision,

@@ -12,7 +12,7 @@ defineEmits<{ refresh: [] }>()
 .page-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; margin-bottom: 32px; }
 .page-heading-copy { min-width: 0; flex: 1 1 260px; }
 .eyebrow { color: var(--erp-text-muted); font-size: 12px; font-weight: 500; }
-h1 { margin: 8px 0 0; color: var(--erp-text); font-size: 30px; line-height: 1.25; font-weight: 600; letter-spacing: -.025em; overflow-wrap: anywhere; }
+h1 { margin: 6px 0 0; color: var(--erp-text); font-size: 30px; line-height: 1.25; font-weight: 700; letter-spacing: -.025em; overflow-wrap: anywhere; }
 .page-heading-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .page-heading-actions :deep(.el-button) { margin: 0; }
 @media (max-width: 900px) { .page-heading { align-items: flex-start; flex-wrap: wrap; } }

@@ -1,8 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { ProductionDepartment } from '@/features/production-departments'
 import type { BomItem } from '../domain/types'
 
-defineProps<{ bomItems: BomItem[]; departments: ProductionDepartment[]; placedBomIds: number[]; loading?: boolean }>()
+const props = defineProps<{ bomItems: BomItem[]; departments: ProductionDepartment[]; placedBomIds: number[]; loading?: boolean }>()
+const departmentNodes = computed(() => props.departments.flatMap(department => department.code === 'outsource'
+  ? ['外发蚀字', '外发电镀'].map(name => ({ ...department, name })) : [department]))
 const emit = defineEmits<{
   dragPart: [part: BomItem]; addPart: [part: BomItem]
   dragDepartment: [department: ProductionDepartment]; addDepartment: [department: ProductionDepartment]
@@ -30,10 +33,10 @@ function addOnTap(event: MouseEvent, add: () => void) {
       <p v-if="!bomItems.length">暂无 BOM 配件</p>
     </section>
     <section>
-      <h3>部门 <span>{{ departments.length }}</span></h3>
+      <h3>部门 <span>{{ departmentNodes.length }}</span></h3>
 
       <p v-if="loading">正在加载部门…</p>
-      <button v-for="department in departments" :key="department.code" type="button" class="palette-node department" @pointerdown="startPointer($event, () => emit('dragDepartment', department))" @click="addOnTap($event, () => emit('addDepartment', department))">{{ department.name }}</button>
+      <button v-for="department in departmentNodes" :key="`${department.code}:${department.name}`" type="button" class="palette-node department" @pointerdown="startPointer($event, () => emit('dragDepartment', department))" @click="addOnTap($event, () => emit('addDepartment', department))">{{ department.name }}</button>
     </section>
   </aside>
 </template>

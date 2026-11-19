@@ -11,10 +11,11 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const leaving = ref(false)
+const sidebarCollapsed = ref(false)
 const links = computed(() => {
   const department = auth.user?.department_code
   if (department) return auth.hasPermission([PLAN_PERMISSIONS.view, DEPARTMENT_WORK_ORDER_VIEW])
-    ? [{ path: `/departments/${encodeURIComponent(department)}/work-orders`, label: '部门生产', icon: 'progress' as const }] : []
+    ? [{ path: `/departments/${encodeURIComponent(department)}/work-orders`, label: '我的工作台', icon: 'progress' as const }] : []
   return [
     ...(auth.hasPermission(PRODUCT_PERMISSIONS.view) ? [{ path: '/products', label: '产品工程', icon: 'products' as const }] : []),
     ...(auth.hasPermission(PLAN_PERMISSIONS.view) ? [
@@ -37,22 +38,22 @@ async function logout() {
 </script>
 
 <template>
-  <div class="workspace">
+  <div class="workspace" :class="{ 'is-sidebar-collapsed': sidebarCollapsed }">
     <a class="skip-link" href="#workspace-content">跳转到主要内容</a>
-    <aside class="workspace-sidebar">
+    <aside id="workspace-sidebar" class="workspace-sidebar">
       <RouterLink :to="getDefaultDashboardPath(auth.user)" class="workspace-brand" aria-label="ZZ ERP 工作台首页">
-        <span class="brand-symbol">ZZ</span><span>ZZ ERP</span>
+        <span class="brand-symbol">ZZ</span><span class="brand-text">ZZ ERP</span>
       </RouterLink>
       <div class="nav-label">工作空间</div>
       <nav aria-label="主要导航">
-        <RouterLink v-for="link in links" :key="link.path" :to="link.path" class="nav-item" :class="{ 'is-current': current?.path === link.path }" :aria-current="current?.path === link.path ? 'page' : undefined">
-          <AppIcon :name="link.icon" /><span>{{ link.label }}</span><AppIcon v-if="current?.path === link.path" name="arrow" class="nav-arrow" />
+        <RouterLink v-for="link in links" :key="link.path" :to="link.path" class="nav-item" :class="{ 'is-current': current?.path === link.path }" :aria-label="link.label" :title="sidebarCollapsed ? link.label : undefined" :aria-current="current?.path === link.path ? 'page' : undefined">
+          <AppIcon :name="link.icon" /><span class="nav-text">{{ link.label }}</span><AppIcon v-if="current?.path === link.path" name="arrow" class="nav-arrow" />
         </RouterLink>
       </nav>
     </aside>
     <div class="workspace-body">
       <header class="workspace-topbar">
-        <div class="workspace-context"><span>工作台</span><AppIcon name="arrow" /><strong>{{ current?.label || '访问权限' }}</strong></div>
+        <div class="workspace-context"><ElButton text class="sidebar-toggle" :aria-expanded="!sidebarCollapsed" aria-controls="workspace-sidebar" :aria-label="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" :title="sidebarCollapsed ? '展开侧栏' : '收起侧栏'" @click="sidebarCollapsed = !sidebarCollapsed"><AppIcon name="arrow" :class="{ 'points-left': !sidebarCollapsed }" /></ElButton><span>工作台</span><AppIcon name="arrow" /><strong>{{ current?.label || '访问权限' }}</strong></div>
         <div class="workspace-account"><span class="user-avatar" aria-hidden="true">{{ auth.user?.name?.slice(0, 1) || '用' }}</span><span class="user-name">{{ auth.user?.name || auth.user?.username }}</span><ElButton text :loading="leaving" @click="logout"><AppIcon name="logout" /><span>退出</span></ElButton></div>
       </header>
       <div id="workspace-content" class="workspace-content" tabindex="-1"><slot /></div>
@@ -62,6 +63,12 @@ async function logout() {
 
 <style scoped>
 .workspace { display: grid; grid-template-columns: 224px minmax(0, 1fr); min-height: 100dvh; }
+.workspace.is-sidebar-collapsed { grid-template-columns: 72px minmax(0, 1fr); }
+.is-sidebar-collapsed .workspace-sidebar { padding-inline: 12px; }
+.is-sidebar-collapsed .brand-text, .is-sidebar-collapsed .nav-label, .is-sidebar-collapsed .nav-text, .is-sidebar-collapsed .nav-arrow { display: none; }
+.is-sidebar-collapsed .workspace-brand { justify-content: center; padding: 0; }
+.is-sidebar-collapsed nav { margin-top: 32px; }
+.is-sidebar-collapsed .nav-item { justify-content: center; padding-inline: 12px; }
 .workspace-sidebar { position: sticky; top: 0; height: 100dvh; padding: 28px 16px 24px; display: flex; flex-direction: column; border-right: 1px solid var(--erp-border); background: var(--erp-surface); }
 .workspace-brand { min-height: 44px; display: flex; gap: 12px; align-items: center; padding: 0 12px; color: var(--erp-text); font-size: 19px; font-weight: 700; letter-spacing: -.02em; }
 .brand-symbol { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--erp-primary); color: var(--erp-on-primary); font-size: 16px; }
@@ -73,9 +80,12 @@ nav { display: grid; gap: 8px; }
 .workspace-body { min-width: 0; }
 .workspace-topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; min-height: 64px; padding: 8px 32px; border-bottom: 1px solid var(--erp-border); background: var(--erp-surface); }
 .workspace-context, .workspace-account { display: flex; align-items: center; gap: 12px; font-size: 13px; }
-.workspace-context { color: var(--erp-text-muted); }
+.workspace-context { min-width: 0; color: var(--erp-text-muted); }
 .workspace-context svg { width: 12px; height: 12px; }
-.workspace-context strong { color: var(--erp-text-secondary); font-weight: 500; }
+.workspace-context strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--erp-text-secondary); font-weight: 500; }
+.workspace-context .sidebar-toggle { width: 44px; min-height: 44px; padding: 10px; flex-shrink: 0; }
+.sidebar-toggle :deep(svg) { width: 18px; height: 18px; }
+.sidebar-toggle :deep(.points-left) { transform: rotate(180deg); }
 .user-avatar { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid var(--erp-border); border-radius: 50%; color: var(--erp-primary); background: var(--erp-primary-soft); font-size: 12px; font-weight: 600; }
 .workspace-account :deep(.el-button > span) { gap: 8px; }
 .skip-link { position: fixed; top: -100px; left: 16px; z-index: 5000; padding: 12px 24px; border-radius: 8px; background: var(--erp-surface); }
@@ -84,6 +94,7 @@ nav { display: grid; gap: 8px; }
 @media (max-width: 1000px) { .workspace { grid-template-columns: 192px minmax(0, 1fr); } .workspace-topbar { padding-inline: 24px; } }
 @media (max-width: 760px) {
   .workspace { display: block; }
+  .is-sidebar-collapsed .workspace-sidebar { display: none; }
   .workspace-sidebar { position: static; height: auto; padding: 16px 16px 0; border-right: 0; border-bottom: 1px solid var(--erp-border); }
   .workspace-brand { padding: 0; font-size: 18px; }
   .nav-label, .nav-arrow { display: none; }
@@ -92,5 +103,5 @@ nav { display: grid; gap: 8px; }
   .workspace-topbar { min-height: 56px; padding: 8px 16px; }
   .workspace-account { gap: 8px; } .user-name { max-width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
-@media (max-width: 400px) { .workspace-context > span, .workspace-context > svg, .user-avatar { display: none; } }
+@media (max-width: 400px) { .workspace-context > span, .workspace-context > svg, .user-avatar { display: none; } .user-name { max-width: 64px; } .workspace-context { gap: 8px; } }
 </style>

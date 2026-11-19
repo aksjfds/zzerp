@@ -7,7 +7,13 @@ from sqlalchemy import func, or_, select
 
 from modules.errors import DomainError
 from modules.identity.read_api import usernames_by_ids
-from modules.organization.read_api import allows_receipts, department_names
+from modules.organization.read_api import (
+    allows_manual_issue,
+    allows_receipts,
+    department_names,
+    is_warehouse,
+    requires_inspection,
+)
 from modules.planning.handoffs import order_context, ticket_number
 from modules.planning.issue_limits import available_issue_quantity
 from modules.planning.persistence import (
@@ -16,6 +22,8 @@ from modules.planning.persistence import (
     DepartmentWorkOrder,
     DepartmentWorkOrderMovement,
     ProductionPlan,
+    QcInspection,
+    WarehousePick,
 )
 from modules.planning.queries import load_plan
 from modules.planning.snapshots import (
@@ -27,6 +35,7 @@ from modules.planning.snapshots import (
     route_references,
     snapshot_items,
 )
+from modules.planning.warehouse_stock import create_warehouse_lot
 from modules.planning.work_order_access import load_scoped_order
 
 
@@ -36,8 +45,14 @@ def ensure_plan_without_movements(session, plan_id: int) -> None:
         .join(DepartmentWorkOrder, DepartmentWorkOrder.id == DepartmentWorkOrderMovement.work_order_id)
         .where(DepartmentWorkOrder.production_plan_id == plan_id).limit(1)
     )
-    if exists is not None:
-        raise DomainError("plan_has_material_movements", "计划已有到料或出料流水，不能撤回、重建或删除工单", status_code=409)
+    inspected = session.scalar(select(QcInspection.id).join(
+        DepartmentWorkOrder, DepartmentWorkOrder.id == QcInspection.work_order_id)
+        .where(DepartmentWorkOrder.production_plan_id == plan_id).limit(1))
+    picked = session.scalar(select(WarehousePick.id).join(
+        DepartmentWorkOrder, DepartmentWorkOrder.id == WarehousePick.target_order_id)
+        .where(DepartmentWorkOrder.production_plan_id == plan_id).limit(1))
+    if exists is not None or inspected is not None or picked is not None:
+        raise DomainError("plan_has_material_movements", "计划已有到料、出料、质检或领料记录，不能撤回、重建或删除工单", status_code=409)
 
 
 def movement_totals(session, orders, contexts) -> dict[int, tuple[str, str]]:
@@ -86,7 +101,10 @@ def serialize_movements(session, movements) -> list[dict]:
     if missing_issues:
         issues.update({row.id: row for row in session.scalars(select(DepartmentWorkOrderMovement)
             .where(DepartmentWorkOrderMovement.id.in_(missing_issues)))})
-    order_ids = ({m.work_order_id for m in movements} | {m.work_order_id for m in issues.values()}
+    pick_ids = {row.warehouse_pick_id for row in movements if row.warehouse_pick_id is not None}
+    picks = {pick.id: pick for pick in session.scalars(select(WarehousePick).where(
+        WarehousePick.id.in_(pick_ids)))} if pick_ids else {}
+    order_ids = ({pick.route_warehouse_order_id for pick in picks.values()} | {m.work_order_id for m in movements} | {m.work_order_id for m in issues.values()}
                  | {ticket.target_work_order_id for ticket in tickets})
     orders = {row.id: row for row in session.scalars(select(DepartmentWorkOrder)
         .where(DepartmentWorkOrder.id.in_(order_ids)))}
@@ -106,6 +124,8 @@ def serialize_movements(session, movements) -> list[dict]:
         material = row.input_material_node_id if row.direction == "receipt" else order.material_node_id
         source_id = issues[ticket.issue_movement_id].work_order_id if ticket else None
         target_id = ticket.target_work_order_id if ticket else None
+        if row.warehouse_pick_id is not None:
+            source_id = picks[row.warehouse_pick_id].route_warehouse_order_id
         if row.direction == "receipt":
             target_id = order.id
         else:
@@ -115,6 +135,7 @@ def serialize_movements(session, movements) -> list[dict]:
             "note": row.note, "request_id": row.request_id, "actor_username": names[row.actor_user_id],
             "created_at": row.created_at.astimezone(BUSINESS_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S"),
             "receipt_source": row.receipt_source, "ticket_id": row.ticket_id,
+            "warehouse_pick_id": row.warehouse_pick_id,
             "input_material_node_id": row.input_material_node_id,
             "target_work_order_id": ticket.target_work_order_id if row.direction == "issue" and ticket else None,
             "receipt_movement_ids": sorted(links.get(row.id, [])),
@@ -128,23 +149,20 @@ def serialize_movements(session, movements) -> list[dict]:
 
 
 def validate_movement_shape(payload):
-    if payload.direction == "receipt" and payload.receipt_source == "external" and not payload.note.strip():
-        raise DomainError("unattributed_receipt_note_required", "无来源到料必须填写备注", path="note")
     if payload.direction == "issue":
-        valid = payload.receipt_source is None and payload.ticket_id is None and payload.input_material_node_id is None
+        valid = (payload.receipt_source is None and payload.ticket_id is None
+                 and payload.warehouse_pick_id is None and payload.input_material_node_id is None)
     else:
-        valid = payload.target_work_order_id is None and (
-            payload.receipt_source == "external" and payload.ticket_id is None and payload.input_material_node_id is not None
-            or payload.receipt_source == "ticket" and payload.ticket_id is not None and payload.input_material_node_id is None)
+        valid = (payload.target_work_order_id is None and payload.input_material_node_id is None and (
+            payload.receipt_source == "ticket" and payload.ticket_id is not None and payload.warehouse_pick_id is None
+            or payload.receipt_source == "warehouse" and payload.warehouse_pick_id is not None and payload.ticket_id is None))
     if not valid:
-        raise DomainError("movement_source_invalid", "请选择有效交接票或填写无来源到料资料，出料不能填写到料字段")
+        raise DomainError("movement_source_invalid", "到料必须引用有效交接票，出料不能填写到料字段")
 
 
 def resolve_receipt_input(session, order, payload, context, key):
-    if payload.receipt_source == "external":
-        if payload.input_material_node_id not in context["receipt_materials"][order.material_node_id]:
-            raise DomainError("receipt_material_invalid", "请选择此工单的实际到料物料", status_code=403)
-        return payload.input_material_node_id
+    if payload.receipt_source == 'warehouse':
+        return resolve_warehouse_receipt_input(session, order, payload, context, key)
     ticket = session.scalar(select(DepartmentHandoffTicket).where(DepartmentHandoffTicket.id == payload.ticket_id).with_for_update())
     if ticket is None or ticket.target_work_order_id != order.id:
         raise DomainError("handoff_ticket_denied", "交接票不存在或不是发给此工单", status_code=403)
@@ -165,11 +183,32 @@ def resolve_receipt_input(session, order, payload, context, key):
     return source.material_node_id
 
 
+def resolve_warehouse_receipt_input(session, order, payload, context, key):
+    pick = session.scalar(select(WarehousePick).where(WarehousePick.id == payload.warehouse_pick_id).with_for_update())
+    if pick is None or pick.target_order_id != order.id:
+        raise DomainError('warehouse_receipt_denied', '仓库交接票不存在或不是发给此工单', status_code=403)
+    received = session.scalar(select(DepartmentWorkOrderMovement.id).where(DepartmentWorkOrderMovement.warehouse_pick_id == pick.id))
+    if received is not None:
+        raise DomainError('warehouse_already_received', '此仓库交接票已登记到料，不能再次登记', status_code=409)
+    if payload.quantity > pick.quantity:
+        raise DomainError('warehouse_receipt_exceeded', '到料数量不能超过仓库交接票数量', path='quantity')
+    if payload.quantity < pick.quantity and not payload.note.strip():
+        raise DomainError('warehouse_receipt_note', '到料数量小于仓库交接票数量，必须填写备注', path='note')
+    source = session.get(DepartmentWorkOrder, pick.route_warehouse_order_id)
+    if ((source.production_plan_id, source.product_id) != (order.production_plan_id, order.product_id)
+        or not is_warehouse(context['departments'][source.department_node_id])
+        or key not in context['routes'].successors.get((source.material_node_id, source.department_node_id), frozenset())):
+        raise DomainError('warehouse_receipt_route', '仓库交接票来源与此工单直接路线不匹配', status_code=409)
+    return source.material_node_id
+
+
 def validate_issue_destination(session, order, payload, context, key, department_scope):
     available = available_issue_quantity(session, order, context, department_scope)
-    if available is not None and payload.quantity > available and not payload.note.strip():
-        raise DomainError("excess_issue_note_required",
-            f"本次出料超过部门停留数量 {available}，必须填写备注", path="note")
+    if requires_inspection(department_scope) and payload.quantity > available:
+        raise DomainError("qc_good_exceeded", "合格出料不能超过尚未出料的合格数量", path="quantity")
+    if available is not None and payload.quantity > available:
+        raise DomainError("issue_quantity_exceeded",
+            f"本次出料不能超过可出料数量 {max(available, 0)}", path="quantity")
     destinations = context["routes"].successors[key]
     target = session.get(DepartmentWorkOrder, payload.target_work_order_id) if payload.target_work_order_id else None
     if destinations:
@@ -184,6 +223,8 @@ def validate_issue_destination(session, order, payload, context, key, department
 def record_movement(order_id: int, payload: DepartmentMovementCreate, *, department_scope: str | None, actor_user_id: int):
     if department_scope is None:
         raise DomainError("department_operator_required", "仅所属生产部门账号可登记到料和出料", status_code=403)
+    if payload.direction == 'issue' and not allows_manual_issue(department_scope):
+        raise DomainError('warehouse_manual_issue_disabled', '请在仓库库存卡片使用出料操作', status_code=403)
     validate_movement_shape(payload)
     with SessionLocal.begin() as session:
         order = load_scoped_order(session, order_id, department_scope)
@@ -196,7 +237,7 @@ def record_movement(order_id: int, payload: DepartmentMovementCreate, *, departm
         if previous is not None:
             actual = serialize_movements(session, [previous])[0]
             expected = payload.model_dump()
-            if payload.receipt_source == "ticket":
+            if payload.receipt_source in {"ticket", "warehouse"}:
                 expected["input_material_node_id"] = actual["input_material_node_id"]
             if previous.actor_user_id != actor_user_id or any(actual[key] != value for key,value in expected.items()):
                 raise DomainError("movement_request_conflict", "该提交标识已用于其他登记，请重新打开录入窗口", status_code=409)
@@ -206,16 +247,19 @@ def record_movement(order_id: int, payload: DepartmentMovementCreate, *, departm
         context, key = order_context(session, order)
         input_material = None
         if payload.direction == "receipt":
-            if not allows_receipts(department_scope):
-                raise DomainError("department_receipt_disabled", "冲压部和外购部无需登记到料，请直接出料", status_code=403)
+            if requires_inspection(department_scope) or (payload.receipt_source != 'warehouse' and not allows_receipts(department_scope)):
+                raise DomainError("department_receipt_disabled", "此部门不允许普通到料，QC请登记质检", status_code=403)
             input_material = resolve_receipt_input(session, order, payload, context, key)
         else:
             validate_issue_destination(session, order, payload, context, key, department_scope)
         movement = DepartmentWorkOrderMovement(work_order_id=order.id, direction=payload.direction,
             quantity=payload.quantity, note=payload.note, request_id=payload.request_id, actor_user_id=actor_user_id,
-            receipt_source=payload.receipt_source, ticket_id=payload.ticket_id, input_material_node_id=input_material)
+            receipt_source=payload.receipt_source, ticket_id=payload.ticket_id,
+            warehouse_pick_id=payload.warehouse_pick_id, input_material_node_id=input_material)
         session.add(movement)
         session.flush()
+        if payload.direction == 'receipt' and is_warehouse(department_scope):
+            create_warehouse_lot(session, order, movement, context)
         if payload.direction == "issue":
             if payload.target_work_order_id is not None:
                 session.add(DepartmentHandoffTicket(issue_movement_id=movement.id, target_work_order_id=payload.target_work_order_id))

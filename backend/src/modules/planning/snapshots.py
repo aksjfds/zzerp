@@ -3,6 +3,7 @@
 from dataclasses import asdict
 
 from domain.handoff_routes import resolve_handoff_routes
+from domain.material_numbers import compact_part_numbers
 from domain.process_flow import material_routes
 from domain.route_order import department_route_order
 from schemas.engineering import ProcessFlowPayload
@@ -124,8 +125,11 @@ def snapshot_context(item):
             members = sorted((parts[key] for key in route.part_node_ids), key=lambda part: part["part_no"])
             materials[route.material_node_id] = "（" + "+".join(part["part_name"] for part in members) + "）装配体"
     return {
+        "departments": {node.id: node.department_code for node in flow.nodes if node.type == "department"},
+        "department_labels": {node.id: node.label for node in flow.nodes if node.type == "department"},
         "routes": resolve_handoff_routes(flow), "materials": materials,
         "receipt_materials": receipt_materials, "requirements": requirements,
+        "product_requirements": {key: part["pcs"] for key, part in parts.items()},
         "parts": {key: {"part_no": part["part_no"], "part_name": part["part_name"]} for key, part in parts.items()},
     }
 
@@ -133,7 +137,7 @@ def snapshot_context(item):
 def material_number(context, material_node_id: str) -> str:
     parts = context["parts"]
     part_ids = context["requirements"][material_node_id]
-    return " + ".join(parts[part_id]["part_no"] for part_id in sorted(part_ids, key=lambda key: parts[key]["part_no"]))
+    return compact_part_numbers(parts[part_id]["part_no"] for part_id in sorted(part_ids, key=lambda key: parts[key]["part_no"]))
 
 
 def handoff_contexts(session, keys):
@@ -143,3 +147,16 @@ def handoff_contexts(session, keys):
 def snapshot_department_orders(session, keys):
     return {key: department_route_order(ProcessFlowPayload.model_validate(item.process_flow_snapshot))
             for key, item in snapshot_items(session, keys).items()}
+
+
+def material_labels(session, order_ids):
+    if not order_ids:
+        return {}
+    orders = list(session.scalars(select(DepartmentWorkOrder).where(DepartmentWorkOrder.id.in_(order_ids))))
+    items = snapshot_items(session, {item_key(order) for order in orders})
+    refs = route_references(session, route_keys={route_key(order) for order in orders})
+    contexts = {key: snapshot_context(item) for key, item in items.items()}
+    return {order.id: {'factory_code': items[item_key(order)].factory_code,
+        'product_name': items[item_key(order)].product_name,
+        'material_no': material_number(contexts[item_key(order)], order.material_node_id),
+        'material_name': refs[route_key(order)].part_name} for order in orders}

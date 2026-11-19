@@ -38,7 +38,7 @@
 :root .el-form-item.is-error .el-input__wrapper,
 :root .el-form-item.is-error .el-select__wrapper,
 :root .el-form-item.is-error .el-textarea__inner { box-shadow: inset 0 0 0 2px var(--erp-danger); }
-:root .el-form-item__label { color: var(--erp-text-secondary); font-weight: 500; }
+:root .el-form-item__label { color: var(--erp-text-secondary); font-weight: 600; }
 :root .el-form-item__error { line-height: 1.4; }
 :root .el-input-number { max-width: 100%; font-variant-numeric: tabular-nums; }
 :root .el-date-editor { max-width: 100%; }
@@ -62,15 +62,19 @@
 :root .el-table th.el-table__cell > .cell { white-space: nowrap; }
 :root .el-table td.el-table__cell { padding: 9px 0; }
 :root .el-table .cell { line-height: 1.6; }
+:root .el-table td.data-primary .cell { color: var(--erp-text); font-weight: 600; }
+:root .el-table td.data-metric .cell { color: var(--erp-primary-strong); font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; }
+:root .el-table td.data-reference .cell { color: var(--erp-text-secondary); font-size: 13px; font-weight: 500; }
+:root .el-table td.data-secondary .cell { color: var(--erp-text-secondary); font-size: 13px; }
 :root .el-table--small td.el-table__cell { padding: 6px 0; }
 :root .el-table .el-button.is-link { margin-left: 0; margin-right: 8px; }
 :root .el-table__empty-block { min-height: 120px; }
 :root .el-table__empty-text { width: auto; padding: 24px; line-height: 1.6; color: var(--erp-text-muted); }
 
-:root .el-tag { height: auto; min-height: 24px; padding: 4px 10px; border-radius: 999px; font-weight: 500; line-height: 1.4; }
+:root .el-tag { height: auto; min-height: 24px; padding: 4px 10px; border-radius: 999px; font-weight: 600; line-height: 1.4; }
 :root .el-tag--small { min-height: 20px; padding: 2px 6px; }
 :root .el-tabs__item { height: 42px; color: var(--erp-text-secondary); font-weight: 500; }
-:root .el-tabs__item.is-active { color: var(--erp-primary); }
+:root .el-tabs__item.is-active { color: var(--erp-primary); font-weight: 700; }
 :root .el-tabs__active-bar { height: 2px; border-radius: 2px; }
 :root .el-tabs__nav-wrap::after { height: 1px; background: var(--erp-border); }
 :root .el-tabs__header { margin-bottom: 18px; }
@@ -87,7 +91,7 @@
   flex-direction: column;
   max-width: calc(100vw - 32px);
   max-height: calc(100dvh - var(--erp-dialog-gap) * 2);
-  margin: var(--erp-dialog-gap) auto;
+  margin: auto;
   padding: 0;
   overflow: hidden;
   border: 1px solid var(--erp-border);
@@ -112,7 +116,7 @@
 :root .el-drawer__body { min-height: 0; padding: 24px; }
 :root .el-drawer__close-btn { display: grid; width: 32px; height: 32px; flex-shrink: 0; place-items: center; border-radius: 8px; color: var(--erp-text-secondary); }
 :root .el-drawer__footer { padding: 16px 24px; border-top: 1px solid var(--erp-border); background: var(--erp-surface); }
-:root .el-message-box { max-width: calc(100vw - 32px); border: 1px solid var(--erp-border); border-radius: 12px; padding: 24px; background: var(--erp-surface); }
+:root .el-message-box { --el-messagebox-width: 380px; max-width: min(var(--el-messagebox-width), calc(100vw - 32px)); border: 1px solid var(--erp-border); border-radius: 12px; padding: 24px; background: var(--erp-surface); }
 :root .el-message-box__title { font-size: 20px; font-weight: 600; }
 :root .el-message-box__content { color: var(--erp-text-secondary); line-height: 1.7; }
 :root .el-message-box__btns { flex-wrap: wrap; gap: 8px; }
@@ -144,7 +148,7 @@
 :root .el-empty__description p { color: var(--erp-text-muted); font-size: 14px; }
 
 @media (max-width: 760px) {
-  :root .el-dialog { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); margin: 12px auto !important; }
+  :root .el-dialog { max-width: calc(100vw - 24px); max-height: calc(100dvh - 24px); margin: auto; }
   :root .el-dialog__header,
   :root .el-drawer__header { padding: 16px; }
   :root .el-dialog__body,

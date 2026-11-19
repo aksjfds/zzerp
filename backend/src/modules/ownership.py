@@ -18,6 +18,12 @@ TABLE_OWNERS = {
     "production_plan": "planning",
     "production_plan_item": "planning",
     "plan_product_route": "planning",
+    "warehouse_lot": "planning",
+    "warehouse_pick": "planning",
+    "warehouse_allocation": "planning",
+    "qc_inspection": "planning",
+    "qc_rework_ticket": "planning",
+    "qc_rework_event": "planning",
 }
 
 

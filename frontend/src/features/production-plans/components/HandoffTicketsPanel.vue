@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import { type InspectionBatch } from '../api/quality'
+import QcInspectionDialog from './QcInspectionDialog.vue'
+import QcReworkDialog from './QcReworkDialog.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { DEPARTMENT_WORK_ORDER_OPERATE } from '@/permission/constants'
@@ -13,10 +16,21 @@ const rows = ref<HandoffTicket[]>([]), total = ref(0), page = ref(1)
 const unreceived = ref(true), keyword = ref(''), loading = ref(false), error = ref('')
 const ticket = ref<HandoffTicket>(), order = ref<DepartmentWorkOrder>()
 const opening = ref(false)
+const inspection = ref<InspectionBatch>()
+const reworkTicket = ref<HandoffTicket>()
+function rowKey(row: HandoffTicket) { return `${row.kind}:${row.id}` }
+function readonlyLabel(row: HandoffTicket) {
+  if (row.kind === 'rework') return row.action === 'rework_receive' ? '待接收返修' : row.action === 'rework_return' ? '待回交QC' : '已回交QC'
+  if (row.kind === 'return') return row.action === 'inspect' ? '待复检' : '已复检'
+  return '—'
+}
+function actionLabel(row: HandoffTicket) {
+  return { none: '—', receive: '登记到料', inspect: '质检', rework_receive: '接收返修', rework_return: '回交QC' }[row.action]
+}
 const canRegisterReceipt = computed(() => Boolean(auth.user?.department_code)
   && auth.hasPermission(DEPARTMENT_WORK_ORDER_OPERATE))
 function canReceive(row: HandoffTicket) {
-  return canRegisterReceipt.value && row.can_receive && BigInt(row.received_quantity) === 0n
+  return canRegisterReceipt.value && row.action !== 'none'
     && row.plan_status === 'confirmed'
 }
 let active = true, revision = 0
@@ -30,8 +44,17 @@ async function load() {
   } catch (cause) { if (active && current === revision) error.value = getApiErrorDetail(cause)?.message || '交接票加载失败' }
   finally { if (active && current === revision) loading.value = false }
 }
-async function receive(row: HandoffTicket) {
+async function handleTicket(row: HandoffTicket) {
   if (opening.value || !canReceive(row)) return
+  if (row.action === 'inspect' && row.target_work_order_id !== null) {
+    inspection.value = { id: row.id, source_kind: row.kind === 'return' ? 'return' : row.kind === 'warehouse' ? 'warehouse' : 'handoff',
+      work_order_id: row.target_work_order_id, order_no: row.order_no,
+      product: `${row.factory_code} · ${row.product_name}`, material: `${row.material_no} · ${row.material_name}`, quantity: String(row.quantity) }
+  } else if (row.kind === 'rework') reworkTicket.value = row
+  else await receive(row)
+}
+async function receive(row: HandoffTicket) {
+  if (opening.value || !canReceive(row) || row.target_work_order_id === null) return
   opening.value = true; error.value = ''
   try {
     const result = await queryDepartmentWorkOrders({ page: 1, work_order_id: row.target_work_order_id })
@@ -41,7 +64,7 @@ async function receive(row: HandoffTicket) {
   } catch (cause) { if (active) error.value = getApiErrorDetail(cause)?.message || '目标工单不可访问，请刷新后重试' }
   finally { if (active) opening.value = false }
 }
-function changed() { emit('changed'); void load() }
+function changed() { reworkTicket.value = undefined; inspection.value = undefined; emit('changed'); void load() }
 defineExpose({ refresh: load })
 onMounted(load)
 onBeforeUnmount(() => { active = false; revision += 1 })
@@ -51,29 +74,29 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     <div class="collection-heading">
       <div><h2>物料交接</h2></div>
     </div>
-
-
     <LoadErrorAlert :message="error" :loading="loading" @retry="load" />
-    <ElTable v-if="!error" v-loading="loading" :data="rows" row-key="id" empty-text="暂无符合条件的交接票">
+    <ElTable v-if="!error" v-loading="loading" :data="rows" :row-key="rowKey" empty-text="暂无符合条件的交接票">
       <ElTableColumn prop="source_department" label="来自" min-width="100" />
-      <ElTableColumn label="产品" min-width="180">
+      <ElTableColumn class-name="data-primary" label="产品" min-width="180">
         <template #default="{ row }">{{ row.factory_code }} · {{ row.product_name }}</template>
       </ElTableColumn>
-      <ElTableColumn label="配件/装配体" min-width="240">
+      <ElTableColumn class-name="data-primary" label="配件/装配体" min-width="240">
         <template #default="{ row }">{{ row.material_no }} · {{ row.material_name }}</template>
       </ElTableColumn>
-      <ElTableColumn prop="order_no" label="订单号" min-width="150" />
-      <ElTableColumn prop="quantity" label="数量" width="120" align="right" />
-      <ElTableColumn prop="created_at" label="时间" min-width="180" />
+      <ElTableColumn class-name="data-reference" prop="order_no" label="订单号" min-width="150" />
+      <ElTableColumn class-name="data-metric" prop="quantity" label="数量" width="120" align="right" />
+      <ElTableColumn class-name="data-secondary" prop="created_at" label="时间" min-width="180" />
       <ElTableColumn label="操作" width="110">
         <template #default="{ row }">
-          <ElButton v-if="canRegisterReceipt && row.can_receive && BigInt(row.received_quantity) === 0n" link type="primary" :disabled="loading || opening || !canReceive(row)" @click="receive(row)">登记到料</ElButton>
-          <span v-else>—</span>
+          <ElButton v-if="canRegisterReceipt && row.action !== 'none'" link type="primary" :disabled="loading || opening || !canReceive(row)" @click="handleTicket(row)">{{ actionLabel(row) }}</ElButton>
+          <span v-else>{{ readonlyLabel(row) }}</span>
         </template>
       </ElTableColumn>
-      <ElTableColumn prop="note" label="备注" min-width="140" />
+      <ElTableColumn class-name="data-secondary" prop="note" label="备注" min-width="140" />
     </ElTable>
     <ElPagination v-model:current-page="page" :total="total" :page-size="50" layout="prev, pager, next, total" @current-change="load" />
+    <QcReworkDialog v-if="reworkTicket" :key="`${reworkTicket.id}:${reworkTicket.action}`" :ticket="reworkTicket" @close="reworkTicket = undefined" @saved="changed" />
+    <QcInspectionDialog v-if="inspection" :key="`${inspection.source_kind}:${inspection.id}`" :batch="inspection" @close="inspection = undefined" @saved="changed" />
     <DepartmentMovementDialog v-if="ticket && order" :order="order" direction="receipt" :ticket="ticket" @close="ticket = undefined; order = undefined" @changed="changed" />
   </section>
 </template>

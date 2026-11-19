@@ -13,6 +13,8 @@ export type ProductionPlanItemInput = {
 export type ProductionPlanInput = {
   customer_id: number
   order_no: string
+  order_date: string
+  delivery_date: string
   items: ProductionPlanItemInput[]
 }
 

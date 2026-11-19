@@ -5,8 +5,11 @@ from sqlalchemy import delete, func, select
 
 from modules.errors import DomainError
 from modules.organization.read_api import (
+    allows_manual_issue,
     allows_receipts,
     department_names,
+    is_warehouse,
+    requires_inspection,
     uses_assembly_tree,
 )
 from modules.planning.material_movements import (
@@ -19,8 +22,10 @@ from modules.planning.persistence import (
     ProductionPlan,
     ProductionPlanItem,
 )
+from modules.planning.quality_totals import inspection_totals
 from modules.planning.snapshots import (
     item_key,
+    material_number,
     order_department_filter,
     order_product_filter,
     route_key,
@@ -28,6 +33,7 @@ from modules.planning.snapshots import (
     snapshot_context,
     snapshot_items,
 )
+from modules.planning.warehouse_stock import warehouse_dispatched
 from modules.sales.customer_api import customer_names_by_ids
 
 
@@ -97,6 +103,8 @@ def list_work_orders(
         if department_code is not None and department_code not in departments:
             raise DomainError("department_not_found", "生产部门不存在", status_code=404)
         conditions = [ProductionPlan.status != "draft", ProductionPlan.confirmed_at.is_not(None)]
+        if work_order_id is None:
+            conditions.append(~order_department_filter("warehouse"))
         if work_order_id is not None:
             conditions.append(DepartmentWorkOrder.id == work_order_id)
         if department_code is not None:
@@ -120,6 +128,19 @@ def list_work_orders(
         return serialize_work_orders(session, rows, departments=departments), total
 
 
+def route_neighbor_names(context):
+    successors = context['routes'].successors
+    predecessors = {key: set() for key in successors}
+    for source, targets in successors.items():
+        for target in targets:
+            predecessors[target].add(source)
+    labels = context['department_labels']
+    return {key: {
+        'upstream_departments': list(dict.fromkeys(labels[node_id] for _, node_id in sorted(predecessors[key]))),
+        'downstream_departments': list(dict.fromkeys(labels[node_id] for _, node_id in sorted(targets))),
+    } for key, targets in successors.items()}
+
+
 def serialize_work_orders(session, rows, *, include_components=True, departments=None):
     if not rows:
         return []
@@ -132,25 +153,35 @@ def serialize_work_orders(session, rows, *, include_components=True, departments
         raise DomainError("department_work_order_route_missing", "部门工单关联的计划快照路线不存在，请检查计划资料", status_code=409)
     orders = [order for order, plan in rows]
     contexts = {key: snapshot_context(item) for key, item in items.items()}
+    neighbors = {key: route_neighbor_names(context) for key, context in contexts.items()}
     components = assembly_components(session, orders, routes, contexts) if include_components else {}
     totals = movement_totals(session, orders, contexts)
+    quality = inspection_totals(session, {order.id for order in orders if requires_inspection(routes[route_key(order)].department_code)})
+    dispatched = warehouse_dispatched(session, {order.id for order in orders if is_warehouse(routes[route_key(order)].department_code)})
     data = []
     for order, plan in rows:
         route = routes[route_key(order)]
         item = items[item_key(order)]
         product = item
+        good, scrap, rework = quality.get(order.id, (0, 0, 0))
         data.append({
+            **neighbors[item_key(order)][(order.material_node_id, order.department_node_id)],
             "id": order.id, "production_plan_id": plan.id, "material_node_id": order.material_node_id, "department_node_id": order.department_node_id,
             "order_no": plan.order_no, "customer_name": customers[plan.customer_id],
             "order_quantity": item.order_quantity,
             "product_id": order.product_id, "factory_code": product.factory_code,
-            "product_name": product.product_name, "part_no": route.part_no,
+            "product_name": product.product_name, "part_no": material_number(contexts[item_key(order)], order.material_node_id),
             "part_name": route.part_name, "department_code": route.department_code,
             "department_name": departments[route.department_code],
             "can_receive": allows_receipts(route.department_code),
+            "can_issue": allows_manual_issue(route.department_code),
+            "requires_inspection": requires_inspection(route.department_code),
+            "good_quantity": str(good), "scrap_quantity": str(scrap), "rework_quantity": str(rework),
             "task_quantity": order.task_quantity, "plan_status": plan.status,
-            "received_quantity": totals.get(order.id, ("0", "0"))[0],
-            "issued_quantity": totals.get(order.id, ("0", "0"))[1],
+            "scheduled_date": order.scheduled_date.isoformat() if order.scheduled_date else None,
+            "schedule_revision": order.schedule_revision,
+            "received_quantity": str(good + scrap + rework) if requires_inspection(route.department_code) else totals.get(order.id, ("0", "0"))[0],
+            "issued_quantity": str(int(totals.get(order.id, ("0", "0"))[1]) + dispatched.get(order.id, 0)),
             "components": components.get(order.id, []),
         })
     return data

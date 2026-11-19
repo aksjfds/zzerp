@@ -29,6 +29,8 @@ let searchSequence = 0
 const form = reactive({
   customer_id: props.plan?.customer_id as number | undefined,
   order_no: props.plan?.order_no || '',
+  order_date: props.plan?.order_date || '',
+  delivery_date: props.plan?.delivery_date || '',
   items: props.plan?.items.map(item => ({ product_id: item.product_id,
     order_quantity: item.order_quantity, production_quantity: item.production_quantity, source_version: item.source_version })) ?? [] as ProductionPlanItemInput[],
 })
@@ -123,10 +125,15 @@ async function save() {
     ElMessage.warning('请填写客户、订单号，并为每个产品填写有效订单数量和生产数量')
     return
   }
+  if (!form.order_date || !form.delivery_date || form.delivery_date < form.order_date) {
+    ElMessage.warning('请填写下单日期和交货日期，交货日期不能早于下单日期')
+    return
+  }
   saving.value = true
   emit('busy', true)
   const input: ProductionPlanInput = {
     customer_id: form.customer_id, order_no: form.order_no.trim(),
+    order_date: form.order_date, delivery_date: form.delivery_date,
     items: form.items.map(item => ({ ...item })),
   }
   try {
@@ -170,6 +177,14 @@ onBeforeUnmount(() => { active = false; searchSequence += 1; versionSequence += 
         <span v-if="readonly">{{ form.order_no }}</span>
         <ElInput v-else v-model="form.order_no" maxlength="200" placeholder="填写订单号" />
       </ElFormItem>
+      <ElFormItem label="下单日期" required>
+        <span v-if="readonly">{{ form.order_date }}</span>
+        <ElDatePicker v-else v-model="form.order_date" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" placeholder="选择下单日期" />
+      </ElFormItem>
+      <ElFormItem label="交货日期" required>
+        <span v-if="readonly">{{ form.delivery_date }}</span>
+        <ElDatePicker v-else v-model="form.delivery_date" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" placeholder="选择交货日期" />
+      </ElFormItem>
     </div>
     </section>
     <section class="form-section">
@@ -205,7 +220,7 @@ onBeforeUnmount(() => { active = false; searchSequence += 1; versionSequence += 
     <footer v-if="!readonly" class="form-submit">
     <ElButton v-if="!readonly" type="primary" native-type="submit" :loading="saving" :disabled="customerLoading || productLoading || versionLoading || !!customerError || !!productError || !!versionError">保存生产计划</ElButton></footer>
   </ElForm>
-  <ElDialog :model-value="snapshotProductId !== undefined" @update:model-value="closeSnapshot" title="计划产品快照" width="min(1280px, 96vw)" destroy-on-close>
+  <ElDialog :model-value="snapshotProductId !== undefined" @update:model-value="closeSnapshot" title="计划产品快照" width="min(1120px, 96vw)" destroy-on-close>
     <PlanProductSnapshot v-if="snapshotProductId && plan" :key="`${plan.id}:${snapshotProductId}`" :plan-id="plan.id" :product-id="snapshotProductId" />
   </ElDialog>
 </template>
