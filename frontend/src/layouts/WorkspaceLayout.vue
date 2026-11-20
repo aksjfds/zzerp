@@ -15,7 +15,8 @@ const sidebarCollapsed = ref(false)
 const links = computed(() => {
   const department = auth.user?.department_code
   if (department) return auth.hasPermission([PLAN_PERMISSIONS.view, DEPARTMENT_WORK_ORDER_VIEW])
-    ? [{ path: `/departments/${encodeURIComponent(department)}/work-orders`, label: '我的工作台', icon: 'progress' as const }] : []
+    ? [{ path: `/departments/${encodeURIComponent(department)}/work-orders`, label: '我的工作台', icon: 'progress' as const },
+      ...(department === 'grinding' ? [{ path: '/departments/grinding/work-orders?view=workers', label: '工人', icon: 'products' as const }] : [])] : []
   return [
     ...(auth.hasPermission(PRODUCT_PERMISSIONS.view) ? [{ path: '/products', label: '产品工程', icon: 'products' as const }] : []),
     ...(auth.hasPermission(PLAN_PERMISSIONS.view) ? [
@@ -24,7 +25,10 @@ const links = computed(() => {
     ] : []),
   ]
 })
-const current = computed(() => links.value.find(link => route.path === link.path || route.path.startsWith(`${link.path}/`)))
+const current = computed(() => links.value.find(link => {
+  const path = link.path.split('?')[0]!
+  return (route.path === path || route.path.startsWith(`${path}/`)) && (link.path.includes('?view=workers') === (route.query.view === 'workers'))
+}))
 async function logout() {
   if (leaving.value) return
   leaving.value = true

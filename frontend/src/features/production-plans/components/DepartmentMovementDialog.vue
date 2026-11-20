@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { getApiErrorDetail } from '@/api/request'
 import LoadErrorAlert from '@/shared/feedback/LoadErrorAlert.vue'
 import { ElMessage } from 'element-plus'
@@ -32,16 +32,26 @@ const options = ref<HandoffOptions>()
 const optionError = ref('')
 const optionLoading = ref(false)
 const target = ref<number>()
+const documentType = ref<'normal' | 'piecework'>('normal'), workerName = ref('')
+const pieceworkProcess = ref('')
+const canPiecework = computed(() => props.direction === 'issue' && !!options.value?.targets.find(item => item.id === target.value)?.can_piecework)
+const documentTitle = computed(() => documentType.value === 'piecework' ? '物料交接单 - 计件单' : '物料交接单 - 普通交接')
+watch(canPiecework, allowed => { if (!allowed) documentType.value = 'normal' })
+watch(documentType, value => { if (value === 'normal') { workerName.value = ''; pieceworkProcess.value = '' } })
 const printMovement = ref<DepartmentLedgerMovement>()
 const saved = ref(false)
 const draftSheet = ref<InstanceType<typeof ProductionDocumentSheet>>()
 const printing = ref(false)
 const issueFields = computed<[string, string | null, string?][]>(() => [
+  ...(canPiecework.value ? [['单据', null, 'document'] as [string, string | null, string?]] : []),
+  ...(documentType.value === 'piecework' ? [['工艺', null, 'pieceworkProcess'] as [string, string | null, string?]] : []),
   ['产品', `${props.order.factory_code} · ${props.order.product_name}`],
   ['配件/装配体', `${props.order.part_no} · ${props.order.part_name}`],
   ['交接', null, 'handoff'], ['备注', null, 'note'],
 ])
 const draftFields = computed<[string, string | null][]>(() => [
+  ...(documentType.value === 'piecework' ? [['磨房工人', workerName.value.trim()] as [string, string | null]] : []),
+  ...(documentType.value === 'piecework' ? [['工艺', pieceworkProcess.value.trim()] as [string, string | null]] : []),
   ['产品', `${props.order.factory_code} · ${props.order.product_name}`],
   ['配件/装配体', `${props.order.part_no} · ${props.order.part_name}`],
   ['交接', `${props.order.department_name} -> ${options.value?.targets.find(item => item.id === target.value)?.department_name || '终端出料'}，${quantity.value ?? ''}`],
@@ -54,7 +64,8 @@ async function printDraft() {
     saveError.value = '请选择交接去向并输入正整数数量'; return
   }
   printing.value = true
-  try { await printElement(draftSheet.value.element, '物料交接单 - 普通交接') }
+  if (documentType.value === 'piecework' && !workerName.value.trim()) { printing.value = false; saveError.value = '请填写磨房工人姓名'; return }
+  try { await printElement(draftSheet.value.element, documentTitle.value) }
   catch (cause) { if (active) ElMessage.error(cause instanceof Error ? cause.message : '打印失败，请重试') }
   finally { if (active) printing.value = false }
 }
@@ -124,7 +135,10 @@ async function save() {
     return
   }
   if (props.direction === 'issue' && options.value.targets.length && !target.value) { saveError.value = '请选择出料去向'; return }
+  if (documentType.value === 'piecework' && !workerName.value.trim()) { saveError.value = '请填写磨房工人姓名'; return }
   const value: Omit<DepartmentMovementInput, 'request_id'> = {
+    document_type: documentType.value, worker_name: workerName.value.trim(),
+    piecework_process: documentType.value === 'piecework' ? pieceworkProcess.value.trim() : '',
     direction: props.direction, quantity: quantity.value, note: note.value.trim(),
     receipt_source: props.direction === 'receipt' ? (props.ticket?.kind === 'warehouse' ? 'warehouse' : 'ticket') : null,
     ticket_id: props.direction === 'receipt' && props.ticket?.kind !== 'warehouse' ? props.ticket?.id ?? null : null,
@@ -161,7 +175,9 @@ onBeforeUnmount(() => { active = false; revision += 1 })
     <template v-if="direction === 'issue'">
       <ElForm :disabled="saving || printing" @submit.prevent="save()">
         <LoadErrorAlert :message="optionError" :loading="optionLoading" @retry="loadOptions" />
-        <ProductionDocumentSheet title="物料交接单 - 普通交接" :fields="issueFields">
+        <ProductionDocumentSheet :title="documentTitle" :fields="issueFields">
+          <template #document><ElRadioGroup v-model="documentType"><ElRadioButton value="normal">普通单</ElRadioButton><ElRadioButton value="piecework">计件单</ElRadioButton></ElRadioGroup><ElInput v-if="documentType === 'piecework'" v-model="workerName" aria-label="磨房工人姓名" maxlength="100" placeholder="磨房工人姓名" /></template>
+          <template #pieceworkProcess><ElInput v-model="pieceworkProcess" aria-label="工艺" maxlength="100" /></template>
           <template #handoff>
             <div class="handoff-inputs"><span>{{ order.department_name }} -&gt;</span>
               <ElSelect v-if="options?.targets.length" v-model="target" aria-label="接收部门" :disabled="optionLoading" placeholder="选择接收部门"><ElOption v-for="item in options.targets" :key="item.id" :label="item.label" :value="item.id" /></ElSelect>
@@ -174,7 +190,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
         <p v-if="options">可出料数量：{{ options.available_issue_quantity === null ? '不限' : quantityMax }} <ElButton text :loading="optionLoading" :disabled="saving" @click="loadOptions">刷新数量</ElButton></p>
         <LoadErrorAlert :message="saveError" title="登记未完成" retry-text="重试" :loading="saving" @retry="save()" />
       </ElForm>
-      <div hidden><ProductionDocumentSheet ref="draftSheet" title="物料交接单 - 普通交接" :fields="draftFields" /></div>
+      <div hidden><ProductionDocumentSheet ref="draftSheet" :title="documentTitle" :fields="draftFields" /></div>
     </template>
     <ElForm v-else-if="direction === 'receipt'" label-position="top" :disabled="saved" @submit.prevent="save()">
       <LoadErrorAlert :message="optionError" :loading="optionLoading" @retry="loadOptions" />

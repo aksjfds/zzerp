@@ -1,7 +1,7 @@
 from database import SessionLocal
 from domain.time import BUSINESS_TIMEZONE, business_iso
 from domain.warehouse import material_stock_key
-from sqlalchemy import func, select, tuple_
+from sqlalchemy import func, tuple_
 
 from modules.errors import DomainError
 from modules.identity.read_api import usernames_by_ids
@@ -10,6 +10,7 @@ from modules.organization.read_api import (
     department_names,
     is_warehouse,
 )
+from modules.planning.current_records import select_current
 from modules.planning.persistence import (
     DepartmentWorkOrder,
     ProductionPlan,
@@ -40,7 +41,7 @@ def department_warehouse_stocks(page, page_size, *, department_scope, department
     if is_warehouse(scope):
         return warehouse_stocks(page, page_size, department_scope=department_scope)
     with SessionLocal() as session:
-        orders = list(session.scalars(select(DepartmentWorkOrder).join(
+        orders = list(session.scalars(select_current(DepartmentWorkOrder).join(
             ProductionPlan, ProductionPlan.id == DepartmentWorkOrder.production_plan_id).where(
             ProductionPlan.status != 'draft', ProductionPlan.confirmed_at.is_not(None), order_department_filter(scope))))
         contexts = handoff_contexts(session, {item_key(order) for order in orders})
@@ -52,7 +53,7 @@ def department_warehouse_stocks(page, page_size, *, department_scope, department
         if not skus:
             return [], 0
         balances = lot_balances()
-        statement = select(balances).where(balances.c.available > 0,
+        statement = select_current(balances).where(balances.c.available > 0,
             tuple_(balances.c.product_id, balances.c.material_key).in_(skus))
         return stock_page(session, statement, balances, page, page_size)
 
@@ -62,12 +63,12 @@ def warehouse_stocks(page, page_size, *, department_scope):
         raise DomainError('warehouse_stock_scope', '请从本人部门的仓库库存页签查看库存', status_code=403)
     with SessionLocal() as session:
         balances = lot_balances()
-        statement = select(balances).where(balances.c.available > 0)
+        statement = select_current(balances).where(balances.c.available > 0)
         return stock_page(session, statement, balances, page, page_size)
 
 
 def stock_page(session, statement, balances, page, page_size):
-    total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+    total = session.scalar(select_current(func.count()).select_from(statement.subquery())) or 0
     rows = session.execute(statement.order_by(balances.c.arrived_at.desc(), balances.c.lot_id.desc())
                            .offset((page - 1) * page_size).limit(page_size)).all()
     labels = material_labels(session, {row.order_id for row in rows})
@@ -82,14 +83,14 @@ def warehouse_picks(page, page_size, *, department_scope, pick_id=None):
     if department_scope is not None and not allows_pick_history(department_scope):
         raise DomainError('warehouse_pick_history_scope', '当前账号不提供领料记录页面', status_code=403)
     with SessionLocal() as session:
-        statement = select(WarehousePick, DepartmentWorkOrder, ProductionPlan).select_from(WarehousePick)\
+        statement = select_current(WarehousePick, DepartmentWorkOrder, ProductionPlan).select_from(WarehousePick)\
             .join(DepartmentWorkOrder, DepartmentWorkOrder.id == WarehousePick.target_order_id)\
             .join(ProductionPlan, ProductionPlan.id == DepartmentWorkOrder.production_plan_id)
         if department_scope is not None and not is_warehouse(department_scope):
             statement = statement.where(order_department_filter(department_scope))
         if pick_id is not None:
             statement = statement.where(WarehousePick.id == pick_id)
-        total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+        total = session.scalar(select_current(func.count()).select_from(statement.subquery())) or 0
         rows = session.execute(statement.order_by(WarehousePick.id.desc()).offset((page - 1) * page_size).limit(page_size)).all()
         labels = material_labels(session, {pick.route_warehouse_order_id for pick, order, plan in rows})
         refs = route_references(session, route_keys={route_key(order) for pick, order, plan in rows})
@@ -105,7 +106,7 @@ def warehouse_picks(page, page_size, *, department_scope, pick_id=None):
 
 
 def pick_sources(session, pick_ids):
-    rows = session.execute(select(WarehouseAllocation.pick_id, ProductionPlan.order_no, WarehouseAllocation.quantity)
+    rows = session.execute(select_current(WarehouseAllocation.pick_id, ProductionPlan.order_no, WarehouseAllocation.quantity)
         .select_from(WarehouseAllocation).join(WarehouseLot, WarehouseLot.id == WarehouseAllocation.lot_id)
         .join(DepartmentWorkOrder, DepartmentWorkOrder.id == WarehouseLot.warehouse_order_id)
         .join(ProductionPlan, ProductionPlan.id == DepartmentWorkOrder.production_plan_id)

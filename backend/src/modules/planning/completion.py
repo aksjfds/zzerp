@@ -1,7 +1,8 @@
 """Product-equivalent quantities received by finished-goods work orders."""
 
-from sqlalchemy import func, select
+from sqlalchemy import func
 
+from modules.planning.current_records import select_current
 from modules.planning.issue_limits import received_kit_quantity
 from modules.planning.persistence import DepartmentWorkOrderMovement
 from modules.planning.snapshots import snapshot_context, snapshot_items
@@ -12,7 +13,7 @@ def completed_quantities(session, orders):
     if not finished:
         return {}
     receipts = {}
-    rows = session.execute(select(DepartmentWorkOrderMovement.work_order_id,
+    rows = session.execute(select_current(DepartmentWorkOrderMovement.work_order_id,
         DepartmentWorkOrderMovement.input_material_node_id, func.sum(DepartmentWorkOrderMovement.quantity))
         .where(DepartmentWorkOrderMovement.work_order_id.in_(finished), DepartmentWorkOrderMovement.direction == 'receipt')
         .group_by(DepartmentWorkOrderMovement.work_order_id, DepartmentWorkOrderMovement.input_material_node_id))

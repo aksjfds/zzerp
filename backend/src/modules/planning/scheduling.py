@@ -42,9 +42,26 @@ def update_work_order_schedule(order_id: int, payload: WorkOrderScheduleUpdate, 
                  "schedule_revision": target.schedule_revision} for target in targets]
 
 
+def get_schedule_context(order_id, *, department_scope):
+    if department_scope is not None:
+        raise DomainError('schedule_access_denied', '生产账号不能修改排产', status_code=403)
+    with SessionLocal() as session:
+        order = load_scoped_order(session, order_id, department_scope=None)
+        if session.scalar(select(DepartmentWorkOrder.id).where(
+            DepartmentWorkOrder.id == order.id, order_department_filter('warehouse'))) is not None:
+            raise DomainError('warehouse_not_production_order', '仓库不参与部门工单排产', status_code=409)
+        targets = following_orders(session, order)
+        return [{'id': target.id, 'scheduled_date': target.scheduled_date,
+                 'schedule_revision': target.schedule_revision} for target in targets]
+
+
 def schedule_targets(session, order, scheduled_date):
     if scheduled_date is None:
         return [order]
+    return following_orders(session, order)
+
+
+def following_orders(session, order):
     orders = list(session.scalars(select(DepartmentWorkOrder).where(
         DepartmentWorkOrder.production_plan_id == order.production_plan_id,
         DepartmentWorkOrder.product_id == order.product_id,

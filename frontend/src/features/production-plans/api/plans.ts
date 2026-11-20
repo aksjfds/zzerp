@@ -1,4 +1,5 @@
 import { service } from '@/api/request'
+import type { Operation } from './operations'
 import type { PlanAction, PlanProductSnapshot, ProductionPlan, ProductionPlanInput } from '../domain/types'
 
 export async function queryPlans(page = 1, pageSize = 50) {
@@ -62,16 +63,18 @@ export type WorkOrderSchedule = {
   schedule_revision: number
 }
 
-export async function saveWorkOrderSchedule(order: DepartmentWorkOrder, scheduledDate: string | null, orders: DepartmentWorkOrder[]) {
+export async function saveWorkOrderSchedule(order: DepartmentWorkOrder, scheduledDate: string | null, orders?: WorkOrderSchedule[]) {
+  const context = orders ?? (await service.get<{ data: WorkOrderSchedule[] }>(`/production-plans/department-work-orders/${order.id}/schedule-context`)).data.data
   const response = await service.put<{ data: WorkOrderSchedule[] }>(
     `/production-plans/department-work-orders/${order.id}/schedule`,
     { scheduled_date: scheduledDate, expected_revision: order.schedule_revision,
-      expected_revisions: Object.fromEntries(orders.map(item => [item.id, item.schedule_revision])) },
+      expected_revisions: Object.fromEntries(context.map(item => [item.id, item.schedule_revision])) },
   )
   return response.data.data
 }
 
 export type DepartmentWorkOrder = WorkOrderSchedule & {
+  department_occurrence: number
   upstream_departments: string[]
   downstream_departments: string[]
   can_issue: boolean
@@ -143,6 +146,9 @@ export type ProgressPlan = {
 }
 
 export type DepartmentMovementInput = {
+  document_type?: 'normal' | 'piecework'
+  worker_name?: string
+  piecework_process?: string
   direction: 'receipt' | 'issue'
   quantity: number
   note: string
@@ -155,6 +161,9 @@ export type DepartmentMovementInput = {
 }
 
 export type DepartmentMovement = Omit<DepartmentMovementInput, 'receipt_source'> & {
+  document_type: 'normal' | 'piecework'
+  worker_name: string
+  piecework_process: string
   receipt_source: 'external' | 'ticket' | 'warehouse' | null
   warehouse_pick_id: number | null
   source_department: string | null
@@ -183,10 +192,14 @@ export async function queryDepartmentMovements(orderId: number, page = 1, inputM
 }
 
 export type DepartmentLedgerMovement = DepartmentMovement & {
+  kind?: 'movement'
   order_no: string; factory_code: string; product_name: string; department_name: string
 }
+export type DepartmentLedgerRecord = Operation & {
+  counterpart: string; can_revoke: boolean; revoke_blocker: string | null; movement: DepartmentLedgerMovement | null
+}
 export async function queryDepartmentLedger(page: number, departmentCode?: string) {
-  return (await service.get<{ data: DepartmentLedgerMovement[]; total: number }>(
+  return (await service.get<{ data: DepartmentLedgerRecord[]; total: number }>(
     '/production-plans/department-movements', { params: { page, page_size: 50, department_code: departmentCode } },
   )).data
 }
@@ -194,11 +207,17 @@ export async function queryDepartmentLedger(page: number, departmentCode?: strin
 export type HandoffOptions = {
   available_issue_quantity: string | null
   can_receive: boolean
-  targets: { id: number; label: string; department_name: string }[]
+  targets: { id: number; label: string; department_name: string; can_piecework: boolean }[]
 }
 export type HandoffTicket = {
+  outsource_available_quantity: string | null
+  outsource_pending_return: boolean
+  document_type: 'normal' | 'piecework'
+  worker_name: string
+  piecework_process: string
   kind: 'normal' | 'rework' | 'return' | 'warehouse'
-  action: 'none' | 'receive' | 'inspect' | 'rework_receive' | 'rework_return'
+  action: 'none' | 'receive' | 'inspect' | 'rework_receive' | 'rework_return' | 'outsource'
+  receipt_id: number | null
   can_receive: boolean
   id: number; ticket_no: string; order_no: string; material_no: string; material_name: string
   factory_code: string; product_name: string

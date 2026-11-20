@@ -269,6 +269,12 @@ CREATE INDEX idx_department_work_order_route ON department_work_order(product_id
 CREATE INDEX idx_department_work_order_product ON department_work_order(product_id);
 
 CREATE TABLE department_work_order_movement (
+    piecework_process TEXT NOT NULL DEFAULT '',
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
+    document_type TEXT NOT NULL DEFAULT 'normal',
+    worker_name TEXT NOT NULL DEFAULT '',
     id BIGSERIAL PRIMARY KEY,
     work_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
     direction TEXT NOT NULL,
@@ -282,8 +288,8 @@ CREATE TABLE department_work_order_movement (
     input_material_node_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uq_department_movement_request UNIQUE (work_order_id, request_id),
-    CONSTRAINT uq_department_movement_ticket UNIQUE (ticket_id),
-    CONSTRAINT uq_department_movement_warehouse_pick UNIQUE (warehouse_pick_id),
+    CONSTRAINT ck_movement_piecework_process CHECK ((document_type = 'normal' AND piecework_process = '') OR (document_type = 'piecework' AND length(btrim(piecework_process)) <= 100)),
+    CONSTRAINT ck_movement_piecework CHECK ((document_type = 'normal' AND worker_name = '') OR (document_type = 'piecework' AND direction = 'issue' AND length(worker_name) BETWEEN 1 AND 100 AND worker_name ~ '[^[:space:]]')),
     CONSTRAINT ck_department_movement_warehouse_pick CHECK ((warehouse_pick_id IS NOT NULL) = (receipt_source IS NOT DISTINCT FROM 'warehouse')),
     CONSTRAINT ck_department_movement_direction CHECK (direction IN ('receipt', 'issue')),
     CONSTRAINT ck_department_movement_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
@@ -293,8 +299,11 @@ CREATE TABLE department_work_order_movement (
             AND ((receipt_source = 'ticket' AND ticket_id IS NOT NULL) OR (receipt_source = 'warehouse' AND ticket_id IS NULL))))
 );
 
+CREATE UNIQUE INDEX uq_department_movement_warehouse_pick ON department_work_order_movement(warehouse_pick_id) WHERE revoked_at IS NULL;
+CREATE UNIQUE INDEX uq_department_movement_ticket ON department_work_order_movement(ticket_id) WHERE revoked_at IS NULL;
 CREATE INDEX idx_department_movement_order ON department_work_order_movement(work_order_id, created_at, id);
 CREATE INDEX idx_department_movement_actor ON department_work_order_movement(actor_user_id);
+CREATE INDEX idx_movement_piecework_worker ON department_work_order_movement(worker_name, id) WHERE document_type = 'piecework';
 
 CREATE TABLE department_handoff_ticket (
     id BIGSERIAL PRIMARY KEY,
@@ -313,6 +322,11 @@ CREATE TABLE department_movement_receipt_link (
 CREATE INDEX idx_movement_link_receipt ON department_movement_receipt_link(receipt_movement_id);
 
 CREATE TABLE qc_inspection (
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
+    repair_kind TEXT,
+    repair_worker_name TEXT NOT NULL DEFAULT '',
     id BIGSERIAL PRIMARY KEY,
     work_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
     source_ticket_id BIGINT REFERENCES department_handoff_ticket(id),
@@ -326,9 +340,7 @@ CREATE TABLE qc_inspection (
     actor_user_id BIGINT NOT NULL REFERENCES users(id),
     note TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_qc_inspection_ticket UNIQUE (source_ticket_id),
-    CONSTRAINT uq_qc_inspection_return UNIQUE (source_return_id),
-    CONSTRAINT uq_qc_inspection_pick UNIQUE (source_pick_id),
+    CONSTRAINT ck_qc_repair_kind CHECK ((rework_quantity = 0 AND repair_kind IS NULL AND repair_worker_name = '') OR (rework_quantity > 0 AND repair_kind IS NOT NULL AND repair_kind IN ('original', 'cross') AND (repair_kind = 'original' OR repair_worker_name = ''))),
     CONSTRAINT uq_qc_inspection_request UNIQUE (request_id),
     CONSTRAINT ck_qc_inspection_note CHECK ((scrap_quantity = 0 AND rework_quantity = 0) OR note ~ '[^[:space:]]'),
     CONSTRAINT ck_qc_inspection_source CHECK ((CASE WHEN source_ticket_id IS NULL THEN 0 ELSE 1 END + CASE WHEN source_return_id IS NULL THEN 0 ELSE 1 END + CASE WHEN source_pick_id IS NULL THEN 0 ELSE 1 END) = 1),
@@ -336,6 +348,10 @@ CREATE TABLE qc_inspection (
     CONSTRAINT ck_qc_repair_department CHECK (repair_department_code IS NULL OR repair_department_code <> 'qc'),
     CONSTRAINT ck_qc_inspection_repair CHECK ((rework_quantity > 0) = (repair_department_code IS NOT NULL))
 );
+
+CREATE UNIQUE INDEX uq_qc_inspection_pick ON qc_inspection(source_pick_id) WHERE revoked_at IS NULL;
+CREATE UNIQUE INDEX uq_qc_inspection_return ON qc_inspection(source_return_id) WHERE revoked_at IS NULL;
+CREATE UNIQUE INDEX uq_qc_inspection_ticket ON qc_inspection(source_ticket_id) WHERE revoked_at IS NULL;
 CREATE INDEX idx_qc_inspection_order ON qc_inspection(work_order_id, id);
 CREATE INDEX idx_qc_inspection_repair ON qc_inspection(repair_department_code, id);
 CREATE TABLE qc_rework_ticket (
@@ -344,6 +360,9 @@ CREATE TABLE qc_rework_ticket (
     CONSTRAINT uq_qc_rework_inspection UNIQUE (inspection_id)
 );
 CREATE TABLE qc_rework_event (
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
     id BIGSERIAL PRIMARY KEY,
     ticket_id BIGINT NOT NULL REFERENCES qc_rework_ticket(id),
     action TEXT NOT NULL,
@@ -354,12 +373,13 @@ CREATE TABLE qc_rework_event (
     actor_user_id BIGINT NOT NULL REFERENCES users(id),
     note TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT uq_qc_rework_event_action UNIQUE (ticket_id, action),
     CONSTRAINT uq_qc_rework_event_request UNIQUE (request_id),
     CONSTRAINT ck_qc_rework_event_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
     CONSTRAINT ck_qc_rework_event_result CHECK (repaired_quantity >= 0 AND unrepaired_quantity >= 0 AND ((action = 'receive' AND repaired_quantity = 0 AND unrepaired_quantity = 0) OR (action = 'return' AND repaired_quantity + unrepaired_quantity = quantity))),
     CONSTRAINT ck_qc_rework_event_action CHECK (action IN ('receive', 'return'))
 );
+
+CREATE UNIQUE INDEX uq_qc_rework_event_action ON qc_rework_event(ticket_id, action) WHERE revoked_at IS NULL;
 ALTER TABLE qc_inspection ADD CONSTRAINT fk_qc_inspection_return FOREIGN KEY (source_return_id) REFERENCES qc_rework_event(id);
 
 CREATE TABLE warehouse_lot (
@@ -375,6 +395,9 @@ CREATE TABLE warehouse_lot (
 );
 CREATE INDEX idx_warehouse_lot_pool ON warehouse_lot(product_id, material_key, id);
 CREATE TABLE warehouse_pick (
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
     id BIGSERIAL PRIMARY KEY,
     target_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
     route_warehouse_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
@@ -399,6 +422,194 @@ CREATE TABLE warehouse_allocation (
 CREATE INDEX idx_warehouse_allocation_lot ON warehouse_allocation(lot_id);
 ALTER TABLE department_work_order_movement ADD CONSTRAINT fk_department_movement_warehouse_pick FOREIGN KEY (warehouse_pick_id) REFERENCES warehouse_pick(id);
 ALTER TABLE qc_inspection ADD CONSTRAINT fk_qc_inspection_pick FOREIGN KEY (source_pick_id) REFERENCES warehouse_pick(id);
+
+CREATE TABLE purchase_order (
+    id BIGSERIAL PRIMARY KEY,
+    work_order_id BIGINT NOT NULL REFERENCES department_work_order(id),
+    quantity BIGINT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    request_id UUID NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
+    CONSTRAINT ck_purchase_order_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
+    CONSTRAINT uq_purchase_order_request UNIQUE (request_id)
+);
+CREATE INDEX idx_purchase_order_work_order ON purchase_order(work_order_id, id);
+
+CREATE TABLE purchase_receipt (
+    id BIGSERIAL PRIMARY KEY,
+    purchase_order_id BIGINT NOT NULL REFERENCES purchase_order(id),
+    quantity BIGINT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    request_id UUID NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
+    CONSTRAINT ck_purchase_receipt_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
+    CONSTRAINT uq_purchase_receipt_request UNIQUE (request_id)
+);
+CREATE UNIQUE INDEX uq_purchase_receipt_order ON purchase_receipt(purchase_order_id) WHERE revoked_at IS NULL;
+
+CREATE TABLE outsource_dispatch (
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
+    id BIGSERIAL PRIMARY KEY,
+    receipt_id BIGINT NOT NULL REFERENCES department_work_order_movement(id),
+    process TEXT NOT NULL,
+    vendor TEXT NOT NULL,
+    quantity BIGINT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    request_id UUID NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_outsource_process CHECK (process IN ('etching', 'plating')),
+    CONSTRAINT ck_outsource_vendor CHECK (length(btrim(vendor)) BETWEEN 1 AND 100 AND vendor ~ '[^[:space:]]'),
+    CONSTRAINT ck_outsource_dispatch_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
+    CONSTRAINT uq_outsource_dispatch_request UNIQUE (request_id)
+);
+CREATE INDEX idx_outsource_dispatch_receipt ON outsource_dispatch(receipt_id, id);
+
+CREATE TABLE outsource_return (
+    revoked_at TIMESTAMPTZ,
+    revoked_by BIGINT REFERENCES users(id),
+    revoke_reason TEXT,
+    id BIGSERIAL PRIMARY KEY,
+    dispatch_id BIGINT NOT NULL REFERENCES outsource_dispatch(id),
+    quantity BIGINT NOT NULL,
+    note TEXT NOT NULL DEFAULT '',
+    request_id UUID NOT NULL,
+    actor_user_id BIGINT NOT NULL REFERENCES users(id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_outsource_return_quantity CHECK (quantity > 0 AND quantity <= 9007199254740991),
+    CONSTRAINT uq_outsource_return_request UNIQUE (request_id)
+);
+CREATE INDEX idx_outsource_return_dispatch ON outsource_return(dispatch_id, id);
+
+CREATE FUNCTION validate_operation_initial_state() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.revoked_at IS NOT NULL OR NEW.revoked_by IS NOT NULL OR NEW.revoke_reason IS NOT NULL THEN
+        RAISE EXCEPTION '新登记操作不能预设撤回信息' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_department_work_order_movement_initial_state BEFORE INSERT ON department_work_order_movement
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+CREATE TRIGGER trg_qc_inspection_initial_state BEFORE INSERT ON qc_inspection
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+CREATE TRIGGER trg_qc_rework_event_initial_state BEFORE INSERT ON qc_rework_event
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+CREATE TRIGGER trg_warehouse_pick_initial_state BEFORE INSERT ON warehouse_pick
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+CREATE TRIGGER trg_outsource_dispatch_initial_state BEFORE INSERT ON outsource_dispatch
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+CREATE TRIGGER trg_outsource_return_initial_state BEFORE INSERT ON outsource_return
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+CREATE TRIGGER trg_purchase_order_initial_state BEFORE INSERT ON purchase_order
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+CREATE TRIGGER trg_purchase_receipt_initial_state BEFORE INSERT ON purchase_receipt
+FOR EACH ROW EXECUTE FUNCTION validate_operation_initial_state();
+
+CREATE FUNCTION validate_purchase_order() RETURNS TRIGGER AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM department_work_order wo JOIN plan_product_route route
+        ON (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+            = (wo.production_plan_id, wo.product_id, wo.material_node_id, wo.department_node_id)
+        WHERE wo.id = NEW.work_order_id AND route.department_code = 'purchase') THEN
+        RAISE EXCEPTION '采购记录必须关联外购节点工单' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_purchase_order BEFORE INSERT ON purchase_order
+FOR EACH ROW EXECUTE FUNCTION validate_purchase_order();
+
+CREATE FUNCTION validate_purchase_receipt() RETURNS TRIGGER AS $$
+DECLARE purchased BIGINT;
+BEGIN
+    PERFORM plan.id FROM production_plan plan JOIN department_work_order wo ON wo.production_plan_id = plan.id
+        JOIN purchase_order purchase ON purchase.work_order_id = wo.id
+        WHERE purchase.id = NEW.purchase_order_id FOR UPDATE OF plan;
+    SELECT quantity INTO purchased FROM purchase_order WHERE id = NEW.purchase_order_id AND revoked_at IS NULL FOR UPDATE;
+    IF purchased IS NULL OR NEW.quantity > purchased THEN
+        RAISE EXCEPTION '采购到料必须关联有效采购且不能超过采购数量' USING ERRCODE = '23514';
+    END IF;
+    IF NEW.quantity < purchased AND NEW.note !~ '[^[:space:]]' THEN
+        RAISE EXCEPTION '采购少到料必须备注' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_purchase_receipt BEFORE INSERT ON purchase_receipt
+FOR EACH ROW EXECUTE FUNCTION validate_purchase_receipt();
+
+CREATE FUNCTION validate_purchase_movement() RETURNS TRIGGER AS $$
+DECLARE received NUMERIC; issued NUMERIC;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM department_work_order wo JOIN plan_product_route route
+        ON (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+            = (wo.production_plan_id, wo.product_id, wo.material_node_id, wo.department_node_id)
+        WHERE wo.id = NEW.work_order_id AND route.department_code = 'purchase') THEN
+        RETURN NEW;
+    END IF;
+    PERFORM plan.id FROM production_plan plan JOIN department_work_order wo ON wo.production_plan_id = plan.id
+        WHERE wo.id = NEW.work_order_id FOR UPDATE OF plan;
+    IF NEW.direction <> 'issue' THEN
+        RAISE EXCEPTION '外购到料必须通过采购记录登记' USING ERRCODE = '23514';
+    END IF;
+    SELECT COALESCE(SUM(receipt.quantity), 0) INTO received FROM purchase_receipt receipt
+        JOIN purchase_order purchase ON purchase.id = receipt.purchase_order_id
+        WHERE purchase.work_order_id = NEW.work_order_id AND purchase.revoked_at IS NULL AND receipt.revoked_at IS NULL;
+    SELECT COALESCE(SUM(quantity), 0) INTO issued FROM department_work_order_movement
+        WHERE work_order_id = NEW.work_order_id AND direction = 'issue' AND revoked_at IS NULL;
+    IF NEW.quantity > received - issued THEN
+        RAISE EXCEPTION '外购出料不能超过实际采购到料余量' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_purchase_movement BEFORE INSERT ON department_work_order_movement
+FOR EACH ROW EXECUTE FUNCTION validate_purchase_movement();
+
+CREATE FUNCTION validate_outsource_dispatch() RETURNS TRIGGER AS $$
+DECLARE received BIGINT;
+BEGIN
+    SELECT movement.quantity INTO received FROM department_work_order_movement movement
+        JOIN department_work_order wo ON wo.id = movement.work_order_id
+        JOIN plan_product_route route ON
+            (route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id)
+            = (wo.production_plan_id, wo.product_id, wo.material_node_id, wo.department_node_id)
+        WHERE movement.id = NEW.receipt_id AND movement.revoked_at IS NULL AND movement.direction = 'receipt' AND route.department_code = 'outsource'
+        FOR UPDATE OF movement;
+    IF received IS NULL OR NEW.quantity + COALESCE((SELECT sum(quantity) FROM outsource_dispatch
+        WHERE receipt_id = NEW.receipt_id AND revoked_at IS NULL), 0) > received THEN
+        RAISE EXCEPTION '外发必须关联委外到料且累计不超过到料数量' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_outsource_dispatch BEFORE INSERT ON outsource_dispatch
+FOR EACH ROW EXECUTE FUNCTION validate_outsource_dispatch();
+
+CREATE FUNCTION validate_outsource_return() RETURNS TRIGGER AS $$
+DECLARE dispatched BIGINT;
+BEGIN
+    SELECT quantity INTO dispatched FROM outsource_dispatch WHERE id = NEW.dispatch_id AND revoked_at IS NULL FOR UPDATE;
+    IF dispatched IS NULL OR NEW.quantity + COALESCE((SELECT sum(quantity) FROM outsource_return
+        WHERE dispatch_id = NEW.dispatch_id AND revoked_at IS NULL), 0) > dispatched THEN
+        RAISE EXCEPTION '累计回料不能超过外发数量' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER trg_validate_outsource_return BEFORE INSERT ON outsource_return
+FOR EACH ROW EXECUTE FUNCTION validate_outsource_return();
 
 CREATE FUNCTION validate_warehouse_lot() RETURNS TRIGGER AS $$
 BEGIN
@@ -445,10 +656,14 @@ BEGIN
     SELECT quantity INTO lot_quantity FROM warehouse_lot WHERE id = NEW.lot_id FOR UPDATE;
     IF NOT EXISTS (SELECT 1 FROM warehouse_pick pick JOIN warehouse_lot lot
         ON pick.product_id = lot.product_id AND pick.material_key = lot.material_key
-        WHERE pick.id = NEW.pick_id AND lot.id = NEW.lot_id) THEN
+        WHERE pick.id = NEW.pick_id AND pick.revoked_at IS NULL AND lot.id = NEW.lot_id
+            AND EXISTS (SELECT 1 FROM department_work_order_movement receipt
+                WHERE receipt.id = lot.receipt_movement_id AND receipt.revoked_at IS NULL)) THEN
         RAISE EXCEPTION '领料产品和物料规格与库存批次不一致' USING ERRCODE = '23514';
     END IF;
-    SELECT COALESCE(SUM(quantity), 0) INTO allocated FROM warehouse_allocation WHERE lot_id = NEW.lot_id;
+    SELECT COALESCE(SUM(allocation.quantity), 0) INTO allocated FROM warehouse_allocation allocation
+        JOIN warehouse_pick pick ON pick.id = allocation.pick_id
+        WHERE allocation.lot_id = NEW.lot_id AND pick.revoked_at IS NULL;
     IF allocated + NEW.quantity > lot_quantity THEN
         RAISE EXCEPTION '领料数量超过仓库批次库存' USING ERRCODE = '23514';
     END IF;
@@ -494,7 +709,7 @@ BEGIN
     END IF;
     IF NEW.warehouse_pick_id IS NOT NULL AND NOT EXISTS (
         SELECT 1 FROM warehouse_pick pick JOIN department_work_order source ON source.id = pick.route_warehouse_order_id
-        WHERE pick.id = NEW.warehouse_pick_id AND pick.target_order_id = NEW.work_order_id
+        WHERE pick.id = NEW.warehouse_pick_id AND pick.revoked_at IS NULL AND pick.target_order_id = NEW.work_order_id
           AND NEW.quantity <= pick.quantity AND NEW.direction = 'receipt'
           AND NEW.input_material_node_id = source.material_node_id
     ) THEN RAISE EXCEPTION '仓库领料到料必须匹配对应领料单' USING ERRCODE = '23514';
@@ -518,17 +733,17 @@ BEGIN
     IF NEW.source_ticket_id IS NOT NULL THEN
         SELECT issue.quantity INTO expected_quantity FROM department_handoff_ticket ticket
             JOIN department_work_order_movement issue ON issue.id = ticket.issue_movement_id
-            WHERE ticket.id = NEW.source_ticket_id AND ticket.target_work_order_id = NEW.work_order_id;
-        IF EXISTS (SELECT 1 FROM department_work_order_movement WHERE ticket_id = NEW.source_ticket_id) THEN
+            WHERE ticket.id = NEW.source_ticket_id AND ticket.target_work_order_id = NEW.work_order_id AND issue.revoked_at IS NULL;
+        IF EXISTS (SELECT 1 FROM department_work_order_movement WHERE ticket_id = NEW.source_ticket_id AND revoked_at IS NULL) THEN
             RAISE EXCEPTION '此来料已登记到料' USING ERRCODE = '23514';
         END IF;
     ELSIF NEW.source_pick_id IS NOT NULL THEN
-        SELECT quantity INTO expected_quantity FROM warehouse_pick WHERE id = NEW.source_pick_id AND target_order_id = NEW.work_order_id;
+        SELECT quantity INTO expected_quantity FROM warehouse_pick WHERE id = NEW.source_pick_id AND revoked_at IS NULL AND target_order_id = NEW.work_order_id;
     ELSE
         SELECT event.quantity INTO expected_quantity FROM qc_rework_event event
             JOIN qc_rework_ticket ticket ON ticket.id = event.ticket_id
             JOIN qc_inspection original ON original.id = ticket.inspection_id
-            WHERE event.id = NEW.source_return_id AND event.action = 'return' AND original.work_order_id = NEW.work_order_id;
+            WHERE event.id = NEW.source_return_id AND event.revoked_at IS NULL AND original.revoked_at IS NULL AND event.action = 'return' AND original.work_order_id = NEW.work_order_id;
     END IF;
     IF expected_quantity IS NULL OR NEW.good_quantity + NEW.scrap_quantity + NEW.rework_quantity <> expected_quantity THEN
         RAISE EXCEPTION '质检分类数量必须等于来料数量' USING ERRCODE = '23514';
@@ -548,7 +763,10 @@ BEGIN
         JOIN qc_rework_ticket ticket ON ticket.inspection_id = inspection.id
         WHERE ticket.id = NEW.ticket_id FOR UPDATE OF plan;
     SELECT inspection.rework_quantity INTO ticket_quantity FROM qc_rework_ticket ticket
-        JOIN qc_inspection inspection ON inspection.id = ticket.inspection_id WHERE ticket.id = NEW.ticket_id;
+        JOIN qc_inspection inspection ON inspection.id = ticket.inspection_id WHERE ticket.id = NEW.ticket_id AND inspection.revoked_at IS NULL;
+    IF ticket_quantity IS NULL THEN
+        RAISE EXCEPTION '原质检已撤回' USING ERRCODE = '23514';
+    END IF;
     IF NEW.action = 'receive' THEN
         IF NEW.quantity > ticket_quantity THEN
             RAISE EXCEPTION '返修接收不能超过票面数量' USING ERRCODE = '23514';
@@ -557,7 +775,7 @@ BEGIN
             RAISE EXCEPTION '返修少收必须备注' USING ERRCODE = '23514';
         END IF;
     ELSE
-        SELECT quantity INTO received_quantity FROM qc_rework_event WHERE ticket_id = NEW.ticket_id AND action = 'receive';
+        SELECT quantity INTO received_quantity FROM qc_rework_event WHERE ticket_id = NEW.ticket_id AND action = 'receive' AND revoked_at IS NULL;
         IF received_quantity IS NULL OR NEW.quantity <> received_quantity THEN
             RAISE EXCEPTION '返修回交总数必须等于实际接收数量' USING ERRCODE = '23514';
         END IF;
@@ -580,9 +798,9 @@ BEGIN
         IF NEW.direction = 'receipt' THEN
             RAISE EXCEPTION 'QC来料必须登记质检' USING ERRCODE = '23514';
         END IF;
-        SELECT COALESCE(SUM(good_quantity), 0) INTO good FROM qc_inspection WHERE work_order_id = NEW.work_order_id;
+        SELECT COALESCE(SUM(good_quantity), 0) INTO good FROM qc_inspection WHERE work_order_id = NEW.work_order_id AND revoked_at IS NULL;
         SELECT COALESCE(SUM(quantity), 0) INTO issued FROM department_work_order_movement
-            WHERE work_order_id = NEW.work_order_id AND direction = 'issue';
+            WHERE work_order_id = NEW.work_order_id AND direction = 'issue' AND revoked_at IS NULL;
         IF NEW.quantity > good - issued THEN
             RAISE EXCEPTION 'QC出料不能超过合格余量' USING ERRCODE = '23514';
         END IF;
@@ -609,6 +827,25 @@ END;
 $$ LANGUAGE plpgsql;
 CREATE TRIGGER trg_validate_handoff_ticket BEFORE INSERT ON department_handoff_ticket
 FOR EACH ROW EXECUTE FUNCTION validate_handoff_ticket();
+
+CREATE FUNCTION validate_piecework_route() RETURNS TRIGGER AS $$
+BEGIN
+    IF NEW.document_type = 'piecework' AND NOT EXISTS (
+        SELECT 1 FROM department_handoff_ticket ticket
+        JOIN department_work_order source ON source.id = NEW.work_order_id
+        JOIN department_work_order target ON target.id = ticket.target_work_order_id
+        JOIN plan_product_route sr ON (sr.production_plan_id, sr.product_id, sr.material_node_id, sr.department_node_id)
+            = (source.production_plan_id, source.product_id, source.material_node_id, source.department_node_id)
+        JOIN plan_product_route tr ON (tr.production_plan_id, tr.product_id, tr.material_node_id, tr.department_node_id)
+            = (target.production_plan_id, target.product_id, target.material_node_id, target.department_node_id)
+        WHERE ticket.issue_movement_id = NEW.id AND sr.department_code = 'grinding' AND tr.department_code = 'qc'
+    ) THEN RAISE EXCEPTION '计件单仅允许磨房向QC交接' USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+CREATE CONSTRAINT TRIGGER trg_piecework_route AFTER INSERT ON department_work_order_movement
+DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION validate_piecework_route();
 
 CREATE FUNCTION validate_movement_receipt_link() RETURNS TRIGGER AS $$
 BEGIN
@@ -641,7 +878,7 @@ BEGIN
         IF NEW.quantity < issue_quantity AND NEW.note !~ '[^[:space:]]' THEN
             RAISE EXCEPTION '登记到料数量小于交接票数量，必须填写备注' USING ERRCODE = '23514';
         END IF;
-        IF EXISTS (SELECT 1 FROM department_work_order_movement WHERE ticket_id = NEW.ticket_id) THEN
+        IF EXISTS (SELECT 1 FROM department_work_order_movement WHERE ticket_id = NEW.ticket_id AND revoked_at IS NULL) THEN
             RAISE EXCEPTION '此交接票已登记到料，不能再次登记' USING ERRCODE = '23514';
         END IF;
         IF NEW.quantity > issue_quantity THEN
@@ -653,7 +890,7 @@ BEGIN
         JOIN department_work_order_movement AS issue ON issue.id = ticket.issue_movement_id
         JOIN department_work_order AS source ON source.id = issue.work_order_id
         WHERE ticket.id = NEW.ticket_id AND ticket.target_work_order_id = NEW.work_order_id
-            AND source.material_node_id = NEW.input_material_node_id
+            AND issue.revoked_at IS NULL AND source.material_node_id = NEW.input_material_node_id
     ) THEN
         RAISE EXCEPTION '到料必须引用发给本工单的交接票及来源物料' USING ERRCODE = '23514';
     END IF;
@@ -665,9 +902,37 @@ FOR EACH ROW EXECUTE FUNCTION validate_ticket_receipt();
 
 CREATE FUNCTION protect_department_movement_history() RETURNS TRIGGER AS $$
 BEGIN
+    IF TG_OP = 'UPDATE' AND TG_TABLE_NAME IN ('department_work_order_movement', 'qc_inspection',
+        'qc_rework_event', 'warehouse_pick', 'outsource_dispatch', 'outsource_return', 'purchase_order', 'purchase_receipt') THEN
+        IF (to_jsonb(OLD)->>'revoked_at') IS NULL AND (to_jsonb(NEW)->>'revoked_at') IS NOT NULL
+            AND (to_jsonb(NEW)->>'revoked_by') IS NOT NULL
+            AND (to_jsonb(NEW)->>'revoke_reason') ~ '[^[:space:]]'
+            AND (to_jsonb(NEW) - ARRAY['revoked_at', 'revoked_by', 'revoke_reason'])
+                = (to_jsonb(OLD) - ARRAY['revoked_at', 'revoked_by', 'revoke_reason']) THEN
+            RETURN NEW;
+        END IF;
+    END IF;
     RAISE EXCEPTION '到料和出料流水不能修改或删除' USING ERRCODE = '23514';
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_purchase_order_immutable BEFORE UPDATE OR DELETE ON purchase_order
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_purchase_order_no_truncate BEFORE TRUNCATE ON purchase_order
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_purchase_receipt_immutable BEFORE UPDATE OR DELETE ON purchase_receipt
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_purchase_receipt_no_truncate BEFORE TRUNCATE ON purchase_receipt
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+
+CREATE TRIGGER trg_outsource_dispatch_immutable BEFORE UPDATE OR DELETE ON outsource_dispatch
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_outsource_dispatch_no_truncate BEFORE TRUNCATE ON outsource_dispatch
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_outsource_return_immutable BEFORE UPDATE OR DELETE ON outsource_return
+FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
+CREATE TRIGGER trg_outsource_return_no_truncate BEFORE TRUNCATE ON outsource_return
+FOR EACH STATEMENT EXECUTE FUNCTION protect_department_movement_history();
 
 CREATE TRIGGER trg_qc_inspection_immutable BEFORE UPDATE OR DELETE ON qc_inspection
 FOR EACH ROW EXECUTE FUNCTION protect_department_movement_history();
@@ -717,7 +982,8 @@ BEGIN
     IF ROW(NEW.production_plan_id, NEW.product_id, NEW.material_node_id, NEW.department_node_id, NEW.task_quantity)
         IS DISTINCT FROM ROW(OLD.production_plan_id, OLD.product_id, OLD.material_node_id, OLD.department_node_id, OLD.task_quantity)
         AND (EXISTS (SELECT 1 FROM department_work_order_movement WHERE work_order_id = OLD.id)
-             OR EXISTS (SELECT 1 FROM qc_inspection WHERE work_order_id = OLD.id)) THEN
+             OR EXISTS (SELECT 1 FROM qc_inspection WHERE work_order_id = OLD.id)
+             OR EXISTS (SELECT 1 FROM purchase_order WHERE work_order_id = OLD.id)) THEN
         RAISE EXCEPTION '已有流水或质检记录，不能修改工单来源或任务数量' USING ERRCODE = '23514';
     END IF;
     RETURN NEW;
@@ -828,7 +1094,7 @@ FROM production_department;
 
 INSERT INTO customer (customer_name) VALUES ('Celine');
 
--- 工程示例包含 Z8737 及下方的 Z8738，末尾仅初始化草稿计划与产品明细，确认后由应用生成工单。
+-- 工程示例包含 Z8737、Z8738 和下方独立确认订单使用的 Z8739。
 INSERT INTO product (customer_id, product_name, factory_code, customer_code, version)
 SELECT customer.id, 'L24.4 椭圆搭扣', 'Z8737', 'FIG6850', 1
 FROM customer
@@ -1122,7 +1388,100 @@ JOIN (VALUES ('Z8737', 3000, 4000), ('Z8738', 1000, 1200))
     AS item(factory_code, order_quantity, production_quantity) ON item.factory_code = product.factory_code
 WHERE plan.order_no IN ('ORDER-Z8737-0001', 'ORDER-Z8737-0002');
 
--- 示例快照投影复制已有种子组成数据，不生成生产工单。
+-- Z8739：独立的已确认订单示例，三路物料在装配部汇合。
+INSERT INTO product (customer_id, product_name, factory_code, customer_code, version)
+SELECT id, '三配件装配搭扣', 'Z8739', 'DEMO-Z8739', 1 FROM customer WHERE customer_name = 'Celine';
+
+INSERT INTO product_version (product_id, version, value)
+SELECT id, 1, 'V1' FROM product WHERE factory_code = 'Z8739';
+
+INSERT INTO product_bom (product_id, product_version, part_name, part_no, pcs, sort_order)
+SELECT product.id, 1, component.name, component.number, 1, component.position
+FROM product CROSS JOIN (VALUES
+    ('主体', 'Z8739-01', 1), ('过桥', 'Z8739-02', 2), ('冬菇头', 'Z8739-03', 3)
+) AS component(name, number, position) WHERE product.factory_code = 'Z8739';
+
+WITH nodes AS (
+    SELECT product.id AS product_id, jsonb_build_object('id', part.node_id, 'type', 'part',
+        'x', 0, 'y', part.y, 'label', bom.part_no || ' · ' || bom.part_name, 'bom_item_id', bom.id) AS node
+    FROM product JOIN product_bom bom ON bom.product_id = product.id AND bom.product_version = 1
+    JOIN (VALUES ('part-body', 'Z8739-01', 0), ('part-bridge', 'Z8739-02', 400),
+        ('part-head', 'Z8739-03', 800)) AS part(node_id, part_no, y) ON part.part_no = bom.part_no
+    WHERE product.factory_code = 'Z8739'
+    UNION ALL
+    SELECT product.id, jsonb_build_object('id', department.node_id, 'type', 'department',
+        'x', department.x, 'y', department.y, 'label', department.label, 'department_code', department.code)
+    FROM product CROSS JOIN (VALUES
+        ('purchase-body', 'purchase', '外购部', 400, 0),
+        ('qc-body', 'qc', 'QC部', 800, 0),
+        ('warehouse-body', 'warehouse', '仓库部', 1200, 0),
+        ('stamp-bridge', 'stamp', '冲压部', 400, 400),
+        ('grinding-bridge', 'grinding', '磨房', 800, 400),
+        ('qc-bridge', 'qc', 'QC部', 1200, 400),
+        ('stamp-head', 'stamp', '冲压部', 400, 800),
+        ('plating-head', 'outsource', '外发电镀', 800, 800),
+        ('qc-head', 'qc', 'QC部', 1200, 800),
+        ('assembly-final', 'assembly', '装配部', 1600, 400),
+        ('finished-final', 'finished', '成品部', 2000, 400)
+    ) AS department(node_id, code, label, x, y) WHERE product.factory_code = 'Z8739'
+), edges AS (
+    SELECT jsonb_agg(jsonb_build_object('id', 'edge-' || source || '-' || target,
+        'edge_type', 'polyline', 'source_node_id', source, 'target_node_id', target)
+        ORDER BY source, target) AS data
+    FROM (VALUES
+        ('part-body', 'purchase-body'), ('purchase-body', 'qc-body'), ('qc-body', 'warehouse-body'),
+        ('warehouse-body', 'assembly-final'), ('part-bridge', 'stamp-bridge'),
+        ('stamp-bridge', 'grinding-bridge'), ('grinding-bridge', 'qc-bridge'),
+        ('qc-bridge', 'assembly-final'), ('part-head', 'stamp-head'),
+        ('stamp-head', 'plating-head'), ('plating-head', 'qc-head'),
+        ('qc-head', 'assembly-final'), ('assembly-final', 'finished-final')
+    ) AS edge(source, target)
+)
+INSERT INTO product_process_flow (product_id, product_version, flow_json)
+SELECT nodes.product_id, 1, jsonb_build_object('schema_version', 8,
+    'nodes', jsonb_agg(nodes.node ORDER BY nodes.node->>'id'), 'edges', edges.data)
+FROM nodes CROSS JOIN edges GROUP BY nodes.product_id, edges.data;
+
+INSERT INTO product_department_route (product_id, material_node_id, department_node_id, department_code)
+SELECT product.id, route.material, route.node, route.code FROM product CROSS JOIN (VALUES
+    ('part-body', 'purchase-body', 'purchase'), ('part-body', 'qc-body', 'qc'),
+    ('part-body', 'warehouse-body', 'warehouse'), ('part-bridge', 'stamp-bridge', 'stamp'),
+    ('part-bridge', 'grinding-bridge', 'grinding'), ('part-bridge', 'qc-bridge', 'qc'),
+    ('part-head', 'stamp-head', 'stamp'), ('part-head', 'plating-head', 'outsource'),
+    ('part-head', 'qc-head', 'qc'), ('assembly-final', 'assembly-final', 'assembly'),
+    ('assembly-final', 'finished-final', 'finished')
+) AS route(material, node, code) WHERE product.factory_code = 'Z8739';
+
+INSERT INTO product_route_component (product_id, material_node_id, department_node_id, product_bom_id)
+SELECT route.product_id, route.material_node_id, route.department_node_id, bom.id
+FROM product_department_route route JOIN product ON product.id = route.product_id
+JOIN product_bom bom ON bom.product_id = product.id AND bom.product_version = 1
+WHERE product.factory_code = 'Z8739' AND (
+    (route.material_node_id = 'part-body' AND bom.part_no = 'Z8739-01')
+    OR (route.material_node_id = 'part-bridge' AND bom.part_no = 'Z8739-02')
+    OR (route.material_node_id = 'part-head' AND bom.part_no = 'Z8739-03')
+    OR route.material_node_id = 'assembly-final'
+);
+
+INSERT INTO production_plan (customer_id, order_no, order_date, delivery_date, status, revision, confirmed_at, confirmed_by)
+SELECT id, 'ORDER-Z8739-0001', DATE '2026-11-20', DATE '2026-12-20', 'confirmed', 1,
+    CURRENT_TIMESTAMP, 'business' FROM customer WHERE customer_name = 'Celine';
+
+INSERT INTO production_plan_item (
+    production_plan_id, product_id, customer_id, order_quantity, production_quantity,
+    source_version, source_version_value, product_name, factory_code, customer_code, bom_snapshot, process_flow_snapshot
+)
+SELECT plan.id, product.id, plan.customer_id, 1000, 1200, product.version, version.value,
+    product.product_name, product.factory_code, product.customer_code,
+    (SELECT jsonb_agg(jsonb_build_object('id', bom.id, 'part_name', bom.part_name, 'part_no', bom.part_no,
+        'pcs', bom.pcs, 'remark', COALESCE(bom.remark, ''), 'sort_order', bom.sort_order) ORDER BY bom.sort_order)
+     FROM product_bom bom WHERE bom.product_id = product.id AND bom.product_version = product.version), flow.flow_json
+FROM production_plan plan JOIN product ON product.customer_id = plan.customer_id
+JOIN product_version version ON version.product_id = product.id AND version.version = product.version
+JOIN product_process_flow flow ON flow.product_id = product.id AND flow.product_version = product.version
+WHERE plan.order_no = 'ORDER-Z8739-0001' AND product.factory_code = 'Z8739';
+
+-- 示例快照投影复制各产品的种子组成数据。
 INSERT INTO plan_product_route (
     production_plan_id, product_id, material_node_id, department_node_id,
     department_code, part_no, part_name, unit_requirement
@@ -1139,7 +1498,14 @@ JOIN product_route_component AS component ON component.product_id = route.produc
 JOIN product_bom AS part ON part.id = component.product_bom_id
 GROUP BY item.production_plan_id, item.product_id, route.material_node_id, route.department_node_id, route.department_code;
 
--- 草稿不预置部门工单；业务确认计划时由应用按正式路线生成。
+-- 仅已确认的新订单预置工单；两个原草稿仍由业务确认时生成。
+INSERT INTO department_work_order (production_plan_id, product_id, material_node_id, department_node_id, task_quantity)
+SELECT route.production_plan_id, route.product_id, route.material_node_id, route.department_node_id,
+    item.production_quantity * route.unit_requirement
+FROM plan_product_route route
+JOIN production_plan plan ON plan.id = route.production_plan_id
+JOIN production_plan_item item ON item.production_plan_id = route.production_plan_id AND item.product_id = route.product_id
+WHERE plan.order_no = 'ORDER-Z8739-0001' AND plan.status = 'confirmed';
 
 COMMIT;
 

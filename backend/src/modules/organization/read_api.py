@@ -6,12 +6,16 @@ from modules.organization.persistence import ProductionDepartment
 RECEIPT_DISABLED_CODES = frozenset({"stamp", "purchase", "qc"})
 
 
+def operating_department(department_code):
+    return 'warehouse' if department_code == 'purchase' else department_code
+
+
 def allows_receipts(department_code: str) -> bool:
     return department_code not in RECEIPT_DISABLED_CODES
 
 
 def allows_unreceived_issue(department_code: str) -> bool:
-    return department_code in {"stamp", "purchase"}
+    return department_code == "stamp"
 
 
 def uses_assembly_tree(department_code: str) -> bool:

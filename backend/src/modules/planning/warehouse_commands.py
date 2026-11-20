@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 
 from modules.errors import DomainError
 from modules.organization.read_api import is_warehouse
+from modules.planning.current_records import require_effective, select_current
 from modules.planning.handoffs import order_context
 from modules.planning.persistence import (
     DepartmentWorkOrder,
@@ -32,12 +33,14 @@ def validate_dispatch_source(session, order, warehouse_order_id):
 
 
 def lock_available_lots(session, product_id, material_key):
-    allocated = select(func.coalesce(func.sum(WarehouseAllocation.quantity), 0)).where(
+    allocated = select_current(func.coalesce(func.sum(WarehouseAllocation.quantity), 0)).where(
         WarehouseAllocation.lot_id == WarehouseLot.id).scalar_subquery()
-    lots = list(session.scalars(select(WarehouseLot).where(WarehouseLot.product_id == product_id,
+    lots = list(session.scalars(select_current(WarehouseLot).where(WarehouseLot.product_id == product_id,
         WarehouseLot.material_key == material_key, WarehouseLot.quantity > allocated)
         .order_by(WarehouseLot.id).with_for_update()))
-    totals = dict(session.execute(select(WarehouseAllocation.lot_id, func.sum(WarehouseAllocation.quantity))
+    valid_ids = set(session.scalars(select_current(WarehouseLot.id).where(WarehouseLot.id.in_({lot.id for lot in lots}))))
+    lots = [lot for lot in lots if lot.id in valid_ids]
+    totals = dict(session.execute(select_current(WarehouseAllocation.lot_id, func.sum(WarehouseAllocation.quantity))
         .where(WarehouseAllocation.lot_id.in_({lot.id for lot in lots})).group_by(WarehouseAllocation.lot_id)).all())
     return [(lot, lot.quantity - int(totals.get(lot.id, 0))) for lot in lots]
 
@@ -63,6 +66,7 @@ def dispatch_warehouse(order_id: int, payload: WarehouseDispatchCreate, *, depar
             order = load_scoped_order(session, order_id, department_scope=None)
             previous = session.scalar(select(WarehousePick).where(WarehousePick.request_id == payload.request_id))
             if previous is not None:
+                require_effective(previous)
                 check_dispatch_retry(previous, order_id, payload, actor_user_id)
                 return {'id': previous.id}
             if plan.status != 'confirmed':

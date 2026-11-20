@@ -114,6 +114,11 @@ def snapshot_context(item):
     flow = ProcessFlowPayload.model_validate(item.process_flow_snapshot)
     bom = {part["id"]: part for part in item.bom_snapshot}
     parts = {node.id: bom[node.bom_item_id] for node in flow.nodes if node.type == "part"}
+    ranks = department_route_order(flow)
+    occurrences, counts = {}, {}
+    for node in sorted((node for node in flow.nodes if node.type == 'department'), key=lambda node: ranks[node.id]):
+        counts[node.department_code] = counts.get(node.department_code, 0) + 1
+        occurrences[node.id] = counts[node.department_code]
     materials = {key: part["part_name"] for key, part in parts.items()}
     receipt_materials = {key: {key} for key in parts}
     requirements = {key: {key: 1} for key in parts}
@@ -127,6 +132,7 @@ def snapshot_context(item):
     return {
         "departments": {node.id: node.department_code for node in flow.nodes if node.type == "department"},
         "department_labels": {node.id: node.label for node in flow.nodes if node.type == "department"},
+        "department_occurrences": occurrences,
         "routes": resolve_handoff_routes(flow), "materials": materials,
         "receipt_materials": receipt_materials, "requirements": requirements,
         "product_requirements": {key: part["pcs"] for key, part in parts.items()},

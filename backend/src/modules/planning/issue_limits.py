@@ -1,10 +1,16 @@
 """Exact unit/kit capacity from immutable movement quantities."""
 
-from sqlalchemy import func, select
+from sqlalchemy import func
 
 from modules.errors import DomainError
 from modules.organization.read_api import allows_unreceived_issue, requires_inspection
-from modules.planning.persistence import DepartmentWorkOrderMovement
+from modules.planning.current_records import select_current
+from modules.planning.persistence import (
+    DepartmentWorkOrderMovement,
+    OutsourceDispatch,
+    OutsourceReturn,
+)
+from modules.planning.purchase_totals import purchase_received_totals
 from modules.planning.quality_totals import inspection_totals
 
 
@@ -25,12 +31,28 @@ def received_kit_quantity(target, requirements, receipts):
 def available_issue_quantity(session, order, context, department_code):
     if allows_unreceived_issue(department_code):
         return None
+    if department_code == 'purchase':
+        received = purchase_received_totals(session, {order.id}).get(order.id, 0)
+        issued = session.scalar(select_current(func.coalesce(func.sum(DepartmentWorkOrderMovement.quantity), 0)).where(
+            DepartmentWorkOrderMovement.work_order_id == order.id, DepartmentWorkOrderMovement.direction == 'issue'))
+        return received - int(issued)
+    if department_code == 'outsource':
+        rows = session.execute(select_current(DepartmentWorkOrderMovement.input_material_node_id,
+            func.sum(OutsourceReturn.quantity)).select_from(OutsourceReturn)
+            .join(OutsourceDispatch, OutsourceDispatch.id == OutsourceReturn.dispatch_id)
+            .join(DepartmentWorkOrderMovement, DepartmentWorkOrderMovement.id == OutsourceDispatch.receipt_id)
+            .where(DepartmentWorkOrderMovement.work_order_id == order.id)
+            .group_by(DepartmentWorkOrderMovement.input_material_node_id))
+        receipts = {material: int(quantity) for material, quantity in rows}
+        issued = session.scalar(select_current(func.coalesce(func.sum(DepartmentWorkOrderMovement.quantity), 0)).where(
+            DepartmentWorkOrderMovement.work_order_id == order.id, DepartmentWorkOrderMovement.direction == 'issue'))
+        return remaining_issue_quantity(order.material_node_id, context['requirements'], receipts, int(issued))
     if requires_inspection(department_code):
         good = inspection_totals(session, {order.id}).get(order.id, (0, 0, 0))[0]
-        issued = session.scalar(select(func.coalesce(func.sum(DepartmentWorkOrderMovement.quantity), 0)).where(
+        issued = session.scalar(select_current(func.coalesce(func.sum(DepartmentWorkOrderMovement.quantity), 0)).where(
             DepartmentWorkOrderMovement.work_order_id == order.id, DepartmentWorkOrderMovement.direction == "issue"))
         return good - int(issued)
-    rows = session.execute(select(DepartmentWorkOrderMovement.direction,
+    rows = session.execute(select_current(DepartmentWorkOrderMovement.direction,
         DepartmentWorkOrderMovement.input_material_node_id, func.sum(DepartmentWorkOrderMovement.quantity))
         .where(DepartmentWorkOrderMovement.work_order_id == order.id)
         .group_by(DepartmentWorkOrderMovement.direction, DepartmentWorkOrderMovement.input_material_node_id))

@@ -4,9 +4,10 @@ import { ElMessage } from 'element-plus'
 import { getApiErrorDetail } from '@/api/request'
 import { saveWorkOrderSchedule, type DepartmentWorkOrder, type WorkOrderSchedule } from '../api/plans'
 
-const props = defineProps<{ order: DepartmentWorkOrder; orders: DepartmentWorkOrder[]; editable: boolean }>()
-const emit = defineEmits<{ edit: []; saved: [updates: WorkOrderSchedule[]] }>()
+const props = defineProps<{ order: DepartmentWorkOrder; orders?: WorkOrderSchedule[]; editable: boolean }>()
+const emit = defineEmits<{ saved: [updates: WorkOrderSchedule[]] }>()
 const dayOffset = ref(0), saving = ref(false)
+const dateRevision = ref(0)
 let active = true
 let ownRevision: number | undefined
 watch(() => props.order.schedule_revision, revision => {
@@ -14,6 +15,15 @@ watch(() => props.order.schedule_revision, revision => {
   ownRevision = undefined
 })
 onBeforeUnmount(() => { active = false })
+async function setDate(value: string | null) {
+  if (saving.value || !props.editable) return
+  saving.value = true
+  try {
+    const updates = await saveWorkOrderSchedule(props.order, value || null, props.orders)
+    if (active) emit('saved', updates)
+  } catch (cause) { if (active) { dateRevision.value += 1; ElMessage.error(getApiErrorDetail(cause)?.message || '交料日期保存失败') } }
+  finally { if (active) saving.value = false }
+}
 async function adjustDate(value: number | undefined, previous: number | undefined) {
   const oldOffset = previous ?? 0
   if (saving.value || !props.editable || !props.order.scheduled_date || value === undefined) {
@@ -46,7 +56,7 @@ async function adjustDate(value: number | undefined, previous: number | undefine
 </script>
 <template>
   <div v-if="editable" class="schedule-cell">
-    <ElButton link type="primary" :disabled="saving" @click="emit('edit')">{{ order.scheduled_date || '设置日期' }}</ElButton>
+    <ElDatePicker :key="dateRevision" :model-value="order.scheduled_date" type="date" value-format="YYYY-MM-DD" format="YYYY-MM-DD" placeholder="设置交料日期" :disabled="saving" aria-label="交料日期" @update:model-value="setDate" />
     <ElInputNumber v-model="dayOffset" size="small" :step="1" :precision="0" :min="-36500" :max="36500" :disabled="saving || !order.scheduled_date" aria-label="调整交料日期天数" @change="adjustDate" />
   </div>
   <span v-else>{{ order.scheduled_date || '未安排' }}</span>
@@ -55,4 +65,5 @@ async function adjustDate(value: number | undefined, previous: number | undefine
 .schedule-cell { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; }
 .schedule-cell :deep(.el-button) { margin: 0; flex-shrink: 0; }
 .schedule-cell :deep(.el-input-number) { width: 144px; flex-shrink: 0; }
+.schedule-cell :deep(.el-date-editor) { width: 160px; flex-shrink: 0; }
 </style>

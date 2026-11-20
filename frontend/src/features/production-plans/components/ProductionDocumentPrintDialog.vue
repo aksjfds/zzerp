@@ -15,8 +15,8 @@ const title = computed(() => {
   const doc = props.document
   if (doc.kind === 'quality') return 'QC质检单'
   const type = doc.kind === 'handoff'
-    ? { normal: '普通交接', rework: '返修交接', return: '返修回交', warehouse: '仓库出料' }[doc.record.kind]
-    : doc.kind === 'warehouse' ? '仓库出料' : '普通交接'
+    ? doc.record.document_type === 'piecework' ? '计件单' : { normal: '普通交接', rework: '返修交接', return: '返修回交', warehouse: '仓库出料' }[doc.record.kind]
+    : doc.kind === 'warehouse' ? '仓库出料' : doc.record.document_type === 'piecework' ? '计件单' : '普通交接'
   return `物料交接单 - ${type}`
 })
 const number = computed(() => {
@@ -29,6 +29,8 @@ const fields = computed<[string, string | null][]>(() => {
   if (doc.kind === 'issue') {
     const row = doc.record
     return [['产品', `${row.factory_code} · ${row.product_name}`],
+      ...(row.worker_name ? [['磨房工人', row.worker_name] as [string, string]] : []),
+      ...(row.document_type === 'piecework' ? [['工艺', row.piecework_process] as [string, string]] : []),
       ['配件/装配体', `${row.material_no} · ${row.material_name}`],
       ['交接', `${row.source_department || '—'} -> ${row.target_department || '—'}，${row.quantity}`],
       ['出料人', row.actor_username], ['备注', row.note]]
@@ -41,6 +43,8 @@ const fields = computed<[string, string | null][]>(() => {
   if (doc.kind === 'handoff') {
     const row = doc.record
     return [
+      ...(row.worker_name ? [['工人', row.worker_name] as [string, string]] : []),
+      ...(row.document_type === 'piecework' ? [['工艺', row.piecework_process] as [string, string]] : []),
       ['产品', `${row.factory_code} · ${row.product_name}`], ['配件/装配体', `${row.material_no} · ${row.material_name}`],
       ['交接', `${row.source_department} -> ${row.target_department}，${row.quantity}`], ['备注', row.note],
     ]
@@ -50,6 +54,7 @@ const fields = computed<[string, string | null][]>(() => {
     ['来源单据', row.source_ref], ['产品', row.product], ['配件/装配体', row.material], ['订单号', row.order_no],
     ['质检部门', row.department], ['质检数量', row.quantity], ['合格数量', row.good_quantity],
     ['报废数量', row.scrap_quantity], ['返修数量', row.rework_quantity], ['返修部门', row.repair_department],
+    ...(row.repair_kind ? [['返修类型', row.repair_kind === 'original' ? '原部门原工人' : '跨部门返修'], ['返修工人', row.repair_worker_name]] as [string, string][] : []),
     ['操作人', row.actor_username], ['质检时间', row.created_at], ['备注', row.note],
   ]
 })

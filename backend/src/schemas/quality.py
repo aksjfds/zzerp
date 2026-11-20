@@ -13,6 +13,7 @@ class QcInspectionCreate(PlanningModel):
     scrap_quantity: int = Field(ge=0, le=9007199254740991, strict=True)
     rework_quantity: int = Field(ge=0, le=9007199254740991, strict=True)
     repair_department_code: str | None = Field(default=None, min_length=1, max_length=100)
+    repair_kind: Literal['original', 'cross'] | None = None
     request_id: UUID
     note: str = Field(default='', max_length=2000)
 
@@ -44,6 +45,8 @@ class QcCommandEnvelope(PlanningModel):
 
 
 class QcRow(PlanningModel):
+    repair_kind: Literal['original', 'cross'] | None = None
+    repair_worker_name: str = ''
     id: int
     work_order_id: int
     source_ref: str = ''
@@ -101,3 +104,43 @@ class QcTarget(PlanningModel):
 
 class QcTargetsEnvelope(PlanningModel):
     data: list[QcTarget]
+
+
+class QcOrigin(PlanningModel):
+    department_code: str
+    worker_name: str
+
+
+class QcOriginEnvelope(PlanningModel):
+    data: QcOrigin
+
+
+class WorkerTicket(PlanningModel):
+    piecework_process: str
+    id: int
+    ticket_no: str
+    quantity: str
+    good_quantity: str
+    scrap_quantity: str
+    unsettled_quantity: str
+    first_only: bool
+    created_at: str
+    note: str
+    order_no: str
+    product: str
+    material: str
+    events: list[QcTimelineEvent]
+
+
+class WorkerResult(PlanningModel):
+    worker_name: str
+    quantity: str
+    good_quantity: str
+    scrap_quantity: str
+    unsettled_quantity: str
+    tickets: list[WorkerTicket]
+
+
+class WorkerEnvelope(PlanningModel):
+    data: list[WorkerResult]
+    total: int

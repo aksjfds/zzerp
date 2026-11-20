@@ -81,7 +81,7 @@ onBeforeUnmount(() => { active = false; revision += 1 })
               <div v-if="event.inspection" class="event-quantities">
                 <span>质检 {{ event.quantity }}</span><span>合格 {{ event.inspection.good_quantity }}</span>
                 <span>报废 {{ event.inspection.scrap_quantity }}</span><span>返修 {{ event.inspection.rework_quantity }}</span>
-                <span v-if="event.inspection.repair_department">返修部门 {{ event.inspection.repair_department }} · {{ event.ticket_no }}</span>
+                <span v-if="event.inspection.repair_department">{{ event.inspection.repair_kind === 'original' ? '原部门原工人' : '跨部门返修' }}：{{ event.inspection.repair_department }} {{ event.inspection.repair_worker_name }} · {{ event.ticket_no }}</span>
               </div>
               <div v-else class="event-quantities"><span>{{ event.ticket_no }} · 数量 {{ event.quantity }}</span>
                 <template v-if="event.kind === 'return'"><span>修好 {{ event.repaired_quantity }}</span><span>未修好 {{ event.unrepaired_quantity }}</span></template>

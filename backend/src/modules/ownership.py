@@ -1,6 +1,10 @@
 """Authoritative table ownership for the modular monolith."""
 
 TABLE_OWNERS = {
+    'purchase_order': 'planning',
+    'purchase_receipt': 'planning',
+    "outsource_dispatch": "planning",
+    "outsource_return": "planning",
     "users": "identity",
     "user_sessions": "identity",
     "customer": "sales",

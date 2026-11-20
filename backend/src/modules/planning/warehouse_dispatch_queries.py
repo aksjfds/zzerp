@@ -6,6 +6,7 @@ from sqlalchemy import select
 
 from modules.errors import DomainError
 from modules.organization.read_api import department_names, is_warehouse
+from modules.planning.current_records import select_current
 from modules.planning.handoffs import order_context
 from modules.planning.persistence import (
     DepartmentWorkOrder,
@@ -22,7 +23,7 @@ from modules.planning.warehouse_stock import pool_quantities
 def dispatch_lot(session, lot_id, department_scope):
     if not is_warehouse(department_scope):
         raise DomainError('warehouse_dispatch_scope', '仅仓库账号可选择出料目标', status_code=403)
-    lot = session.get(WarehouseLot, lot_id)
+    lot = session.scalar(select_current(WarehouseLot).where(WarehouseLot.id == lot_id))
     if lot is None:
         raise DomainError('warehouse_stock_missing', '库存批次不存在', status_code=404)
     return lot

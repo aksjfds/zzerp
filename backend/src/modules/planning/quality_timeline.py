@@ -1,32 +1,33 @@
 """Read-only batch lineage and causally ordered inspection/rework events."""
 
 from domain.time import BUSINESS_TIMEZONE
-from sqlalchemy import func, literal, select
+from sqlalchemy import func, literal
 from sqlalchemy.orm import aliased
 
+from modules.planning.current_records import select_current
 from modules.planning.persistence import QcInspection, QcReworkEvent, QcReworkTicket
 
 
 def batch_page(session, page, page_size):
-    roots = select(QcInspection.id).where(QcInspection.source_return_id.is_(None))
-    total = session.scalar(select(func.count()).select_from(roots.subquery())) or 0
+    roots = select_current(QcInspection.id).where(QcInspection.source_return_id.is_(None))
+    total = session.scalar(select_current(func.count()).select_from(roots.subquery())) or 0
     ids = list(session.scalars(roots.order_by(QcInspection.id.desc()).offset((page - 1) * page_size).limit(page_size)))
     return ids, total
 
 
 def batch_history(session, root_ids):
-    lineage = select(QcInspection.id.label('root_id'), QcInspection.id.label('inspection_id'),
+    lineage = select_current(QcInspection.id.label('root_id'), QcInspection.id.label('inspection_id'),
         literal(0).label('round')).where(QcInspection.id.in_(root_ids)).cte('qc_lineage', recursive=True)
     child = aliased(QcInspection)
-    descendants = select(lineage.c.root_id, child.id, (lineage.c.round + 1).label('round')).select_from(lineage)\
+    descendants = select_current(lineage.c.root_id, child.id, (lineage.c.round + 1).label('round')).select_from(lineage)\
         .join(QcReworkTicket, QcReworkTicket.inspection_id == lineage.c.inspection_id)\
         .join(QcReworkEvent, (QcReworkEvent.ticket_id == QcReworkTicket.id) & (QcReworkEvent.action == 'return'))\
         .join(child, child.source_return_id == QcReworkEvent.id)
     lineage = lineage.union_all(descendants)
-    records = session.execute(select(lineage.c.root_id, lineage.c.round, QcInspection).select_from(lineage)
+    records = session.execute(select_current(lineage.c.root_id, lineage.c.round, QcInspection).select_from(lineage)
         .join(QcInspection, QcInspection.id == lineage.c.inspection_id)
         .order_by(lineage.c.root_id, lineage.c.round, QcInspection.id)).all()
-    reworks = session.execute(select(QcReworkTicket, QcReworkEvent).outerjoin(
+    reworks = session.execute(select_current(QcReworkTicket, QcReworkEvent).outerjoin(
         QcReworkEvent, QcReworkEvent.ticket_id == QcReworkTicket.id)
         .where(QcReworkTicket.inspection_id.in_({record.id for _, _, record in records}))).all()
     return records, reworks
@@ -44,6 +45,7 @@ def inspection_row(record, labels, users, departments):
     else:
         source = f'FH-{record.source_return_id:08d}'
     return dict(id=record.id, source_ref=source, **labels[record.work_order_id],
+        repair_kind=record.repair_kind, repair_worker_name=record.repair_worker_name,
         quantity=str(record.good_quantity + record.scrap_quantity + record.rework_quantity),
         good_quantity=str(record.good_quantity), scrap_quantity=str(record.scrap_quantity),
         rework_quantity=str(record.rework_quantity),

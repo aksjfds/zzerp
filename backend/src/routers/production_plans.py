@@ -14,14 +14,17 @@ from fastapi import APIRouter, Depends, Query, Response, status
 from modules.planning.api import (
     change_plan_status,
     create_plan,
+    create_purchase,
     delete_plan,
     department_warehouse_stocks,
+    dispatch_outsource,
     dispatch_plans,
     dispatch_targets,
     dispatch_warehouse,
     get_handoff_options,
     get_plan,
     get_plan_product_snapshot,
+    get_schedule_context,
     inspect_material,
     list_department_movements,
     list_handoff_tickets,
@@ -29,17 +32,29 @@ from modules.planning.api import (
     list_plans,
     list_production_progress,
     list_work_orders,
+    outsource_receipts,
+    purchase_work_orders,
     qc_history,
     qc_repair_targets,
+    qc_source_origin,
+    receive_purchase,
     record_movement,
     record_rework,
+    return_outsource,
+    revoke_operation,
     update_plan,
     update_work_order_schedule,
     warehouse_picks,
     warehouse_stocks,
+    worker_piecework,
+)
+from schemas.outsourcing import (
+    OutsourceCommandEnvelope,
+    OutsourceDispatchCreate,
+    OutsourceReceiptEnvelope,
+    OutsourceReturnCreate,
 )
 from schemas.planning import (
-    DepartmentLedgerEnvelope,
     DepartmentMovementCreate,
     DepartmentMovementEnvelope,
     DepartmentMovementListEnvelope,
@@ -55,13 +70,21 @@ from schemas.planning import (
     WorkOrderScheduleEnvelope,
     WorkOrderScheduleUpdate,
 )
+from schemas.purchasing import (
+    PurchaseCommandEnvelope,
+    PurchaseCreate,
+    PurchaseWorkOrderEnvelope,
+)
 from schemas.quality import (
     QcCommandEnvelope,
     QcInspectionCreate,
     QcListEnvelope,
+    QcOriginEnvelope,
     QcReworkAction,
     QcTargetsEnvelope,
+    WorkerEnvelope,
 )
+from schemas.revocations import DepartmentLedgerEnvelope, OperationKind, RevokeOperation
 from schemas.warehouse import (
     WarehouseDispatchCreate,
     WarehouseDispatchEnvelope,
@@ -80,6 +103,43 @@ WorkOrderReader = Annotated[dict, Depends(require_any_permission(PLAN_VIEW, DEPA
 MovementOperator = Annotated[dict, Depends(require_any_permission(DEPARTMENT_WORK_ORDER_OPERATE, csrf=True))]
 
 router = APIRouter(prefix="/production-plans", tags=["production-plans"])
+
+
+@router.get('/purchasing/work-orders', response_model=PurchaseWorkOrderEnvelope)
+def purchasing_orders(page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=100), *, user: WorkOrderReader):
+    data, total = purchase_work_orders(page, page_size, department_scope=user['department_code'])
+    return {'data': data, 'total': total}
+
+
+@router.post('/purchasing/work-orders/{work_order_id}', response_model=PurchaseCommandEnvelope)
+def purchasing_create(work_order_id: int, payload: PurchaseCreate, *, user: MovementOperator):
+    return create_purchase(work_order_id, payload, department_scope=user['department_code'], actor_user_id=user['id'])
+
+
+@router.post('/purchasing/{purchase_id}/receipts', response_model=PurchaseCommandEnvelope)
+def purchasing_receive(purchase_id: int, payload: PurchaseCreate, *, user: MovementOperator):
+    return receive_purchase(purchase_id, payload, department_scope=user['department_code'], actor_user_id=user['id'])
+
+
+@router.post('/operations/{kind}/{operation_id}/revoke', response_model=OutsourceCommandEnvelope)
+def operation_revoke(kind: OperationKind, operation_id: int, payload: RevokeOperation, *, user: MovementOperator):
+    return revoke_operation(kind, operation_id, payload, department_scope=user['department_code'], actor_user_id=user['id'])
+
+
+@router.get('/outsourcing/receipts', response_model=OutsourceReceiptEnvelope)
+def outsourcing_receipts(page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=100), receipt_id: int | None = Query(default=None, gt=0), *, user: WorkOrderReader):
+    data, total = outsource_receipts(page, page_size, department_scope=user['department_code'], receipt_id=receipt_id)
+    return {'data': data, 'total': total}
+
+
+@router.post('/outsourcing/dispatches', response_model=OutsourceCommandEnvelope)
+def outsourcing_dispatch(payload: OutsourceDispatchCreate, *, user: MovementOperator):
+    return dispatch_outsource(payload, department_scope=user['department_code'], actor_user_id=user['id'])
+
+
+@router.post('/outsourcing/dispatches/{dispatch_id}/returns', response_model=OutsourceCommandEnvelope)
+def outsourcing_return(dispatch_id: int, payload: OutsourceReturnCreate, *, user: MovementOperator):
+    return return_outsource(dispatch_id, payload, department_scope=user['department_code'], actor_user_id=user['id'])
 
 
 @router.get("", response_model=ProductionPlanListEnvelope)
@@ -119,6 +179,11 @@ def department_work_order_list(
 @router.put("/department-work-orders/{order_id}/schedule", response_model=WorkOrderScheduleEnvelope)
 def work_order_schedule(order_id: int, payload: WorkOrderScheduleUpdate, *, user: PlanEditor):
     return {"data": update_work_order_schedule(order_id, payload, department_scope=user["department_code"])}
+
+
+@router.get("/department-work-orders/{order_id}/schedule-context", response_model=WorkOrderScheduleEnvelope)
+def work_order_schedule_context(order_id: int, *, user: PlanEditor):
+    return {"data": get_schedule_context(order_id, department_scope=user["department_code"])}
 
 
 @router.get("/progress", response_model=ProductionProgressEnvelope)
@@ -221,6 +286,17 @@ def warehouse_dispatch_targets(lot_id: int, plan_id: int = Query(gt=0), *, user:
 def quality_history(page: int = Query(default=1, gt=0), page_size: int = Query(default=50, gt=0, le=100), *, user: WorkOrderReader):
     data, total = qc_history(page, page_size, department_scope=user["department_code"])
     return {"data": data, "total": total}
+
+
+@router.get('/piecework/workers', response_model=WorkerEnvelope)
+def piecework_workers(page: int = Query(default=1, gt=0), page_size: int = Query(default=20, gt=0, le=50), worker_name: str | None = Query(default=None, max_length=100), *, user: WorkOrderReader):
+    data, total = worker_piecework(page, page_size, worker_name, department_scope=user['department_code'])
+    return {'data': data, 'total': total}
+
+
+@router.get('/qc/source-origin', response_model=QcOriginEnvelope)
+def quality_source_origin(source_kind: Literal['handoff', 'return', 'warehouse'], source_id: int = Query(gt=0), *, user: WorkOrderReader):
+    return {'data': qc_source_origin(source_kind, source_id, department_scope=user['department_code'])}
 
 
 @router.get("/qc/orders/{order_id}/targets", response_model=QcTargetsEnvelope)

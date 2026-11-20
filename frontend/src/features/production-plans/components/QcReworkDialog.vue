@@ -42,6 +42,7 @@ async function save() {
   <ElDialog :model-value="true" :title="returning ? '回交QC' : '接收返修'" width="min(520px, 94vw)" :close-on-click-modal="!saving" :close-on-press-escape="!saving" :show-close="!saving" @close="emit('close')">
     <p>{{ ticket.order_no }} · {{ ticket.factory_code }} · {{ ticket.product_name }}</p>
     <p>{{ ticket.material_no }} · {{ ticket.material_name }}</p>
+    <p v-if="ticket.worker_name">返修工人：{{ ticket.worker_name }}</p>
     <p v-if="ticket.note">备注：{{ ticket.note }}</p>
     <p>{{ returning ? '实际接收数量' : '返修票数量' }}：{{ limit }}</p>
     <ElForm label-position="top" :disabled="saving" @submit.prevent="save">

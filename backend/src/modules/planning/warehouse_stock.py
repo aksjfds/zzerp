@@ -1,10 +1,11 @@
 """Physical lots and precise shared-pool balances."""
 
 from domain.warehouse import material_stock_key
-from sqlalchemy import func, select
+from sqlalchemy import func
 
 from modules.errors import DomainError
 from modules.organization.read_api import is_warehouse
+from modules.planning.current_records import select_current
 from modules.planning.persistence import WarehouseAllocation, WarehouseLot
 
 
@@ -22,9 +23,9 @@ def create_warehouse_lot(session, order, movement, context):
 
 
 def lot_balances():
-    allocated = (select(WarehouseAllocation.lot_id, func.sum(WarehouseAllocation.quantity).label('quantity'))
+    allocated = (select_current(WarehouseAllocation.lot_id, func.sum(WarehouseAllocation.quantity).label('quantity'))
                  .group_by(WarehouseAllocation.lot_id).subquery())
-    return (select(WarehouseLot.id.label('lot_id'), WarehouseLot.warehouse_order_id.label('order_id'),
+    return (select_current(WarehouseLot.id.label('lot_id'), WarehouseLot.warehouse_order_id.label('order_id'),
         WarehouseLot.product_id, WarehouseLot.material_key, WarehouseLot.created_at.label('arrived_at'),
         (WarehouseLot.quantity - func.coalesce(allocated.c.quantity, 0)).label('available'))
         .select_from(WarehouseLot).outerjoin(allocated, allocated.c.lot_id == WarehouseLot.id)).subquery()
@@ -34,7 +35,7 @@ def pool_quantities(session, product_id, material_keys):
     if not material_keys:
         return {}
     balances = lot_balances()
-    return {key: int(quantity) for key, quantity in session.execute(select(balances.c.material_key,
+    return {key: int(quantity) for key, quantity in session.execute(select_current(balances.c.material_key,
         func.sum(balances.c.available)).where(balances.c.product_id == product_id,
         balances.c.material_key.in_(material_keys)).group_by(balances.c.material_key))}
 
@@ -43,6 +44,6 @@ def warehouse_dispatched(session, order_ids):
     if not order_ids:
         return {}
     return {order_id: int(quantity) for order_id, quantity in session.execute(
-        select(WarehouseLot.warehouse_order_id, func.sum(WarehouseAllocation.quantity))
+        select_current(WarehouseLot.warehouse_order_id, func.sum(WarehouseAllocation.quantity))
         .join(WarehouseAllocation, WarehouseAllocation.lot_id == WarehouseLot.id)
         .where(WarehouseLot.warehouse_order_id.in_(order_ids)).group_by(WarehouseLot.warehouse_order_id))}

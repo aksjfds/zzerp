@@ -12,6 +12,7 @@ import { queryProductionDepartments, type ProductionDepartment } from '@/feature
 import { queryDepartmentWorkOrders, type DepartmentWorkOrder, type WorkOrderComponent } from '../api/plans'
 
 const compact = useCompactViewport()
+defineExpose({ refresh: () => load() })
 const props = defineProps<{ planId?: number; departmentCode?: string; requiresInspection?: boolean; isWarehouse?: boolean }>()
 const authStore = useAuthStore()
 const movementOrder = ref<DepartmentWorkOrder | null>(null)

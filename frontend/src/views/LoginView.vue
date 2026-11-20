@@ -26,7 +26,7 @@ let requestRevision = 0
 const accounts = computed(() => [
   { key: 'engineering', username: 'engineering', name: '工程部', description: '产品、BOM 与生产流程', path: '' },
   { key: 'business', username: 'business', name: '业务部', description: '生产计划管理', path: '' },
-  ...departments.value.map(department => ({
+  ...departments.value.filter(department => department.code !== 'purchase').map(department => ({
     key: `department:${department.code}`, username: department.code, name: department.name,
     description: '本部门工单、到料与出料',
     path: `/departments/${encodeURIComponent(department.code)}/work-orders`,

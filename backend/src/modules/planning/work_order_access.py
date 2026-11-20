@@ -19,3 +19,13 @@ def load_scoped_order(session, order_id: int, department_scope: str | None):
     if department_scope is not None and route.department_code != department_scope:
         raise DomainError("department_access_denied", "只能操作和查看本部门工单", status_code=403)
     return order
+
+
+def load_material_order(session, order_id, department_scope):
+    if department_scope != 'warehouse':
+        return load_scoped_order(session, order_id, department_scope)
+    order = load_scoped_order(session, order_id, None)
+    route = route_references(session, route_keys={route_key(order)})[route_key(order)]
+    if route.department_code not in {'warehouse', 'purchase'}:
+        raise DomainError('department_access_denied', '仓库只能处理仓库及外购节点的物料', status_code=403)
+    return order

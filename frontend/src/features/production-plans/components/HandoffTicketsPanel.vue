@@ -2,6 +2,7 @@
 import { type InspectionBatch } from '../api/quality'
 import QcInspectionDialog from './QcInspectionDialog.vue'
 import QcReworkDialog from './QcReworkDialog.vue'
+import OutsourcingPanel from './OutsourcingPanel.vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { DEPARTMENT_WORK_ORDER_OPERATE } from '@/permission/constants'
@@ -18,6 +19,12 @@ const ticket = ref<HandoffTicket>(), order = ref<DepartmentWorkOrder>()
 const opening = ref(false)
 const inspection = ref<InspectionBatch>()
 const reworkTicket = ref<HandoffTicket>()
+const outsourceReceiptId = ref<number>()
+const outsourceMode = ref<'dispatch' | 'return'>('dispatch')
+function openOutsourceReturn(row: HandoffTicket) {
+  if (!canReceive(row) || !row.outsource_pending_return || row.receipt_id === null) return
+  outsourceMode.value = 'return'; outsourceReceiptId.value = row.receipt_id
+}
 function rowKey(row: HandoffTicket) { return `${row.kind}:${row.id}` }
 function readonlyLabel(row: HandoffTicket) {
   if (row.kind === 'rework') return row.action === 'rework_receive' ? '待接收返修' : row.action === 'rework_return' ? '待回交QC' : '已回交QC'
@@ -25,7 +32,7 @@ function readonlyLabel(row: HandoffTicket) {
   return '—'
 }
 function actionLabel(row: HandoffTicket) {
-  return { none: '—', receive: '登记到料', inspect: '质检', rework_receive: '接收返修', rework_return: '回交QC' }[row.action]
+  return { none: '—', receive: '登记到料', inspect: '质检', rework_receive: '接收返修', rework_return: '回交QC', outsource: '外发' }[row.action]
 }
 const canRegisterReceipt = computed(() => Boolean(auth.user?.department_code)
   && auth.hasPermission(DEPARTMENT_WORK_ORDER_OPERATE))
@@ -46,7 +53,10 @@ async function load() {
 }
 async function handleTicket(row: HandoffTicket) {
   if (opening.value || !canReceive(row)) return
-  if (row.action === 'inspect' && row.target_work_order_id !== null) {
+  if (row.action === 'outsource' && row.receipt_id !== null) {
+    outsourceMode.value = 'dispatch'
+    outsourceReceiptId.value = row.receipt_id
+  } else if (row.action === 'inspect' && row.target_work_order_id !== null) {
     inspection.value = { id: row.id, source_kind: row.kind === 'return' ? 'return' : row.kind === 'warehouse' ? 'warehouse' : 'handoff',
       work_order_id: row.target_work_order_id, order_no: row.order_no,
       product: `${row.factory_code} · ${row.product_name}`, material: `${row.material_no} · ${row.material_name}`, quantity: String(row.quantity) }
@@ -86,16 +96,18 @@ onBeforeUnmount(() => { active = false; revision += 1 })
       <ElTableColumn class-name="data-reference" prop="order_no" label="订单号" min-width="150" />
       <ElTableColumn class-name="data-metric" prop="quantity" label="数量" width="120" align="right" />
       <ElTableColumn class-name="data-secondary" prop="created_at" label="时间" min-width="180" />
-      <ElTableColumn label="操作" width="110">
+      <ElTableColumn label="操作" min-width="170">
         <template #default="{ row }">
-          <ElButton v-if="canRegisterReceipt && row.action !== 'none'" link type="primary" :disabled="loading || opening || !canReceive(row)" @click="handleTicket(row)">{{ actionLabel(row) }}</ElButton>
+          <ElButton v-if="canRegisterReceipt && row.action !== 'none'" link type="primary" :disabled="loading || opening || !canReceive(row) || (row.action === 'outsource' && BigInt(row.outsource_available_quantity || '0') <= 0n)" @click="handleTicket(row)">{{ actionLabel(row) }}</ElButton>
           <span v-else>{{ readonlyLabel(row) }}</span>
+          <ElButton v-if="canRegisterReceipt && row.outsource_pending_return" link type="primary" :disabled="loading || opening || !canReceive(row)" @click="openOutsourceReturn(row)">登记到料</ElButton>
         </template>
       </ElTableColumn>
       <ElTableColumn class-name="data-secondary" prop="note" label="备注" min-width="140" />
     </ElTable>
     <ElPagination v-model:current-page="page" :total="total" :page-size="50" layout="prev, pager, next, total" @current-change="load" />
     <QcReworkDialog v-if="reworkTicket" :key="`${reworkTicket.id}:${reworkTicket.action}`" :ticket="reworkTicket" @close="reworkTicket = undefined" @saved="changed" />
+    <OutsourcingPanel v-if="outsourceReceiptId" :key="`${outsourceReceiptId}:${outsourceMode}`" :receipt-id="outsourceReceiptId" :mode="outsourceMode" active @close="outsourceReceiptId = undefined" @changed="changed" />
     <QcInspectionDialog v-if="inspection" :key="`${inspection.source_kind}:${inspection.id}`" :batch="inspection" @close="inspection = undefined" @saved="changed" />
     <DepartmentMovementDialog v-if="ticket && order" :order="order" direction="receipt" :ticket="ticket" @close="ticket = undefined; order = undefined" @changed="changed" />
   </section>

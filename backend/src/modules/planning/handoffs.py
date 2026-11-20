@@ -12,7 +12,7 @@ from modules.planning.snapshots import (
     item_key,
     route_references,
 )
-from modules.planning.work_order_access import load_scoped_order
+from modules.planning.work_order_access import load_material_order
 
 
 def ticket_number(ticket_id):
@@ -29,7 +29,7 @@ def order_context(session, order):
 
 def get_handoff_options(order_id, *, department_scope):
     with SessionLocal() as session:
-        order = load_scoped_order(session, order_id, department_scope)
+        order = load_material_order(session, order_id, department_scope)
         context, key = order_context(session, order)
         candidates = list(session.scalars(select(DepartmentWorkOrder).where(
             DepartmentWorkOrder.production_plan_id == order.production_plan_id,
@@ -40,12 +40,14 @@ def get_handoff_options(order_id, *, department_scope):
             raise DomainError("handoff_target_unarranged", "路线下一步尚未安排工单，请业务部检查计划", status_code=409)
         refs = route_references(session, item_keys={item_key(order)})
         names = department_names(session)
+        department = refs[(*item_key(order), *key)].department_code
         targets = []
         for target_key in sorted(destination_keys):
             target = by_key[target_key]
             ref = refs[(*item_key(order), *target_key)]
             targets.append({"id": target.id, "label": f"{names[ref.department_code]} · {ref.part_name}",
-                            "department_name": names[ref.department_code]})
+                            "department_name": names[ref.department_code],
+                            "can_piecework": department == 'grinding' and ref.department_code == 'qc'})
         department = refs[(*item_key(order), *key)].department_code
         available = available_issue_quantity(session, order, context, department)
         return {"targets": targets, "can_receive": allows_receipts(department),

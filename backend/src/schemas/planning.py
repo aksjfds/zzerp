@@ -94,6 +94,7 @@ class WorkOrderScheduleEnvelope(PlanningModel):
 
 
 class DepartmentWorkOrderResponse(PlanningModel):
+    department_occurrence: int
     upstream_departments: list[str]
     downstream_departments: list[str]
     can_issue: bool
@@ -162,6 +163,9 @@ class ProductionProgressEnvelope(PlanningModel):
 
 
 class DepartmentMovementCreate(PlanningModel):
+    piecework_process: str = Field(default='', max_length=100)
+    document_type: Literal['normal', 'piecework'] = 'normal'
+    worker_name: str = Field(default='', max_length=100)
     direction: Literal["receipt", "issue"]
     quantity: int = Field(strict=True, gt=0, le=9007199254740991)
     note: str = Field(default="", max_length=1000)
@@ -187,6 +191,7 @@ class DepartmentMovementResponse(DepartmentMovementCreate):
 
 
 class HandoffChoice(PlanningModel):
+    can_piecework: bool
     id: int
     label: str
     department_name: str
@@ -199,8 +204,14 @@ class HandoffOptionsResponse(PlanningModel):
 
 
 class HandoffTicketResponse(PlanningModel):
+    piecework_process: str
+    outsource_available_quantity: str | None
+    outsource_pending_return: bool
+    document_type: Literal['normal', 'piecework']
+    worker_name: str
     kind: Literal["normal", "rework", "return", "warehouse"]
-    action: Literal["none", "receive", "inspect", "rework_receive", "rework_return"]
+    action: Literal["none", "receive", "inspect", "rework_receive", "rework_return", "outsource"]
+    receipt_id: int | None
     can_receive: bool
     id: int
     ticket_no: str
@@ -234,15 +245,11 @@ class DepartmentMovementListEnvelope(PlanningModel):
 
 
 class DepartmentLedgerMovement(DepartmentMovementResponse):
+    kind: Literal['movement'] = 'movement'
     order_no: str
     factory_code: str
     product_name: str
     department_name: str
-
-
-class DepartmentLedgerEnvelope(PlanningModel):
-    data: list[DepartmentLedgerMovement]
-    total: int
 
 
 class SnapshotBomItemResponse(PlanningModel):

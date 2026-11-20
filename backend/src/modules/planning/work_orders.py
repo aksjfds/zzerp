@@ -1,7 +1,7 @@
 """Department work orders are derived assignments, without execution state."""
 
 from database import SessionLocal
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func
 
 from modules.errors import DomainError
 from modules.organization.read_api import (
@@ -12,6 +12,7 @@ from modules.organization.read_api import (
     requires_inspection,
     uses_assembly_tree,
 )
+from modules.planning.current_records import select_current
 from modules.planning.material_movements import (
     ensure_plan_without_movements,
     movement_totals,
@@ -40,7 +41,7 @@ from modules.sales.customer_api import customer_names_by_ids
 def rebuild_work_orders(session, plan: ProductionPlan) -> None:
     ensure_plan_without_movements(session, plan.id)
     quantities = []
-    items = list(session.scalars(select(ProductionPlanItem)
+    items = list(session.scalars(select_current(ProductionPlanItem)
         .where(ProductionPlanItem.production_plan_id == plan.id).order_by(ProductionPlanItem.product_id)))
     if not items:
         raise DomainError("plan_products_required", "生产计划至少需要一个产品")
@@ -73,7 +74,7 @@ def assembly_components(session, orders, routes, contexts):
     if not assemblies:
         return {}
     received = {(order_id, material): int(quantity) for order_id, material, quantity in session.execute(
-        select(DepartmentWorkOrderMovement.work_order_id, DepartmentWorkOrderMovement.input_material_node_id,
+        select_current(DepartmentWorkOrderMovement.work_order_id, DepartmentWorkOrderMovement.input_material_node_id,
                func.sum(DepartmentWorkOrderMovement.quantity))
         .where(DepartmentWorkOrderMovement.work_order_id.in_({order.id for order in assemblies}),
                DepartmentWorkOrderMovement.direction == "receipt")
@@ -116,11 +117,11 @@ def list_work_orders(
         if product_keyword:
             conditions.append(order_product_filter(product_keyword))
         statement = (
-            select(DepartmentWorkOrder, ProductionPlan)
+            select_current(DepartmentWorkOrder, ProductionPlan)
             .join(ProductionPlan, ProductionPlan.id == DepartmentWorkOrder.production_plan_id)
             .where(*conditions)
         )
-        total = session.scalar(select(func.count()).select_from(statement.subquery())) or 0
+        total = session.scalar(select_current(func.count()).select_from(statement.subquery())) or 0
         rows = session.execute(
             statement.order_by(DepartmentWorkOrder.id.desc())
             .offset((page - 1) * page_size).limit(page_size)
@@ -173,8 +174,9 @@ def serialize_work_orders(session, rows, *, include_components=True, departments
             "product_name": product.product_name, "part_no": material_number(contexts[item_key(order)], order.material_node_id),
             "part_name": route.part_name, "department_code": route.department_code,
             "department_name": departments[route.department_code],
+            "department_occurrence": contexts[item_key(order)]['department_occurrences'][order.department_node_id],
             "can_receive": allows_receipts(route.department_code),
-            "can_issue": allows_manual_issue(route.department_code),
+            "can_issue": allows_manual_issue(route.department_code) and route.department_code != 'purchase',
             "requires_inspection": requires_inspection(route.department_code),
             "good_quantity": str(good), "scrap_quantity": str(scrap), "rework_quantity": str(rework),
             "task_quantity": order.task_quantity, "plan_status": plan.status,
